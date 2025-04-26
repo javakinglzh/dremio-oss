@@ -33,7 +33,6 @@ import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
 import com.dremio.exec.store.iceberg.IcebergTestTables;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
-import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.iceberg.deletes.RowLevelDeleteFilterFactory.DeleteFileInfo;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -61,7 +60,7 @@ public class BaseTestParquetScanTableFunction extends BaseTestTableFunction {
   protected FileSystem fs;
   @Mock protected StoragePluginId pluginId;
 
-  @Mock(extraInterfaces = {SupportsIcebergRootPointer.class, SupportsInternalIcebergTable.class})
+  @Mock(extraInterfaces = {SupportsIcebergRootPointer.class})
   protected MutablePlugin plugin;
 
   @Before
@@ -69,9 +68,8 @@ public class BaseTestParquetScanTableFunction extends BaseTestTableFunction {
     fs = HadoopFileSystem.get(Path.of("/"), new Configuration());
     when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
     SupportsIcebergRootPointer sirp = (SupportsIcebergRootPointer) plugin;
-    when(sirp.createFSWithAsyncOptions(any(), any(), any())).thenReturn(fs);
-    SupportsInternalIcebergTable siit = (SupportsInternalIcebergTable) plugin;
-    when(siit.createScanTableFunction(any(), any(), any(), any()))
+    when(sirp.createFS(any())).thenReturn(fs);
+    when(sirp.createScanTableFunction(any(), any(), any(), any()))
         .thenAnswer(
             i ->
                 new ParquetScanTableFunction(

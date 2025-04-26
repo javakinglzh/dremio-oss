@@ -13,16 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { cloneElement, Component } from "react";
+import { cloneElement, Component, Suspense } from "react";
 import PropTypes from "prop-types";
 import classNames from "clsx";
 
 import { flexColumnContainer, fullHeight } from "#oss/uiTheme/less/layout.less";
-import { Suspense } from "#oss/components/Lazy";
 
 import { page } from "uiTheme/radium/general";
 import { pageContent } from "./Page.less";
 import { SonarSideNav } from "#oss/exports/components/SideNav/SonarSideNav";
+import LoadingOverlay from "#oss/components/LoadingOverlay";
 
 //todo (DX-17781) we should migrate all the pages to use MainMasterPage
 export default class Page extends Component {
@@ -49,7 +49,7 @@ export class MainMasterPage extends Component {
       <div className={classNames(flexColumnContainer, "mainPage")}>
         <div className={pageContent}>
           <SonarSideNav />
-          <Suspense>{children}</Suspense>
+          <Suspense fallback={<LoadingOverlay />}>{children}</Suspense>
         </div>
       </div>
     );

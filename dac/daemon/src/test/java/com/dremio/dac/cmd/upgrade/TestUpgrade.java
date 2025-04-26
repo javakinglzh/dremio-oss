@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -256,7 +257,7 @@ public class TestUpgrade extends DremioTest {
   private UpgradeContext tasksExecutor(Version kvStoreVersion, List<UpgradeTask> tasks)
       throws Exception {
     final UpgradeContext context =
-        new UpgradeContext(kvStoreProvider, legacyKVStoreProvider, null, null, null);
+        new UpgradeContext(kvStoreProvider, legacyKVStoreProvider, null, null, null, null);
     List<UpgradeTask> tasksToRun = new ArrayList<>();
     for (UpgradeTask task : tasks) {
       if (upgradeStore.isUpgradeTaskCompleted(task.getTaskUUID())) {
@@ -366,66 +367,36 @@ public class TestUpgrade extends DremioTest {
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
 
-    // Get MapR profile variable from Maven surfire plugin
-    boolean isMapr = Boolean.valueOf(System.getProperty("dremio.mapr.profile"));
-
-    // Dremio build contains S3 plugin, UpdateS3CredentialType is included in the list of
-    // upgrade tasks. The Dremio MapR distribution does not include S3 plugin, therefore
-    // UpdateS3CredentialType
-    // should not be included in the list of upgrade tasks. UpdateDatasetSplitIdTask has a child,
-    // UpdateS3CredentialType, which should not be included as an upgrade task in the MapR
-    // distribution.
-    // We want to first determine whether UpdateDatasetSplitIdTask and UpdateS3CredentialType are in
-    // the list
-    // of tasks, then test accordingly.
-    boolean containsS3Task = false;
-    int s3TaskIndex = 0;
-    boolean containsDatasetSplitTask = false;
-    int datasetSplitTaskIndex = 0;
-
-    for (int i = 0; i < tasks.size(); i++) {
-      String taskName = tasks.get(i).getClass().getName();
-      if ("com.dremio.dac.cmd.upgrade.UpdateS3CredentialType".equals(taskName)) {
-        containsS3Task = true;
-        s3TaskIndex = i;
-      } else if ("com.dremio.dac.cmd.upgrade.UpdateDatasetSplitIdTask".equals(taskName)) {
-        containsDatasetSplitTask = true;
-        datasetSplitTaskIndex = i;
-      }
-    }
-
-    if (isMapr) {
-      assertThat(containsS3Task).isFalse();
-    } else {
-      // Following conditions must be satisfied to ensure correct upgrade tasks ordering.
-      // 1. All three tasks are in the list of tasks
-      assertThat(containsDatasetSplitTask).isTrue();
-      assertThat(containsS3Task).isTrue();
-      // 2. Both child tasks are successive of UpdateDatasetSplitIdTask
-      assertThat(s3TaskIndex).isGreaterThan(datasetSplitTaskIndex);
-      // Remove UpdateS3CredentialType from the list, so vanilla and MapR distribution can be
-      // tested with the same upgrade task list
-      tasks.remove(s3TaskIndex);
-    }
-
     // WHEN creating new UpgradeTask - please add it to the list
     // in order to get taskUUID you can run
     // testNoDuplicateUUID() test - it will generate one
     // tasks will not include TestUpgradeFailORSuccessTask and TestUpgradeTask
     // because they don't have default ctor
-    assertThat(tasks).hasSize(12);
-    assertThat(tasks.get(0)).isInstanceOf(ReIndexAllStores.class);
-    assertThat(tasks.get(1)).isInstanceOf(UpdateDatasetSplitIdTask.class);
-    assertThat(tasks.get(2)).isInstanceOf(DeleteHistoryOfRenamedDatasets.class);
-    assertThat(tasks.get(3)).isInstanceOf(DeleteHive121BasedInputSplits.class);
-    assertThat(tasks.get(4)).isInstanceOf(MinimizeJobResultsMetadata.class);
-    assertThat(tasks.get(5)).isInstanceOf(UpdateExternalReflectionHash.class);
-    assertThat(tasks.get(6)).isInstanceOf(DeleteSysMaterializationsMetadata.class);
-    assertThat(tasks.get(7)).isInstanceOf(SetTableauDefaults.class);
-    assertThat(tasks.get(8)).isInstanceOf(SetExportType.class);
-    assertThat(tasks.get(9)).isInstanceOf(TopPriorityTask.class);
-    assertThat(tasks.get(10)).isInstanceOf(LowPriorityTask.class);
-    assertThat(tasks.get(11)).isInstanceOf(DeleteSnowflakeCommunitySource.class);
+    List<Class<?>> taskClasses =
+        tasks.stream().map(UpgradeTask::getClass).collect(Collectors.toList());
+
+    int idxDatasetSplit = taskClasses.indexOf(UpdateDatasetSplitIdTask.class);
+    assertThat(idxDatasetSplit).isGreaterThanOrEqualTo(0);
+    int idxS3Cred = taskClasses.indexOf(UpdateS3CredentialType.class);
+    assertThat(idxS3Cred).isGreaterThan(idxDatasetSplit);
+    taskClasses.remove(idxS3Cred);
+
+    assertThat(taskClasses)
+        .containsExactly(
+            ReIndexAllStores.class,
+            UpdateDatasetSplitIdTask.class,
+            DeleteHistoryOfRenamedDatasets.class,
+            DeleteHive121BasedInputSplits.class,
+            MinimizeJobResultsMetadata.class,
+            UpdateExternalReflectionHash.class,
+            DeleteSysMaterializationsMetadata.class,
+            SetTableauDefaults.class,
+            SetExportType.class,
+            DeleteGen1AzureUpgradeTask.class,
+            DeleteSnowflakeCommunitySource.class,
+            ReindexDatasets.class,
+            TopPriorityTask.class,
+            LowPriorityTask.class);
   }
 
   @Test
@@ -460,48 +431,6 @@ public class TestUpgrade extends DremioTest {
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
 
-    // Get MapR profile variable from Maven surfire plugin
-    boolean isMapr = Boolean.valueOf(System.getProperty("dremio.mapr.profile"));
-
-    // Dremio build contains S3 plugin, UpdateS3CredentialType is included in the list of
-    // upgrade tasks. The Dremio MapR distribution does not include S3 plugin, therefore
-    // UpdateS3CredentialType
-    // should not be included in the list of upgrade tasks. UpdateDatasetSplitIdTask has a child,
-    // UpdateS3CredentialType, which should not be included as an upgrade task in the MapR
-    // distribution.
-    // We want to first determine whether UpdateDatasetSplitIdTask and UpdateS3CredentialType are in
-    // the list
-    // of tasks, then test accordingly.
-    boolean containsS3Task = false;
-    int s3TaskIndex = 0;
-    boolean containsDatasetSplitTask = false;
-    int datasetSplitTaskIndex = 0;
-
-    for (int i = 0; i < tasks.size(); i++) {
-      String taskName = tasks.get(i).getClass().getName();
-      if ("com.dremio.dac.cmd.upgrade.UpdateS3CredentialType".equals(taskName)) {
-        containsS3Task = true;
-        s3TaskIndex = i;
-      } else if ("com.dremio.dac.cmd.upgrade.UpdateDatasetSplitIdTask".equals(taskName)) {
-        containsDatasetSplitTask = true;
-        datasetSplitTaskIndex = i;
-      }
-    }
-
-    if (isMapr) {
-      assertThat(containsS3Task).isFalse();
-    } else {
-      // Following conditions must be satisfied to ensure correct upgrade tasks ordering.
-      // 1. All three tasks are in the list of tasks
-      assertThat(containsDatasetSplitTask).isTrue();
-      assertThat(containsS3Task).isTrue();
-      // 2. Both child tasks are successive of UpdateDatasetSplitIdTask
-      assertThat(s3TaskIndex).isGreaterThan(datasetSplitTaskIndex);
-      // Remove UpdateS3CredentialType from the list, so vanilla and MapR distribution can be
-      // tested with the same upgrade task list
-      tasks.remove(s3TaskIndex);
-    }
-
     Collections.shuffle(tasks);
     UpgradeTaskDependencyResolver upgradeTaskDependencyResolver =
         new UpgradeTaskDependencyResolver(tasks);
@@ -512,19 +441,31 @@ public class TestUpgrade extends DremioTest {
     // testNoDuplicateUUID() test - it will generate one
     // tasks will not include TestUpgradeFailORSuccessTask and TestUpgradeTask
     // because they don't have default ctor
-    assertThat(resolvedTasks).hasSize(12);
-    assertThat(resolvedTasks.get(0)).isInstanceOf(ReIndexAllStores.class);
-    assertThat(resolvedTasks.get(1)).isInstanceOf(UpdateDatasetSplitIdTask.class);
-    assertThat(resolvedTasks.get(2)).isInstanceOf(DeleteHistoryOfRenamedDatasets.class);
-    assertThat(resolvedTasks.get(3)).isInstanceOf(DeleteHive121BasedInputSplits.class);
-    assertThat(resolvedTasks.get(4)).isInstanceOf(MinimizeJobResultsMetadata.class);
-    assertThat(resolvedTasks.get(5)).isInstanceOf(UpdateExternalReflectionHash.class);
-    assertThat(resolvedTasks.get(6)).isInstanceOf(DeleteSysMaterializationsMetadata.class);
-    assertThat(resolvedTasks.get(7)).isInstanceOf(SetTableauDefaults.class);
-    assertThat(resolvedTasks.get(8)).isInstanceOf(SetExportType.class);
-    assertThat(resolvedTasks.get(9)).isInstanceOf(TopPriorityTask.class);
-    assertThat(resolvedTasks.get(10)).isInstanceOf(LowPriorityTask.class);
-    assertThat(resolvedTasks.get(11)).isInstanceOf(DeleteSnowflakeCommunitySource.class);
+    List<Class<?>> taskClasses =
+        resolvedTasks.stream().map(UpgradeTask::getClass).collect(Collectors.toList());
+
+    int idxDatasetSplit = taskClasses.indexOf(UpdateDatasetSplitIdTask.class);
+    assertThat(idxDatasetSplit).isGreaterThanOrEqualTo(0);
+    int idxS3Cred = taskClasses.indexOf(UpdateS3CredentialType.class);
+    assertThat(idxS3Cred).isGreaterThan(idxDatasetSplit);
+    taskClasses.remove(idxS3Cred);
+
+    assertThat(taskClasses)
+        .containsExactly(
+            ReIndexAllStores.class,
+            UpdateDatasetSplitIdTask.class,
+            DeleteHistoryOfRenamedDatasets.class,
+            DeleteHive121BasedInputSplits.class,
+            MinimizeJobResultsMetadata.class,
+            UpdateExternalReflectionHash.class,
+            DeleteSysMaterializationsMetadata.class,
+            SetTableauDefaults.class,
+            SetExportType.class,
+            DeleteGen1AzureUpgradeTask.class,
+            DeleteSnowflakeCommunitySource.class,
+            ReindexDatasets.class,
+            TopPriorityTask.class,
+            LowPriorityTask.class);
   }
 
   /** Tests illegal upgrade from OSS to EE */

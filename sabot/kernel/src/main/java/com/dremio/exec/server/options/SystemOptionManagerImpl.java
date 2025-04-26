@@ -109,23 +109,6 @@ public class SystemOptionManagerImpl extends SystemOptionManager {
     kvStoreCalls = 0;
   }
 
-  protected SystemOptionManagerImpl(
-      OptionValidatorListing optionValidatorListing,
-      OptionValidatorListing optionValidatorListing1,
-      LogicalPlanPersistence lpPersistance,
-      Provider<LegacyKVStoreProvider> storeProvider,
-      Provider<SchedulerService> scheduler,
-      OptionChangeBroadcaster broadcaster,
-      boolean inMemory) {
-    super(optionValidatorListing);
-    this.optionValidatorListing = optionValidatorListing1;
-    this.lpPersistance = lpPersistance;
-    this.storeProvider = storeProvider;
-    this.scheduler = scheduler;
-    this.broadcaster = broadcaster;
-    this.inMemory = inMemory;
-  }
-
   /** Initializes this option manager. */
   @Override
   public void start() throws Exception {

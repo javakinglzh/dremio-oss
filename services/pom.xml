@@ -44,6 +44,7 @@
     <module>coordinator</module>
     <module>credentials</module>
     <module>datastore</module>
+    <module>distributed-plan-cache</module>
     <module>embedded-catalog</module>
     <module>exec-selector</module>
     <module>executorservice</module>
@@ -57,7 +58,6 @@
     <module>jobtelemetry</module>
     <module>maestro</module>
     <module>namespace</module>
-    <module>nessie</module>
     <module>nessie-grpc</module>
     <module>nessie-metadata-cache</module>
     <module>nessie-proxy</module>
@@ -65,6 +65,7 @@
     <module>nessie-storage-upgrade</module>
     <module>nessie-validation</module>
     <module>node-metrics</module>
+    <module>optimization-api</module>
     <module>options</module>
     <module>orphanage</module>
     <module>orphanagecleaner</module>
@@ -74,8 +75,7 @@
     <module>reindexer</module>
     <module>resourcescheduler</module>
     <module>scheduler</module>
-    <module>script</module>
-    <module>search</module>
+    <module>scripts</module>
     <module>spill</module>
     <module>sqlrunner</module>
     <module>statistics</module>

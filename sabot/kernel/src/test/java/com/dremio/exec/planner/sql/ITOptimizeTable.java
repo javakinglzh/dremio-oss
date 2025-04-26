@@ -133,4 +133,14 @@ public class ITOptimizeTable extends BaseTestQuery {
   public void testRewriteManifestsForEvolvedPartitionSpec() throws Exception {
     OptimizeTests.testRewriteManifestsForEvolvedPartitionSpec(SOURCE, allocator);
   }
+
+  @Test
+  public void testOptimizeWithTableProperties() throws Exception {
+    OptimizeTests.testOptimizeWithTableProperties(SOURCE, allocator);
+  }
+
+  @Test
+  public void testOptimizeWithTablePropertiesAndQueryOptions() throws Exception {
+    OptimizeTests.testOptimizeWithTablePropertiesAndQueryOptions(SOURCE, allocator);
+  }
 }

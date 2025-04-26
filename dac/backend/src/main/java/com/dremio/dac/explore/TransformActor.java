@@ -531,8 +531,8 @@ abstract class TransformActor implements TransformBase.TransformVisitor<Transfor
           case TIME:
           case FLOAT:
           case BINARY:
-            // valid under some conditions
-            // TODO: validate incoming type
+          // valid under some conditions
+          // TODO: validate incoming type
           case TEXT:
             // valid
             break;

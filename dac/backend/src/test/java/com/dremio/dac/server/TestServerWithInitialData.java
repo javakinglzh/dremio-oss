@@ -54,6 +54,7 @@ import com.dremio.dac.proto.model.dataset.TrimType;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.dac.util.JSONUtil;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.job.proto.JobState;
@@ -344,7 +345,7 @@ public class TestServerWithInitialData extends BaseTestServer {
     source.setMetadataPolicy(
         UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
     final SourceService sourceService = getSourceService();
-    sourceService.registerSourceWithRuntime(source);
+    sourceService.registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     // preview a file in NAS source, so that it will be added as a physical dataset
     getHttpClient()

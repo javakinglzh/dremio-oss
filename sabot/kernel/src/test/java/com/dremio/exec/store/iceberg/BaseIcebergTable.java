@@ -121,7 +121,7 @@ public abstract class BaseIcebergTable extends BaseTestQuery {
     runSQL("alter table dfs_hadoop." + "\"" + tableFolder.toPath() + "\"" + " refresh metadata");
   }
 
-  private static final class TestHadoopTableOperations extends HadoopTableOperations {
+  public static final class TestHadoopTableOperations extends HadoopTableOperations {
     public TestHadoopTableOperations(Path location, Configuration conf) {
       super(location, new HadoopFileIO(conf), conf, LockManagers.defaultLockManager());
     }

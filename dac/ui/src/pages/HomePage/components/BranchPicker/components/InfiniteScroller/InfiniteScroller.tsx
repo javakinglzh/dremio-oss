@@ -132,6 +132,7 @@ function InfiniteScroller<T>({
                 height={height || 600}
                 width={width || 150}
                 data={data} //Rerender when data changes
+                tabIndex={-1}
               />
             )}
           </AutoSizer>

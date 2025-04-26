@@ -57,6 +57,12 @@ public class ProfilesPathUtils {
     return buildExecutorProfilePrefix(queryId) + EndpointHelper.getMinimalString(endpoint) + suffix;
   }
 
+  public static String buildExecutorProfilePathWithEndpointAddress(
+      UserBitShared.QueryId queryId, CoordinationProtos.NodeEndpoint endpoint, boolean isFinal) {
+    String suffix = isFinal ? FINAL_EXECUTOR_PROFILE_SUFFIX : "";
+    return buildExecutorProfilePrefix(queryId) + endpoint.getAddress() + suffix;
+  }
+
   public static String buildFullProfilePath(UserBitShared.QueryId queryId) {
     return buildFinalPrefix(queryId) + FULL;
   }

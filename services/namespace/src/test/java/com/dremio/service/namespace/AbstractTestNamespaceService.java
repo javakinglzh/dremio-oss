@@ -107,8 +107,6 @@ public abstract class AbstractTestNamespaceService {
       fail("Got incorrect exception " + e);
     }
     // updates
-    src1.setCtime(2001L);
-    src2.setCtime(2001L);
     namespaceService.addOrUpdateSource(new NamespaceKey(src1.getName()), src1);
     namespaceService.addOrUpdateSource(new NamespaceKey(src2.getName()), src2);
 
@@ -175,14 +173,12 @@ public abstract class AbstractTestNamespaceService {
     final SpaceConfig space2 = new SpaceConfig();
 
     space1.setName("space1");
-    space1.setCtime(1000L);
     namespaceService.addOrUpdateSpace(new NamespaceKey(space1.getName()), space1);
 
     SpaceConfig newSpace1 = namespaceService.getSpace(new NamespaceKey(space1.getName()));
     Assert.assertEquals(space1, newSpace1);
 
     space2.setName("space2");
-    space2.setCtime(2000L);
     namespaceService.addOrUpdateSpace(new NamespaceKey(space2.getName()), space2);
 
     SpaceConfig newSpace2 = namespaceService.getSpace(new NamespaceKey(space2.getName()));
@@ -197,8 +193,6 @@ public abstract class AbstractTestNamespaceService {
       fail("Got incorrect exception " + e);
     }
     // updates
-    space1.setCtime(2001L);
-    space2.setCtime(2001L);
     namespaceService.addOrUpdateSpace(new NamespaceKey(space1.getName()), space1);
     namespaceService.addOrUpdateSpace(new NamespaceKey(space2.getName()), space2);
 

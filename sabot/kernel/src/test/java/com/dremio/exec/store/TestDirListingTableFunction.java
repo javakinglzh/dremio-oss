@@ -26,7 +26,6 @@ import static com.dremio.sabot.Fixtures.tr;
 import static org.apache.iceberg.types.Types.NestedField.optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -44,6 +43,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants;
@@ -89,7 +89,7 @@ public class TestDirListingTableFunction extends BaseTestTableFunction {
 
     fs = mock(HadoopFileSystem.class);
     when(fec.getStoragePlugin(any())).thenReturn(plugin);
-    when(plugin.createFSWithoutHDFSCache(anyString(), anyString(), any())).thenReturn(fs);
+    when(plugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
   }
 
   @After

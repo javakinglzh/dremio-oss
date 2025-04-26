@@ -18,7 +18,7 @@ package com.dremio.exec.util;
 
 import static com.dremio.exec.proto.ExecProtos.RuntimeFilterType.BLOOM_FILTER;
 import static com.dremio.exec.proto.ExecProtos.RuntimeFilterType.VALUE_LIST;
-import static java.util.Collections.EMPTY_LIST;
+import static java.util.Collections.emptyList;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -68,28 +68,28 @@ public class RuntimeFilterManagerTest {
         new RuntimeFilterManager(allocator, MAX_VALS, Sets.newHashSet(1, 2, 3));
 
     RuntimeFilter frMinor1Target1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     BloomFilter bf = mockedBloom();
     BloomFilter copyBf = mockedBloom();
     when(bf.createCopy(any(BufferAllocator.class))).thenReturn(copyBf);
 
     RuntimeFilterManagerEntry entry1 =
-        filterManager.coalesce(frMinor1Target1, Optional.of(bf), EMPTY_LIST, 1);
+        filterManager.coalesce(frMinor1Target1, Optional.of(bf), emptyList(), 1);
     assertFalse(entry1.isComplete());
     assertEquals(Sets.newHashSet(2, 3), entry1.getRemainingMinorFragments());
 
     RuntimeFilter frMinor2Target1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     RuntimeFilterManagerEntry entry2 =
-        filterManager.coalesce(frMinor2Target1, Optional.of(mockedBloom()), EMPTY_LIST, 2);
+        filterManager.coalesce(frMinor2Target1, Optional.of(mockedBloom()), emptyList(), 2);
     assertFalse(entry2.isComplete());
     assertEquals(entry1, entry2);
     assertEquals(Sets.newHashSet(3), entry2.getRemainingMinorFragments());
 
     RuntimeFilter frMinor3Target1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     RuntimeFilterManagerEntry entry3 =
-        filterManager.coalesce(frMinor3Target1, Optional.of(mockedBloom()), EMPTY_LIST, 3);
+        filterManager.coalesce(frMinor3Target1, Optional.of(mockedBloom()), emptyList(), 3);
     assertTrue(entry1.isComplete());
     assertFalse(entry1.isDropped());
     assertEquals(entry1, entry3);
@@ -104,7 +104,7 @@ public class RuntimeFilterManagerTest {
         new RuntimeFilterManager(allocator, MAX_VALS, Sets.newHashSet(1, 2, 3));
 
     RuntimeFilter frMinor1Target1 =
-        newFilter(opId1, majorFragment1, EMPTY_LIST, Lists.newArrayList("col1", "col2"));
+        newFilter(opId1, majorFragment1, emptyList(), Lists.newArrayList("col1", "col2"));
     ValueListFilter vA1 = newValListFilter("col1", Lists.newArrayList(4, 1, 3, 2));
     ValueListFilter vA2 = newValListFilter("col2", Lists.newArrayList(11, 12, 13, 14));
     RuntimeFilterManagerEntry entry1 =
@@ -114,7 +114,7 @@ public class RuntimeFilterManagerTest {
     assertEquals(Sets.newHashSet(2, 3), entry1.getRemainingMinorFragments());
 
     RuntimeFilter frMinor2Target1 =
-        newFilter(opId1, majorFragment1, EMPTY_LIST, Lists.newArrayList("col1", "col2"));
+        newFilter(opId1, majorFragment1, emptyList(), Lists.newArrayList("col1", "col2"));
     ValueListFilter vB1 = newValListFilter("col1", Lists.newArrayList(6, 4, 5, 3));
     ValueListFilter vB2 = newValListFilter("col2", Lists.newArrayList(15, 16, 17, 18));
     RuntimeFilterManagerEntry entry2 =
@@ -125,7 +125,7 @@ public class RuntimeFilterManagerTest {
     assertEquals(Sets.newHashSet(3), entry2.getRemainingMinorFragments());
 
     RuntimeFilter frMinor3Target1 =
-        newFilter(opId1, majorFragment1, EMPTY_LIST, Lists.newArrayList("col1", "col2"));
+        newFilter(opId1, majorFragment1, emptyList(), Lists.newArrayList("col1", "col2"));
     ValueListFilter vC1 = newValListFilter("col1", Lists.newArrayList(6, 9, 8, 3));
     ValueListFilter vC2 = newValListFilter("col2", Lists.newArrayList(19, 20, 21, 22));
     RuntimeFilterManagerEntry entry3 =
@@ -265,32 +265,32 @@ public class RuntimeFilterManagerTest {
     BloomFilter copyBf1 = mockedBloom();
     when(bf1.createCopy(any(BufferAllocator.class))).thenReturn(copyBf1);
     RuntimeFilter frMinor1Target1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("colT1"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("colT1"), emptyList());
     RuntimeFilterManagerEntry entry1 =
-        filterManager.coalesce(frMinor1Target1, Optional.of(bf1), EMPTY_LIST, 1);
+        filterManager.coalesce(frMinor1Target1, Optional.of(bf1), emptyList(), 1);
 
     BloomFilter bf2 = mockedBloom();
     BloomFilter copyBf2 = mockedBloom();
     when(bf2.createCopy(any(BufferAllocator.class))).thenReturn(copyBf2);
     RuntimeFilter frMinor1Target2 =
-        newFilter(opId2, majorFragment2, Lists.newArrayList("colT2"), EMPTY_LIST);
+        newFilter(opId2, majorFragment2, Lists.newArrayList("colT2"), emptyList());
     RuntimeFilterManagerEntry entry2 =
-        filterManager.coalesce(frMinor1Target2, Optional.of(bf2), EMPTY_LIST, 1);
+        filterManager.coalesce(frMinor1Target2, Optional.of(bf2), emptyList(), 1);
     assertNotEquals(entry1, entry2);
 
     RuntimeFilter frMinor2Target1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("colT1"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("colT1"), emptyList());
     RuntimeFilterManagerEntry entry3 =
-        filterManager.coalesce(frMinor2Target1, Optional.of(mockedBloom()), EMPTY_LIST, 2);
+        filterManager.coalesce(frMinor2Target1, Optional.of(mockedBloom()), emptyList(), 2);
     assertEquals(entry1, entry3);
     assertTrue(entry1.isComplete());
     assertFalse(entry1.isDropped());
     assertFalse(entry2.isComplete());
 
     RuntimeFilter frMinor2Target2 =
-        newFilter(opId2, majorFragment2, Lists.newArrayList("colT2"), EMPTY_LIST);
+        newFilter(opId2, majorFragment2, Lists.newArrayList("colT2"), emptyList());
     RuntimeFilterManagerEntry entry4 =
-        filterManager.coalesce(frMinor2Target2, Optional.of(mockedBloom()), EMPTY_LIST, 2);
+        filterManager.coalesce(frMinor2Target2, Optional.of(mockedBloom()), emptyList(), 2);
     assertEquals(entry2, entry4);
     assertTrue(entry2.isComplete());
     assertFalse(entry2.isDropped());
@@ -430,19 +430,19 @@ public class RuntimeFilterManagerTest {
         new RuntimeFilterManager(allocator, MAX_VALS, Sets.newHashSet(1, 2, 3));
 
     RuntimeFilter filter1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     BloomFilter bf = mockedBloom();
     BloomFilter copyBf = mockedBloom();
     when(bf.createCopy(any(BufferAllocator.class))).thenReturn(copyBf);
 
     when(copyBf.isCrossingMaxFPP()).thenReturn(true);
     RuntimeFilterManagerEntry entry1 =
-        filterManager.coalesce(filter1, Optional.of(bf), EMPTY_LIST, 1);
+        filterManager.coalesce(filter1, Optional.of(bf), emptyList(), 1);
 
     RuntimeFilter filter2 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     RuntimeFilterManagerEntry entry2 =
-        filterManager.coalesce(filter2, Optional.of(mockedBloom()), EMPTY_LIST, 2);
+        filterManager.coalesce(filter2, Optional.of(mockedBloom()), emptyList(), 2);
 
     assertTrue(entry1.isDropped());
     assertEquals(entry1, entry2);
@@ -456,7 +456,7 @@ public class RuntimeFilterManagerTest {
     RuntimeFilterManager filterManager =
         new RuntimeFilterManager(allocator, MAX_VALS, Sets.newHashSet(1, 2, 3));
     RuntimeFilter filter1 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     BloomFilter bf = mockedBloom();
     BloomFilter copyBf = mockedBloom();
     when(bf.createCopy(any(BufferAllocator.class))).thenReturn(copyBf);
@@ -465,12 +465,12 @@ public class RuntimeFilterManagerTest {
         .when(copyBf)
         .merge(any(BloomFilter.class));
     RuntimeFilterManagerEntry entry1 =
-        filterManager.coalesce(filter1, Optional.of(bf), EMPTY_LIST, 1);
+        filterManager.coalesce(filter1, Optional.of(bf), emptyList(), 1);
 
     RuntimeFilter filter2 =
-        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), EMPTY_LIST);
+        newFilter(opId1, majorFragment1, Lists.newArrayList("col1", "col2"), emptyList());
     RuntimeFilterManagerEntry entry2 =
-        filterManager.coalesce(filter2, Optional.of(mockedBloom()), EMPTY_LIST, 2);
+        filterManager.coalesce(filter2, Optional.of(mockedBloom()), emptyList(), 2);
 
     assertTrue(entry1.isDropped());
     assertEquals(entry1, entry2);

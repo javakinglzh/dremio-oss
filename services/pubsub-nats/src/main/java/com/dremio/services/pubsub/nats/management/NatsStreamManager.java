@@ -68,11 +68,12 @@ public class NatsStreamManager implements StreamManager {
   }
 
   @Override
-  public <M extends Message> void upsertStream(
-      StreamOptions streamOptions, List<Class<? extends Topic<M>>> topics) {
+  public <M extends Message> void createStreamIfNotExists(
+      StreamOptions streamOptions, List<Class<? extends Topic<M>>> subjects) {
+    logger.info("Going to create stream if not exists: {} ", streamOptions.streamName());
 
     List<String> subjectNames =
-        topics.stream()
+        subjects.stream()
             .map(ClassToInstanceUtil::toTopicInstance)
             .map(Topic::getName)
             .collect(Collectors.toList());
@@ -85,24 +86,26 @@ public class NatsStreamManager implements StreamManager {
             .replicas(streamOptions.getNumberOfReplicasOrDefault())
             .retentionPolicy(RetentionPolicy.Limits) // Retain messages based on limits
             .maxAge(DEFAULT_MAX_RETENTION)
+            .maxMessages(streamOptions.getMaxMessagesOrDefault())
             .build();
 
     try {
       // First, attempt to get StreamInfo to check if the stream already exists
       jetStreamManagement.getStreamInfo(streamOptions.streamName());
-      // If the stream exists, update it
-      updateStream(streamConfig, streamOptions.streamName());
+      // If the stream exists, do nothing
+      logger.info(
+          "Stream: {} already exists. Skipping stream creation.", streamOptions.streamName());
     } catch (JetStreamApiException e) {
       if (e.getApiErrorCode() == NatsErrorCodes.JET_STREAM_NOT_FOUND.getErrorCode()) {
         try {
           // If stream doesn't exist, create a new one
           addStream(streamConfig, streamOptions.streamName());
         } catch (Exception ex) {
-          throw new NatsManagerException("Unexpected error during stream upsert.", ex);
+          throw new NatsManagerException("Unexpected error during creating stream.", ex);
         }
 
       } else {
-        throw new NatsManagerException("JetStream API error occurred during stream upsert.", e);
+        throw new NatsManagerException("JetStream API error occurred during stream add.", e);
       }
     } catch (Exception e) {
       throw new NatsManagerException("Unexpected error during stream upsert.", e);

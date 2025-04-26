@@ -120,6 +120,10 @@
       <version>1.3.0</version>
     </dependency>
     <dependency>
+      <groupId>org.checkerframework</groupId>
+      <artifactId>checker-qual</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.hubspot.jackson</groupId>
       <artifactId>jackson-datatype-protobuf</artifactId>
     </dependency>
@@ -260,12 +264,6 @@
     <dependency>
       <groupId>org.apache.iceberg</groupId>
       <artifactId>iceberg-parquet</artifactId>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.parquet</groupId>
-          <artifactId>parquet-avro</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.iceberg</groupId>
@@ -300,12 +298,14 @@
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-lang3</artifactId>
     </dependency>
-
+    <dependency>
+      <groupId>commons-codec</groupId>
+      <artifactId>commons-codec</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-text</artifactId>
     </dependency>
-
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-math3</artifactId>
@@ -431,118 +431,30 @@
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-column</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-hadoop</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.parquet</groupId>
-      <artifactId>parquet-hadoop</artifactId>
-      <version>${parquet.version}</version>
-      <type>test-jar</type>
-      <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-common</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-jackson</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-encoding</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-generator</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>org.apache.parquet</groupId>
       <artifactId>parquet-arrow</artifactId>
-      <version>${parquet.version}</version>
-      <exclusions>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-client</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.arrow</groupId>
-          <artifactId>arrow-memory</artifactId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>it.unimi.dsi</groupId>
@@ -629,12 +541,10 @@
     <dependency>
       <groupId>org.codehaus.janino</groupId>
       <artifactId>janino</artifactId>
-      <version>3.1.6</version>
     </dependency>
     <dependency>
       <groupId>org.codehaus.janino</groupId>
       <artifactId>commons-compiler</artifactId>
-      <version>3.1.6</version>
     </dependency>
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
@@ -744,11 +654,6 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.projectnessie.nessie</groupId>
-      <artifactId>nessie-combined-cs</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
       <groupId>com.tdunning</groupId>
       <artifactId>t-digest</artifactId>
       <version>3.2</version>
@@ -790,12 +695,21 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
+      <artifactId>dremio-services-distributed-plan-cache</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-catalog</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>com.dremio.common</groupId>
       <artifactId>dremio-common-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.services</groupId>
+      <artifactId>dremio-optimization-api</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -816,10 +730,6 @@
       <resource>
         <filtering>false</filtering>
         <directory>src/main/resources</directory>
-      </resource>
-      <resource>
-        <filtering>false</filtering>
-        <directory>src/main/resources-${dremio.mapr.distribution}</directory>
       </resource>
     </resources>
     <testResources>
@@ -1235,6 +1145,52 @@
                 <exclude>**/TestLargeFileCompilation.java</exclude>
               </excludes>
             </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!-- The value is provided by nessie-runner-maven-plugin -->
+            <nessie.server.url>${nessie.server.url}</nessie.server.url>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.projectnessie.nessie-runner</groupId>
+        <artifactId>nessie-runner-maven-plugin</artifactId>
+        <configuration>
+          <skip>${skipTests}</skip>
+          <appArtifactId>org.projectnessie.nessie:nessie-quarkus:jar:runner:${nessie.version}</appArtifactId>
+          <javaVersion>21</javaVersion>
+          <systemProperties>
+            <nessie.version.store.type>IN_MEMORY</nessie.version.store.type>
+            <nessie.version.store.persist.cache-capacity-mb>1</nessie.version.store.persist.cache-capacity-mb>
+          </systemProperties>
+          <environment>
+            <!-- Jenkins sets OTEL_TRACES_EXPORTER and other OTEL config variables to monitor builds. However,
+            those settins break recent Nessie servers, which must be configured in a Quarkus-specific way.
+            Therefore, we override this main config variable here to un-enable tracing in Nessie during tests. -->
+            <OTEL_TRACES_EXPORTER>none</OTEL_TRACES_EXPORTER>
+          </environment>
+          <httpListenPortProperty>nessie.server.http.port</httpListenPortProperty>
+          <httpListenUrlProperty>nessie.server.url</httpListenUrlProperty>
+        </configuration>
+        <executions>
+          <execution>
+            <id>start</id>
+            <goals>
+              <goal>start</goal>
+            </goals>
+            <phase>pre-integration-test</phase>
+          </execution>
+          <execution>
+            <id>stop</id>
+            <goals>
+              <goal>stop</goal>
+            </goals>
+            <phase>post-integration-test</phase>
           </execution>
         </executions>
       </plugin>

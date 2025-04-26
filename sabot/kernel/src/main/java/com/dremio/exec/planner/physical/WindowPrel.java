@@ -45,6 +45,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -160,7 +162,26 @@ public class WindowPrel extends WindowRelBase implements Prel {
             func.materialize(expr, childSchema, collector, creator.getFunctionLookupContext()));
       }
     }
-    BatchSchema schema = schemaBuilder.build();
+    // TODO: DX-98085 - Remove the workaround.
+    // The following is a workaround until the implementation of CompleteType
+    // with nullability constraints is completed.
+    // At which point the following code block which tries to set nullability in Field
+    // via child schema while constructing schema is to be removed and replaced with
+    // BatchSchema schema = schemaBuilder.build();
+    BatchSchema schema =
+        new BatchSchema(
+            schemaBuilder.build().getFields().stream()
+                .map(
+                    f -> {
+                      Optional<Field> field =
+                          childSchema.getFields().stream()
+                              .filter(cf -> cf.getName().equalsIgnoreCase(f.getName()))
+                              .findFirst();
+                      return field.isPresent()
+                          ? new Field(f.getName(), field.get().getFieldType(), f.getChildren())
+                          : new Field(f.getName(), f.getFieldType(), f.getChildren());
+                    })
+                .collect(Collectors.toList()));
 
     return new WindowPOP(
         creator.props(this, null, schema, RESERVE, LIMIT),

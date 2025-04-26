@@ -19,16 +19,14 @@ import static com.dremio.common.UserConstants.SYSTEM_USERNAME;
 import static com.dremio.common.utils.PathUtils.constructFullPath;
 import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants.METADATA_STORAGE_PLUGIN_NAME;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SimpleJobRunner;
 import com.dremio.service.job.QueryType;
-import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.orphanage.OrphanageEntryHandler;
 import com.dremio.service.orphanage.proto.OrphanEntry;
-import com.google.common.base.Preconditions;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -39,15 +37,15 @@ public class IcebergMetadataHandler implements OrphanageEntryHandler {
       org.slf4j.LoggerFactory.getLogger(IcebergMetadataHandler.class);
 
   private final NamespaceService namespaceService;
-  private final SabotContext sabotContext;
+  private final SimpleJobRunner jobRunner;
 
-  public IcebergMetadataHandler(NamespaceService namespaceService, SabotContext sabotContext) {
+  public IcebergMetadataHandler(NamespaceService namespaceService, SimpleJobRunner jobRunner) {
     this.namespaceService = namespaceService;
-    this.sabotContext = Preconditions.checkNotNull(sabotContext, "sabot context required");
+    this.jobRunner = jobRunner;
   }
 
   private void runDropQuery(String query, String user, String queryType) throws Exception {
-    sabotContext.getJobsRunner().get().runQueryAsJob(query, user, queryType, "DML");
+    jobRunner.runQueryAsJob(query, user, queryType, "DML");
   }
 
   private void deleteIcebergMetadataFromNamespace(OrphanEntry.OrphanIcebergMetadata val)
@@ -60,8 +58,6 @@ public class IcebergMetadataHandler implements OrphanageEntryHandler {
         dataset = namespaceService.getDataset(namespaceKey);
       } catch (NamespaceNotFoundException ex) {
         dataset = null;
-      } catch (NamespaceException ex) {
-        throw new RuntimeException(ex);
       }
 
       if (dataset == null) {

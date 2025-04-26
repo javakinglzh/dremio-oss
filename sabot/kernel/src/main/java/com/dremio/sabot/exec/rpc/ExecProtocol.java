@@ -33,6 +33,7 @@ import com.dremio.exec.rpc.RpcBus;
 import com.dremio.exec.rpc.RpcConfig;
 import com.dremio.exec.rpc.RpcConstants;
 import com.dremio.exec.rpc.RpcException;
+import com.dremio.exec.rpc.UserRpcException;
 import com.dremio.sabot.exec.DynamicLoadRoutingMessage;
 import com.dremio.sabot.exec.FragmentExecutors;
 import com.dremio.sabot.exec.fragment.OutOfBandMessage;
@@ -78,7 +79,7 @@ public class ExecProtocol implements FabricProtocol {
     switch (rpcType) {
       case RpcType.REQ_RECORD_BATCH_VALUE:
         {
-          final FragmentRecordBatch fragmentBatch = RpcBus.get(pBody, FragmentRecordBatch.PARSER);
+          final FragmentRecordBatch fragmentBatch = RpcBus.get(pBody, FragmentRecordBatch.parser());
           handleFragmentRecordBatch(fragmentBatch, body, sender);
           return;
         }
@@ -86,7 +87,7 @@ public class ExecProtocol implements FabricProtocol {
       case RpcType.REQ_STREAM_COMPLETE_VALUE:
         {
           final FragmentStreamComplete completion =
-              RpcBus.get(pBody, FragmentStreamComplete.PARSER);
+              RpcBus.get(pBody, FragmentStreamComplete.parser());
           handleFragmentStreamCompletion(completion);
           sender.send(OK);
           return;
@@ -94,7 +95,7 @@ public class ExecProtocol implements FabricProtocol {
 
       case RpcType.REQ_RECEIVER_FINISHED_VALUE:
         {
-          final FinishedReceiver completion = RpcBus.get(pBody, FinishedReceiver.PARSER);
+          final FinishedReceiver completion = RpcBus.get(pBody, FinishedReceiver.parser());
           handleReceiverFinished(completion);
           sender.send(OK);
           return;
@@ -102,7 +103,7 @@ public class ExecProtocol implements FabricProtocol {
 
       case RpcType.REQ_OOB_MESSAGE_VALUE:
         {
-          final OOBMessage oobMessage = RpcBus.get(pBody, OOBMessage.PARSER);
+          final OOBMessage oobMessage = RpcBus.get(pBody, OOBMessage.parser());
           handleOobMessage(oobMessage, body);
           sender.send(OK);
           return;
@@ -110,7 +111,7 @@ public class ExecProtocol implements FabricProtocol {
 
       case RpcType.REQ_DLR_MESSAGE_VALUE:
         {
-          final DlrProtoMessage message = RpcBus.get(pBody, DlrProtoMessage.PARSER);
+          final DlrProtoMessage message = RpcBus.get(pBody, DlrProtoMessage.parser());
           handleDlrMessage(message, sender);
           return;
         }
@@ -130,13 +131,13 @@ public class ExecProtocol implements FabricProtocol {
       // decrement the extra reference we grabbed at the top.
       ack.sendOk();
     } catch (Exception e) {
-      logger.error(
-          "Failure while handling DynamicLoadRouting message query id {} command {}",
-          QueryIdHelper.getQueryId(message.getQueryId()),
-          message.getCommand(),
-          e);
+      String errorMsg =
+          String.format(
+              "Failure while handling DynamicLoadRouting message query id %s command %s",
+              QueryIdHelper.getQueryId(message.getQueryId()), message.getCommand());
+      logger.error("{}", errorMsg);
       ack.clear();
-      sender.send(new Response(RpcType.ACK, Acks.FAIL));
+      sender.sendFailure(new UserRpcException(null, errorMsg, e));
     }
   }
 

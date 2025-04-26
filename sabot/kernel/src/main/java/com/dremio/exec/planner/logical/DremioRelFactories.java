@@ -183,7 +183,7 @@ public class DremioRelFactories {
       RelTraitSet traits = input.getTraitSet();
       if (!collation.getFieldCollations().isEmpty()) {
         collation = RelCollationTraitDef.INSTANCE.canonize(collation);
-        newInput = SortRel.create(input.getCluster(), traits, input, collation, null, null);
+        newInput = SortRel.create(input.getCluster(), traits, input, collation);
         traits = newInput.getTraitSet();
       } else {
         newInput = input;

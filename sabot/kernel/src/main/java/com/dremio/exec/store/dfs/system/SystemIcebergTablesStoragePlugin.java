@@ -31,6 +31,7 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUser;
 import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.dotfile.View;
@@ -40,7 +41,6 @@ import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.parser.SqlGrant.Privilege;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.SchemaConfig;
@@ -105,7 +105,7 @@ public class SystemIcebergTablesStoragePlugin
    */
   public SystemIcebergTablesStoragePlugin(
       SystemIcebergTablesStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> idProvider) {
     super(config, context, name, idProvider);
@@ -130,9 +130,7 @@ public class SystemIcebergTablesStoragePlugin
         new SystemIcebergTablesExecutionDatasetAccessor(
             datasetPath,
             Suppliers.ofInstance(getTable(tableMetadata.getTableLocation())),
-            getFsConfCopy(),
             Table::currentSnapshot,
-            this,
             (t, s) -> t.schema(),
             getContext().getOptionManager());
 

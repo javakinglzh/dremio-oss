@@ -95,12 +95,13 @@ public class CarryForwardAwareTableFunctionContext extends TableFunctionContext 
       Map<SchemaPath, SchemaPath> inputColMap,
       String constValCol,
       String constVal,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> dataset) {
     this(
         null,
         outputSchema,
         null,
-        null,
+        List.of(dataset),
         null,
         storagePluginId,
         null,

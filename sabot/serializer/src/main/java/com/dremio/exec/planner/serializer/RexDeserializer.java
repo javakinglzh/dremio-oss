@@ -59,6 +59,7 @@ import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexDynamicParam;
 import org.apache.calcite.rex.RexFieldCollation;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexLocalRef;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexPatternFieldRef;
@@ -81,7 +82,7 @@ import org.apache.calcite.util.Optionality;
 import org.apache.calcite.util.TimeString;
 import org.apache.calcite.util.TimestampString;
 
-class RexDeserializer {
+public class RexDeserializer {
   private static final SqlCollation Utf8SqlCollation =
       new SqlCollation("UTF-8$en_US$primary", SqlCollation.Coercibility.IMPLICIT);
 
@@ -333,7 +334,7 @@ class RexDeserializer {
             Arrays.toString(expected), actual));
   }
 
-  private RexNode convertLiteral(PRexLiteral literal) {
+  public RexLiteral convertLiteral(PRexLiteral literal) {
     RelDataType type = types.fromProto(literal.getDataType());
     switch (literal.getValueTypeCase()) {
       case BINARY_VALUE:
@@ -387,7 +388,7 @@ class RexDeserializer {
           case FLOAT:
           case DOUBLE:
           case VARCHAR:
-            return rexBuilder.makeLiteral(literal.getLongValue(), type, true);
+            return (RexLiteral) rexBuilder.makeLiteral(literal.getLongValue(), type, true);
           case DATE:
             return rexBuilder.makeDateLiteral(
                 DateString.fromDaysSinceEpoch((int) (literal.getLongValue())));
@@ -424,7 +425,7 @@ class RexDeserializer {
           case TIME_WITH_LOCAL_TIME_ZONE:
           case VARCHAR:
             try {
-              return rexBuilder.makeLiteral(literal.getStringValue(), type, true);
+              return (RexLiteral) rexBuilder.makeLiteral(literal.getStringValue(), type, true);
             } catch (CalciteException ce) {
               if (!((type.getSqlTypeName() == SqlTypeName.CHAR)
                   || (type.getSqlTypeName() == SqlTypeName.VARCHAR))) {
@@ -439,7 +440,7 @@ class RexDeserializer {
                       .createTypeWithCharsetAndCollation(
                           type, StandardCharsets.UTF_8, Utf8SqlCollation);
 
-              return rexBuilder.makeLiteral(utf8NlsString, utf8RelDataType, true);
+              return (RexLiteral) rexBuilder.makeLiteral(utf8NlsString, utf8RelDataType, true);
             }
 
           default:
@@ -462,7 +463,7 @@ class RexDeserializer {
     }
 
     if (literal.getDataType().getTypeName() == PSqlTypeName.ANY) {
-      return rexBuilder.makeNullLiteral(SqlTypeName.ANY);
+      return rexBuilder.makeNullLiteral(type);
     }
     throw new IllegalStateException("Unknown value handling: " + literal.getValueTypeCase());
   }

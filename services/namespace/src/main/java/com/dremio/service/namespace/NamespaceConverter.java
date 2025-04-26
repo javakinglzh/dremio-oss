@@ -15,13 +15,10 @@
  */
 package com.dremio.service.namespace;
 
-import static com.dremio.common.utils.Protos.listNotNull;
 import static com.dremio.common.utils.Protos.notEmpty;
-import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_ALLPARENTS;
 import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_COLUMNS_NAMES;
 import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_OWNER;
 import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_PARENTS;
-import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_SOURCES;
 import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_SQL;
 import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_UUID;
 import static com.dremio.service.namespace.DatasetIndexKeys.UNQUOTED_LC_NAME;
@@ -34,8 +31,6 @@ import com.dremio.datastore.api.DocumentConverter;
 import com.dremio.datastore.api.DocumentWriter;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
-import com.dremio.service.namespace.dataset.proto.FieldOrigin;
-import com.dremio.service.namespace.dataset.proto.Origin;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
 import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
@@ -46,12 +41,9 @@ import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.namespace.space.proto.FolderConfig;
 import com.dremio.service.namespace.space.proto.HomeConfig;
 import com.dremio.service.namespace.space.proto.SpaceConfig;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Sets;
 import io.protostuff.ByteString;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 import org.apache.arrow.flatbuf.Schema;
 
 /** Namespace search indexing. for now only support pds, vds, source and space indexing. */
@@ -114,9 +106,6 @@ public class NamespaceConverter implements DocumentConverter<String, NameSpaceCo
 
                 addParents(writer, virtualDataset.getParentsList());
                 addColumns(writer, datasetConfig);
-                addSourcesAndOrigins(writer, virtualDataset.getFieldOriginsList());
-                addAllParents(
-                    writer, virtualDataset.getParentsList(), virtualDataset.getGrandParentsList());
               }
               break;
 
@@ -223,41 +212,6 @@ public class NamespaceConverter implements DocumentConverter<String, NameSpaceCo
         parents[i++] = PathUtils.constructFullPath(parent.getDatasetPathList());
       }
       writer.write(DATASET_PARENTS, parents);
-    }
-  }
-
-  private void addSourcesAndOrigins(DocumentWriter writer, List<FieldOrigin> fieldOrigins) {
-    if (notEmpty(fieldOrigins)) {
-      Set<String> sources = Sets.newHashSet();
-      final List<String> empty = ImmutableList.of();
-      for (FieldOrigin fieldOrigin : fieldOrigins) {
-        for (Origin origin : listNotNull(fieldOrigin.getOriginsList())) {
-          // DX-3999: fix this in calcite
-          final List<String> path = Optional.ofNullable(origin.getTableList()).orElse(empty);
-          if (path.isEmpty()) {
-            continue;
-          }
-          NamespaceKey dataset = new NamespaceKey(origin.getTableList());
-          sources.add(dataset.getRoot());
-        }
-      }
-      writer.write(DATASET_SOURCES, sources.toArray(new String[0]));
-    }
-  }
-
-  private void addAllParents(
-      DocumentWriter writer, List<ParentDataset> parents, List<ParentDataset> grandParents) {
-    if (notEmpty(parents)) {
-      grandParents = listNotNull(grandParents);
-      int i = 0;
-      final String[] allParents = new String[parents.size() + grandParents.size()];
-      for (ParentDataset parent : parents) {
-        allParents[i++] = PathUtils.constructFullPath(parent.getDatasetPathList());
-      }
-      for (ParentDataset grandParent : grandParents) {
-        allParents[i++] = PathUtils.constructFullPath(grandParent.getDatasetPathList());
-      }
-      writer.write(DATASET_ALLPARENTS, allParents);
     }
   }
 }

@@ -15,7 +15,6 @@
  */
 package com.dremio.plugins.elastic;
 
-import static com.dremio.exec.ExecConstants.ELASTIC_ACTION_RETRIES_VALIDATOR;
 import static com.dremio.plugins.elastic.ElasticBaseTestQuery.TestNameGenerator.aliasName;
 import static com.dremio.plugins.elastic.ElasticBaseTestQuery.TestNameGenerator.schemaName;
 import static com.dremio.plugins.elastic.ElasticBaseTestQuery.TestNameGenerator.tableName;
@@ -72,9 +71,6 @@ public class ElasticBaseTestQuery extends PlanTestBase {
   protected String schema;
   protected String table;
   protected String alias;
-  protected boolean enable7vFeatures;
-  protected boolean enable68vFeatures;
-
   protected final String[] uidJsonES7 =
       new String[] {
         "[{\n"
@@ -82,15 +78,13 @@ public class ElasticBaseTestQuery extends PlanTestBase {
             + "  \"size\" : 4000,\n"
             + "  \"query\" : {\n"
             + "          \"match_all\" : {\n"
-            + "            \"boost\" : 1.0\n"
             + "          }\n"
             + "  },\n"
             + "  \"_source\" : {\n"
             + "    \"includes\" : [\n"
             + "      \"_id\",\n"
             + "      \"_type\"\n"
-            + "    ],\n"
-            + "    \"excludes\" : [ ]\n"
+            + "    ]\n"
             + "  }\n"
             + "}]"
       };
@@ -231,7 +225,7 @@ public class ElasticBaseTestQuery extends PlanTestBase {
             showIDColumn,
             publishHost,
             sslEnabled,
-            getSabotContext().getOptionManager().getOption(ELASTIC_ACTION_RETRIES_VALIDATOR),
+            1,
             forceDoublePrecision);
     SourceConfig sc = new SourceConfig();
     sc.setName("elasticsearch");
@@ -241,8 +235,6 @@ public class ElasticBaseTestQuery extends PlanTestBase {
     createSourceWithRetry(sc);
     ElasticVersionBehaviorProvider elasticVersionBehaviorProvider =
         new ElasticVersionBehaviorProvider(elastic.getMinVersionInCluster());
-    enable7vFeatures = elasticVersionBehaviorProvider.isEnable7vFeatures();
-    enable68vFeatures = elasticVersionBehaviorProvider.isEs68Version();
   }
 
   @After
@@ -548,9 +540,7 @@ public class ElasticBaseTestQuery extends PlanTestBase {
         indexInPlan = positionOfPushdownInPlan + PUSHDOWN_PREFIX.length();
         int pushdownEndIndexInPlan = findJsonEndBoundary(plan, indexInPlan);
         String jsonPushdown = plan.substring(indexInPlan, pushdownEndIndexInPlan);
-        if (enable7vFeatures) {
-          jsonPushdown = jsonPushdown.replaceAll(ElasticsearchConstants.DISABLE_COORD_FIELD, "");
-        }
+        jsonPushdown = jsonPushdown.replaceAll(ElasticsearchConstants.DISABLE_COORD_FIELD, "");
         indexInPlan = pushdownEndIndexInPlan;
         String expectedJson = jsonExpectedInPlan[expectedJsonBlobIndex];
         if (!edgeProjectEnabled) {

@@ -18,6 +18,8 @@ package com.dremio.sabot.op.join.vhash;
 import static com.dremio.sabot.op.join.vhash.PartitionColFilters.BLOOMFILTER_MAX_SIZE;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.LogicalExpression;
@@ -45,6 +47,7 @@ import com.dremio.sabot.op.common.ht2.PivotDef;
 import com.dremio.sabot.op.join.JoinUtils;
 import com.dremio.sabot.op.join.hash.BuildInfo;
 import com.dremio.sabot.op.join.vhash.HashJoinStats.Metric;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.DualInputOperator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -63,6 +66,7 @@ import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.calcite.rel.core.JoinRelType;
 
 public class VectorizedHashJoinOperator implements DualInputOperator {
@@ -148,6 +152,13 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
   private long duplicateBuildRecordCount;
   private PartitionColFilters partitionColFilters = null;
   private NonPartitionColFilters nonPartitionColFilters = null;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
 
   public VectorizedHashJoinOperator(OperatorContext context, HashJoinPOP popConfig)
       throws OutOfMemoryException {
@@ -167,6 +178,11 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
             context.getAllocator(),
             RuntimeFilterUtil.getRuntimeValFilterCap(context),
             allMinorFragments);
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
@@ -264,7 +280,7 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
         case DATE:
         case FLOAT8:
         case INTERVALDAY:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           break;
         default:
           mode = Mode.VECTORIZED_GENERIC;
@@ -376,8 +392,34 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
 
     debugInsertion = context.getOptions().getOption(ExecConstants.DEBUG_HASHJOIN_INSERTION);
 
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (!VectorContainerHelper.isVarLenColumnPresent(outgoing)) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+      }
+    }
+
     state = State.CAN_CONSUME_R;
     return outgoing;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
   }
 
   // Get ids for a field
@@ -638,7 +680,9 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
       outputRecords += Math.abs(probedRecords);
       if (probedRecords > -1) {
         state = State.CAN_CONSUME_L;
-        return outgoing.setAllCount(probedRecords);
+        outgoing.setAllCount(probedRecords);
+        checkForRowSizeOverLimit(probedRecords);
+        return probedRecords;
       } else {
         // we didn't finish everything, will produce again.
         state = State.CAN_PRODUCE;
@@ -649,12 +693,30 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
       outputRecords += Math.abs(unmatched);
       if (unmatched > -1) {
         state = State.DONE;
-        return outgoing.setAllCount(unmatched);
+        outgoing.setAllCount(unmatched);
+        checkForRowSizeOverLimit(unmatched);
+        return unmatched;
       } else {
         // remainder, need to output again.
         return outgoing.setAllCount(-unmatched);
       }
     }
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   @Override
@@ -801,6 +863,7 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
     autoCloseables.addAll(buildOutputKeys);
     autoCloseables.addAll(startIndices);
     autoCloseables.addAll(keyMatchBitVectors);
+    autoCloseables.add(rowSizeAccumulator);
     AutoCloseables.close(autoCloseables);
   }
 

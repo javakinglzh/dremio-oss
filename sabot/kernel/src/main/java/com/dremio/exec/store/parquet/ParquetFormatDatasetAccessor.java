@@ -45,11 +45,11 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.ColumnCountTooLargeException;
 import com.dremio.exec.catalog.FileConfigMetadata;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.exception.NoSupportedUpPromotionOrCoercionException;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.PartitionChunkListingImpl;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.SampleMutator;
@@ -136,7 +136,7 @@ public class ParquetFormatDatasetAccessor
   private ParquetDatasetXAttr extended;
   private List<String> partitionColumns;
   private BatchSchema schema;
-  private SabotContext context;
+  private PluginSabotContext context;
 
   public ParquetFormatDatasetAccessor(
       DatasetType type,
@@ -148,7 +148,7 @@ public class ParquetFormatDatasetAccessor
       FormatPlugin formatPlugin,
       PreviousDatasetInfo oldConfig,
       int maxLeafColumns,
-      SabotContext context) {
+      PluginSabotContext context) {
     this.type = type;
     this.fs = fs;
     this.fileSelection = fileSelection;
@@ -165,7 +165,7 @@ public class ParquetFormatDatasetAccessor
   private BatchSchema getBatchSchema(
       final BatchSchema oldSchema, final FileSelection selection, final FileSystem fs)
       throws Exception {
-    final SabotContext context = ((ParquetFormatPlugin) formatPlugin).getContext();
+    final PluginSabotContext context = ((ParquetFormatPlugin) formatPlugin).getContext();
     final Optional<FileAttributes> firstFileO = selection.getFirstFileIteratively(fs);
     if (!firstFileO.isPresent()) {
       throw UserException.dataReadError()
@@ -263,7 +263,10 @@ public class ParquetFormatDatasetAccessor
   }
 
   private BatchSchema getSchema(
-      BatchSchema oldSchema, SabotContext context, FileAttributes firstFile, List<Field> fields) {
+      BatchSchema oldSchema,
+      PluginSabotContext context,
+      FileAttributes firstFile,
+      List<Field> fields) {
     BatchSchema newSchema = BatchSchema.newBuilder().addFields(fields).build();
     try {
       newSchema = newSchema.handleUnions(this);
@@ -284,7 +287,7 @@ public class ParquetFormatDatasetAccessor
    */
   private BatchSchema getBatchSchemaFromReader(final FileSelection selection, final FileSystem fs)
       throws Exception {
-    final SabotContext context = ((ParquetFormatPlugin) formatPlugin).getContext();
+    final PluginSabotContext context = ((ParquetFormatPlugin) formatPlugin).getContext();
 
     try (BufferAllocator sampleAllocator =
             context.getAllocator().newChildAllocator("sample-alloc", 0, Long.MAX_VALUE);

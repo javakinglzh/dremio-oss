@@ -19,6 +19,7 @@ import { listReflectionJobs } from "../endpoints/JobsListing/listReflectionJobs"
 import { formatJobsBackendQuery } from "#oss/pages/JobsPage/jobs-page-utils";
 import { JobsQueryParams } from "dremio-ui-common/types/Jobs.types";
 import moize from "moize";
+import { PollingResource } from "../utilities/PollingResource";
 
 export const jobsCache = moize.promise(listReflectionJobs, {
   maxAge: 30000,
@@ -65,4 +66,20 @@ export const PaginatedReflectionJobsResource = new SmartResource(
   {
     mode: "takeEvery",
   },
+);
+
+export const ReflectionJobsPollingResource = new PollingResource(
+  ({ reflectionId }) => {
+    return listReflectionJobs({
+      reflectionId,
+      ...formatJobsBackendQuery({
+        sort: "st",
+        order: "DESCENDING",
+        filters: {},
+      }),
+      offset: undefined,
+      limit: 100,
+    });
+  },
+  { pollingInterval: 5000 },
 );

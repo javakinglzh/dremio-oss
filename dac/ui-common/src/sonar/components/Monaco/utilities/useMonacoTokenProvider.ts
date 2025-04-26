@@ -225,6 +225,11 @@ const DremioSQLLanguageConfig: monaco.languages.LanguageConfiguration = {
       close: "'",
     },
   ],
+  colorizedBracketPairs: [
+    ["{", "}"],
+    ["[", "]"],
+    ["(", ")"],
+  ],
 };
 
 const DremioSQLColors = {

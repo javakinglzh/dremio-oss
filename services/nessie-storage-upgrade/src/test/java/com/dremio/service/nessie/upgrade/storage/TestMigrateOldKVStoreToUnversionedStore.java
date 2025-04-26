@@ -23,28 +23,25 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.projectnessie.versioned.VersionStore.KeyRestrictions.NO_KEY_RESTRICTIONS;
 
 import com.dremio.datastore.LocalKVStoreProvider;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStore.FindOption;
+import com.dremio.legacy.org.projectnessie.model.ContentKey;
+import com.dremio.service.embedded.catalog.EmbeddedContent;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedUnversionedStore;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.versioned.BranchName;
-import org.projectnessie.versioned.ContentResult;
 
 /** Unit tests for {@link MigrateOldKVStoreToUnversionedStore}. */
 class TestMigrateOldKVStoreToUnversionedStore {
@@ -82,15 +79,14 @@ class TestMigrateOldKVStoreToUnversionedStore {
   }
 
   @Test
-  void testEmptyUpgrade() throws Exception {
+  void testEmptyUpgrade() {
     task.upgrade(storeProvider, c -> {});
-    assertThat(store.getKeys(BranchName.of("main"), null, false, NO_KEY_RESTRICTIONS).hasNext())
-        .isFalse();
+    assertThat(store.getEntries(Integer.MAX_VALUE)).isEmpty();
   }
 
   @ParameterizedTest
   @ValueSource(ints = {1, 2, 40, 99, 100, 101, 499, 500, 501})
-  void testUpgrade(int numCommits) throws Exception {
+  void testUpgrade(int numCommits) {
     List<ContentKey> keys = new ArrayList<>();
     List<String> testEntries = new ArrayList<>();
 
@@ -109,15 +105,13 @@ class TestMigrateOldKVStoreToUnversionedStore {
           }
         });
 
-    Map<ContentKey, ContentResult> tables = store.getValues(BranchName.of("main"), keys, false);
-
     assertThat(
-            tables.entrySet().stream()
+            keys.stream()
                 .map(
-                    e -> {
-                      ContentKey key = e.getKey();
-                      IcebergTable table = (IcebergTable) e.getValue().content();
-                      return table.getMetadataLocation() + "|" + key;
+                    key -> {
+                      EmbeddedContent table =
+                          store.getValue(EmbeddedContentKey.of(key.getElements()));
+                      return table.location() + "|" + key;
                     }))
         .containsExactlyInAnyOrder(testEntries.toArray(new String[0]));
   }

@@ -12,7 +12,6 @@
   { "label": "NAS", "sourceType": "NAS" },
   { "label": "Oracle", "sourceType": "ORACLE" },
   { "label": "PostgreSQL", "sourceType": "POSTGRES" },
-  { "label": "Azure Data Lake Store", "sourceType": "ADL" },
   { "label": "Sample Source", "sourceType": "SampleSource" },
   { "label": "AWS Glue Catalog", "sourceType": "AWSGLUE" },
   { "label": "Google Cloud Storage", "sourceType": "GCS" },

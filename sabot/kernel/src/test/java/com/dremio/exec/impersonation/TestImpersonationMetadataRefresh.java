@@ -15,11 +15,10 @@
  */
 package com.dremio.exec.impersonation;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
-import static com.dremio.common.TestProfileHelper.isMaprProfile;
 import static org.junit.Assert.assertEquals;
 
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.dfs.InternalFileConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
@@ -45,23 +44,12 @@ public class TestImpersonationMetadataRefresh extends BaseTestImpersonation {
 
   @BeforeClass
   public static void setup() throws Exception {
-    assumeNonMaprProfile();
     configuration = startMiniDfsCluster(TestImpersonationMetadataRefresh.class.getSimpleName());
     addMiniDfsStorage();
   }
 
   @AfterClass
   public static void removeMiniDfsBasedStorage() throws Exception {
-    /*
-    JUnit assume() call results in AssumptionViolatedException, which is handled by JUnit with a goal to ignore
-    the test having the assume() call. Multiple assume() calls, or other exceptions coupled with a single assume()
-    call, result in multiple exceptions, which aren't handled by JUnit, leading to test deemed to be failed.
-    We thus use isMaprProfile() check instead of assumeNonMaprProfile() here.
-    */
-    if (isMaprProfile()) {
-      return;
-    }
-
     stopMiniDfsCluster();
   }
 
@@ -112,7 +100,9 @@ public class TestImpersonationMetadataRefresh extends BaseTestImpersonation {
             .setAutoPromoteDatasets(true)
             .setDatasetDefinitionExpireAfterMs(1_000_000L));
 
-    getCatalogService().getSystemUserCatalog().createSource(config);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   private static Path getSampleParquetFilePath() throws URISyntaxException {

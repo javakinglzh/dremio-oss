@@ -24,6 +24,8 @@ import java.util.function.Function;
 import org.apache.iceberg.expressions.Literal;
 import org.apache.iceberg.types.Type;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 
 /**
@@ -69,25 +71,25 @@ public class ParquetToIcebergLiteralConvertor {
   }
 
   private static Function<Object, Object> converterFromParquet(PrimitiveType type) {
-    if (type.getOriginalType() != null) {
-      switch (type.getOriginalType()) {
-        case UTF8:
-          // decode to CharSequence to avoid copying into a new String
-          return binary -> StandardCharsets.UTF_8.decode(((Binary) binary).toByteBuffer());
-        case DECIMAL:
-          int scale = type.getDecimalMetadata().getScale();
-          switch (type.getPrimitiveTypeName()) {
-            case INT32:
-            case INT64:
-              return num -> BigDecimal.valueOf(((Number) num).longValue(), scale);
-            case FIXED_LEN_BYTE_ARRAY:
-            case BINARY:
-              return bin -> new BigDecimal(new BigInteger(((Binary) bin).getBytes()), scale);
-            default:
-              throw new IllegalArgumentException(
-                  "Unsupported primitive type for decimal: " + type.getPrimitiveTypeName());
-          }
-        default:
+    if (type.getLogicalTypeAnnotation() != null) {
+      LogicalTypeAnnotation logicalType = type.getLogicalTypeAnnotation();
+      if (logicalType instanceof LogicalTypeAnnotation.StringLogicalTypeAnnotation) {
+        // decode to CharSequence to avoid copying into a new String
+        return binary -> StandardCharsets.UTF_8.decode(((Binary) binary).toByteBuffer());
+      } else if (logicalType instanceof DecimalLogicalTypeAnnotation) {
+        DecimalLogicalTypeAnnotation decimal = (DecimalLogicalTypeAnnotation) logicalType;
+        int scale = decimal.getScale();
+        switch (type.getPrimitiveTypeName()) {
+          case INT32:
+          case INT64:
+            return num -> BigDecimal.valueOf(((Number) num).longValue(), scale);
+          case FIXED_LEN_BYTE_ARRAY:
+          case BINARY:
+            return bin -> new BigDecimal(new BigInteger(((Binary) bin).getBytes()), scale);
+          default:
+            throw new IllegalArgumentException(
+                "Unsupported primitive type for decimal: " + type.getPrimitiveTypeName());
+        }
       }
     }
 

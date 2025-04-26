@@ -17,15 +17,41 @@ package com.dremio.config;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import com.dremio.test.TemporarySystemProperties;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.slf4j.LoggerFactory;
 
 /** Test Dremio Config. */
 public class TestDremioConfig {
 
   @Rule public final TemporarySystemProperties properties = new TemporarySystemProperties();
+
+  @SuppressWarnings("Slf4jIllegalPassedClass")
+  private final Logger logger = (Logger) LoggerFactory.getLogger(DremioConfig.class);
+
+  private ListAppender<ILoggingEvent> listAppender;
+
+  @Before
+  public void setUp() {
+    // Add accessible ListAppender to read logged messages.
+    listAppender = new ListAppender<>();
+    listAppender.start();
+    logger.addAppender(listAppender);
+  }
+
+  @After
+  public void tearDown() {
+    logger.detachAppender(listAppender);
+    listAppender.stop();
+  }
 
   @Test
   public void initialize() {
@@ -64,10 +90,51 @@ public class TestDremioConfig {
 
     // check overriden setting that uses
     assertEquals("/tmp/foobar/db", config.getString(DremioConfig.DB_PATH_STRING));
-    assertEquals("pdfs:///tmp/foobar/dist", config.getString(DremioConfig.DIST_WRITE_PATH_STRING));
+    assertEquals("file:///tmp/foobar/dist", config.getString(DremioConfig.DIST_WRITE_PATH_STRING));
     assertEquals(
-        "pdfs:///tmp/foobar/dist/accelerator",
+        "file:///tmp/foobar/dist/accelerator",
         config.getString(DremioConfig.ACCELERATOR_PATH_STRING));
+  }
+
+  @Test
+  public void testDefaultDistLogsWarning() {
+    DremioConfig.create();
+
+    assertTrue(
+        listAppender.list.stream()
+            .anyMatch(
+                (ILoggingEvent e) ->
+                    e.getMessage()
+                        .equals(
+                            "PDFS is not supported as a distributed store for Dremio Software.")));
+  }
+
+  @Test
+  public void testLocalDistOverrideDoesNotLogWarningSingleNode() {
+    // Default config is master coordinator + executor, where the local paths.dist is OK.
+    DremioConfig.create(getClass().getResource("/test-local-dist-dremio.conf"));
+
+    assertTrue(
+        listAppender.list.stream()
+            .noneMatch(
+                (ILoggingEvent e) ->
+                    e.getMessage()
+                        .equals(
+                            "The distributed store cannot be a local path - update the paths.dist property.")));
+  }
+
+  @Test
+  public void testLocalDistOverrideLogsWarningMultiNode() {
+    // Simulate a 2+ node Dremio server by turning executor off.
+    DremioConfig.create(getClass().getResource("/test-no-executor-dremio.conf"));
+
+    assertTrue(
+        listAppender.list.stream()
+            .anyMatch(
+                (ILoggingEvent e) ->
+                    e.getMessage()
+                        .equals(
+                            "The distributed store cannot be a local path - update the paths.dist property.")));
   }
 
   /**

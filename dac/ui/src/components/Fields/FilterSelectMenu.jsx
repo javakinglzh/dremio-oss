@@ -166,6 +166,7 @@ export function FilterSelectMenuItem({
             tabIndex: 0,
             onKeyDown: (e) => {
               if (e.code === "Enter" || e.code === "Space") {
+                e.preventDefault();
                 onChange(checked, item.id);
               }
             },
@@ -646,6 +647,7 @@ export default class FilterSelectMenu extends Component {
                   width={width}
                   height={height}
                   className={listClass}
+                  tabIndex={-1}
                 />
               )}
             </AutoSizer>
@@ -663,7 +665,7 @@ export default class FilterSelectMenu extends Component {
  * of data-qa attributes. This method is created to explicitly define that relation
  * @param {string|number} id - filter id
  */
-export const getDataQaForFilterItem = (id) => id + "-filter-item";
+const getDataQaForFilterItem = (id) => id + "-filter-item";
 
 const styles = {
   base: {

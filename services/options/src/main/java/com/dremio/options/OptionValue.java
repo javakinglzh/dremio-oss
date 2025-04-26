@@ -21,6 +21,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Preconditions;
+import java.util.Optional;
 
 /**
  * An {@link OptionValue option value} is used by an {@link OptionManager} to store a run-time
@@ -97,6 +98,23 @@ public final class OptionValue implements Comparable<OptionValue> {
         return createDouble(type, name, Double.valueOf(val));
       default:
         return null;
+    }
+  }
+
+  public static Optional<Kind> getKind(Object optionVal) {
+    switch (optionVal.getClass().getSimpleName()) {
+      case "String":
+        return Optional.of(OptionValue.Kind.STRING);
+      case "Boolean":
+        return Optional.of(OptionValue.Kind.BOOLEAN);
+      case "Integer":
+      case "Long":
+        return Optional.of(OptionValue.Kind.LONG);
+      case "Float":
+      case "Double":
+        return Optional.of(OptionValue.Kind.DOUBLE);
+      default:
+        return Optional.empty();
     }
   }
 

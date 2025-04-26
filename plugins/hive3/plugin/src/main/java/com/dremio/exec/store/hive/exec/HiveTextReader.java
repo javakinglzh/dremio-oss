@@ -175,9 +175,8 @@ public class HiveTextReader extends HiveAbstractReader {
       }
       skipRecordsInspector.incrementTempCount();
     }
-    for (int i = 0; i < selectedStructFieldRefs.length; i++) {
-      vectors[i].setValueCount(skipRecordsInspector.getActualCount());
-    }
+    outputMutator.getContainer().setAllCount(recordCount);
+    checkForRowSizeOverLimit(recordCount);
 
     skipRecordsInspector.updateContinuance();
     return skipRecordsInspector.getActualCount();

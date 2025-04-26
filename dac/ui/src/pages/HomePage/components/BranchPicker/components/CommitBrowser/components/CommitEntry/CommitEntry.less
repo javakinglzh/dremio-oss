@@ -49,6 +49,9 @@
       &:focus {
         background-color: var(--fill--primary--hover);
       }
+      &:focus-within:has(> button:focus-visible) {
+        background-color: var(--fill--primary--hover);
+      }
       &.isSelected {
         background-color: var(--fill--primary--selected);
       }

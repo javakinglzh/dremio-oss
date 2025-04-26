@@ -64,7 +64,9 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
           .map(f -> SchemaPath.getSimplePath(f.getName()))
           .collect(Collectors.toList());
 
-  private final String user;
+  private final List<String> qualifiedTableName;
+  private final String userName;
+  private final String userId;
   private final RelDataType relDataType;
   private final SnapshotsScanOptions snapshotsScanOptions;
   private final long estimatedRows;
@@ -76,15 +78,18 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
   public IcebergSnapshotsPrel(
       RelOptCluster cluster,
       RelTraitSet traitSet,
+      List<String> qualifiedTableName,
       RelDataType relDataType,
       SnapshotsScanOptions snapshotsScanOptions,
-      String user,
+      String userName,
+      String userId,
       StoragePluginId storagePluginId,
       Iterator<PartitionChunkMetadata> splits,
       long estimatedRows,
       int maxParallelizationWidth,
       String schemeVariate) {
     super(cluster, traitSet);
+    this.qualifiedTableName = qualifiedTableName;
     this.relDataType = relDataType;
     this.snapshotsScanOptions =
         Preconditions.checkNotNull(snapshotsScanOptions, "snapshotsScanOption cannot be null");
@@ -92,15 +97,18 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
     this.splits = splits;
     this.estimatedRows = estimatedRows;
     this.maxParallelizationWidth = maxParallelizationWidth;
-    this.user = user;
+    this.userName = userName;
+    this.userId = userId;
     this.schemeVariate = schemeVariate;
   }
 
   public IcebergSnapshotsPrel(
       RelOptCluster cluster,
       RelTraitSet traitSet,
+      List<String> qualifiedTableName,
       SnapshotsScanOptions snapshotsScanOptions,
-      String user,
+      String userName,
+      String userId,
       StoragePluginId storagePluginId,
       Iterator<PartitionChunkMetadata> splits,
       long estimatedRows,
@@ -109,9 +117,11 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
     this(
         cluster,
         traitSet,
+        qualifiedTableName,
         getRowTypeFromProjectedColumns(PROJECTED_COLUMNS, SNAPSHOTS_READER_SCHEMA, cluster),
         snapshotsScanOptions,
-        user,
+        userName,
+        userId,
         storagePluginId,
         splits,
         estimatedRows,
@@ -154,13 +164,15 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     return new IcebergSnapshotsGroupScan(
-        creator.props(this, user, SNAPSHOTS_READER_SCHEMA, RESERVE, LIMIT),
+        creator.props(this, userName, SNAPSHOTS_READER_SCHEMA, RESERVE, LIMIT),
         storagePluginId,
         PROJECTED_COLUMNS,
         snapshotsScanOptions,
         splits,
         maxParallelizationWidth,
-        schemeVariate);
+        schemeVariate,
+        userId,
+        qualifiedTableName);
   }
 
   @Override
@@ -168,8 +180,10 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
     return new IcebergSnapshotsPrel(
         getCluster(),
         getTraitSet(),
+        qualifiedTableName,
         snapshotsScanOptions,
-        user,
+        userName,
+        userId,
         storagePluginId,
         splits,
         estimatedRows,

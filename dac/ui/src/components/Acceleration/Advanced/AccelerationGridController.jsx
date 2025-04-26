@@ -566,7 +566,7 @@ export class AccelerationGridController extends Component {
     return granularity;
   };
 
-  renderCell = (fieldType, rowIndex, columnIndex) => {
+  renderCell = (fieldType, rowIndex, columnIndex, shouldHide) => {
     const onCheckClick = () =>
       this.handleOnCheckboxItem(fieldType, columnIndex, rowIndex);
     const isChecked = !!this.findCurrentColumnInLayouts(
@@ -584,12 +584,12 @@ export class AccelerationGridController extends Component {
         isChecked={isChecked}
         isLastCell={isLastCell}
         hasPermission={this.checkForPermissionToAlter()}
-        isRecommendation={this.props.isRecommendation}
+        isRecommendation={this.props.isRecommendation || shouldHide}
       />
     );
   };
 
-  renderDimensionCell = (rowIndex, columnIndex) => {
+  renderDimensionCell = (rowIndex, columnIndex, shouldHide) => {
     const currentColumn = this.findCurrentColumnInLayouts(
       fieldTypes.dimension,
       rowIndex,
@@ -620,7 +620,7 @@ export class AccelerationGridController extends Component {
       <AccelerationGridSubCell
         onClick={onCheckClick}
         hasPermission={this.checkForPermissionToAlter()}
-        isRecommendation={this.props.isRecommendation}
+        isRecommendation={this.props.isRecommendation || shouldHide}
         isChecked={isChecked}
         subValue={subValue}
         subValueAltText={`${granularity.alt} granularity`}
@@ -629,7 +629,7 @@ export class AccelerationGridController extends Component {
     );
   };
 
-  renderSortCell = (rowIndex, columnIndex) => {
+  renderSortCell = (rowIndex, columnIndex, shouldHide) => {
     const { dataset, isRecommendation } = this.props;
     const allColumns = dataset.get("fields");
     const datasetSchema = this.filterFieldList(allColumns).toJS();
@@ -664,7 +664,7 @@ export class AccelerationGridController extends Component {
       <AccelerationGridSubCell
         onClick={onCheckClick}
         hasPermission={this.checkForPermissionToAlter()}
-        isRecommendation={isRecommendation}
+        isRecommendation={isRecommendation || shouldHide}
         isChecked={isChecked}
         subValue={subValue}
         subValueAltText={subValueAltText}
@@ -673,7 +673,7 @@ export class AccelerationGridController extends Component {
     );
   };
 
-  renderMeasureCell = (rowIndex, columnIndex) => {
+  renderMeasureCell = (rowIndex, columnIndex, shouldHide) => {
     const currentColumn = this.findCurrentColumnInLayouts(
       fieldTypes.measure,
       rowIndex,
@@ -706,7 +706,7 @@ export class AccelerationGridController extends Component {
       <AccelerationGridSubCell
         onClick={onCheckClick}
         hasPermission={this.checkForPermissionToAlter()}
-        isRecommendation={this.props.isRecommendation}
+        isRecommendation={this.props.isRecommendation || shouldHide}
         isChecked={isChecked}
         subValue={subValueText}
         subValueAltText={subValueAltText}
@@ -715,7 +715,7 @@ export class AccelerationGridController extends Component {
     );
   };
 
-  renderPartitionCell = (rowIndex, columnIndex) => {
+  renderPartitionCell = (rowIndex, columnIndex, shouldHide) => {
     const selectedField = this.findCurrentColumnInLayouts(
       fieldTypes.partition,
       rowIndex,
@@ -767,7 +767,7 @@ export class AccelerationGridController extends Component {
         isLastCell={isLastCell}
         setPartitionTransformation={setPartitionTransformation}
         hasPermission={this.checkForPermissionToAlter()}
-        isRecommendation={this.props.isRecommendation}
+        isRecommendation={this.props.isRecommendation || shouldHide}
       />
     );
   };
@@ -777,9 +777,10 @@ export class AccelerationGridController extends Component {
    *   [display, dimension, measure, sort, partition, distribution]
    * @param rowIndex
    * @param columnIndex - an index of a reflection
+   * @param layout - the item being rendered
    * @return {*}
    */
-  renderBodyCell = (rowIndex, columnIndex) => {
+  renderBodyCell = (rowIndex, columnIndex, layout) => {
     const { allowPartitionTransform, canAlter } = this.props;
     const backgroundColor =
       rowIndex % 2 ? "--bgColor-advEnDark" : "--bgColor-advEnLight";
@@ -788,23 +789,40 @@ export class AccelerationGridController extends Component {
 
     const isRaw = this.props.activeTab === "raw";
     const showDistributionCell = this.shouldShowDistribution();
+    const shouldHide = this.shouldHideUpdates(layout.id.value);
     return (
       <div
         className={`AccelerationGridController__cell --bColor-bottom
-        ${canAlter ? backgroundColor : disabledBackgroundColor}
+        ${canAlter && !shouldHide ? backgroundColor : disabledBackgroundColor}
         `}
         key={`${rowIndex}-${columnIndex}`}
         data-qa={`acceleration-cell-${rowIndex + 1}-${columnIndex + 1}`}
       >
-        {isRaw && this.renderCell(fieldTypes.display, rowIndex, columnIndex)}
-        {!isRaw && this.renderDimensionCell(rowIndex, columnIndex)}
-        {!isRaw && this.renderMeasureCell(rowIndex, columnIndex)}
-        {this.renderSortCell(rowIndex, columnIndex)}
+        {isRaw &&
+          this.renderCell(
+            fieldTypes.display,
+            rowIndex,
+            columnIndex,
+            shouldHide,
+          )}
+        {!isRaw && this.renderDimensionCell(rowIndex, columnIndex, shouldHide)}
+        {!isRaw && this.renderMeasureCell(rowIndex, columnIndex, shouldHide)}
+        {this.renderSortCell(rowIndex, columnIndex, shouldHide)}
         {allowPartitionTransform
-          ? this.renderPartitionCell(rowIndex, columnIndex)
-          : this.renderCell(fieldTypes.partition, rowIndex, columnIndex)}
+          ? this.renderPartitionCell(rowIndex, columnIndex, shouldHide)
+          : this.renderCell(
+              fieldTypes.partition,
+              rowIndex,
+              columnIndex,
+              shouldHide,
+            )}
         {showDistributionCell &&
-          this.renderCell(fieldTypes.distribution, rowIndex, columnIndex)}
+          this.renderCell(
+            fieldTypes.distribution,
+            rowIndex,
+            columnIndex,
+            shouldHide,
+          )}
       </div>
     );
   };
@@ -823,6 +841,7 @@ export class AccelerationGridController extends Component {
     const { columnIndex } = this.state.currentCell;
     const allColumns = dataset.get("fields");
     const columns = this.filterFieldList(allColumns);
+    const shouldDisable = this.shouldDisablePopover();
 
     return (
       <div className={"AccelerationGridController"}>
@@ -850,7 +869,11 @@ export class AccelerationGridController extends Component {
           }
           onRequestClose={this.handleRequestClose}
           onSelectMenuItem={this.handleOnSelectMenuItem}
-          hasPermission={this.checkForPermissionToAlter() && !isRecommendation}
+          hasPermission={
+            this.checkForPermissionToAlter() &&
+            !isRecommendation &&
+            !shouldDisable
+          }
           container={
             isRecommendation
               ? document.body.querySelector(".dremio-modal-container")

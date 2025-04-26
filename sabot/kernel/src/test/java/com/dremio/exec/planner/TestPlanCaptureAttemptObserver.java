@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner;
 
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
@@ -23,6 +24,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.exec.expr.fn.FunctionImplementationRegistry;
+import com.dremio.exec.ops.PlannerCatalogAccessListener;
 import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
@@ -30,7 +32,6 @@ import com.dremio.exec.planner.acceleration.descriptor.ReflectionInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo.Substitution;
 import com.dremio.exec.planner.common.PlannerMetrics;
-import com.dremio.exec.planner.serialization.RelSerializerFactory;
 import com.dremio.exec.proto.UserBitShared.ReflectionType;
 import com.google.common.collect.ImmutableList;
 import io.micrometer.core.instrument.Counter;
@@ -62,7 +63,7 @@ public class TestPlanCaptureAttemptObserver {
             true,
             Mockito.mock(FunctionImplementationRegistry.class),
             Mockito.mock(AccelerationDetailsPopulator.class),
-            Mockito.mock(RelSerializerFactory.class));
+            Mockito.mock(PlannerCatalogAccessListener.class));
   }
 
   @Test
@@ -82,13 +83,13 @@ public class TestPlanCaptureAttemptObserver {
                   "reflectionId",
                   ReflectionType.RAW,
                   "reflectionName",
-                  false,
                   null,
                   null,
                   null,
                   null,
                   null,
-                  null));
+                  null,
+                  MANUAL_REFLECTION_MODE));
       SubstitutionInfo.Substitution substitution = Mockito.mock(Substitution.class);
       MaterializationDescriptor descriptor = Mockito.mock(MaterializationDescriptor.class);
       when(descriptor.getLayoutId()).thenReturn("reflectionId");
@@ -113,7 +114,7 @@ public class TestPlanCaptureAttemptObserver {
             true,
             Mockito.mock(FunctionImplementationRegistry.class),
             Mockito.mock(AccelerationDetailsPopulator.class),
-            Mockito.mock(RelSerializerFactory.class));
+            Mockito.mock(PlannerCatalogAccessListener.class));
 
     try (MockedStatic<PlannerMetrics> mockedPlannerMetrics = mockStatic(PlannerMetrics.class)) {
       mockedPlannerMetrics.when(PlannerMetrics::getAcceleratedQueriesCounter).thenReturn(provider);

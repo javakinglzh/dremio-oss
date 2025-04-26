@@ -15,6 +15,8 @@
  */
 package com.dremio.dac.model.folder;
 
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
+
 import com.dremio.dac.model.common.LeafEntity;
 import com.dremio.dac.model.common.NamespacePath;
 import com.dremio.dac.model.common.RootEntity;
@@ -68,7 +70,7 @@ public class FolderPath extends NamespacePath {
     if (TempSpace.isTempSpace(name)) {
       return TempSpace.impl();
     }
-    if (name.startsWith(HomeName.HOME_PREFIX)) {
+    if (isHomeSpace(name)) {
       return new HomeName(name);
     }
     return new SpaceName(name);

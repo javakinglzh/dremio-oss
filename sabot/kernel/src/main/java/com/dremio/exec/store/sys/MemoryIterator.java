@@ -17,21 +17,23 @@ package com.dremio.exec.store.sys;
 
 import com.dremio.common.VM;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
-import com.dremio.exec.server.SabotContext;
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryUsage;
 import java.util.Iterator;
 import java.util.List;
+import org.apache.arrow.memory.BufferAllocator;
 
 public class MemoryIterator implements Iterator<Object> {
 
+  private final NodeEndpoint nodeEndpoint;
+  private final BufferAllocator bufferAllocator;
   private boolean beforeFirst = true;
-  private final SabotContext dbContext;
 
-  public MemoryIterator(final SabotContext dbContext) {
-    this.dbContext = dbContext;
+  public MemoryIterator(NodeEndpoint nodeEndpoint, BufferAllocator bufferAllocator) {
+    this.nodeEndpoint = nodeEndpoint;
+    this.bufferAllocator = bufferAllocator;
   }
 
   @Override
@@ -47,9 +49,8 @@ public class MemoryIterator implements Iterator<Object> {
     beforeFirst = false;
     final MemoryInfo memoryInfo = new MemoryInfo();
 
-    final NodeEndpoint endpoint = dbContext.getEndpoint();
-    memoryInfo.hostname = endpoint.getAddress();
-    memoryInfo.fabric_port = endpoint.getFabricPort();
+    memoryInfo.hostname = nodeEndpoint.getAddress();
+    memoryInfo.fabric_port = nodeEndpoint.getFabricPort();
 
     final MemoryUsage heapMemoryUsage = ManagementFactory.getMemoryMXBean().getHeapMemoryUsage();
     memoryInfo.heap_current = heapMemoryUsage.getUsed();
@@ -58,9 +59,9 @@ public class MemoryIterator implements Iterator<Object> {
     BufferPoolMXBean directBean = getDirectBean();
     memoryInfo.jvm_direct_current = directBean.getMemoryUsed();
 
-    memoryInfo.direct_current = dbContext.getAllocator().getAllocatedMemory();
+    memoryInfo.direct_current = bufferAllocator.getAllocatedMemory();
     memoryInfo.direct_max = VM.getMaxDirectMemory();
-    memoryInfo.node_id = endpoint.getAddress() + ":" + endpoint.getFabricPort();
+    memoryInfo.node_id = nodeEndpoint.getAddress() + ":" + nodeEndpoint.getFabricPort();
     return memoryInfo;
   }
 

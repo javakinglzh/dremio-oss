@@ -28,6 +28,7 @@ import com.dremio.dac.service.autocomplete.model.AutocompleteRequest;
 import com.dremio.dac.service.autocomplete.model.AutocompleteResponse;
 import com.dremio.dac.service.autocomplete.model.SuggestionEntity;
 import com.dremio.dac.service.autocomplete.model.SuggestionsType;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.namespace.NamespaceKey;
@@ -86,7 +87,8 @@ public class TestSQLResource extends BaseTestServer {
     // disappear
     source.setMetadataPolicy(UIMetadataPolicy.of(CatalogService.NEVER_REFRESH_POLICY));
     source.setConfig(nas);
-    getSourceService().registerSourceWithRuntime(source);
+    getSourceService()
+        .registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     addPhysicalDataset(DATASET_PATH_ONE, DatasetType.PHYSICAL_DATASET);
     addPhysicalDataset(DATASET_PATH_TWO, DatasetType.PHYSICAL_DATASET);
     addPhysicalDataset(DATASET_PATH_THREE, DatasetType.PHYSICAL_DATASET);
@@ -103,20 +105,24 @@ public class TestSQLResource extends BaseTestServer {
         .createDatasetFromSQLAndSave(
             d1Path, "select s_name, s_phone from cp.\"tpch/supplier.parquet\"", asList("cp"));
 
-    Folder newFolder1 = new Folder(null, Arrays.asList("testSpace", "myFolder"), null, null);
+    Folder newFolder1 =
+        new Folder(null, Arrays.asList("testSpace", "myFolder"), null, null, null, null);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv3().path("/catalog/")).buildPost(Entity.json(newFolder1)),
         new GenericType<Folder>() {});
-    Folder newFolder2 = new Folder(null, Arrays.asList("testSpace", "@dremio"), null, null);
+    Folder newFolder2 =
+        new Folder(null, Arrays.asList("testSpace", "@dremio"), null, null, null, null);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv3().path("/catalog/")).buildPost(Entity.json(newFolder2)),
         new GenericType<Folder>() {});
 
-    Folder subFolder1 = new Folder(null, Arrays.asList("testSpace", "@dremio", "foo"), null, null);
+    Folder subFolder1 =
+        new Folder(null, Arrays.asList("testSpace", "@dremio", "foo"), null, null, null, null);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv3().path("/catalog/")).buildPost(Entity.json(subFolder1)),
         new GenericType<Folder>() {});
-    Folder subFolder2 = new Folder(null, Arrays.asList("testSpace", "@dremio", "bar"), null, null);
+    Folder subFolder2 =
+        new Folder(null, Arrays.asList("testSpace", "@dremio", "bar"), null, null, null, null);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv3().path("/catalog/")).buildPost(Entity.json(subFolder2)),
         new GenericType<Folder>() {});
@@ -147,7 +153,7 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys =
-        Arrays.asList(Collections.EMPTY_LIST, Arrays.asList("@dremio", "mySpace"));
+        Arrays.asList(Collections.emptyList(), Arrays.asList("@dremio", "mySpace"));
     final List<String> queryContext = Collections.emptyList();
     testAutocompleteError(prefix, type, catalogEntityKeys, queryContext);
   }
@@ -156,7 +162,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testCatalogEntityKeysForColumnTypeHasEmpty() throws Exception {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.COLUMN;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Collections.emptyList();
     testAutocompleteError(prefix, type, catalogEntityKeys, queryContext);
   }
@@ -165,7 +171,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testCatalogEntityKeysForReferenceTypeHasEmpty() throws Exception {
     final String prefix = "foo";
     final SuggestionsType type = SuggestionsType.REFERENCE;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Collections.emptyList();
     testAutocompleteError(prefix, type, catalogEntityKeys, queryContext);
   }
@@ -174,7 +180,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testCatalogEntityKeysForBranchTypeHasEmpty() throws Exception {
     final String prefix = "foo";
     final SuggestionsType type = SuggestionsType.BRANCH;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Collections.emptyList();
     testAutocompleteError(prefix, type, catalogEntityKeys, queryContext);
   }
@@ -183,7 +189,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testCatalogEntityKeysForTagTypeHasEmpty() throws Exception {
     final String prefix = "foo";
     final SuggestionsType type = SuggestionsType.TAG;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Collections.emptyList();
     testAutocompleteError(prefix, type, catalogEntityKeys, queryContext);
   }
@@ -192,7 +198,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithoutPrefix() {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(
@@ -219,7 +225,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithPrefix() {
     final String prefix = "s";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(
@@ -238,7 +244,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithAmbiguousPrefix() {
     final String prefix = "@dre";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(
@@ -257,7 +263,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithPrefixMatchingQueryContext() {
     final String prefix = "test";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(new SuggestionEntity(Arrays.asList("testSpace"), "space"));
@@ -274,7 +280,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithPrefixHappenToBeQueryContext() {
     final String prefix = "testSpace";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(new SuggestionEntity(Arrays.asList("testSpace"), "space"));
@@ -291,7 +297,7 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithPrefixIgnoredCase() {
     final String prefix = "info";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
     final List<SuggestionEntity> expected =
         Arrays.asList(new SuggestionEntity(Arrays.asList("INFORMATION_SCHEMA"), "source"));
@@ -308,9 +314,9 @@ public class TestSQLResource extends BaseTestServer {
   public void testTopLevelContainersWithoutMatch() {
     final String prefix = "dremio";
     final SuggestionsType type = SuggestionsType.CONTAINER;
-    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.EMPTY_LIST);
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Collections.emptyList());
     final List<String> queryContext = Arrays.asList("testSpace");
-    final List<SuggestionEntity> expected = Collections.EMPTY_LIST;
+    final List<SuggestionEntity> expected = Collections.emptyList();
     AutocompleteResponse containerSuggestions =
         testAutocompleteSuccess(
             prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);
@@ -326,8 +332,8 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("@dremio"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
-    final List<SuggestionEntity> expected = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
+    final List<SuggestionEntity> expected = Collections.emptyList();
     AutocompleteResponse containerSuggestions =
         testAutocompleteSuccess(
             prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);
@@ -342,8 +348,8 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "no-match";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("@dremio"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
-    final List<SuggestionEntity> expected = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
+    final List<SuggestionEntity> expected = Collections.emptyList();
     AutocompleteResponse containerSuggestions =
         testAutocompleteSuccess(
             prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);
@@ -394,7 +400,7 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("testSpace"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("testSpace", "@dremio"), "folder"),
@@ -414,7 +420,7 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "My";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("testSpace"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(new SuggestionEntity(Arrays.asList("testSpace", "myFolder"), "folder"));
     AutocompleteResponse containerSuggestions =
@@ -432,7 +438,7 @@ public class TestSQLResource extends BaseTestServer {
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys =
         Arrays.asList(Arrays.asList("testSpace", "myFolder"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("testSpace", "myFolder", "supplier"), "virtual"));
@@ -450,7 +456,7 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("INFORMATION_SCHEMA"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("INFORMATION_SCHEMA", "CATALOGS"), "direct"),
@@ -468,11 +474,48 @@ public class TestSQLResource extends BaseTestServer {
   }
 
   @Test
+  public void testContainersInSystemSourceWithoutPrefix() {
+    final String prefix = "";
+    final SuggestionsType type = SuggestionsType.CONTAINER;
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("sys"));
+    final List<String> queryContext = Collections.emptyList();
+    final List<SuggestionEntity> expected =
+        Arrays.asList(
+            new SuggestionEntity(Arrays.asList("sys", "copy_job_history"), "direct"),
+            new SuggestionEntity(Arrays.asList("sys", "copy_file_history"), "direct"),
+            new SuggestionEntity(Arrays.asList("sys", "copy_errors_history"), "direct"));
+    AutocompleteResponse containerSuggestions =
+        testAutocompleteSuccess(
+            prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);
+    Assert.assertNotNull(containerSuggestions);
+    Assert.assertTrue(
+        containerSuggestions.getSuggestionsType().equals(SuggestionsType.CONTAINER.getType()));
+    Assert.assertArrayEquals(expected.toArray(), containerSuggestions.getSuggestions().toArray());
+  }
+
+  @Test
+  public void testContainersInSystemSourceWithPrefix() {
+    final String prefix = "copy_j";
+    final SuggestionsType type = SuggestionsType.CONTAINER;
+    final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("sys"));
+    final List<String> queryContext = Collections.emptyList();
+    final List<SuggestionEntity> expected =
+        Arrays.asList(new SuggestionEntity(Arrays.asList("sys", "copy_job_history"), "direct"));
+    AutocompleteResponse containerSuggestions =
+        testAutocompleteSuccess(
+            prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);
+    Assert.assertNotNull(containerSuggestions);
+    Assert.assertTrue(
+        containerSuggestions.getSuggestionsType().equals(SuggestionsType.CONTAINER.getType()));
+    Assert.assertArrayEquals(expected.toArray(), containerSuggestions.getSuggestions().toArray());
+  }
+
+  @Test
   public void testContainersInSourceWithPrefix() {
     final String prefix = "c";
     final SuggestionsType type = SuggestionsType.CONTAINER;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("INFORMATION_SCHEMA"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("INFORMATION_SCHEMA", "CATALOGS"), "direct"),
@@ -492,7 +535,7 @@ public class TestSQLResource extends BaseTestServer {
     final SuggestionsType type = SuggestionsType.COLUMN;
     final List<List<String>> catalogEntityKeys =
         Arrays.asList(Arrays.asList("testSpace", "supplier"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("testSpace", "supplier", "s_name"), "TEXT"),
@@ -512,7 +555,7 @@ public class TestSQLResource extends BaseTestServer {
     final SuggestionsType type = SuggestionsType.COLUMN;
     final List<List<String>> catalogEntityKeys =
         Arrays.asList(Arrays.asList("testSpace", "supplier"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(Arrays.asList("testSpace", "supplier", "s_name"), "TEXT"));
@@ -568,7 +611,7 @@ public class TestSQLResource extends BaseTestServer {
     final SuggestionsType type = SuggestionsType.COLUMN;
     final List<List<String>> catalogEntityKeys =
         Arrays.asList(Arrays.asList("INFORMATION_SCHEMA", "CATALOGS"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(
@@ -592,7 +635,7 @@ public class TestSQLResource extends BaseTestServer {
     final SuggestionsType type = SuggestionsType.COLUMN;
     final List<List<String>> catalogEntityKeys =
         Arrays.asList(Arrays.asList("INFORMATION_SCHEMA", "CATALOGS"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
     final List<SuggestionEntity> expected =
         Arrays.asList(
             new SuggestionEntity(
@@ -611,8 +654,8 @@ public class TestSQLResource extends BaseTestServer {
     final String prefix = "";
     final SuggestionsType type = SuggestionsType.COLUMN;
     final List<List<String>> catalogEntityKeys = Arrays.asList(Arrays.asList("INFORMATION_SCHEMA"));
-    final List<String> queryContext = Collections.EMPTY_LIST;
-    final List<SuggestionEntity> expected = Collections.EMPTY_LIST;
+    final List<String> queryContext = Collections.emptyList();
+    final List<SuggestionEntity> expected = Collections.emptyList();
     AutocompleteResponse columnSuggestions =
         testAutocompleteSuccess(
             prefix, type, catalogEntityKeys, queryContext, AutocompleteResponse.class);

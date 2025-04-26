@@ -33,7 +33,7 @@ export default class Radio extends PureComponent {
     return (
       <div
         data-qa={this.props.radioValue}
-        className={classNames(dummy, isChecked && "checked")}
+        className={classNames(dummy, isChecked && "checked", "radio")}
         style={style}
       >
         {isChecked ? <div className={dot} /> : ""}

@@ -22,6 +22,7 @@ import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREURIS;
 
 import com.dremio.TestBuilder;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.dotfile.DotFileType;
 import com.dremio.exec.hive.HiveTestBase;
@@ -170,7 +171,9 @@ public class BaseTestHiveImpersonation extends BaseTestImpersonation {
     sc.setType(conf.getType());
     sc.setConfig(conf.toBytesString());
     sc.setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY);
-    getCatalogService().getSystemUserCatalog().createSource(sc);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(sc, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   protected void showTablesHelper(final String db, List<String> expectedTables) throws Exception {

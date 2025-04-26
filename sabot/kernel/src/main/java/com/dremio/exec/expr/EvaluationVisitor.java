@@ -83,6 +83,7 @@ import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -111,6 +112,23 @@ public class EvaluationVisitor {
 
   public int getFunctionErrorContextsCount() {
     return functionContext.getFunctionErrorContextSize();
+  }
+
+  public Iterator<FunctionErrorContext> getFunctionErrorContexts(int fromIndex) {
+    return new Iterator<>() {
+      private final int size = functionContext.getFunctionErrorContextSize();
+      private int index = fromIndex;
+
+      @Override
+      public boolean hasNext() {
+        return index < size;
+      }
+
+      @Override
+      public FunctionErrorContext next() {
+        return functionContext.getFunctionErrorContext(index++);
+      }
+    };
   }
 
   public HoldingContainer addExpr(

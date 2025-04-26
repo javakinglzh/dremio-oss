@@ -84,7 +84,6 @@ public class ITHiveTestCatalogFunctionsUnlimitedSplits extends LazyDataGeneratin
 
   @BeforeClass
   public static void generateHiveWithoutData() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
     LazyDataGeneratingHiveTestBase.generateHiveWithoutData();
     finalIcebergMetadataLocation = getDfsTestTmpSchemaLocation();
     fs = setupLocalFS();

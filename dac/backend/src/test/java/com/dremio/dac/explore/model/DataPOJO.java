@@ -139,7 +139,7 @@ public class DataPOJO implements JobDataFragment {
 
   @Override
   public synchronized void close() {
-    throw new UnsupportedOperationException("not supported in pojo class");
+    // nothing to do
   }
 
   @Override

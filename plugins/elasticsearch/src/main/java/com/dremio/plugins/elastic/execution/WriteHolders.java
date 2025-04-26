@@ -22,7 +22,7 @@ import com.dremio.plugins.elastic.DateFormats;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import java.io.IOException;
-import javax.xml.bind.DatatypeConverter;
+import java.util.Base64;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.StructWriter;
 import org.apache.arrow.vector.complex.writer.BigIntWriter;
@@ -346,7 +346,7 @@ class WriteHolders {
 
     public void write(VarBinaryWriter writer, JsonToken token, JsonParser parser)
         throws IOException {
-      byte[] bytes = DatatypeConverter.parseBase64Binary(parser.getText());
+      byte[] bytes = Base64.getDecoder().decode(parser.getText());
       writer.writeVarBinary(0, buffer.prepareBinary(bytes), buffer.getBuf());
     }
   }
@@ -385,9 +385,11 @@ class WriteHolders {
       SchemaPath path, String value, DateFormats.AbstractFormatterAndType[] formatters) {
     for (DateFormats.AbstractFormatterAndType format : formatters) {
       try {
-        return format.parseToLong(value);
+        long fmt = format.parseToLong(value);
+        logger.debug("Parsed date time value {} with format {}", value, format);
+        return fmt;
       } catch (IllegalArgumentException e) {
-        logger.debug("Failed to parse date time value {} with format {}", value, format, e);
+        logger.debug("Tried to parse date time value {} with format {} and failed", value, format);
       }
     }
 

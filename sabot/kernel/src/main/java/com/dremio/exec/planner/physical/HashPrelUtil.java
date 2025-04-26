@@ -148,10 +148,23 @@ public class HashPrelUtil {
     final HashExpressionCreatorHelper<RexNode> hashHelper =
         new RexNodeBasedHashExpressionCreatorHelper(rexBuilder);
     final List<RexNode> distFieldRefs = Lists.newArrayListWithExpectedSize(distFields.size());
+    final boolean randomizeNull =
+        PrelUtil.getPlannerSettings(input.getCluster())
+            .options
+            .getOption(PlannerSettings.OUTER_JOIN_NULL_DIST);
     for (int i = 0; i < distFields.size(); i++) {
-      final int fieldId = distFields.get(i).getFieldId();
-      distFieldRefs.add(
-          rexBuilder.makeInputRef(childRowTypeFields.get(fieldId).getType(), fieldId));
+      DistributionField distField = distFields.get(i);
+      final int fieldId = distField.getFieldId();
+      RexNode rex = rexBuilder.makeInputRef(childRowTypeFields.get(fieldId).getType(), fieldId);
+      if (randomizeNull && distField.notNull()) {
+        rex =
+            rexBuilder.makeCall(
+                SqlStdOperatorTable.CASE,
+                rexBuilder.makeCall(SqlStdOperatorTable.IS_NULL, rex),
+                rexBuilder.makeCast(rex.getType(), rexBuilder.makeCall(SqlStdOperatorTable.RAND)),
+                rex);
+      }
+      distFieldRefs.add(rex);
     }
 
     final List<RexNode> updatedExpr =

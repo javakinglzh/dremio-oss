@@ -20,7 +20,7 @@ import org.apache.arrow.flight.CallHeaders;
 
 /** Utilities for parsing cookies */
 public class CookieUtils {
-  public static final String COOKIE_HEADER = "Cookie";
+  public static final String COOKIE_HEADER = "cookie";
 
   /**
    * Returns the first value found for a cookie

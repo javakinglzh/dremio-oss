@@ -17,9 +17,13 @@ package com.dremio.sabot.op.windowframe;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
+import com.dremio.common.expression.FunctionCall;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.logical.data.NamedExpression;
 import com.dremio.common.logical.data.Order;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.TemplateClassDefinition;
 import com.dremio.exec.compile.sig.GeneratorMapping;
 import com.dremio.exec.compile.sig.MappingSet;
@@ -31,10 +35,12 @@ import com.dremio.exec.expr.fn.FunctionGenerationHelper;
 import com.dremio.exec.physical.config.WindowPOP;
 import com.dremio.exec.physical.config.WindowPOP.Bound;
 import com.dremio.exec.physical.config.WindowPOP.BoundType;
+import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -43,10 +49,14 @@ import com.sun.codemodel.JExpr;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.function.Consumer;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.util.TransferPair;
 
 /**
@@ -71,11 +81,23 @@ public class WindowFrameOperator implements SingleInputOperator {
   private boolean noMoreToConsume;
 
   private int currentBatchIndex = 0;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
 
   public WindowFrameOperator(OperatorContext context, WindowPOP config)
       throws OutOfMemoryException {
     this.context = context;
     this.config = config;
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
@@ -87,8 +109,48 @@ public class WindowFrameOperator implements SingleInputOperator {
     createFramers(incoming);
     outgoing.buildSchema();
     outgoing.setInitialCapacity(context.getTargetBatchSize());
+    createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (!isVarLenAggregatePresent()) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        // do row size check only in case when EvalMode is Complex or Eval (for VarChar and
+        // VarBinary
+        // output type)
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      }
+    }
     state = State.CAN_CONSUME;
     return outgoing;
+  }
+
+  private boolean isVarLenAggregatePresent() {
+    for (final NamedExpression ne : config.getAggregations()) {
+      final TypedFieldId outputId = outgoing.getValueVectorId(ne.getRef());
+      if (!(outputId.getFinalType().isFixedWidthType())) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
   }
 
   @Override
@@ -126,7 +188,26 @@ public class WindowFrameOperator implements SingleInputOperator {
     } else if (!noMoreToConsume && !canDoWork()) {
       state = State.CAN_CONSUME;
     }
-    return outgoing.getRecordCount();
+    int outCount = outgoing.getRecordCount();
+    outgoing.setAllCount(outCount);
+    checkForRowSizeOverLimit(outCount);
+    return outCount;
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   private int doWork() throws Exception {
@@ -147,35 +228,22 @@ public class WindowFrameOperator implements SingleInputOperator {
 
     Bound lowerBound = config.getLowerBound();
     Bound upperBound = config.getUpperBound();
-
-    // transfer "non aggregated" vectors
-    for (VectorWrapper<?> vw : current) {
-      ValueVector v = outgoing.addOrGet(vw.getField());
-      TransferPair tp = vw.getValueVector().makeTransferPair(v);
-      /* we shouldn't clear batch for case when start bound is PRECEDING
-       because for case partition located in several batches,
-      it's possible that we will need to get access to the previous batch */
-      if (lowerBound.getType().equals(WindowPOP.BoundType.PRECEDING)
-          || (!config.isFrameUnitsRows() && upperBound.getType().equals(BoundType.FOLLOWING))) {
-        tp.splitAndTransfer(0, recordCount);
-      } else {
-        tp.transfer();
-      }
-    }
-
-    if (recordCount > 0) {
-      try {
-        outgoing.setAllCount(recordCount);
-      } catch (RuntimeException ex) {
-        throw ex;
-      }
-    }
+    boolean isLagFunction =
+        config.getAggregations().stream()
+            .map(
+                e ->
+                    e.getExpr() instanceof FunctionCall
+                        ? ((FunctionCall) e.getExpr()).getName()
+                        : null)
+            .anyMatch("lag"::equals);
 
     // if lower bound is PRECEDING it's possible that partition could be located in several batches.
-    if (lowerBound.getType().equals(WindowPOP.BoundType.PRECEDING)
-        && !upperBound.getType().equals(BoundType.CURRENT_ROW)) {
+    if ((lowerBound.getType().equals(WindowPOP.BoundType.PRECEDING)
+            && !upperBound.getType().equals(BoundType.CURRENT_ROW))
+        || isLagFunction) {
       // if last row from previous batch not in same partition with last row in current, we can
       // close it
+      transferVectors(current, recordCount, tp -> tp.splitAndTransfer(0, recordCount));
       if (isPartitionEndReachedInPrevBatch(current, recordCount)) {
         closeUnneededBatches();
       } else {
@@ -185,12 +253,14 @@ public class WindowFrameOperator implements SingleInputOperator {
       // located in several batches.
     } else if (!config.isFrameUnitsRows() && upperBound.getType().equals(BoundType.FOLLOWING)) {
       // check if we need to close previous batches
+      transferVectors(current, recordCount, tp -> tp.splitAndTransfer(0, recordCount));
       if (isFrameEndReachedInPrevBatch(current, recordCount)) {
         closeUnneededBatches();
       } else {
         currentBatchIndex++;
       }
     } else {
+      transferVectors(current, recordCount, TransferPair::transfer);
       current.close();
       batches.remove(currentBatchIndex);
       currentBatchIndex = 0;
@@ -200,14 +270,41 @@ public class WindowFrameOperator implements SingleInputOperator {
     return recordCount;
   }
 
+  private void transferVectors(
+      VectorContainer current, int recordCount, Consumer<TransferPair> transferFunction) {
+    for (VectorWrapper<?> vw : current) {
+      ValueVector v = outgoing.addOrGet(vw.getField());
+      TransferPair tp = vw.getValueVector().makeTransferPair(v);
+      /* we shouldn't clear batch for case when start bound is PRECEDING
+       because for case partition located in several batches,
+      it's possible that we will need to get access to the previous batch */
+      transferFunction.accept(tp);
+    }
+
+    if (recordCount > 0) {
+      try {
+        outgoing.setAllCount(recordCount);
+      } catch (RuntimeException ex) {
+        throw ex;
+      }
+    }
+  }
+
   private void closeUnneededBatches() {
     boolean isLastBatch = isLastBatch();
     // if current batch is the last one - close all batches, otherwise close all batches before
     // current
-    for (int i = isLastBatch ? currentBatchIndex : currentBatchIndex - 1; i >= 0; i--) {
-      batches.get(i).close();
-      batches.remove(i);
+    // if current batch is the last one - close all batches, otherwise close all batches before
+    // current
+    Iterator<VectorContainer> iterator = batches.iterator();
+    int limit = isLastBatch ? currentBatchIndex : currentBatchIndex - 1;
+    int index = 0;
+    while (iterator.hasNext() && index <= limit) {
+      VectorContainer current = iterator.next();
+      current.close();
+      iterator.remove();
       currentBatchIndex--;
+      index++;
     }
     if (!isLastBatch) {
       // if current batch is not the last one, we need to increment currentBatchIndex to point to
@@ -301,8 +398,9 @@ public class WindowFrameOperator implements SingleInputOperator {
 
     List<TransferPair> transfers = new ArrayList<>();
     for (final VectorWrapper<?> wrapper : batch) {
-      ValueVector vector = wrapper.getValueVector();
-      TransferPair pair = vector.getTransferPair(context.getAllocator());
+      ValueVector valueVector = wrapper.getValueVector();
+      TransferPair pair =
+          valueVector.getTransferPair(valueVector.getField(), context.getAllocator());
       outgoing.add(pair.getTo());
       transfers.add(pair);
     }
@@ -459,6 +557,10 @@ public class WindowFrameOperator implements SingleInputOperator {
     }
     closeables.addAll(batches);
     AutoCloseables.close(closeables);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   public static class Creator implements SingleInputOperator.Creator<WindowPOP> {

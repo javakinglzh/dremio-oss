@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.work.WorkStats.FragmentInfo;
 import com.dremio.sabot.exec.context.OperatorContext;
 import java.util.Iterator;
@@ -24,7 +24,7 @@ import java.util.Iterator;
 public class FragmentIterator implements Iterator<Object> {
   private final Iterator<FragmentInfo> iter;
 
-  public FragmentIterator(SabotContext dbContext, OperatorContext c) {
+  public FragmentIterator(PluginSabotContext dbContext, OperatorContext c) {
     iter = dbContext.getWorkStatsProvider().get().getRunningFragments();
   }
 

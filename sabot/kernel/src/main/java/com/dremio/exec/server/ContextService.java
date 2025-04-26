@@ -355,7 +355,6 @@ public class ContextService implements Service, Provider<SabotContext> {
         resourceInformationProvider.get(),
         fileSystemWrapper,
         optionValidatorProvider.get(),
-        bootstrapContext.getExecutor(),
         coordinatorModeInfoProvider,
         nessieApiProvider,
         statisticsService,

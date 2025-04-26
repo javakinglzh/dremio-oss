@@ -159,7 +159,8 @@ public class TableFunctionUtil {
       List<SchemaPath> manifestFileReaderColumns,
       BatchSchema manifestFileReaderSchema,
       ManifestContentType manifestContentType,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> dataset) {
     return new ManifestScanTableFunctionContext(
         null,
         null,
@@ -167,7 +168,7 @@ public class TableFunctionUtil {
         null,
         manifestFileReaderSchema,
         manifestFileReaderSchema,
-        Collections.EMPTY_LIST,
+        List.of(dataset),
         null,
         storagePluginId,
         internalStoragePlugin,
@@ -244,34 +245,41 @@ public class TableFunctionUtil {
   }
 
   public static RelDataType getSplitRowType(RelOptCluster cluster) {
-    final RelDataTypeFactory.Builder builder = cluster.getTypeFactory().builder();
+    RelDataTypeFactory typeFactory = cluster.getTypeFactory();
+    final RelDataTypeFactory.Builder builder = typeFactory.builder();
     builder.add(
         new RelDataTypeFieldImpl(
             RecordReader.SPLIT_IDENTITY,
             0,
-            cluster
-                .getTypeFactory()
-                .createStructType(
+            typeFactory.createTypeWithNullability(
+                typeFactory.createStructType(
                     ImmutableList.of(
-                        cluster.getTypeFactory().createSqlType(SqlTypeName.VARCHAR),
-                        cluster.getTypeFactory().createSqlType(SqlTypeName.BIGINT),
-                        cluster.getTypeFactory().createSqlType(SqlTypeName.BIGINT),
-                        cluster.getTypeFactory().createSqlType(SqlTypeName.BIGINT)),
+                        typeFactory.createTypeWithNullability(
+                            typeFactory.createSqlType(SqlTypeName.VARCHAR), true),
+                        typeFactory.createTypeWithNullability(
+                            typeFactory.createSqlType(SqlTypeName.BIGINT), true),
+                        typeFactory.createTypeWithNullability(
+                            typeFactory.createSqlType(SqlTypeName.BIGINT), true),
+                        typeFactory.createTypeWithNullability(
+                            typeFactory.createSqlType(SqlTypeName.BIGINT), true)),
                     ImmutableList.of(
                         SplitIdentity.PATH,
                         SplitIdentity.OFFSET,
                         SplitIdentity.LENGTH,
-                        SplitIdentity.FILE_LENGTH))));
+                        SplitIdentity.FILE_LENGTH)),
+                true)));
     builder.add(
         new RelDataTypeFieldImpl(
             RecordReader.SPLIT_INFORMATION,
             0,
-            cluster.getTypeFactory().createSqlType(SqlTypeName.VARBINARY)));
+            typeFactory.createTypeWithNullability(
+                typeFactory.createSqlType(SqlTypeName.VARBINARY), true)));
     builder.add(
         new RelDataTypeFieldImpl(
             RecordReader.COL_IDS,
             0,
-            cluster.getTypeFactory().createSqlType(SqlTypeName.VARBINARY)));
+            typeFactory.createTypeWithNullability(
+                typeFactory.createSqlType(SqlTypeName.VARBINARY), true)));
     return builder.build();
   }
 
@@ -517,7 +525,8 @@ public class TableFunctionUtil {
       StoragePluginId internalStoragePlugin,
       List<SchemaPath> manifestFileReaderColumns,
       BatchSchema manifestFileReaderSchema,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> dataset) {
     TableFunctionContext manifestScanTableFunctionContext =
         TableFunctionUtil.getTableAgnosticManifestScanTableFunctionContext(
             storagePluginId,
@@ -525,7 +534,8 @@ public class TableFunctionUtil {
             manifestFileReaderColumns,
             manifestFileReaderSchema,
             ManifestContentType.ALL,
-            schemeVariate);
+            schemeVariate,
+            dataset);
     return new TableFunctionConfig(
         TableFunctionConfig.FunctionType.METADATA_MANIFEST_FILE_SCAN,
         true,
@@ -544,6 +554,7 @@ public class TableFunctionUtil {
             manifestFileReaderColumns,
             manifestFileReaderSchema,
             ManifestContentType.DATA,
+            null,
             null);
     return new TableFunctionConfig(
         TableFunctionConfig.FunctionType.METADATA_MANIFEST_FILE_SCAN,
@@ -552,13 +563,16 @@ public class TableFunctionUtil {
   }
 
   public static TableFunctionConfig getManifestListScanTableFunctionConfig(
-      BatchSchema outputSchema, StoragePluginId storagePluginId, String schemeVariate) {
+      BatchSchema outputSchema,
+      StoragePluginId storagePluginId,
+      String schemeVariate,
+      List<String> dataset) {
     TableFunctionContext context =
         new CarryForwardAwareTableFunctionContext(
             null,
             outputSchema,
             null,
-            null,
+            List.of(dataset),
             null,
             storagePluginId,
             null,
@@ -866,8 +880,65 @@ public class TableFunctionUtil {
     return new TableFunctionConfig(functionType, true, context);
   }
 
+  public static TableFunctionConfig getTableFunctionConfig(
+      TableFunctionConfig.FunctionType functionType,
+      BatchSchema outputSchema,
+      StoragePluginId storagePluginId,
+      List<String> partitionColumns) {
+    TableFunctionContext context =
+        new TableFunctionContext(
+            null,
+            outputSchema,
+            null,
+            null,
+            null,
+            null,
+            storagePluginId,
+            null,
+            outputSchema.getFields().stream()
+                .map(f -> SchemaPath.getSimplePath(f.getName()))
+                .collect(Collectors.toList()),
+            partitionColumns,
+            null,
+            false,
+            false,
+            false,
+            null);
+    return new TableFunctionConfig(functionType, true, context);
+  }
+
+  public static TableFunctionConfig getTableFunctionConfig(
+      TableFunctionConfig.FunctionType functionType,
+      BatchSchema outputSchema,
+      List<String> dataset,
+      StoragePluginId storagePluginId) {
+    TableFunctionContext context =
+        new TableFunctionContext(
+            null,
+            outputSchema,
+            null,
+            List.of(dataset),
+            null,
+            null,
+            storagePluginId,
+            null,
+            outputSchema.getFields().stream()
+                .map(f -> SchemaPath.getSimplePath(f.getName()))
+                .collect(Collectors.toList()),
+            null,
+            null,
+            false,
+            false,
+            false,
+            null);
+    return new TableFunctionConfig(functionType, true, context);
+  }
+
   public static TableFunctionConfig getOrphanFileDeleteTableFunctionConfig(
-      BatchSchema outputSchema, StoragePluginId storagePluginId, String tableLocation) {
+      BatchSchema outputSchema,
+      StoragePluginId storagePluginId,
+      String tableLocation,
+      List<String> dataset) {
     OrphanFileDeleteTableFunctionContext context =
         new OrphanFileDeleteTableFunctionContext(
             outputSchema,
@@ -875,7 +946,8 @@ public class TableFunctionUtil {
             outputSchema.getFields().stream()
                 .map(f -> SchemaPath.getSimplePath(f.getName()))
                 .collect(Collectors.toList()),
-            tableLocation);
+            tableLocation,
+            dataset);
     return new TableFunctionConfig(
         TableFunctionConfig.FunctionType.ICEBERG_ORPHAN_FILE_DELETE, true, context);
   }
@@ -937,7 +1009,7 @@ public class TableFunctionUtil {
   }
 
   public static Function<Prel, TableFunctionPrel> getTableAgnosticHashExchangeTableFunctionCreator(
-      StoragePluginId storagePluginId, String user) {
+      StoragePluginId storagePluginId, String user, List<String> dataset) {
     return input -> {
       RelDataTypeFactory.FieldInfoBuilder fieldInfoBuilder =
           new RelDataTypeFactory.FieldInfoBuilder(input.getCluster().getTypeFactory());
@@ -951,7 +1023,10 @@ public class TableFunctionUtil {
       BatchSchema outputSchema = CalciteArrowHelper.fromCalciteRowType(output);
       TableFunctionConfig tableFunctionConfig =
           getTableFunctionConfig(
-              TableFunctionConfig.FunctionType.SPLIT_ASSIGNMENT, outputSchema, storagePluginId);
+              TableFunctionConfig.FunctionType.SPLIT_ASSIGNMENT,
+              outputSchema,
+              dataset,
+              storagePluginId);
       return new TableFunctionPrel(
           input.getCluster(),
           input.getTraitSet(),

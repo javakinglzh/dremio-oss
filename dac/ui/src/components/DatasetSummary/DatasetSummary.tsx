@@ -30,6 +30,7 @@ import CopyButton from "#oss/components/Buttons/CopyButton";
 import { VersionContextType } from "dremio-ui-common/components/VersionContext.js";
 import { hideForNonDefaultBranch } from "dremio-ui-common/utilities/versionContext.js";
 import { getEdition } from "@inject/utils/versionUtils";
+import { useSourceTypeFromState } from "@inject/utils/sourceUtils";
 import { ARSFeatureSwitch } from "@inject/utils/arsUtils";
 import SummaryActions from "./components/SummaryActions/SummaryActions";
 
@@ -50,6 +51,7 @@ type DatasetSummaryProps = {
   isPanel?: boolean;
   hideGoToButton?: boolean;
   hideMainActionButtons?: boolean;
+  hideAllActions?: boolean;
 };
 
 const DatasetSummary = ({
@@ -67,6 +69,7 @@ const DatasetSummary = ({
   isPanel,
   hideGoToButton,
   hideMainActionButtons,
+  hideAllActions = false,
 }: DatasetSummaryProps) => {
   const { formatMessage } = useIntl();
   const datasetType = dataset.get("datasetType");
@@ -91,6 +94,8 @@ const DatasetSummary = ({
     "canExploreDatasetGraph",
   ]);
 
+  const rootName = dataset.get("fullPath")?.get(0);
+  const sourceType = useSourceTypeFromState(rootName);
   const areTagsVisible = hideForNonDefaultBranch(versionContext);
 
   const shouldRenderLineageButton =
@@ -134,18 +139,21 @@ const DatasetSummary = ({
             disableActionButtons={disableActionButtons}
             hideSqlEditorIcon={hideSqlEditorIcon}
             versionContext={versionContext}
+            hideAllActions={hideAllActions}
           />
         )}
         {!detailsView ? (
           <SummarySubHeader
             subTitle={fullPath}
             versionContext={versionContext}
+            sourceType={sourceType}
           />
         ) : (
           <div className={classes["dataset-summary-dataset-path"]}>
             <SummarySubHeader
               subTitle={fullPath}
               versionContext={versionContext}
+              sourceType={sourceType}
               detailsView
             />
             <CopyButton
@@ -182,49 +190,53 @@ const DatasetSummary = ({
           dataset={dataset}
           detailsView={detailsView}
           versionContext={versionContext}
+          hideAllActions={hideAllActions}
         />
-        {!detailsView && datasetType && !hideMainActionButtons && (
-          <div className={classes["dataset-summary-button-wrapper"]}>
-            <div
-              className={clsx(
-                classes["dataset-summary-open-details-button"],
-                showColumns ? "margin-bottom--double" : "",
-              )}
-              onClick={() => {
-                openWikiDrawer(dataset);
-              }}
-            >
-              <dremio-icon
-                name="interface/meta"
-                class={classes["dataset-summary-open-details-icon"]}
-              />
-              {formatMessage({ id: "Wiki.OpenDetails" })}
-            </div>
-            {shouldRenderLineageButton && (
-              <ARSFeatureSwitch
-                renderEnabled={() => null}
-                renderDisabled={() => (
-                  <Link
-                    to={wrapBackendLink(graphLink)}
-                    target="_blank"
-                    alt="Open graph button"
-                    className={clsx(
-                      classes["dataset-summary-open-details-button"],
-                      showColumns ? "margin-bottom--double" : "",
-                    )}
-                  >
-                    <dremio-icon
-                      name="sql-editor/graph"
-                      class={classes["dataset-summary-open-details-icon"]}
-                    />
-                    {formatMessage({ id: "Dataset.Summary.Lineage" })}
-                  </Link>
+        {!detailsView &&
+          datasetType &&
+          !hideMainActionButtons &&
+          !hideAllActions && (
+            <div className={classes["dataset-summary-button-wrapper"]}>
+              <div
+                className={clsx(
+                  classes["dataset-summary-open-details-button"],
+                  showColumns ? "margin-bottom--double" : "",
                 )}
-              />
-            )}
-          </div>
-        )}
-        {isPanel && queryLink && (
+                onClick={() => {
+                  openWikiDrawer(dataset);
+                }}
+              >
+                <dremio-icon
+                  name="interface/meta"
+                  class={classes["dataset-summary-open-details-icon"]}
+                />
+                {formatMessage({ id: "Wiki.OpenDetails" })}
+              </div>
+              {shouldRenderLineageButton && (
+                <ARSFeatureSwitch
+                  renderEnabled={() => null}
+                  renderDisabled={() => (
+                    <Link
+                      to={wrapBackendLink(graphLink)}
+                      target="_blank"
+                      alt="Open graph button"
+                      className={clsx(
+                        classes["dataset-summary-open-details-button"],
+                        showColumns ? "margin-bottom--double" : "",
+                      )}
+                    >
+                      <dremio-icon
+                        name="sql-editor/graph"
+                        class={classes["dataset-summary-open-details-icon"]}
+                      />
+                      {formatMessage({ id: "Dataset.Summary.Lineage" })}
+                    </Link>
+                  )}
+                />
+              )}
+            </div>
+          )}
+        {isPanel && queryLink && !hideAllActions && (
           <div className={classes["dataset-summary-button-wrapper"]}>
             <SummaryActions
               dataset={dataset}

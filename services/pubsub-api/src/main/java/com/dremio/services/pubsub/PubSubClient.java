@@ -43,5 +43,5 @@ public interface PubSubClient {
   <M extends Message> MessageSubscriber<M> getSubscriber(
       Class<? extends Subscription<M>> subscriptionClass,
       MessageConsumer<M> messageConsumer,
-      MessageSubscriberOptions options);
+      MessageSubscriberOptions<M> options);
 }

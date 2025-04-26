@@ -15,19 +15,25 @@
  */
 package com.dremio.exec.planner.cost;
 
+import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.apache.calcite.linq4j.Ord;
+import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPredicateList;
 import org.apache.calcite.plan.Strong;
 import org.apache.calcite.plan.volcano.RelSubset;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Correlate;
 import org.apache.calcite.rel.core.Project;
+import org.apache.calcite.rel.core.Union;
 import org.apache.calcite.rel.metadata.BuiltInMetadata;
 import org.apache.calcite.rel.metadata.MetadataDef;
 import org.apache.calcite.rel.metadata.MetadataHandler;
@@ -36,10 +42,13 @@ import org.apache.calcite.rel.metadata.RelMetadataProvider;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexExecutor;
 import org.apache.calcite.rex.RexInputRef;
 import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
+import org.apache.calcite.rex.RexSimplify;
+import org.apache.calcite.rex.RexUnknownAs;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
@@ -75,6 +84,144 @@ public class RelMdPredicates implements MetadataHandler<BuiltInMetadata.Predicat
   /** Infers predicates for a correlate node. */
   public RelOptPredicateList getPredicates(Correlate correlate, RelMetadataQuery mq) {
     return mq.getPulledUpPredicates(correlate.getLeft());
+  }
+
+  public RelOptPredicateList getPredicates(ExpansionNode expansionNode, RelMetadataQuery mq) {
+    if (expansionNode.considerForPullUpPredicate()) {
+      return mq.getPulledUpPredicates(expansionNode.getInput());
+    }
+    return RelOptPredicateList.EMPTY;
+  }
+
+  /*
+   * This method is copied entirely from calcite code just to change the simplify call parameter
+   * from RexUnknownAs.FALSE to RexUnknownAs.UNKNOWN. This was changed in CALCITE-2338, which
+   * was causing the simplification to take longer.
+   */
+  /** Infers predicates for a Union node. */
+  public RelOptPredicateList getPredicates(Union union, RelMetadataQuery mq) {
+    final RexBuilder rexBuilder = union.getCluster().getRexBuilder();
+
+    Set<RexNode> finalPredicates = new HashSet<>();
+    final List<RexNode> finalResidualPredicates = new ArrayList<>();
+    for (Ord<RelNode> input : Ord.zip(union.getInputs())) {
+      RelOptPredicateList info = mq.getPulledUpPredicates(input.e);
+      if (info.pulledUpPredicates.isEmpty()) {
+        return RelOptPredicateList.EMPTY;
+      }
+      final Set<RexNode> predicates = new HashSet<>();
+      final List<RexNode> residualPredicates = new ArrayList<>();
+      for (RexNode pred : info.pulledUpPredicates) {
+        if (input.i == 0) {
+          predicates.add(pred);
+          continue;
+        }
+        if (finalPredicates.contains(pred)) {
+          predicates.add(pred);
+        } else {
+          residualPredicates.add(pred);
+        }
+      }
+      // Add new residual predicates
+      finalResidualPredicates.add(RexUtil.composeConjunction(rexBuilder, residualPredicates));
+      // Add those that are not part of the final set to residual
+      for (RexNode e : finalPredicates) {
+        if (!predicates.contains(e)) {
+          // This node was in previous union inputs, but it is not in this one
+          for (int j = 0; j < input.i; j++) {
+            finalResidualPredicates.set(
+                j,
+                RexUtil.composeConjunction(
+                    rexBuilder, Arrays.asList(finalResidualPredicates.get(j), e)));
+          }
+        }
+      }
+      // Final predicates
+      finalPredicates = predicates;
+    }
+
+    final List<RexNode> predicates = new ArrayList<>(finalPredicates);
+    final RelOptCluster cluster = union.getCluster();
+    final RexExecutor executor = Util.first(cluster.getPlanner().getExecutor(), RexUtil.EXECUTOR);
+    RexNode disjunctivePredicate =
+        new RexSimplify(rexBuilder, RelOptPredicateList.EMPTY, executor)
+            .simplifyUnknownAs(
+                rexBuilder.makeCall(SqlStdOperatorTable.OR, finalResidualPredicates),
+                RexUnknownAs.UNKNOWN);
+    if (!disjunctivePredicate.isAlwaysTrue()) {
+      predicates.add(disjunctivePredicate);
+    }
+    return RelOptPredicateList.of(rexBuilder, predicates);
+  }
+
+  /**
+   * Infers predicates for a project.
+   *
+   * <ol>
+   *   <li>create a mapping from input to projection. Map only positions that directly reference an
+   *       input column.
+   *   <li>Expressions that only contain above columns are retained in the Project's pullExpressions
+   *       list.
+   *   <li>For e.g. expression 'a + e = 9' below will not be pulled up because 'e' is not in the
+   *       projection list.
+   *       <blockquote>
+   *       <pre>
+   * inputPullUpExprs:      {a &gt; 7, b + c &lt; 10, a + e = 9}
+   * projectionExprs:       {a, b, c, e / 2}
+   * projectionPullupExprs: {a &gt; 7, b + c &lt; 10}
+   * </pre>
+   *       </blockquote>
+   * </ol>
+   */
+  public RelOptPredicateList getPredicates(Project project, RelMetadataQuery mq) {
+    final RelNode input = project.getInput();
+    final RexBuilder rexBuilder = project.getCluster().getRexBuilder();
+    final RelOptPredicateList inputInfo = mq.getPulledUpPredicates(input);
+    final List<RexNode> projectPullUpPredicates = new ArrayList<>();
+
+    // Store all the projected columns for a given projected expression.
+    // E.g., Project($0 = $3, $1 = $3), store $3 -> [0, 1]
+    Map<ComparableRexNode, List<Integer>> positionsList = new HashMap<>();
+    for (Ord<RexNode> o : Ord.zip(project.getProjects())) {
+      ComparableRexNode keyNode = new ComparableRexNode(o.e);
+      positionsList.putIfAbsent(keyNode, new ArrayList<>());
+      positionsList.get(keyNode).add(o.i);
+    }
+
+    // Go over child pullUpPredicates. If a predicate is made from projected columns
+    // then pull up the predicate in terms of the projected columns.
+    // If a predicate contains columns outside the projection, see if we can pull up
+    // a weaker predicate on the projection columns it does use.
+    for (RexNode r : inputInfo.pulledUpPredicates) {
+      try {
+        Map<ComparableRexNode, IndexValueHolder> referenceMap = new HashMap<>();
+        do {
+          final RexNode newRex =
+              r.accept(new ProjectMapper(rexBuilder, project, referenceMap, positionsList));
+          projectPullUpPredicates.add(newRex);
+        } while (updateReferences(referenceMap, positionsList));
+      } catch (ProjectMapper.ProjectColumnMiss e) {
+        // We do not add predicate which can not be referenced by these project fields.
+      }
+    }
+
+    // Project can also generate constants. We need to include them.
+    for (Ord<RexNode> expr : Ord.zip(project.getProjects())) {
+      if (RexLiteral.isNullLiteral(expr.e)) {
+        projectPullUpPredicates.add(
+            rexBuilder.makeCall(
+                SqlStdOperatorTable.IS_NULL, rexBuilder.makeInputRef(project, expr.i)));
+      } else if (RexUtil.isConstant(expr.e)) {
+        final List<RexNode> args =
+            ImmutableList.of(rexBuilder.makeInputRef(project, expr.i), expr.e);
+        final SqlOperator op =
+            args.get(0).getType().isNullable() || args.get(1).getType().isNullable()
+                ? SqlStdOperatorTable.IS_NOT_DISTINCT_FROM
+                : SqlStdOperatorTable.EQUALS;
+        projectPullUpPredicates.add(rexBuilder.makeCall(op, args));
+      }
+    }
+    return RelOptPredicateList.of(rexBuilder, projectPullUpPredicates);
   }
 
   /** Key for rexnodes in a map. */
@@ -266,76 +413,6 @@ public class RelMdPredicates implements MetadataHandler<BuiltInMetadata.Predicat
       // Return the weakened predicates to the user if this is the parent node.
       return RexUtil.composeDisjunction(rexBuilder, weakenedPredicates);
     }
-  }
-
-  /**
-   * Infers predicates for a project.
-   *
-   * <ol>
-   *   <li>create a mapping from input to projection. Map only positions that directly reference an
-   *       input column.
-   *   <li>Expressions that only contain above columns are retained in the Project's pullExpressions
-   *       list.
-   *   <li>For e.g. expression 'a + e = 9' below will not be pulled up because 'e' is not in the
-   *       projection list.
-   *       <blockquote>
-   *       <pre>
-   * inputPullUpExprs:      {a &gt; 7, b + c &lt; 10, a + e = 9}
-   * projectionExprs:       {a, b, c, e / 2}
-   * projectionPullupExprs: {a &gt; 7, b + c &lt; 10}
-   * </pre>
-   *       </blockquote>
-   * </ol>
-   */
-  public RelOptPredicateList getPredicates(Project project, RelMetadataQuery mq) {
-    final RelNode input = project.getInput();
-    final RexBuilder rexBuilder = project.getCluster().getRexBuilder();
-    final RelOptPredicateList inputInfo = mq.getPulledUpPredicates(input);
-    final List<RexNode> projectPullUpPredicates = new ArrayList<>();
-
-    // Store all the projected columns for a given projected expression.
-    // E.g., Project($0 = $3, $1 = $3), store $3 -> [0, 1]
-    Map<ComparableRexNode, List<Integer>> positionsList = new HashMap<>();
-    for (Ord<RexNode> o : Ord.zip(project.getProjects())) {
-      ComparableRexNode keyNode = new ComparableRexNode(o.e);
-      positionsList.putIfAbsent(keyNode, new ArrayList<>());
-      positionsList.get(keyNode).add(o.i);
-    }
-
-    // Go over child pullUpPredicates. If a predicate is made from projected columns
-    // then pull up the predicate in terms of the projected columns.
-    // If a predicate contains columns outside the projection, see if we can pull up
-    // a weaker predicate on the projection columns it does use.
-    for (RexNode r : inputInfo.pulledUpPredicates) {
-      try {
-        Map<ComparableRexNode, IndexValueHolder> referenceMap = new HashMap<>();
-        do {
-          final RexNode newRex =
-              r.accept(new ProjectMapper(rexBuilder, project, referenceMap, positionsList));
-          projectPullUpPredicates.add(newRex);
-        } while (updateReferences(referenceMap, positionsList));
-      } catch (ProjectMapper.ProjectColumnMiss e) {
-        // We do not add predicate which can not be referenced by these project fields.
-      }
-    }
-
-    // Project can also generate constants. We need to include them.
-    for (Ord<RexNode> expr : Ord.zip(project.getProjects())) {
-      if (RexLiteral.isNullLiteral(expr.e)) {
-        projectPullUpPredicates.add(
-            rexBuilder.makeCall(
-                SqlStdOperatorTable.IS_NULL, rexBuilder.makeInputRef(project, expr.i)));
-      } else if (RexUtil.isConstant(expr.e)) {
-        final List<RexNode> args =
-            ImmutableList.of(rexBuilder.makeInputRef(project, expr.i), expr.e);
-        final SqlOperator op =
-            args.get(0).getType().isNullable() || args.get(1).getType().isNullable()
-                ? SqlStdOperatorTable.IS_NOT_DISTINCT_FROM
-                : SqlStdOperatorTable.EQUALS;
-        projectPullUpPredicates.add(rexBuilder.makeCall(op, args));
-      }
-    }
-    return RelOptPredicateList.of(rexBuilder, projectPullUpPredicates);
   }
 
   /**

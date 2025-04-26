@@ -52,7 +52,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
   private LinkedList<ArrayAggAccumulatorHolder<ElementType>> accumulatedBatches;
   private boolean resizeInProgress;
   private final BufferAllocator allocator;
-  private final int maxFieldSizeBytes;
+  private final int maxArrayAggSize;
   private final int initialVectorSize;
 
   protected ArrayAggAccumulator(
@@ -60,7 +60,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     this.input = input;
     this.transferVector = transferVector;
@@ -68,7 +68,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
     this.accumulatedBatches = new LinkedList<>();
     resizeInProgress = false;
     this.allocator = allocator;
-    this.maxFieldSizeBytes = maxFieldSizeBytes;
+    this.maxArrayAggSize = maxArrayAggSize;
     this.initialVectorSize = initialVectorSize;
   }
 
@@ -77,7 +77,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
   protected abstract void writeItem(UnionListWriter writer, ElementType item);
 
   protected abstract ArrayAggAccumulatorHolder<ElementType> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialSize);
+      BufferAllocator allocator, int initialSize);
 
   protected abstract ElementType getElement(
       long baseAddress, int itemIndex, ArrowBuf dataBuffer, ArrowBuf offsetBuffer);
@@ -161,7 +161,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
         ElementType item = group.next();
         totalGroupSizeInBytes += batch.getSizeOfElement(item);
         Preconditions.checkArgument(
-            totalGroupSizeInBytes <= maxFieldSizeBytes,
+            totalGroupSizeInBytes <= maxArrayAggSize,
             "One or more of the ARRAY_AGG groups contains too many elements");
         writeItem(writer, group.next());
       }
@@ -183,7 +183,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
 
   @Override
   public int getDataBufferSize() {
-    return maxFieldSizeBytes;
+    return maxArrayAggSize;
   }
 
   @Override
@@ -243,7 +243,7 @@ public abstract class ArrayAggAccumulator<ElementType> implements Accumulator {
 
   @Override
   public void addBatch(ArrowBuf dataBuffer, ArrowBuf validityBuffer) {
-    accumulatedBatches.add(getAccumulatorHolder(maxFieldSizeBytes, allocator, initialVectorSize));
+    accumulatedBatches.add(getAccumulatorHolder(allocator, initialVectorSize));
     resizeInProgress = true;
   }
 

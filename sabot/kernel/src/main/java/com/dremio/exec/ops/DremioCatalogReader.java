@@ -22,6 +22,7 @@ import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.DremioTranslatableTable;
 import com.dremio.exec.catalog.SimpleCatalog;
 import com.dremio.exec.planner.sql.SqlVersionedIdentifier;
+import com.dremio.exec.planner.sql.parser.SqlTypeNameSpec;
 import com.dremio.exec.planner.sql.parser.SqlVersionedTableMacro;
 import com.dremio.exec.tablefunctions.VersionedTableMacro;
 import com.dremio.service.namespace.NamespaceKey;
@@ -150,6 +151,11 @@ public class DremioCatalogReader
 
   @Override
   public RelDataType getNamedType(SqlIdentifier paramSqlIdentifier) {
+    if (paramSqlIdentifier instanceof SqlTypeNameSpec) {
+      return ((SqlTypeNameSpec) paramSqlIdentifier)
+          .deriveType(plannerCatalog.getSqlValidatorAndToRelContext().getValidator());
+    }
+
     return null;
   }
 

@@ -17,10 +17,12 @@ package com.dremio.exec.planner.sql.handlers;
 
 import static java.util.Objects.requireNonNull;
 
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.planner.sql.handlers.direct.SimpleCommandResult;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.ReferenceTypeUtils;
@@ -49,6 +51,7 @@ public class DropFolderHandler extends BaseVersionHandler<SimpleCommandResult> {
   @Override
   public List<SimpleCommandResult> toResult(String sql, SqlNode sqlNode) throws Exception {
 
+    final Catalog catalog = getCatalog();
     final SqlDropFolder dropFolder =
         requireNonNull(SqlNodeUtil.unwrap(sqlNode, SqlDropFolder.class));
     NamespaceKey path = dropFolder.getPath();
@@ -64,12 +67,15 @@ public class DropFolderHandler extends BaseVersionHandler<SimpleCommandResult> {
         ReferenceTypeUtils.map(dropFolder.getRefType(), dropFolder.getRefValue(), null);
     VersionContext sessionVersion = userSession.getSessionVersionForSource(sourceName);
     VersionContext sourceVersion = statementSourceVersion.orElse(sessionVersion);
-
-    final VersionedPlugin versionedPlugin = getVersionedPlugin(sourceName);
-
     try {
-      versionedPlugin.deleteFolder(path, sourceVersion);
-    } catch (NamespaceNotFoundException e) {
+      CatalogEntityKey key =
+          CatalogEntityKey.newBuilder()
+              .keyComponents(path.getPathComponents())
+              .tableVersionContext(
+                  sourceVersion != null ? TableVersionContext.of(sourceVersion) : null)
+              .build();
+      catalog.deleteFolder(key, null);
+    } catch (NamespaceNotFoundException | CatalogEntityNotFoundException e) {
       if (existenceCheck) {
         return Collections.singletonList(SimpleCommandResult.successful(e.getMessage()));
       }

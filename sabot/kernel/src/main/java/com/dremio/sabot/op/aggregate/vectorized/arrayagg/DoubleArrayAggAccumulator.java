@@ -30,14 +30,14 @@ public final class DoubleArrayAggAccumulator extends ArrayAggAccumulator<Double>
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -53,7 +53,7 @@ public final class DoubleArrayAggAccumulator extends ArrayAggAccumulator<Double>
 
   @Override
   protected ArrayAggAccumulatorHolder<Double> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new DoubleArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

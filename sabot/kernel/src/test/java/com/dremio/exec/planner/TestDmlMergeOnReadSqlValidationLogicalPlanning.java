@@ -42,7 +42,9 @@ import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.iceberg.RowLevelOperationMode;
 import org.junit.After;
+import org.junit.AfterClass;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /**
@@ -65,37 +67,42 @@ import org.junit.Test;
  */
 public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableManagementBase {
 
-  private static final String TARGET_TABLE = "dfs_test.iceberg_MOR_DML_Test";
   private static final String SOURCE_TABLE = "dfs_test.source_table";
 
+  // template table to acquire iceberg table schema
+  protected static String TEMPLATE_TABLE = "dfs_static_test_hadoop.iceberg_Template_MOR";
+  private static final String TARGET_TABLE = "dfs_test.iceberg_target_table_MOR";
+
+  @BeforeClass
+  public static void setup() throws Exception {
+    createOrdersTable(TEMPLATE_TABLE);
+    userColumnList = getOriginalFieldList(TEMPLATE_TABLE);
+    userColumnCount = userColumnList.size();
+    // table has at least one column
+    assertThat(userColumnCount).isGreaterThan(0);
+  }
+
+  @AfterClass
+  public static void close() throws Exception {
+    runSQL("DROP TABLE %s", TEMPLATE_TABLE);
+  }
+
   @Before
-  public void setup() throws Exception {
-    config
-        .getContext()
-        .getOptions()
-        .setOption(
-            OptionValue.createBoolean(
-                OptionValue.OptionType.SYSTEM,
-                "dremio.iceberg.merge_on_read_writer_with_positional_delete.enabled",
-                true));
-
-    runSQL(
-        String.format(
-            "CREATE TABLE %s "
-                + "(order_id INT, "
-                + "order_year INT, "
-                + "order_date TIMESTAMP, "
-                + "product_name VARCHAR, "
-                + "amount DOUBLE)",
-            TARGET_TABLE));
-
-    runSQL(String.format("INSERT INTO %s SELECT * FROM %s", TARGET_TABLE, table.getTableName()));
-    enableMergeOnRead(TARGET_TABLE);
+  public void setupTables() throws Exception {
+    configureMergeOnReadFeatureFlagTo(true);
+    createAndPopulateOrdersTable(TARGET_TABLE);
     buildSourceTable(SOURCE_TABLE);
+    enableMergeOnRead(TARGET_TABLE);
   }
 
   @After
-  public void close() throws Exception {
+  public void dropTables() throws Exception {
+    runSQL(String.format("DROP TABLE %s", TARGET_TABLE));
+    runSQL(String.format("DROP TABLE %s", SOURCE_TABLE));
+    configureMergeOnReadFeatureFlagTo(false);
+  }
+
+  private static void configureMergeOnReadFeatureFlagTo(boolean flag) {
     config
         .getContext()
         .getOptions()
@@ -103,10 +110,7 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
             OptionValue.createBoolean(
                 OptionValue.OptionType.SYSTEM,
                 "dremio.iceberg.merge_on_read_writer_with_positional_delete.enabled",
-                false));
-
-    runSQL(String.format("DROP TABLE %s", TARGET_TABLE));
-    runSQL(String.format("DROP TABLE %s", SOURCE_TABLE));
+                flag));
   }
 
   private void enableMergeOnRead(String testTable) throws Exception {
@@ -117,16 +121,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
                 + "'write.update.mode'='merge-on-read', "
                 + "'write.merge.mode'='merge-on-read')",
             testTable));
-  }
-
-  private void disableMergeOnRead() throws Exception {
-    runSQL(
-        String.format(
-            "ALTER TABLE %s SET UNSET TBLPROPERTIES "
-                + "('write.delete.mode'='merge-on-read',"
-                + "'write.update.mode'='merge-on-read', "
-                + "'write.merge.mode'='merge-on-read')",
-            table.getTableName()));
   }
 
   private void buildSourceTable(String table) throws Exception {
@@ -177,7 +171,7 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
   }
 
   @Test
-  public void testFeatureFlagErrorForUpdate() {
+  public void testFeatureFlagErrorForUpdate() throws Exception {
     config
         .getContext()
         .getOptions()
@@ -202,7 +196,7 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
   }
 
   @Test
-  public void testFeatureFlagErrorForMerge() {
+  public void testFeatureFlagErrorForMerge() throws Exception {
     config
         .getContext()
         .getOptions()
@@ -246,7 +240,7 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
                 + "EXTEND "
                 + "(D_R_E_M_I_O_D_A_T_A_F_I_L_E_F_I_L_E_P_A_T_H VARCHAR, "
                 + "D_R_E_M_I_O_D_A_T_A_F_I_L_E_R_O_W_I_N_D_E_X BIGINT)",
-            table.getTableName(), table.getTableName()));
+            TARGET_TABLE, TARGET_TABLE));
   }
 
   @Test
@@ -394,7 +388,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
   @Test
   public void testSqlValidationMergeTypeInsertUpdateSourceDifferentThanTargetNoOutdatedColumns()
       throws Exception {
-
     String expectedRowInputType =
         "RecordType("
             + "INTEGER order_id, "
@@ -422,7 +415,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
 
   @Test
   public void testSqlValidationMergeTypeInsertUpdateSourceSameAsTargetSetNulls() throws Exception {
-
     String expectedRowInputType =
         "RecordType("
             + "INTEGER order_year0, "
@@ -584,7 +576,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
 
   @Test
   public void testSqlValidationUpdateStarWhenSourceDifferentThanTarget() throws Exception {
-
     String expectedInputRowType =
         "RecordType(VARCHAR(65536) D_R_E_M_I_O_D_A_T_A_F_I_L_E_F_I_L_E_P_A_T_H, "
             + "BIGINT D_R_E_M_I_O_D_A_T_A_F_I_L_E_R_O_W_I_N_D_E_X, "
@@ -788,7 +779,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
                 + "WHEN MATCHED THEN UPDATE SET * "
                 + "WHEN NOT MATCHED THEN INSERT *;",
             TARGET_TABLE, SOURCE_TABLE, TARGET_TABLE + '.' + testColumn4, "s." + "c5");
-
     Prel plan = getDmlPlan(sql);
 
     validateCommonMergeOnReadPlan(plan, expectedRexNodes);
@@ -953,7 +943,6 @@ public class TestDmlMergeOnReadSqlValidationLogicalPlanning extends TestTableMan
 
   @Test
   public void testMergeInsertOnlyStar() throws Exception {
-
     List<String> expectedRexNodes = new ArrayList<>();
     expectedRexNodes.addAll(buildExprList(2, 3, 4, 5, 6));
 

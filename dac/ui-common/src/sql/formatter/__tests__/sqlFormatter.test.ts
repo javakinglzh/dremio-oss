@@ -215,18 +215,6 @@ TRUNCATE TABLE abc123.def456 AT BRANCH branch1`,
 REFRESH REFLECTION 'reflectionBlah' AS 'rfl'`,
       ],
     ],
-    sqlLoadMaterialization: [
-      [
-        `
-LOAD MATERIALIZATION METADATA blah;`,
-      ],
-    ],
-    sqlCompactMaterialization: [
-      [
-        `
-COMPACT MATERIALIZATION abc.def AS 'mtr'`,
-      ],
-    ],
     sqlAnalyzeTableStatistics: [
       [
         `
@@ -300,8 +288,7 @@ MEASURES                    (me1 (
                                MIN,
                                MAX))
 DISTRIBUTE BY               (db1,
-                             db2)
-ARROW CACHE                `,
+                             db2)`,
       ],
     ],
     sqlCreateRawReflection: [
@@ -720,6 +707,10 @@ EXPIRE SNAPSHOTS RETAIN_LAST = 10`,
         `
 VACUUM CATALOG cat1`,
       ],
+      [
+        `
+VACUUM CATALOG cat1 EXCLUDE (tbl1, folder1.tbl2, folder1.tbl3 AT BRANCH dev)`,
+      ],
     ],
     sqlOptimize: [
       [
@@ -824,6 +815,12 @@ SELECT timestampadd(month, 2, '2009-05-18')`,
       [
         `
 SELECT timestampdiff(month, '2009-05-18', '2009-07-29');`,
+      ],
+    ],
+    tryConvertFromFunctionCall: [
+      [
+        `
+SELECT TRY_CONVERT_FROM(arg0 AS VARCHAR ARRAY)`,
       ],
     ],
     matchRecognizeFunctionCall: null, // covered by other cases
@@ -1172,6 +1169,7 @@ SET          (MIN_REPLICAS = 1,
     jsonPathSpec: null, // covered by other cases
     jsonApiCommonSyntax: null, // covered by other cases
     jsonExistsErrorBehavior: null, // covered by other cases
+    tableWithVersionContextCommaList: null, // covered by other cases
     jsonExistsFunctionCall: [
       [
         `

@@ -15,6 +15,8 @@
  */
 package com.dremio.exec.expr.fn;
 
+import static org.apache.arrow.vector.types.IntervalUnit.YEAR_MONTH;
+
 import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -118,6 +120,12 @@ public class GandivaRegistryWrapper {
             || signature.getName().equalsIgnoreCase("day"))
         && !ArrowTypeID.Int.equals(signature.getReturnType().getTypeID())) {
       return true;
+    }
+
+    if (signature.getName().equalsIgnoreCase("castBIGINT")
+        || signature.getName().equalsIgnoreCase("castINT")) {
+      return signature.getParamTypes().size() == 1
+          && signature.getParamTypes().get(0).get(0).equals(new ArrowType.Interval(YEAR_MONTH));
     }
 
     // blacklisted while upgrading arrow and DX-44699

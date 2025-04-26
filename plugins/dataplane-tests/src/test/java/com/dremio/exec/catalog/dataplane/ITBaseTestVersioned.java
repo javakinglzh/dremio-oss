@@ -34,6 +34,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.server.BaseTestServerJunit5;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.Property;
@@ -165,7 +166,7 @@ public abstract class ITBaseTestVersioned extends BaseTestServerJunit5 {
             .setName(DATAPLANE_PLUGIN_NAME)
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
 
-    catalog.createSource(sourceConfig);
+    catalog.createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     dataplanePlugin = catalog.getSource(DATAPLANE_PLUGIN_NAME);
 
     SourceConfig sourceConfigForReflectionTest =
@@ -173,7 +174,8 @@ public abstract class ITBaseTestVersioned extends BaseTestServerJunit5 {
             .setConnectionConf(prepareConnectionConf(BUCKET_NAME))
             .setName(DATAPLANE_PLUGIN_NAME_FOR_REFLECTION_TEST)
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
-    catalog.createSource(sourceConfigForReflectionTest);
+    catalog.createSource(
+        sourceConfigForReflectionTest, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     namespaceService = getSabotContext().getNamespaceService(SystemUser.SYSTEM_USERNAME);
   }

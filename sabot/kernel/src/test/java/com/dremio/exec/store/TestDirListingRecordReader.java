@@ -27,6 +27,7 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.hadoop.HadoopFileSystem.FetchOnDemandDirectoryStream;
 import com.dremio.exec.physical.config.MinorFragmentEndpoint;
@@ -1702,7 +1703,7 @@ public class TestDirListingRecordReader extends BaseTestQuery {
   }
 
   @Test
-  public void testFullPathSchemeVariateAzure() throws Exception {
+  public void testFullPathSchemeVariateAzureWasbs() throws Exception {
     Path inputPath = Path.of("/testcontainer2/");
     HadoopFileSystem fs = (HadoopFileSystem) setUpFs();
     when(fs.getScheme())
@@ -1719,7 +1720,7 @@ public class TestDirListingRecordReader extends BaseTestQuery {
             .setSchemeVariate("wasbs")
             .build();
     Configuration fsConf = new Configuration();
-    fsConf.set("dremio.azure.account", "account1");
+    fsConf.set(AzureStorageConfProperties.ACCOUNT, "account1");
     reader = new DirListingRecordReader(getCtx(), fs, split, true, null, null, true, false, fsConf);
     reader.allocate(mutator.getFieldVectorMap());
     reader.setup(mutator);
@@ -1735,6 +1736,84 @@ public class TestDirListingRecordReader extends BaseTestQuery {
         outputpaths.getObject(0).toString());
     assertEquals(
         "wasbs://testcontainer2@account1.blob.core.windows.net/bar/file1.parquet?version=31",
+        outputpaths.getObject(1).toString());
+    // Not testing all paths
+  }
+
+  @Test
+  public void testFullPathSchemeVariateAzureAbfssToWasbs() throws Exception {
+    Path inputPath = Path.of("/testcontainer2/");
+    HadoopFileSystem fs = (HadoopFileSystem) setUpFs();
+    when(fs.getScheme())
+        .thenReturn(
+            FileSystemConf.CloudFileSystemScheme.AZURE_STORAGE_FILE_SYSTEM_SCHEME.getScheme());
+
+    setupMutator();
+    setupFsListIteratorMock(fs, inputPath);
+    DirListInputSplitProto.DirListInputSplit split =
+        DirListInputSplitProto.DirListInputSplit.newBuilder()
+            .setOperatingPath(inputPath.toString())
+            .setReadSignature(Long.MAX_VALUE)
+            .setRootPath(inputPath.toString())
+            .setSchemeVariate("wasb")
+            .build();
+    Configuration fsConf = new Configuration();
+    fsConf.set("dremio.azure.account", "account1");
+    fsConf.set("dremio.azure.mode", "STORAGE_V2");
+    reader = new DirListingRecordReader(getCtx(), fs, split, true, null, null, true, false, fsConf);
+    reader.allocate(mutator.getFieldVectorMap());
+    reader.setup(mutator);
+
+    int generatedRecords = reader.next();
+    assertEquals(5, generatedRecords);
+
+    Map<String, ValueVector> fieldVectorMap = mutator.getFieldVectorMap();
+    VarCharVector outputpaths = (VarCharVector) fieldVectorMap.get("filepath");
+
+    assertEquals(
+        "wasb://testcontainer2@account1.blob.core.windows.net/foo.parquet?version=1",
+        outputpaths.getObject(0).toString());
+    assertEquals(
+        "wasb://testcontainer2@account1.blob.core.windows.net/bar/file1.parquet?version=31",
+        outputpaths.getObject(1).toString());
+    // Not testing all paths
+  }
+
+  @Test
+  public void testFullPathSchemeVariateAzureAbfssToAbfs() throws Exception {
+    Path inputPath = Path.of("/testcontainer2/");
+    HadoopFileSystem fs = (HadoopFileSystem) setUpFs();
+    when(fs.getScheme())
+        .thenReturn(
+            FileSystemConf.CloudFileSystemScheme.AZURE_STORAGE_FILE_SYSTEM_SCHEME.getScheme());
+
+    setupMutator();
+    setupFsListIteratorMock(fs, inputPath);
+    DirListInputSplitProto.DirListInputSplit split =
+        DirListInputSplitProto.DirListInputSplit.newBuilder()
+            .setOperatingPath(inputPath.toString())
+            .setReadSignature(Long.MAX_VALUE)
+            .setRootPath(inputPath.toString())
+            .setSchemeVariate("abfs")
+            .build();
+    Configuration fsConf = new Configuration();
+    fsConf.set("dremio.azure.account", "account1");
+    fsConf.set("dremio.azure.mode", "STORAGE_V2");
+    reader = new DirListingRecordReader(getCtx(), fs, split, true, null, null, true, false, fsConf);
+    reader.allocate(mutator.getFieldVectorMap());
+    reader.setup(mutator);
+
+    int generatedRecords = reader.next();
+    assertEquals(5, generatedRecords);
+
+    Map<String, ValueVector> fieldVectorMap = mutator.getFieldVectorMap();
+    VarCharVector outputpaths = (VarCharVector) fieldVectorMap.get("filepath");
+
+    assertEquals(
+        "abfs://testcontainer2@account1.dfs.core.windows.net/foo.parquet?version=1",
+        outputpaths.getObject(0).toString());
+    assertEquals(
+        "abfs://testcontainer2@account1.dfs.core.windows.net/bar/file1.parquet?version=31",
         outputpaths.getObject(1).toString());
     // Not testing all paths
   }

@@ -15,10 +15,14 @@
  */
 package com.dremio.exec.store.parquet;
 
+import static com.dremio.exec.store.SystemSchemas.FILE_GROUP_INDEX;
+
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.arrow.DremioArrowSchema;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.expression.FunctionCallFactory;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.SchemaPath;
@@ -32,6 +36,7 @@ import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RuntimeFilter;
 import com.dremio.exec.store.dfs.implicit.AdditionalColumnsRecordReader;
 import com.dremio.exec.store.dfs.implicit.ConstantColumnPopulators;
+import com.dremio.exec.store.dfs.implicit.NameValuePair;
 import com.dremio.exec.store.iceberg.deletes.PositionalDeleteFilter;
 import com.dremio.exec.store.parquet2.LogicalListL1Converter;
 import com.dremio.exec.store.parquet2.ParquetRowiseReader;
@@ -46,6 +51,7 @@ import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf.ParquetDatasetSplitScanXAttr;
 import com.dremio.sabot.op.copier.CopierFactory;
 import com.dremio.sabot.op.copier.FieldBufferCopier;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.scan.OutputMutator;
 import com.dremio.sabot.op.scan.ScanOperator.Metric;
 import com.google.common.base.Preconditions;
@@ -56,7 +62,6 @@ import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -73,6 +78,7 @@ import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.FixedWidthVector;
 import org.apache.arrow.vector.SimpleIntVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.complex.StructVector;
@@ -83,8 +89,10 @@ import org.apache.parquet.hadoop.CodecFactory;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.io.InvalidRecordException;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.MapLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 
@@ -100,6 +108,9 @@ public class UnifiedParquetReader implements RecordReader {
   private final boolean enableDetailedTracing;
   private final boolean isConvertedIcebergDataset;
   private final BatchSchema tableSchema;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
   private ParquetScanProjectedColumns projectedColumns;
   private ParquetColumnResolver columnResolver;
   private final FileSystem fs;
@@ -123,6 +134,10 @@ public class UnifiedParquetReader implements RecordReader {
   private final int maxValidityBufSize;
   private List<FieldBufferCopier> copiers;
   private ArrowBuf sv2;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
 
   public UnifiedParquetReader(
       OperatorContext context,
@@ -155,9 +170,26 @@ public class UnifiedParquetReader implements RecordReader {
     this.tableSchema = tableSchema;
     this.projectedColumns = projectedColumns;
     this.columnResolver = null;
+    // Creating a new Configuration object with reading and loading default resources
+    // turned on could be expensive depending on how often the current class instance is
+    // created as well as the sizes of default resources.
+    // Moreover, the only reason CodecFactory takes a Configuration object is to get
+    // the compression level due to PARQUET-2336.
+    // PARQUET-2336 extended the CodecFactory to have an instance of
+    // org.apache.hadoop.io.compress.CompressionCodec as a means to set
+    // different compression levels in different configuration files to write parquet files.
+    // Example: "org.apache.parquet.hadoop.codec.ZstandardCodec:-3" -> ZstandardCodec()
+    // where the trailing "-3" is the compression level.
+    // By not loading default resources for the Configuration object,
+    // this results in the following mapping:
+    // "org.apache.parquet.hadoop.codec.ZstandardCodec" -> ZstandardCodec().
+    // Moreover, while reading a relevant Decompressor is used which does not require
+    // compression level information.
     this.codecFactory =
         CodecFactory.createDirectCodecFactory(
-            new Configuration(), new ParquetDirectByteBufferAllocator(context.getAllocator()), 0);
+            new Configuration(false),
+            new ParquetDirectByteBufferAllocator(context.getAllocator()),
+            0);
     this.enableDetailedTracing = enableDetailedTracing;
     this.inputStreamProvider = inputStreamProvider;
     this.schemaHelper = schemaHelper;
@@ -174,6 +206,12 @@ public class UnifiedParquetReader implements RecordReader {
     this.useCopiersToRemoveInvalidRows =
         context.getOptions().getOption(ExecConstants.USE_COPIER_IN_PARQUET_READER)
             && context.getTargetBatchSize() <= Short.MAX_VALUE;
+
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   public UnifiedParquetReader(
@@ -300,6 +338,22 @@ public class UnifiedParquetReader implements RecordReader {
       long numColumnsTrimmed = footer.removeUnneededColumns(parquetColumnNamesToRetain);
       addMetricValue(Metric.NUM_COLUMNS_TRIMMED, numColumnsTrimmed);
     }
+
+    createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+
+    this.variableVectorSizer = VectorContainerHelper.createSizer(output.getVectors(), false);
+
+    fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(output.getContainer());
+
+    if (rowSizeLimitEnabled) {
+      if (fixedDataLenPerRow <= rowSizeLimit && variableVectorSizer.getVectorCount() == 0) {
+        rowSizeLimitEnabledForThisOperator = false;
+      }
+      if (fixedDataLenPerRow > rowSizeLimit) {
+        throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+            rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+      }
+    }
   }
 
   public void setIgnoreSchemaLearning(boolean ignoreSchemaLearning) {
@@ -404,11 +458,41 @@ public class UnifiedParquetReader implements RecordReader {
     }
   }
 
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outputMutator.getContainer(),
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.READ,
+        logger);
+  }
+
   @Override
   public int next() {
     // at most one filter
     if (validityBuf == null) {
-      return readEnsuringReadersReturnSameNumberOfRecords();
+      int recordCount = readEnsuringReadersReturnSameNumberOfRecords();
+      checkForRowSizeOverLimit(recordCount);
+      return recordCount;
     }
 
     int totalRecords = -1; // including invalid records
@@ -434,7 +518,7 @@ public class UnifiedParquetReader implements RecordReader {
               ? removeInvalidRowsWithCopiers(totalRecords)
               : removeInvalidRows(totalRecords);
     }
-
+    checkForRowSizeOverLimit(totalRecords);
     return totalRecords;
   }
 
@@ -594,6 +678,7 @@ public class UnifiedParquetReader implements RecordReader {
       closeables.add(sv2);
       closeables.add(filters);
       closeables.add(codecFactory::release);
+      closeables.add(rowSizeAccumulator);
       AutoCloseables.close(closeables);
     } finally {
       delegates = null;
@@ -715,7 +800,8 @@ public class UnifiedParquetReader implements RecordReader {
       return true;
     }
     if (vector instanceof StructVector) {
-      isParentTypeMap = (parquetField.getOriginalType() == OriginalType.MAP);
+      isParentTypeMap =
+          (parquetField.getLogicalTypeAnnotation() instanceof MapLogicalTypeAnnotation);
       // if vector is struct, then all of its children must be vectorizable
       for (FieldVector fieldVector : ((StructVector) vector).getChildrenFromFields()) {
         Type parquetChildField = getParquetChildField(parquetField, fieldVector.getName());
@@ -736,7 +822,8 @@ public class UnifiedParquetReader implements RecordReader {
           parquetField.asGroupType().getType(0),
           false);
     } else if (vector instanceof ListVector) {
-      if (parquetField.getOriginalType() != OriginalType.LIST && !isParentTypeMap) {
+      if (!(parquetField.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation)
+          && !isParentTypeMap) {
         // if we get a listvector for non list parquet element, use rowise reader
         return false;
       }
@@ -772,7 +859,8 @@ public class UnifiedParquetReader implements RecordReader {
   }
 
   private boolean checkIfDecimalIsVectorizable(Type parquetField, ColumnChunkMetaData metadata) {
-    if (parquetField.asPrimitiveType().getOriginalType() != OriginalType.DECIMAL) {
+    if (!(parquetField.asPrimitiveType().getLogicalTypeAnnotation()
+        instanceof DecimalLogicalTypeAnnotation)) {
       return true;
     }
 
@@ -1016,18 +1104,31 @@ public class UnifiedParquetReader implements RecordReader {
           unifiedReader.readEntry.getOriginalPath(),
           "the original split file path cannot be null. ");
 
+      boolean hasAdditionalColumns = false;
+      List<NameValuePair<?>> columnNameValuePairs = new ArrayList<>();
+      if (unifiedReader
+          .tableSchema
+          .findFieldIgnoreCase(ColumnUtils.FILE_PATH_COLUMN_NAME)
+          .isPresent()) {
+        columnNameValuePairs.add(
+            new ConstantColumnPopulators.VarCharNameValuePair(
+                ColumnUtils.FILE_PATH_COLUMN_NAME, unifiedReader.readEntry.getOriginalPath()));
+        hasAdditionalColumns = true;
+      }
+
+      if (unifiedReader.tableSchema.findFieldIgnoreCase(FILE_GROUP_INDEX).isPresent()) {
+        columnNameValuePairs.add(
+            new ConstantColumnPopulators.BigIntNameValuePair(
+                FILE_GROUP_INDEX, unifiedReader.readEntry.getFileGroupIndex()));
+        hasAdditionalColumns = true;
+      }
+
       // Add "fileName" system column, if the "tableSchema" explicitly requires this column.
-      return unifiedReader
-              .tableSchema
-              .findFieldIgnoreCase(ColumnUtils.FILE_PATH_COLUMN_NAME)
-              .isPresent()
+      return hasAdditionalColumns
           ? new AdditionalColumnsRecordReader(
               unifiedReader.context,
               reader,
-              Arrays.asList(
-                  new ConstantColumnPopulators.VarCharNameValuePair(
-                      ColumnUtils.FILE_PATH_COLUMN_NAME,
-                      unifiedReader.readEntry.getOriginalPath())),
+              columnNameValuePairs,
               unifiedReader.context.getAllocator())
           : reader;
     }

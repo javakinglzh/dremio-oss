@@ -82,7 +82,7 @@
   //Job table relies on the below CSS also since it's a global style
   .ReactVirtualized__Table {
     border-collapse: collapse;
-    * {
+    * :not(.dremio-icon-button) {
       outline: 0;
     }
     .ReactVirtualized__Table__headerRow {
@@ -346,7 +346,8 @@
     height: 100%;
     align-items: center;
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
       .headerCell__sorting-icon {
         display: inline-flex;
         opacity: 50%;

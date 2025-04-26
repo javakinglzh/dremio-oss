@@ -15,13 +15,11 @@
  */
 package com.dremio.exec.store.iceberg;
 
-import static com.dremio.exec.store.RecordReader.SPLIT_GEN_AND_COL_IDS_SCAN_SCHEMA;
-import static com.dremio.exec.store.SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA;
-
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.planner.physical.TableFunctionPrel;
 import com.dremio.exec.planner.physical.TableFunctionUtil;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
+import com.dremio.exec.record.BatchSchema;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
@@ -31,16 +29,17 @@ import org.apache.calcite.rel.type.RelDataType;
 
 public class ManifestFileDuplicateRemovePrel extends TableFunctionPrel {
   public ManifestFileDuplicateRemovePrel(
-      RelOptCluster cluster, RelTraitSet traitSet, RelNode child, Long survivingRowCount) {
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      RelNode child,
+      BatchSchema schema,
+      Long survivingRowCount) {
     this(
         cluster,
         traitSet,
         child,
-        TableFunctionUtil.getManifestFileDuplicateRemoveTableFunctionConfig(
-            SPLIT_GEN_AND_COL_IDS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA)),
-        CalciteArrowHelper.wrap(
-                SPLIT_GEN_AND_COL_IDS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA))
-            .toCalciteRecordType(cluster.getTypeFactory(), true),
+        TableFunctionUtil.getManifestFileDuplicateRemoveTableFunctionConfig(schema),
+        CalciteArrowHelper.wrap(schema).toCalciteRecordType(cluster.getTypeFactory(), true),
         survivingRowCount);
   }
 

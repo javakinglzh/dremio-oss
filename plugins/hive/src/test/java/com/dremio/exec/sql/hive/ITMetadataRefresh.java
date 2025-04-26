@@ -19,6 +19,7 @@ package com.dremio.exec.sql.hive;
 import org.junit.Test;
 
 import com.dremio.exec.catalog.CatalogServiceImpl;
+import com.dremio.exec.catalog.SourceUpdateType;
 import com.dremio.exec.hive.HiveTestBase;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.NamespaceKey;
@@ -29,7 +30,7 @@ public class ITMetadataRefresh extends HiveTestBase {
   public void ensureFirstTableRefresh() throws Exception {
     // refresh the catalog to ensure we have a base config in the kvstore.
     ((CatalogServiceImpl) getInstance(CatalogService.class))
-        .refreshSource(new NamespaceKey("hive"), null, CatalogServiceImpl.UpdateType.FULL);
+        .refreshSource(new NamespaceKey("hive"), null, SourceUpdateType.FULL);
 
     // now try to read refresh a table where we have a DatasetConfig but not a ReadDefinition.
     testBuilder()

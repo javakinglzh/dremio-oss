@@ -48,6 +48,7 @@ public abstract class JSONOutputRecordWriter extends AbstractRowBasedRecordWrite
   private final int maxCellSize;
 
   protected JSONOutputRecordWriter(OperatorContext context) {
+    super(context);
     maxCellSize = Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
   }
 
@@ -94,6 +95,8 @@ public abstract class JSONOutputRecordWriter extends AbstractRowBasedRecordWrite
   <#case "TimeNano">
   <#case "FixedSizeBinary">
   <#case "Duration">
+  <#case "ViewVarChar">
+  <#case "ViewVarBinary">
     <#assign typeName = "unsupported">
     <#break>
 
@@ -146,6 +149,9 @@ public abstract class JSONOutputRecordWriter extends AbstractRowBasedRecordWrite
     if (reader.isSet()) {
       final Text varValue = reader.readText();
       FieldSizeLimitExceptionHelper.checkSizeLimit((int)varValue.getLength(), maxCellSize, fieldId, logger);
+      if (isRowSizeLimitCheckEnabled()) {
+        currentFieldSize = varValue.getBytes().length;
+      }
       gen.writeVarChar(varValue.toString());
     } else {
       gen.writeVarcharNull();
@@ -154,11 +160,23 @@ public abstract class JSONOutputRecordWriter extends AbstractRowBasedRecordWrite
     if (reader.isSet()) {
       final byte[] varValue = reader.readByteArray();
       FieldSizeLimitExceptionHelper.checkSizeLimit(varValue.length, maxCellSize, fieldId, logger);
+      if (isRowSizeLimitCheckEnabled()) {
+        currentFieldSize = varValue.length;
+      }
       gen.writeBinary(varValue);
     } else {
       gen.writeBinaryNull();
     }
+    <#elseif typeName == "Decimal">
+      if (reader.isSet() && isRowSizeLimitCheckEnabled()) {
+        currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFieldSizeForDecimalType(reader.readBigDecimal().toBigInteger().toByteArray()
+.length);
+      }
+      gen.write${typeName}(reader);
     <#else>
+    if (reader.isSet() && isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFixedLengthTypeSize(reader.getMinorType());
+    }
     gen.write${typeName}(reader);
     </#if>
   </#if>

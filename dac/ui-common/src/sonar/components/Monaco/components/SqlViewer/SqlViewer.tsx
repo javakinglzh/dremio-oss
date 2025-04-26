@@ -41,6 +41,7 @@ export const SqlViewer: FC<SqlViewerProps> = ({
 }) => {
   const divEl = useRef<HTMLDivElement>(null);
   const colorScheme = useColorScheme();
+
   const theme = colorScheme === "dark" ? SQL_DARK_THEME : SQL_LIGHT_THEME;
 
   const options: monaco.editor.IStandaloneEditorConstructionOptions = useMemo(

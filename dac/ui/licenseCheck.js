@@ -54,6 +54,7 @@ const BLESSED = new Set([
   "Public Domain",
   "BSD-3-Clause",
   "(OFL-1.1 AND MIT)",
+  "(MPL-2.0 OR Apache-2.0)",
   "0BSD",
 ]);
 
@@ -230,7 +231,16 @@ const KNOWN = {
   "dialog-polyfill": {
     licenses: "BSD-3-Clause",
   },
+  "tr46": {
+    licenses: "MIT",
+    noFile: true,
+  },
 };
+
+// Dependencies that contain the word GPL on the license text that have been verified
+const GPL_KNOWN = [
+  "apache-arrow@17.0.0"
+]
 
 // @mui/styled mistakenly adds @babel/core as a peerDep which depends on caniuse-lite. This is never actually packaged
 const IGNORED = ["caniuse-lite"];
@@ -422,6 +432,16 @@ async function main() {
               licenseText = module.licenses; // best we can do
             }
 
+            const fullName = `${module.name}@${module.version}`
+            if (!GPL_KNOWN.includes(fullName)) {
+              const gplMatch = licenseText.match(/.*GPL.*/i);
+              if (gplMatch && gplMatch[0] !== "Dual licensed under GPLv2 & MIT") {
+                console.error('Found "GPL" in the License text for:');
+                console.error(`${module.name}\n${module.version}\n${module.repository}`)
+                process.exit(-1)
+              }
+            }
+
             return `${module.name}\n${module.version}\n${module.repository}\n\n${licenseText}`;
           })
           .join("\n\n" + "-".repeat(80) + "\n\n");
@@ -433,12 +453,6 @@ async function main() {
         console.log(
           "\nNOTICE_UI_PRODUCTION.txt written for production dependencies.",
         );
-
-        const gplMatch = text.match(/.*GPL.*/i);
-        if (gplMatch && gplMatch[0] !== "Dual licensed under GPLv2 & MIT") {
-          console.error('Found "GPL" in the NOTICE_UI_PRODUCTION.');
-          process.exit(-1);
-        }
 
         // check if there is any error
         let isError = false;

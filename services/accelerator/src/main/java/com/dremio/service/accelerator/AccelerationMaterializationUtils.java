@@ -20,12 +20,10 @@ import com.dremio.datastore.Serializer;
 import com.dremio.exec.store.sys.accel.AccelerationListManager;
 import com.dremio.service.job.proto.JoinAnalysis;
 import com.dremio.service.reflection.ReflectionUtils;
-import com.dremio.service.reflection.proto.DataPartition;
 import com.dremio.service.reflection.store.MaterializationStore;
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.Iterator;
-import java.util.List;
 import java.util.Optional;
 import java.util.stream.StreamSupport;
 import org.slf4j.Logger;
@@ -42,19 +40,6 @@ public class AccelerationMaterializationUtils {
       LoggerFactory.getLogger(AccelerationMaterializationUtils.class);
   private static final Serializer<JoinAnalysis, byte[]> JOIN_ANALYSIS_ABSTRACT_SERIALIZER =
       ProtostuffSerializer.of(JoinAnalysis.getSchema());
-
-  private static String dataPartitionsToString(List<DataPartition> partitions) {
-    if (partitions == null || partitions.isEmpty()) {
-      return "";
-    }
-
-    final StringBuilder dataPartitions = new StringBuilder();
-    for (int i = 0; i < partitions.size() - 1; i++) {
-      dataPartitions.append(partitions.get(i).getAddress()).append(", ");
-    }
-    dataPartitions.append(partitions.get(partitions.size() - 1).getAddress());
-    return dataPartitions.toString();
-  }
 
   public static Iterator<AccelerationListManager.MaterializationInfo> getMaterializationsFromStore(
       MaterializationStore materializationStore) {
@@ -85,14 +70,6 @@ public class AccelerationMaterializationUtils {
                       ? materialization.getFailure().getMessage()
                       : null;
 
-              Long lastRefreshDuration = null;
-              if (materialization.getLastRefreshFromPds() != null
-                  && materialization.getLastRefreshFinished() != null) {
-                lastRefreshDuration =
-                    materialization.getLastRefreshFinished()
-                        - materialization.getLastRefreshFromPds();
-              }
-
               return new AccelerationListManager.MaterializationInfo(
                   materialization.getReflectionId().getId(),
                   materialization.getId().getId(),
@@ -105,12 +82,11 @@ public class AccelerationMaterializationUtils {
                   joinAnalysisJson,
                   materialization.getState().toString(),
                   Optional.ofNullable(failureMsg).orElse("NONE"),
-                  dataPartitionsToString(materialization.getPartitionList()),
                   new Timestamp(
                       Optional.ofNullable(materialization.getLastRefreshFromPds()).orElse(0L)),
                   new Timestamp(
                       Optional.ofNullable(materialization.getLastRefreshFinished()).orElse(0L)),
-                  lastRefreshDuration);
+                  Optional.ofNullable(materialization.getLastRefreshDurationMillis()).orElse(0L));
             })
         .iterator();
   }

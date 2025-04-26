@@ -82,7 +82,7 @@ public class TestUpdateS3CredentialType extends DremioTest {
           ConnectionReader.of(CLASSPATH_SCAN_RESULT, ConnectionReaderImpl.class);
       UpgradeContext context =
           new UpgradeContext(
-              kvStoreProvider, legacyKVStoreProvider, lpPersistence, connectionReader, null);
+              kvStoreProvider, legacyKVStoreProvider, lpPersistence, connectionReader, null, null);
       task.upgrade(context);
 
       final NamespaceService namespaceService =

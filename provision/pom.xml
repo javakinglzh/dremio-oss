@@ -33,26 +33,4 @@
     <module>common</module>
     <module>yarn</module>
   </modules>
-
-  <dependencies/>
-
-  <build/>
-
-  <profiles>
-    <profile>
-      <id>default</id>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <modules>
-        <module>shimloader</module>
-      </modules>
-    </profile>
-  </profiles>
-
 </project>

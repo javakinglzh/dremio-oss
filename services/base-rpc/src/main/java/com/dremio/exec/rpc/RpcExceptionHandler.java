@@ -15,10 +15,7 @@
  */
 package com.dremio.exec.rpc;
 
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-
-public class RpcExceptionHandler<C extends RemoteConnection> implements ChannelHandler {
+public class RpcExceptionHandler<C extends RemoteConnection> extends ChannelExceptionHandler {
   static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(RpcExceptionHandler.class);
 
@@ -29,23 +26,7 @@ public class RpcExceptionHandler<C extends RemoteConnection> implements ChannelH
   }
 
   @Override
-  public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-    if (!ctx.channel().isOpen() || cause.getMessage().equals("Connection reset by peer")) {
-      logger.warn(
-          "Exception occurred with closed channel.  Connection: {}", connection.getName(), cause);
-      return;
-    } else {
-      logger.error(
-          "Exception in RPC communication.  Connection: {}.  Closing connection.",
-          connection.getName(),
-          cause);
-      ctx.close();
-    }
+  protected String getConnectionId() {
+    return connection.getName();
   }
-
-  @Override
-  public void handlerAdded(ChannelHandlerContext ctx) throws Exception {}
-
-  @Override
-  public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {}
 }

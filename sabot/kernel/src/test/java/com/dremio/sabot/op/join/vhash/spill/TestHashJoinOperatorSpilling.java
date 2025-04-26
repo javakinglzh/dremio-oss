@@ -357,8 +357,8 @@ public class TestHashJoinOperatorSpilling extends TestVHashJoinSpill {
       boolean isBroadcast, String partitionCols, String nonPartitionCols) {
     return newRuntimeFilterInfo(
         isBroadcast,
-        partitionCols != null ? Arrays.asList(partitionCols) : Collections.EMPTY_LIST,
-        nonPartitionCols != null ? Arrays.asList(nonPartitionCols) : Collections.EMPTY_LIST);
+        partitionCols != null ? Arrays.asList(partitionCols) : Collections.emptyList(),
+        nonPartitionCols != null ? Arrays.asList(nonPartitionCols) : Collections.emptyList());
   }
 
   private RuntimeFilterInfo newRuntimeFilterInfo(

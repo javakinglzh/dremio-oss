@@ -15,6 +15,8 @@
  */
 package com.dremio.exec.planner.events;
 
+import java.util.function.Consumer;
+
 /** A Callback for handling planner events. */
 public interface PlannerEventHandler<EVENT extends PlannerEvent> {
   PlannerEventHandler<PlannerEvent> NO_OP =
@@ -39,4 +41,19 @@ public interface PlannerEventHandler<EVENT extends PlannerEvent> {
    * @return the class of the event that this handler supports. Inheritance is not supported.
    */
   Class<EVENT> supports();
+
+  static <E extends PlannerEvent> PlannerEventHandler<E> handle(
+      Class<E> clazz, Consumer<E> handler) {
+    return new PlannerEventHandler<>() {
+      @Override
+      public void handle(E event) {
+        handler.accept(event);
+      }
+
+      @Override
+      public Class<E> supports() {
+        return clazz;
+      }
+    };
+  }
 }

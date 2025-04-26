@@ -15,16 +15,14 @@
  */
 
 import Immutable from "immutable";
+import { browserHistory } from "react-router";
 import { addProjectBase as wrapBackendLink } from "dremio-ui-common/utilities/projectBase.js";
 import * as sqlPaths from "dremio-ui-common/paths/sqlEditor.js";
 
-export function newGetHref(
-  entity: Immutable.Map<string, any>,
-  context: Record<string, any>,
-) {
+export function newGetHref(entity: Immutable.Map<string, any>) {
   const fileType = entity.get("fileType");
   const newFullPath = JSON.stringify(entity.get("fullPathList").toJS());
-
+  const location = browserHistory.getCurrentLocation();
   if (entity.get("fileType") === "file") {
     if (entity.get("queryable")) {
       const resourceId = entity.getIn(["fullPathList", 0]);
@@ -40,7 +38,7 @@ export function newGetHref(
     }
 
     return {
-      ...context.location,
+      ...location,
       state: {
         modal: "DatasetSettingsModal",
         tab: "format",

@@ -21,6 +21,7 @@ import com.dremio.service.jobtelemetry.client.JobTelemetryExecutorClient;
 import com.dremio.service.maestroservice.MaestroClient;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.Empty;
+import io.grpc.stub.StreamObserver;
 import java.util.Optional;
 
 /** A QueryTracker which does not send any messages to Coordinator */
@@ -31,7 +32,8 @@ public class NoOpQueryTracker implements QueryTracker {
       QueryTicket ticket,
       CoordinationProtos.NodeEndpoint foreman,
       MaestroClient maestroClient,
-      JobTelemetryExecutorClient telemetryClient) {
+      JobTelemetryExecutorClient telemetryClient,
+      StreamObserver<Empty> startFragmentObserver) {
     return true;
   }
 
@@ -77,4 +79,7 @@ public class NoOpQueryTracker implements QueryTracker {
   public FileCursorManagerFactory getFileCursorManagerFactory() {
     return null;
   }
+
+  @Override
+  public void markStartFragmentDone(StreamObserver<Empty> startFragmentObserver, Throwable th) {}
 }

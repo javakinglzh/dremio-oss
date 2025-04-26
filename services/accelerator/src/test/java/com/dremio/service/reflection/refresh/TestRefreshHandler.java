@@ -46,7 +46,6 @@ public class TestRefreshHandler {
     when(attemptId.getAttemptNum()).thenReturn(attemptIdInt);
 
     // test with IcebergDataset, not initial refresh
-    materialization.setIsIcebergDataset(true);
     decision.setInitialRefresh(false);
     final String materilizatonBasePathstr = "materilizatonBasePathstr";
     materialization.setBasePath(materilizatonBasePathstr);
@@ -57,16 +56,6 @@ public class TestRefreshHandler {
 
     // test with IcebergDataset, initial refresh
     decision.setInitialRefresh(true);
-    Assert.assertEquals(
-        ImmutableList.of(
-            ACCELERATOR_STORAGEPLUGIN_NAME,
-            reflectionIdStr,
-            materilizatonIdStr + "_" + attemptIdInt),
-        RefreshHandler.getRefreshPath(reflectionId, materialization, decision, attemptId));
-
-    // test with non-Iceberg dataset
-    materialization.setIsIcebergDataset(false);
-    decision.setInitialRefresh(false);
     Assert.assertEquals(
         ImmutableList.of(
             ACCELERATOR_STORAGEPLUGIN_NAME,

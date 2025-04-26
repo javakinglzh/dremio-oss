@@ -15,31 +15,19 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
-import com.dremio.common.exceptions.UserException;
+import com.dremio.config.DremioConfig;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
-import com.dremio.exec.catalog.conf.Property;
-import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.iceberg.IcebergUtils;
 import io.protostuff.Tag;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.CatalogProperties;
-import org.apache.iceberg.CatalogUtil;
-import org.apache.iceberg.catalog.Catalog;
-import org.apache.iceberg.rest.RESTCatalog;
+import javax.inject.Provider;
 
-@SourceType(
-    value = "RESTCATALOG",
-    label = "REST Iceberg Catalog",
-    uiConfig = "restcatalog-layout.json")
 public class RestIcebergCatalogPluginConfig extends IcebergCatalogPluginConfig {
 
   // 1-9   - IcebergCatalogPluginConfig
   // 10-19 - RestIcebergCatalogPluginConfig
-  // 20-99 - Reserved
+  // 20-109 - Reserved by other plugins
 
   @Tag(10)
   @DisplayMetadata(label = "Endpoint URI")
@@ -63,55 +51,15 @@ public class RestIcebergCatalogPluginConfig extends IcebergCatalogPluginConfig {
    */
   public boolean isRecursiveAllowedNamespaces = true;
 
+  public String getRestEndpointURI(DremioConfig dremioConfig) {
+    return restEndpointUri;
+  }
+
   @Override
-  public CatalogAccessor createCatalog(Configuration config, SabotContext context) {
-    try {
-      initializeHadoopConf(config);
-      return new RestCatalogAccessor(
-          createRestCatalog(config, context),
-          config,
-          context.getOptionManager(),
-          allowedNamespaces,
-          isRecursiveAllowedNamespaces);
-    } catch (Exception e) {
-      throw UserException.connectionError(e)
-          .message("Can't connect to %s catalog. %s", restCatalogImpl(context).getSimpleName(), e)
-          .buildSilently();
-    }
-  }
-
-  protected String catalogName() {
-    return null;
-  }
-
-  protected Class<?> restCatalogImpl(SabotContext context) {
-    return RESTCatalog.class;
-  }
-
-  protected Map<String, String> catalogProperties(SabotContext context) {
-    Map<String, String> properties = new HashMap<>();
-
-    String catalogImplClassName = restCatalogImpl(context).getName();
-    properties.put(CatalogProperties.CATALOG_IMPL, catalogImplClassName);
-    properties.put(CatalogProperties.URI, restEndpointUri);
-
-    return properties;
-  }
-
-  protected com.google.common.base.Supplier<Catalog> createRestCatalog(
-      Configuration config, SabotContext context) {
-    Map<String, String> properties = catalogProperties(context);
-
-    config.set(IcebergUtils.ENABLE_AZURE_ABFSS_SCHEME, "true");
-    properties.put(IcebergUtils.ENABLE_AZURE_ABFSS_SCHEME, "true");
-
-    for (Property p : getProperties()) {
-      config.set(p.name, p.value);
-      properties.put(p.name, p.value);
-    }
-
-    return () ->
-        CatalogUtil.loadCatalog(
-            restCatalogImpl(context).getName(), catalogName(), properties, config);
+  public IcebergCatalogPlugin newPlugin(
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new RestIcebergCatalogPlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 }

@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.planner.physical;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.TableFormatWriterOptions;
 import com.dremio.exec.physical.config.WriterCommitterPOP;
@@ -50,7 +50,7 @@ public class WriterCommitterPrel extends SingleRel implements Prel {
 
   private final String tempLocation;
   private final String finalLocation;
-  private final MutablePlugin plugin;
+  private final SupportsFsMutablePlugin plugin;
   private final String userName;
   private final CreateTableEntry createTableEntry;
   private final Optional<DatasetConfig> datasetConfig;
@@ -62,7 +62,7 @@ public class WriterCommitterPrel extends SingleRel implements Prel {
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,
-      MutablePlugin plugin,
+      SupportsFsMutablePlugin plugin,
       String tempLocation,
       String finalLocation,
       String userName,
@@ -81,33 +81,6 @@ public class WriterCommitterPrel extends SingleRel implements Prel {
     this.isPartialRefresh = partialRefresh;
     this.readSignatureEnabled = readSignatureEnabled;
     this.sourceTablePluginId = sourceTablePluginId;
-  }
-
-  public WriterCommitterPrel(
-      RelOptCluster cluster,
-      RelTraitSet traits,
-      RelNode child,
-      MutablePlugin plugin,
-      String tempLocation,
-      String finalLocation,
-      String userName,
-      CreateTableEntry createTableEntry,
-      Optional<DatasetConfig> datasetConfig,
-      boolean partialRefresh,
-      boolean readSignatureEnabled) {
-    this(
-        cluster,
-        traits,
-        child,
-        plugin,
-        tempLocation,
-        finalLocation,
-        userName,
-        createTableEntry,
-        datasetConfig,
-        partialRefresh,
-        readSignatureEnabled,
-        null);
   }
 
   @Override
@@ -225,7 +198,7 @@ public class WriterCommitterPrel extends SingleRel implements Prel {
     return sourceTablePluginId;
   }
 
-  protected MutablePlugin getPlugin() {
+  protected SupportsFsMutablePlugin getPlugin() {
     return plugin;
   }
 

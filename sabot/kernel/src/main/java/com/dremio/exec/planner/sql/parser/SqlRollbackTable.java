@@ -116,8 +116,7 @@ public class SqlRollbackTable extends SqlCall {
       }
     } else {
       type = RollbackOption.Type.TIME;
-      Object value = SqlHandlerUtil.convertToTimeInMillis(literal, specifier.getParserPosition());
-      rollbackValue = Long.parseLong(String.valueOf(value));
+      rollbackValue = SqlHandlerUtil.convertToTimeInMillis(literal, specifier.getParserPosition());
     }
 
     return new RollbackOption(type, rollbackValue, literal);

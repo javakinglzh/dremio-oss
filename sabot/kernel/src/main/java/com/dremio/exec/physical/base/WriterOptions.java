@@ -92,8 +92,6 @@ public class WriterOptions {
    */
   private boolean mergeOnReadRowSplitterMode;
 
-  private final boolean writeAsClustering;
-
   public WriterOptions(
       Integer ringCount,
       List<String> partitionColumns,
@@ -146,8 +144,7 @@ public class WriterOptions {
         null,
         null,
         Collections.emptyMap(),
-        mergeOnReadRowSplitterMode,
-        false);
+        mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions(
@@ -179,8 +176,7 @@ public class WriterOptions {
         null,
         null,
         Collections.emptyMap(),
-        mergeOnReadRowSplitterMode,
-        false);
+        mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions(
@@ -213,8 +209,7 @@ public class WriterOptions {
         null,
         null,
         tableProperties,
-        mergeOnReadRowSplitterMode,
-        false);
+        mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions(
@@ -248,44 +243,7 @@ public class WriterOptions {
         version,
         null,
         tableProperties,
-        mergeOnReadRowSplitterMode,
-        false);
-  }
-
-  public WriterOptions(
-      Integer ringCount,
-      List<String> partitionColumns,
-      List<String> sortColumns,
-      List<String> distributionColumns,
-      PartitionDistributionStrategy partitionDistributionStrategy,
-      String tableLocation,
-      boolean singleWriter,
-      long recordLimit,
-      TableFormatWriterOptions tableFormatOptions,
-      ByteString extendedProperty,
-      ResolvedVersionContext version,
-      Map<String, String> tableProperties,
-      boolean mergeOnReadRowSplitterMode,
-      boolean writeAsClustering) {
-    this(
-        ringCount,
-        partitionColumns,
-        sortColumns,
-        distributionColumns,
-        partitionDistributionStrategy,
-        tableLocation,
-        singleWriter,
-        recordLimit,
-        tableFormatOptions,
-        extendedProperty,
-        false,
-        Long.MAX_VALUE,
-        true,
-        version,
-        null,
-        tableProperties,
-        mergeOnReadRowSplitterMode,
-        writeAsClustering);
+        mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions(
@@ -318,8 +276,7 @@ public class WriterOptions {
         version,
         null,
         Collections.emptyMap(),
-        mergeOnReadRowSplitterMode,
-        false);
+        mergeOnReadRowSplitterMode);
   }
 
   @JsonCreator
@@ -341,8 +298,7 @@ public class WriterOptions {
       @JsonProperty("versionContext") ResolvedVersionContext version,
       @JsonProperty("combineSmallFileOptions") CombineSmallFileOptions combineSmallFileOptions,
       @JsonProperty("tableProperties") Map<String, String> tableProperties,
-      @JsonProperty("mergeOnReadRowSplitterMode") boolean mergeOnReadRowSplitterMode,
-      @JsonProperty("writeAsClustering") boolean writeAsClustering) {
+      @JsonProperty("mergeOnReadRowSplitterMode") boolean mergeOnReadRowSplitterMode) {
     this.ringCount = ringCount;
     this.partitionColumns = partitionColumns;
     this.sortColumns = sortColumns;
@@ -360,11 +316,11 @@ public class WriterOptions {
     this.combineSmallFileOptions = combineSmallFileOptions;
     this.tableProperties = tableProperties;
     this.mergeOnReadRowSplitterMode = mergeOnReadRowSplitterMode;
-    this.writeAsClustering = writeAsClustering;
   }
 
+  @JsonIgnore
   public boolean isWriteAsClustering() {
-    return writeAsClustering;
+    return tableFormatOptions != null && tableFormatOptions.getClusteringOptions() != null;
   }
 
   @JsonIgnore
@@ -386,6 +342,10 @@ public class WriterOptions {
 
   public List<String> getPartitionColumns() {
     return partitionColumns;
+  }
+
+  public PartitionDistributionStrategy getPartitionDistributionStrategy() {
+    return partitionDistributionStrategy;
   }
 
   public String getTableLocation() {
@@ -488,8 +448,7 @@ public class WriterOptions {
         null,
         null,
         this.getTableProperties(),
-        this.mergeOnReadRowSplitterMode,
-        this.writeAsClustering);
+        this.mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions withOutputLimitSize(long outputLimitSize) {
@@ -510,8 +469,7 @@ public class WriterOptions {
         null,
         null,
         this.getTableProperties(),
-        this.mergeOnReadRowSplitterMode,
-        this.writeAsClustering);
+        this.mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions withPartitionColumns(List<String> partitionColumns) {
@@ -548,8 +506,7 @@ public class WriterOptions {
         Preconditions.checkNotNull(version),
         null,
         this.getTableProperties(),
-        this.mergeOnReadRowSplitterMode,
-        this.writeAsClustering);
+        this.mergeOnReadRowSplitterMode);
   }
 
   public WriterOptions withCombineSmallFileOptions(
@@ -571,12 +528,33 @@ public class WriterOptions {
         version,
         combineSmallFileOptions,
         this.getTableProperties(),
-        this.mergeOnReadRowSplitterMode,
-        this.writeAsClustering);
+        this.mergeOnReadRowSplitterMode);
   }
 
   public TableFormatWriterOptions getTableFormatOptions() {
     return this.tableFormatOptions;
+  }
+
+  public WriterOptions withTableFormatWriterOptions(
+      TableFormatWriterOptions tableFormatWriterOptions) {
+    return new WriterOptions(
+        this.ringCount,
+        this.partitionColumns,
+        this.sortColumns,
+        this.distributionColumns,
+        this.partitionDistributionStrategy,
+        this.tableLocation,
+        this.singleWriter,
+        recordLimit,
+        tableFormatWriterOptions,
+        this.extendedProperty,
+        this.outputLimitEnabled,
+        this.outputLimitSize,
+        readSignatureSupport,
+        version,
+        combineSmallFileOptions,
+        this.getTableProperties(),
+        this.mergeOnReadRowSplitterMode);
   }
 
   public RelTraitSet inferTraits(

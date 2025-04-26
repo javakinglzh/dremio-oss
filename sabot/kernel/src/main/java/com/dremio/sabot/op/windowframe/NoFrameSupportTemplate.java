@@ -41,7 +41,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   private FunctionContext context;
   private VectorAccessible container;
   private VectorContainer internal;
-  private boolean lagCopiedToInternal;
   private List<VectorContainer> batches;
   private int outputCount; // number of rows in currently/last processed batch
 
@@ -69,7 +68,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
 
     internal = new VectorContainer(oContext.getAllocator());
     allocateInternal();
-    lagCopiedToInternal = false;
 
     outputCount = 0;
     partition = null;
@@ -129,7 +127,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
         validityBuffer.setZero(0, validityBuffer.capacity());
       }
     }
-    lagCopiedToInternal = false;
   }
 
   /**
@@ -146,46 +143,75 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
         partition,
         currentRow,
         outputCount);
-    setupCopyNext(current, container);
+
+    setupCopyNext(context, current, container);
     // copy remaining from current
-    setupCopyPrev(current, container);
+    setupCopyPrev(context, current, container);
     int row = currentRow;
     partition.setFirstRowInPartition(currentRow);
-    boolean hasNextBatch = batches.size() - currentBatchIndex > 1;
-    if (hasNextBatch) {
-      setupCopyFromNextBatch(batches.get(currentBatchIndex + 1), container);
-    }
-
     // process all rows except the last one of the batch/partition
     while (row < outputCount && !partition.isDone()) {
       partition.setCurrentRowInPartition(row);
-      copyPrevFromInternal(row);
+
+      copyFromPastBatch(row, currentBatchIndex);
       copyPrev(row, row, partition);
       processRow(row);
-      if (!partition.isDone()) {
-        copyNext(row, row, partition);
-        if (hasNextBatch) {
-          copyFromNextBatch(row, row, partition);
-        }
-      }
-      copyPrevToInternal(current, row);
+      copyNext(row, row, partition);
+      copyFromNextBatch(row, currentBatchIndex);
       row++;
     }
     return row;
   }
 
-  private void copyPrevToInternal(VectorAccessible current, int row) {
-    logger.trace("copying {} into internal", row);
-    setupCopyToNextBatch(current, internal);
-    copyToNextBatch(row, row, partition);
-    lagCopiedToInternal = true;
+  /**
+   * Copies values from the previous batch to the current batch if the rows belong to the same
+   * partition. This method is recursive and processes all previous batches until the first batch or
+   * until a row from a different partition is encountered.
+   *
+   * @param row The index of the current row in the current batch.
+   * @param batchIndex The index of the current batch in the list of batches.
+   */
+  private void copyFromPastBatch(int row, int batchIndex) {
+    // Check if there is a previous batch to process
+    if (batchIndex > 0) {
+      // Get the previous batch
+      final VectorAccessible previousBatch = batches.get(batchIndex - 1);
+      // Update the count of rows skipped in the partition
+      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch + previousBatch.getRecordCount();
+      // Recursively process the previous batch
+      copyFromPastBatch(row, batchIndex - 1);
+      // Revert the count of rows skipped in the partition after processing
+      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch - previousBatch.getRecordCount();
+      // Set up the copy operation for the previous batch
+      setupCopyFromPastBatch(context, previousBatch, container);
+      // Perform the copy operation from the previous batch to the current batch
+      copyFromPastBatch(row, row, partition, previousBatch, current);
+    }
   }
 
-  private void copyPrevFromInternal(int row) {
-    if (lagCopiedToInternal) {
-      setupCopyFromInternal(internal, container);
-      copyFromInternal(row, row, partition);
-      lagCopiedToInternal = false;
+  /**
+   * Recursively copies values from the next batch to the current batch if the rows belong to the
+   * same partition. This method processes all subsequent batches until the last batch or until a
+   * row from a different partition is encountered.
+   *
+   * @param row The index of the current row in the current batch.
+   * @param batchIndex The index of the current batch in the list of batches.
+   */
+  private void copyFromNextBatch(int row, int batchIndex) {
+    // Check if there is a next batch to process
+    if (batchIndex + 1 < batches.size()) {
+      // Get the next batch
+      final VectorAccessible nextBatch = batches.get(batchIndex + 1);
+      // Update the count of rows skipped in the partition
+      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch + nextBatch.getRecordCount();
+      // Recursively process the next batch
+      copyFromNextBatch(row, batchIndex + 1);
+      // Revert the count of rows skipped in the partition after processing
+      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch - nextBatch.getRecordCount();
+      // Set up the copy operation for the next batch
+      setupCopyFromNextBatch(context, nextBatch, container);
+      // Perform the copy operation from the next batch to the current batch
+      copyFromNextBatch(row, row, partition, nextBatch, current);
     }
   }
 
@@ -247,7 +273,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
                   0,
                   batches.get(currentBatchIndex + 1)); // next batch contains a different partition
     }
-
     partition.updateLength(length, !(requireFullPartition || lastBatch));
   }
 
@@ -326,15 +351,21 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
       @Named("partition") Partition partition);
 
   public abstract void setupCopyNext(
-      @Named("incoming") VectorAccessible incoming, @Named("outgoing") VectorAccessible outgoing);
+      @Named("context") FunctionContext context,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("outgoing") VectorAccessible outgoing);
 
   public abstract void copyFromNextBatch(
       @Named("inIndex") int inIndex,
       @Named("outIndex") int outIndex,
-      @Named("partition") Partition partition);
+      @Named("partition") Partition partition,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("b2") VectorAccessible b2);
 
   public abstract void setupCopyFromNextBatch(
-      @Named("incoming") VectorAccessible incoming, @Named("outgoing") VectorAccessible outgoing);
+      @Named("context") FunctionContext context,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("outgoing") VectorAccessible outgoing);
 
   /**
    * copies value(s) from inIndex row to outIndex row. Mostly used by LAG. inIndex always points to
@@ -349,23 +380,21 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
       @Named("partition") Partition partition);
 
   public abstract void setupCopyPrev(
-      @Named("incoming") VectorAccessible incoming, @Named("outgoing") VectorAccessible outgoing);
+      @Named("context") FunctionContext context,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("outgoing") VectorAccessible outgoing);
 
-  public abstract void copyToNextBatch(
+  public abstract void copyFromPastBatch(
       @Named("inIndex") int inIndex,
       @Named("outIndex") int outIndex,
-      @Named("partition") Partition partition);
+      @Named("partition") Partition partition,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("b2") VectorAccessible b2);
 
-  public abstract void setupCopyToNextBatch(
-      @Named("incoming") VectorAccessible incoming, @Named("outgoing") VectorAccessible outgoing);
-
-  public abstract void copyFromInternal(
-      @Named("inIndex") int inIndex,
-      @Named("outIndex") int outIndex,
-      @Named("partition") Partition partition);
-
-  public abstract void setupCopyFromInternal(
-      @Named("incoming") VectorAccessible incoming, @Named("outgoing") VectorAccessible outgoing);
+  public abstract void setupCopyFromPastBatch(
+      @Named("context") FunctionContext context,
+      @Named("incoming") VectorAccessible incoming,
+      @Named("outgoing") VectorAccessible outgoing);
 
   /** reset all window functions */
   public abstract boolean resetValues();

@@ -27,18 +27,21 @@ import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.NessieConnectionProvider;
 import com.dremio.options.OptionManager;
 import com.dremio.options.Options;
+import com.dremio.services.nessie.proxy.ProxyV2ConfigResource;
 import com.dremio.services.nessie.proxy.ProxyV2TreeResource;
+import com.google.common.annotations.VisibleForTesting;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
 import javax.ws.rs.NotFoundException;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
+import javax.ws.rs.core.HttpHeaders;
 import org.projectnessie.client.api.NessieApiV2;
 
 /** Resource for providing APIs for Nessie As a Source. */
 @Secured
 @RolesAllowed({"admin", "user"})
-@Path("/v2/source/{sourceName}/trees")
+@Path("/v2/source/{sourceName}")
 @Options
 public class NessieSourceResource {
 
@@ -46,16 +49,18 @@ public class NessieSourceResource {
       org.slf4j.LoggerFactory.getLogger(NessieSourceResource.class);
   private CatalogService catalogService;
   private OptionManager optionManager;
+  private final HttpHeaders headers;
 
   @Inject
-  public NessieSourceResource(CatalogService catalogService, OptionManager optionManager) {
+  public NessieSourceResource(
+      CatalogService catalogService, OptionManager optionManager, HttpHeaders headers) {
     this.catalogService = catalogService;
     this.optionManager = optionManager;
+    this.headers = headers;
   }
-  ;
 
-  @Path("/")
-  public ProxyV2TreeResource handle(@PathParam("sourceName") String sourceName) {
+  @VisibleForTesting
+  NessieApiV2 api(String sourceName) {
     if (optionManager.getOption(NESSIE_SOURCE_API)) {
       NessieConnectionProvider provider;
       try {
@@ -71,7 +76,7 @@ public class NessieSourceResource {
         logger.error("Unexpected Error");
         throw new NessieSourceResourceException(exception, "Unexpected Error", BAD_REQUEST);
       }
-      return getTreeResource(provider.getNessieApi());
+      return provider.getNessieApi();
     } else {
       logger.error(
           String.format(
@@ -84,7 +89,17 @@ public class NessieSourceResource {
     }
   }
 
+  @Path("/trees")
+  public ProxyV2TreeResource handleTree(@PathParam("sourceName") String sourceName) {
+    return getTreeResource(api(sourceName));
+  }
+
+  @Path("/config")
+  public ProxyV2ConfigResource handleConfig(@PathParam("sourceName") String sourceName) {
+    return new V2ConfigResource(api(sourceName));
+  }
+
   protected ProxyV2TreeResource getTreeResource(NessieApiV2 nessieApi) {
-    return new V2TreeResource(nessieApi);
+    return new V2TreeResource(nessieApi, headers);
   }
 }

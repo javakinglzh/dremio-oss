@@ -46,6 +46,7 @@ import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.namespace.source.proto.UpdateMode;
 import com.dremio.test.DremioTest;
 import java.util.Collections;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -118,7 +119,7 @@ public class TestMetadataSynchronizer {
     SupportsListingDatasets sourceMetadata = mock(TestSourceMetadata.class);
     when(sourceMetadata.listDatasetHandles(any()))
         .thenThrow(new ConnectorException("Source error"));
-    when(bridge.getMetadata()).thenReturn((SourceMetadata) sourceMetadata);
+    when(bridge.getMetadata()).thenReturn(Optional.of((SourceMetadata) sourceMetadata));
     final MetadataSynchronizer synchronizeRun =
         new MetadataSynchronizer(
             namespaceService,
@@ -127,8 +128,8 @@ public class TestMetadataSynchronizer {
             metadataPolicy,
             datasetSaver,
             retrievalOptions,
-            optionManager);
-    synchronizeRun.setup();
+            optionManager,
+            null);
     synchronizeRun.go();
     Assertions.assertNotNull(
         namespaceService.getDataset(new NamespaceKey(PathUtils.parseFullPath(TABLE))));
@@ -141,7 +142,7 @@ public class TestMetadataSynchronizer {
     SupportsListingDatasets sourceMetadata = mock(TestSourceMetadata.class);
     when(sourceMetadata.listDatasetHandles(any(GetDatasetOption[].class)))
         .thenReturn(Collections::emptyIterator);
-    when(bridge.getMetadata()).thenReturn((SourceMetadata) sourceMetadata);
+    when(bridge.getMetadata()).thenReturn(Optional.of((SourceMetadata) sourceMetadata));
     final MetadataSynchronizer synchronizeRun =
         new MetadataSynchronizer(
             namespaceService,
@@ -150,8 +151,8 @@ public class TestMetadataSynchronizer {
             metadataPolicy,
             datasetSaver,
             retrievalOptions,
-            optionManager);
-    synchronizeRun.setup();
+            optionManager,
+            null);
     synchronizeRun.go();
     Assertions.assertThrows(
         NamespaceNotFoundException.class,

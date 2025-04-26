@@ -36,7 +36,4 @@
     </dependency>
   </dependencies>
 
-  <build>
-    <plugins/>
-  </build>
 </project>

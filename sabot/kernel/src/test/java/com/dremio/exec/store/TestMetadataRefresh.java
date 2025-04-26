@@ -21,6 +21,7 @@ import static org.junit.Assert.fail;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.exec.catalog.CatalogServiceImpl;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.store.dfs.InternalFileConf;
 import com.dremio.service.namespace.source.proto.SourceConfig;
@@ -235,7 +236,9 @@ public class TestMetadataRefresh extends BaseTestQuery {
       c.setConnectionConf(conf);
       c.setName(name);
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
-      catalogService.getSystemUserCatalog().createSource(c);
+      catalogService
+          .getSystemUserCatalog()
+          .createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     // wait for source to be created

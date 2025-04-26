@@ -21,9 +21,10 @@ import static com.dremio.service.flight.client.properties.DremioFlightClientProp
 
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.SessionOptionManagerImpl;
 import com.dremio.options.OptionManager;
+import com.dremio.options.OptionValidatorListing;
+import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.tokens.TokenDetails;
 import com.dremio.service.tokens.TokenManager;
@@ -31,6 +32,8 @@ import com.dremio.service.usersessions.UserSessionService;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Provider;
 import org.apache.arrow.flight.CallHeaders;
@@ -45,16 +48,18 @@ public class TokenCacheFlightSessionManager implements DremioFlightSessionsManag
       LoggerFactory.getLogger(TokenCacheFlightSessionManager.class);
 
   private final Cache<String, UserSession> userSessions;
-  private final Provider<SabotContext> sabotContextProvider;
   private final Provider<TokenManager> tokenManagerProvider;
   private final OptionManager optionManager;
+  private final OptionValidatorListing optionValidatorListing;
 
   @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
   public TokenCacheFlightSessionManager(
-      Provider<SabotContext> sabotContextProvider, Provider<TokenManager> tokenManagerProvider) {
-    this.sabotContextProvider = sabotContextProvider;
+      Provider<TokenManager> tokenManagerProvider,
+      OptionManager optionManager,
+      OptionValidatorListing optionValidatorListing) {
     this.tokenManagerProvider = tokenManagerProvider;
-    this.optionManager = sabotContextProvider.get().getOptionManager();
+    this.optionManager = optionManager;
+    this.optionValidatorListing = optionValidatorListing;
     this.userSessions =
         CacheBuilder.newBuilder()
             .expireAfterAccess(
@@ -83,7 +88,9 @@ public class TokenCacheFlightSessionManager implements DremioFlightSessionsManag
 
   @Override
   public UserSessionService.UserSessionData createUserSession(
-      String token, CallHeaders incomingHeaders) {
+      String token,
+      CallHeaders incomingHeaders,
+      Optional<Map<String, SessionOptionValue>> sessionOptionValueMap) {
     final TokenDetails tokenDetails = tokenManagerProvider.get().validateToken(token);
     final UserSession session = buildUserSession(tokenDetails.username, incomingHeaders);
 
@@ -101,6 +108,10 @@ public class TokenCacheFlightSessionManager implements DremioFlightSessionsManag
 
   @Override
   public void updateSession(UserSessionService.UserSessionData updatedSession) {}
+
+  @Override
+  public void closeSession(
+      FlightProducer.CallContext callContext, UserSessionService.UserSessionData sessionData) {}
 
   /**
    * Determines if we have reached the max number of allowed sessions.
@@ -134,9 +145,7 @@ public class TokenCacheFlightSessionManager implements DremioFlightSessionsManag
     final UserSession.Builder builder =
         UserSession.Builder.newBuilder()
             .withSessionOptionManager(
-                new SessionOptionManagerImpl(
-                    sabotContextProvider.get().getOptionValidatorListing()),
-                optionManager)
+                new SessionOptionManagerImpl(optionValidatorListing), optionManager)
             .withCredentials(
                 UserBitShared.UserCredentials.newBuilder().setUserName(username).build())
             .withUserProperties(UserProtos.UserProperties.getDefaultInstance())

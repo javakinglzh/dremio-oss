@@ -16,17 +16,26 @@
 package com.dremio.sabot.op.aggregate.vectorized;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.exec.record.selection.SelectionVector2;
+import com.dremio.sabot.op.common.ht2.FixedBlockVector;
+import com.dremio.sabot.op.common.ht2.HashTable;
 import com.dremio.sabot.op.common.ht2.LBlockHashTable;
+import com.dremio.sabot.op.common.ht2.PivotDef;
 import com.dremio.sabot.op.common.ht2.ResizeListener;
 import com.dremio.sabot.op.common.ht2.SpaceCheckListener;
+import com.dremio.sabot.op.common.ht2.Unpivots;
+import com.dremio.sabot.op.common.ht2.VariableBlockVector;
+import com.dremio.sabot.op.join.vhash.spill.SV2UnsignedUtil;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import io.netty.util.internal.PlatformDependent;
 import java.util.Arrays;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.util.LargeMemoryUtil;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.DecimalVector;
 import org.apache.arrow.vector.FieldVector;
@@ -38,9 +47,11 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(VectorizedHashAggPartition.class);
   boolean spilled;
-  final LBlockHashTable hashTable;
+  final HashTable hashTable;
   final AccumulatorSet accumulator;
   final int blockWidth;
+  private final boolean useNewFixedAccumulatorAllocation;
+  private final int targetBatchSize;
   int records;
   ArrowBuf buffer;
   private VectorizedHashAggDiskPartition spillInfo;
@@ -53,12 +64,26 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
   private int[] batchValueCount;
   private final Stopwatch forceAccumTimer = Stopwatch.createUnstarted();
   private int numForceAccums = 0;
+  private int[] blockRowCounts;
+  private int currentOutputBlockIndex;
+  private int maxHashTableBatchSize;
 
   /*
   When this VectorizedHashAggOperator picks this partition to output, it does it one batch at a time and serially.
   Below member keeps track of current batch index to output.
    */
   private int nextBatchToOutput = 0;
+  private PivotDef pivot;
+  private BufferAllocator allocator;
+  private ArrowBuf sv2;
+  private int sv2Index;
+  private FixedBlockVector fbv;
+  private VariableBlockVector vbv;
+  private boolean isClosed;
+  private int currentBlockStartRow;
+  private boolean eod;
+
+  // private ArrowBuf ordinals;
 
   /**
    * Create a partition. Used by {@link VectorizedHashAggOperator} at setup time to initialize all
@@ -67,24 +92,36 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
    *
    * @param accumulator accumulator for the partition
    * @param hashTable hashtable for the partition
-   * @param blockWidth pivot block width.
+   * @param pivot PivotDef for the partition
    * @param decimalV2Enabled
    */
   public VectorizedHashAggPartition(
+      final BufferAllocator allocator,
+      final int maxHashTableBatchSize,
+      final int targetBatchSize,
       final AccumulatorSet accumulator,
-      final LBlockHashTable hashTable,
-      final int blockWidth,
+      final HashTable hashTable,
+      final PivotDef pivot,
       final String identifier,
       final ArrowBuf buffer,
-      boolean decimalV2Enabled) {
+      boolean decimalV2Enabled,
+      boolean useNewFixedAccumulatorAllocation) {
     Preconditions.checkArgument(
         hashTable != null, "Error: initializing a partition with invalid hash table");
+    this.allocator = allocator;
     this.spilled = false;
     this.records = 0;
     this.hashTable = hashTable;
-    this.hashTable.registerSpaceCheckListener(this);
+    if (hashTable instanceof LBlockHashTable) {
+      ((LBlockHashTable) this.hashTable).registerSpaceCheckListener(this);
+    }
+    // In order to output the single block of hash table into multiple batches
+    // the target batch size needs to rounded down to a multiple of 8. This eases the
+    // slicing of validity buffer.
+    this.targetBatchSize = targetBatchSize >> 3 << 3;
     this.accumulator = accumulator;
-    this.blockWidth = blockWidth;
+    this.pivot = pivot;
+    this.blockWidth = pivot.getBlockWidth();
     this.spillInfo = null;
     this.identifier = identifier;
     this.buffer = buffer;
@@ -92,6 +129,11 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
     batchSpaceUsage = new int[0];
     batchValueCount = new int[0];
     buffer.getReferenceManager().retain(1);
+    currentOutputBlockIndex = -1;
+    currentBlockStartRow = 0;
+    eod = false;
+    this.maxHashTableBatchSize = maxHashTableBatchSize;
+    this.useNewFixedAccumulatorAllocation = useNewFixedAccumulatorAllocation;
   }
 
   /**
@@ -110,8 +152,126 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
 
   @Override
   public void close() throws Exception {
-    AutoCloseables.close(hashTable, accumulator, buffer);
-    this.buffer = null;
+    if (!isClosed) {
+      // When there is a problem during setup, it is possible that the
+      // close could be called more than once.
+      AutoCloseables.close(hashTable, accumulator, buffer, sv2);
+      this.buffer = null;
+      isClosed = true;
+    }
+  }
+
+  public boolean useNewFixedAccumulatorAllocation() {
+    return this.useNewFixedAccumulatorAllocation;
+  }
+
+  void checkAndResizeHTBuffers(int numRecords) {
+    if (sv2 == null) {
+      int numRecordsToUse = Math.max(numRecords, maxHashTableBatchSize);
+      try (AutoCloseables.RollbackCloseable rc = new AutoCloseables.RollbackCloseable(true)) {
+        sv2 = rc.add(allocator.buffer(numRecordsToUse * SelectionVector2.RECORD_SIZE));
+        rc.commit();
+      } catch (RuntimeException ex) {
+        throw ex;
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    }
+    if (sv2.capacity() < numRecords * SelectionVector2.RECORD_SIZE) {
+      try (AutoCloseables.RollbackCloseable rc = new AutoCloseables.RollbackCloseable(true)) {
+        sv2.close();
+        sv2 = rc.add(allocator.buffer(numRecords * SelectionVector2.RECORD_SIZE));
+        rc.commit();
+      } catch (RuntimeException ex) {
+        throw ex;
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    }
+  }
+
+  void hashPivoted(int records, ArrowBuf keyFixed, ArrowBuf keyVar, long seed, ArrowBuf hashout8B) {
+    hashTable.computeHash(records, keyFixed, keyVar, seed, hashout8B);
+  }
+
+  public int insertPivoted(
+      int records,
+      int recordsConsumed,
+      ArrowBuf tableHash4B,
+      ArrowBuf fixed,
+      ArrowBuf variable,
+      ArrowBuf ordinals) {
+    int recordsToBeInserted = getRecordsToBeInserted();
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Before insertPivoted VerifyBlocks returned records {} in {} blocks for partition {}",
+          hashTable.verifyBlocks("Before insertPivoted"),
+          hashTable.getCurrentNumberOfBlocks(),
+          getIdentifier());
+      logger.debug(
+          "Inserting {} records into partition {}, Total records in this batch: {} Total records consumed: {} , sv2Size {}",
+          recordsToBeInserted,
+          this.getIdentifier(),
+          records,
+          recordsConsumed,
+          sv2Index);
+    }
+    int recordsInserted =
+        hashTable.addSv2(sv2, 0, recordsToBeInserted, fixed, variable, tableHash4B, ordinals);
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "After insertPivoted VerifyBlocks returned records {} in {} blocks for partition {}",
+          hashTable.verifyBlocks("After insertPivoted"),
+          hashTable.getCurrentNumberOfBlocks(),
+          getIdentifier());
+      logger.debug(
+          "Inserted {} records of {} into partition {},  recordsInTheBatch: {} Total recordsConsumed: {} ",
+          recordsInserted,
+          recordsToBeInserted,
+          this.getIdentifier(),
+          records,
+          recordsConsumed);
+    }
+    if (recordsInserted > 0) {
+      long ordinalsAddr = ordinals.memoryAddress();
+      long sv2Addr = sv2.memoryAddress();
+      for (int recNum = 0; recNum < recordsInserted; recNum++) {
+        int keyIndex =
+            PlatformDependent.getShort(sv2Addr + (recNum * SelectionVector2.RECORD_SIZE));
+        int ordinal = PlatformDependent.getInt(ordinalsAddr + (recNum * HashTable.ORDINAL_SIZE));
+        appendRecord(ordinal, keyIndex + recordsConsumed);
+      }
+    }
+    return recordsInserted;
+  }
+
+  void addToSV2(int ordinal) {
+    SV2UnsignedUtil.writeAtOffset(sv2, sv2Index * SelectionVector2.RECORD_SIZE, ordinal);
+    ++sv2Index;
+  }
+
+  void resetSv2Index() {
+    sv2Index = 0;
+  }
+
+  void removeInsertedRecordsInSV2(int numInserted) {
+    if (numInserted == 0) {
+      return;
+    }
+    Preconditions.checkArgument(numInserted < sv2Index);
+
+    // move the records to the start of the sv2
+    int remainingRecords = sv2Index - numInserted;
+    logger.debug("Moving sv2 index from {} to {} for length {} ", numInserted, 0, remainingRecords);
+    for (int idx = 0; idx < remainingRecords; idx++) {
+      int ordinal = SV2UnsignedUtil.readAtIndex(sv2, numInserted + idx);
+      SV2UnsignedUtil.writeAtIndex(sv2, idx, ordinal);
+    }
+    sv2Index -= numInserted;
+  }
+
+  int getRecordsToBeInserted() {
+    return sv2Index;
   }
 
   /**
@@ -151,7 +311,12 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
    * @return total size (in bytes) of all the partition structures
    */
   public long getSize() {
-    return hashTable.getSizeInBytes() + accumulator.getSizeInBytes();
+    long hashTableSize = hashTable.getSizeInBytes();
+    if (hashTableSize > 0) {
+      return hashTableSize + accumulator.getSizeInBytes();
+    } else {
+      return 0;
+    }
   }
 
   /**
@@ -169,8 +334,17 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
    * @throws Exception
    */
   public void resetToMinimumSize() throws Exception {
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Calling resetToMinimumSize for partition {} containing {} batches ",
+          getIdentifier(),
+          hashTable.getCurrentNumberOfBlocks());
+    }
     /* hashtable internally resets the corresponding accumulator to minimum size */
     hashTable.resetToMinimumSize();
+    currentOutputBlockIndex = -1;
+    currentBlockStartRow = 0;
+    eod = false;
     setNextBatchToOutput(0);
   }
 
@@ -605,7 +779,7 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
   }
 
   @VisibleForTesting
-  public LBlockHashTable getHashTable() {
+  public HashTable getHashTable() {
     return hashTable;
   }
 
@@ -696,7 +870,7 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
    * @param batchIndex2
    */
   private void spliceBatchSpaceUsageAndCount(final int batchIndex1, final int batchIndex2) {
-    if (batchIndex1 >= batchSpaceUsage.length || batchIndex2 >= batchSpaceUsage.length) {
+    if (batchIndex1 >= this.batchSpaceUsage.length || batchIndex2 >= batchSpaceUsage.length) {
       reallocateBatchSpaceAndCount();
     }
     final int originalCount = batchValueCount[batchIndex1];
@@ -715,11 +889,25 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
     forceAccumTimer.start();
 
     if (getRecords() > 0) {
+      if (logger.isDebugEnabled()) {
+        logger.debug(
+            "Before forceAccumulateAndCompact VerifyBlocks returned records {} in {} blocks for partition {}",
+            hashTable.verifyBlocks("Before forceAccumulateAndCompact"),
+            hashTable.getCurrentNumberOfBlocks(),
+            getIdentifier());
+      }
       resizeListener.accumulate(
           getBuffer().memoryAddress(),
           getRecords(),
           hashTable.getBitsInChunk(),
           hashTable.getChunkOffsetMask());
+      if (logger.isDebugEnabled()) {
+        logger.debug(
+            "After forceAccumulateAndCompact VerifyBlocks returned records {} in {} blocks for partition {}",
+            hashTable.verifyBlocks("After forceAccumulateAndCompact"),
+            hashTable.getCurrentNumberOfBlocks(),
+            getIdentifier());
+      }
       resetRecords();
     }
 
@@ -742,5 +930,108 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
 
   public void setNextBatchToOutput(int nextBatchToOutput) {
     this.nextBatchToOutput = nextBatchToOutput;
+  }
+
+  public int outputPartitions(Stopwatch unpivotWatch) throws Exception {
+    if (eod) {
+      return -1;
+    }
+    if (currentOutputBlockIndex == -1) {
+      blockRowCounts = hashTable.getRecordsInBlocks();
+      if (blockRowCounts == null) {
+        eod = true;
+        return -1;
+      }
+      // Empty hash table
+      if (blockRowCounts[0] == 0) {
+        eod = true;
+        return -1;
+      }
+      currentOutputBlockIndex = 0;
+    }
+    // When the block contains more entries, output in more than batch with each batch
+    // containing targetBatchSize number of records. The last batch may contain fewer rows
+    // than the target batch size. Merging blocks to output targetBatchSize records is cumbersome
+    // and may turn it to be inefficient.
+    int outputRecordsToPump = blockRowCounts[currentOutputBlockIndex] - currentBlockStartRow;
+    if (outputRecordsToPump >= targetBatchSize) {
+      outputRecordsToPump = targetBatchSize;
+    }
+
+    unpivotWatch.start();
+    /* unpivot GROUP BY key columns for one or more batches into corresponding vectors in outgoing container */
+    int recordsToOutput =
+        unpivot(currentOutputBlockIndex, currentBlockStartRow, outputRecordsToPump);
+    unpivotWatch.stop();
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Output partition name: {} Block: {} of {}  Requested records: {} from {}, OutputRecords : {}",
+          getIdentifier(),
+          currentOutputBlockIndex,
+          blockRowCounts.length,
+          outputRecordsToPump,
+          currentBlockStartRow,
+          recordsToOutput);
+    }
+    Preconditions.checkState(
+        recordsToOutput == outputRecordsToPump,
+        "Unpivot returned %s records, but expected to return %s for partition %s",
+        recordsToOutput,
+        outputRecordsToPump,
+        getIdentifier());
+    accumulator.output(
+        currentOutputBlockIndex,
+        currentBlockStartRow,
+        recordsToOutput,
+        blockRowCounts[currentOutputBlockIndex]);
+    int remainRecordsInBlock =
+        blockRowCounts[currentOutputBlockIndex] - (currentBlockStartRow + recordsToOutput);
+    if (remainRecordsInBlock == 0) {
+      currentBlockStartRow = 0;
+      currentOutputBlockIndex++;
+    } else {
+      currentBlockStartRow = blockRowCounts[currentOutputBlockIndex] - remainRecordsInBlock;
+    }
+    if (currentOutputBlockIndex == blockRowCounts.length && remainRecordsInBlock == 0) {
+      eod = true;
+    }
+    return recordsToOutput;
+  }
+
+  public int unpivot(int startBatchIndex, int startRow, int outputRecordsToPump) throws Exception {
+    int numRecords = 0;
+    ArrowBuf fixedKeyBuffer = null;
+    ArrowBuf variableKeyBuffer = null;
+
+    List<ArrowBuf> keyBuffers = hashTable.getKeyBuffers(startBatchIndex);
+    fixedKeyBuffer = keyBuffers.get(0);
+    int fixedKeyBufferLength = LargeMemoryUtil.checkedCastToInt(fixedKeyBuffer.readableBytes());
+    int variableKeyBufferLength = 0;
+    if (keyBuffers.size() > 1) {
+      variableKeyBuffer = keyBuffers.get(1);
+      variableKeyBufferLength = LargeMemoryUtil.checkedCastToInt(variableKeyBuffer.readableBytes());
+    }
+    numRecords = fixedKeyBufferLength / blockWidth;
+
+    if (numRecords == 0) {
+      Preconditions.checkState(
+          numRecords != 0,
+          "Returned records is 0, but the number of records in the block is %s ",
+          blockRowCounts[startBatchIndex]);
+    }
+    Preconditions.checkState(
+        numRecords >= outputRecordsToPump,
+        "Returned less records than requested, Requested records %s, Returned Records %s",
+        outputRecordsToPump,
+        numRecords);
+    // Unpivot the keys for build side into output
+    fbv = new FixedBlockVector(fixedKeyBuffer, blockWidth);
+    vbv = null;
+    if (variableKeyBufferLength > 0) {
+      vbv = new VariableBlockVector(variableKeyBuffer, pivot.getVariableCount());
+    }
+
+    Unpivots.unpivot(pivot, fbv, vbv, startRow, outputRecordsToPump);
+    return outputRecordsToPump;
   }
 }

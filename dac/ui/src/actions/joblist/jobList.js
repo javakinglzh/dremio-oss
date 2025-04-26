@@ -15,11 +15,7 @@
  */
 import { transformFromReflectionDetails } from "#oss/exports/endpoints/JobsListing/utils";
 import apiUtils from "#oss/utils/apiUtils/apiUtils";
-import { renderQueryStateForServer } from "utils/jobsQueryState";
 
-export const FETCH_JOBS_LIST_REQUEST = "FETCH_JOBS_LIST_REQUEST";
-export const FETCH_JOBS_LIST_SUCCESS = "FETCH_JOBS_LIST_SUCCESS";
-export const FETCH_JOBS_LIST_FAILURE = "FETCH_JOBS_LIST_FAILURE";
 export const JOBS_LIST_RESET = "JOBS_LIST_RESET";
 export const FETCH_JOB_DETAILS_BY_ID_REQUEST =
   "FETCH_JOB_DETAILS_BY_ID_REQUEST";
@@ -34,7 +30,6 @@ export const ITEMS_FOR_FILTER_JOBS_LIST_SUCCESS =
 export const ITEMS_FOR_FILTER_JOBS_LIST_FAILURE =
   "ITEMS_FOR_FILTER_JOBS_LIST_FAILURE";
 export const JOB_DETAILS_VIEW_ID = "JOB_DETAILS_VIEW_ID";
-export const JOB_PAGE_NEW_VIEW_ID = "JOB_PAGE_NEW_VIEW_ID";
 export const FETCH_JOB_EXECUTION_DETAILS_BY_ID_REQUEST =
   "FETCH_JOB_EXECUTION_DETAILS_BY_ID_REQUEST";
 export const FETCH_JOB_EXECUTION_DETAILS_BY_ID_SUCCESS =
@@ -48,68 +43,6 @@ export const FETCH_JOB_EXECUTION_OPERATOR_DETAILS_BY_ID_SUCCESS =
 export const FETCH_JOB_EXECUTION_OPERATOR_DETAILS_BY_ID_FAILURE =
   "FETCH_JOB_EXECUTION_OPERATOR_DETAILS_BY_ID_FAILURE";
 export const CLEAR_JOB_PROFILE_DATA = "CLEAR_JOB_PROFILE_DATA";
-
-function fetchJobsListAction(queryState, viewId) {
-  const meta = { viewId };
-  const query = renderQueryStateForServer(queryState);
-  return (dispatch) => {
-    dispatch({ type: FETCH_JOBS_LIST_REQUEST, meta });
-    return apiUtils
-      .fetch(`jobs-listing/v1.0?detailLevel=1&${query}`, {}, 2)
-      .then((response) => {
-        try {
-          return response.json();
-        } catch {
-          // eslint-disable-next-line promise/no-return-wrap
-          return Promise.reject(response);
-        }
-      })
-      .then((payload) => {
-        dispatch(fetchJobsListActionSuccess(payload, meta));
-        // eslint-disable-next-line promise/no-return-wrap
-        return Promise.resolve(payload);
-      })
-      .catch((response) => {
-        if (Object.prototype.isPrototypeOf.call(Response.prototype, response)) {
-          response
-            .json()
-            .then((error) => {
-              return dispatch(fetchJobsListActionFailure({ response: error }));
-            })
-            .catch(() => dispatch(fetchJobsListActionFailure(response)));
-        } else {
-          dispatch(
-            fetchJobsListActionFailure({
-              response,
-              meta: { notification: true },
-            }),
-          );
-        }
-      });
-  };
-}
-
-const fetchJobsListActionSuccess = (payload, meta) => ({
-  type: FETCH_JOBS_LIST_SUCCESS,
-  payload,
-  meta,
-});
-
-const fetchJobsListActionFailure = (response) => ({
-  type: FETCH_JOBS_LIST_FAILURE,
-  response,
-  meta: {
-    notification: true,
-    showDefaultMoreInfo: false,
-  },
-  error: true,
-});
-
-export function fetchJobsList(queryState, viewId) {
-  return (dispatch) => {
-    return dispatch(fetchJobsListAction(queryState, viewId));
-  };
-}
 
 function loadJobDetailsAction(
   jobId,
@@ -243,69 +176,6 @@ const fetchItemsForFilterFailure = (payload, tag) => ({
 export function loadItemsForFilter(tag, filter, limit) {
   return (dispatch) => {
     return dispatch(fetchItemsForFilter(tag, filter, limit));
-  };
-}
-
-export const SET_JOB_LIST_CLUSTER_TYPE = "SET_JOB_LIST_CLUSTER_TYPE";
-
-export const setClusterType = (value) => ({
-  type: SET_JOB_LIST_CLUSTER_TYPE,
-  payload: value,
-});
-
-export const LOAD_NEXT_JOBS_LIST_REQUEST = "LOAD_NEXT_JOBS_LIST_REQUEST";
-export const LOAD_NEXT_JOBS_LIST_SUCCESS = "LOAD_NEXT_JOBS_LIST_SUCCESS";
-export const LOAD_NEXT_JOBS_LIST_FAILURE = "LOAD_NEXT_JOBS_LIST_FAILURE";
-
-const fetchNextJobList = (href, viewId) => {
-  const meta = { viewId };
-  return (dispatch) => {
-    dispatch({ type: LOAD_NEXT_JOBS_LIST_REQUEST, meta });
-    return apiUtils
-      .fetch(href.slice(6), {}, 2)
-      .then((response) => {
-        try {
-          return response.json();
-        } catch {
-          // eslint-disable-next-line promise/no-return-wrap
-          return Promise.reject(response);
-        }
-      })
-      .then((payload) => {
-        dispatch(fetchNextJobsSuccess(payload, meta));
-        // eslint-disable-next-line promise/no-return-wrap
-        return Promise.resolve(payload);
-      })
-      .catch((response) =>
-        response
-          .json()
-          .then((error) => {
-            return dispatch(fetchNextJobsFailure({ response: error }));
-          })
-          .catch(() => dispatch(fetchNextJobsFailure(response))),
-      );
-  };
-};
-
-const fetchNextJobsSuccess = (payload, meta) => ({
-  type: LOAD_NEXT_JOBS_LIST_SUCCESS,
-  payload,
-  meta,
-});
-
-const fetchNextJobsFailure = (response) => ({
-  type: LOAD_NEXT_JOBS_LIST_FAILURE,
-  response,
-  meta: {
-    notification: true,
-    showDefaultMoreInfo: false,
-  },
-  error: true,
-});
-
-export function loadNextJobs(href, viewId) {
-  return (dispatch) => {
-    return dispatch(fetchNextJobList(href, viewId));
   };
 }
 

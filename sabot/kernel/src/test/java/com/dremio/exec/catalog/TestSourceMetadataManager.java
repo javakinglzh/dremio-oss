@@ -15,9 +15,11 @@
  */
 package com.dremio.exec.catalog;
 
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS;
 import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.VALIDATION;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -28,11 +30,17 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.catalog.exception.SourceMalfunctionException;
 import com.dremio.common.AutoCloseables;
+import com.dremio.connector.ConnectorException;
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetMetadata;
@@ -43,8 +51,12 @@ import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
+import com.dremio.connector.metadata.SourceMetadata;
+import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.cost.ScanCostFactor;
@@ -53,29 +65,43 @@ import com.dremio.exec.store.SchemaConfig;
 import com.dremio.options.OptionManager;
 import com.dremio.options.TypeValidators.PositiveLongValidator;
 import com.dremio.service.namespace.DatasetMetadataSaver;
+import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.dataset.proto.IcebergViewAttributes;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
+import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
+import com.dremio.service.namespace.source.proto.SourceConfig;
+import com.dremio.service.namespace.source.proto.SourceInternalData;
+import com.dremio.service.namespace.source.proto.UpdateMode;
 import com.dremio.service.orphanage.Orphanage;
+import com.dremio.service.scheduler.Cancellable;
 import com.dremio.service.scheduler.ModifiableLocalSchedulerService;
 import com.dremio.service.scheduler.ModifiableSchedulerService;
+import com.dremio.service.scheduler.Schedule;
 import com.dremio.test.UserExceptionAssert;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Optional;
 import org.apache.arrow.vector.types.pojo.Schema;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.MockitoAnnotations;
 import org.mockito.stubbing.Answer;
 
 public class TestSourceMetadataManager {
@@ -86,11 +112,18 @@ public class TestSourceMetadataManager {
       mock(MetadataRefreshInfoBroadcaster.class);
   private ModifiableSchedulerService modifiableSchedulerService;
 
+  @Captor private ArgumentCaptor<Runnable> runnableCaptor;
+
   @BeforeEach
   public void setup() {
+    MockitoAnnotations.openMocks(this);
     optionManager = mock(OptionManager.class);
     when(optionManager.getOption(eq(CatalogOptions.SPLIT_COMPRESSION_TYPE)))
         .thenAnswer((Answer) invocation -> NamespaceService.SplitCompression.SNAPPY.toString());
+    doReturn(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS.getDefault())
+        .when(optionManager)
+        .getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS.getOptionName());
+
     doNothing().when(broadcaster).communicateChange(any());
 
     PositiveLongValidator option = ExecConstants.MAX_CONCURRENT_METADATA_REFRESHES;
@@ -103,6 +136,40 @@ public class TestSourceMetadataManager {
   @AfterEach
   public void tearDown() throws Exception {
     AutoCloseables.close(modifiableSchedulerService);
+  }
+
+  @Test
+  public void testWakeupTaskWrappedWithSystemUser() throws Exception {
+    ModifiableSchedulerService modifiableSchedulerService = mock(ModifiableSchedulerService.class);
+    LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore = mock(LegacyKVStore.class);
+    ManagedStoragePlugin.MetadataBridge bridge = mock(ManagedStoragePlugin.MetadataBridge.class);
+    CatalogServiceMonitor catalogServiceMonitor = mock(CatalogServiceMonitor.class);
+    Cancellable cancellable = mock(Cancellable.class);
+    when(modifiableSchedulerService.schedule(any(Schedule.class), any(Runnable.class)))
+        .thenReturn(cancellable);
+    doNothing().when(catalogServiceMonitor).onWakeup();
+    SourceMetadataManager manager =
+        new SourceMetadataManager(
+            new NamespaceKey("test-source"),
+            modifiableSchedulerService,
+            true,
+            sourceDataStore,
+            bridge,
+            optionManager,
+            catalogServiceMonitor,
+            () -> null);
+    verify(modifiableSchedulerService).schedule(any(Schedule.class), runnableCaptor.capture());
+    Runnable wakeupWorker = runnableCaptor.getValue();
+    doAnswer(
+            invocation -> {
+              UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+              assertEquals(UserContext.SYSTEM_USER_CONTEXT, userContext);
+              return null;
+            })
+        .when(catalogServiceMonitor)
+        .onWakeup();
+    wakeupWorker.run();
+    verify(catalogServiceMonitor).onWakeup();
   }
 
   @Test
@@ -130,7 +197,7 @@ public class TestSourceMetadataManager {
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -173,7 +240,7 @@ public class TestSourceMetadataManager {
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -222,7 +289,7 @@ public class TestSourceMetadataManager {
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -262,7 +329,7 @@ public class TestSourceMetadataManager {
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -302,7 +369,7 @@ public class TestSourceMetadataManager {
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -365,7 +432,7 @@ public class TestSourceMetadataManager {
         .thenReturn(SupportsReadSignature.MetadataValidity.VALID);
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy())
         .thenReturn(new MetadataPolicy().setDeleteUnavailableDatasets(false));
     when(msp.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
@@ -435,7 +502,7 @@ public class TestSourceMetadataManager {
         .thenReturn(saver);
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(mockStoragePlugin);
+    when(msp.getMetadata()).thenReturn(Optional.of(mockStoragePlugin));
     when(msp.getMetadataPolicy()).thenReturn(new MetadataPolicy());
     when(msp.getNamespaceService()).thenReturn(ns);
 
@@ -474,7 +541,7 @@ public class TestSourceMetadataManager {
         .getDatasetMetadata(eq(handle), any(), any(GetMetadataOption[].class));
 
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy()).thenReturn(new MetadataPolicy());
     when(msp.getNamespaceService()).thenReturn(ns);
 
@@ -516,7 +583,7 @@ public class TestSourceMetadataManager {
     MetadataPolicy metadataPolicy = new MetadataPolicy();
     metadataPolicy.setDatasetDefinitionExpireAfterMs(1000L);
     ManagedStoragePlugin.MetadataBridge msp = mock(ManagedStoragePlugin.MetadataBridge.class);
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getMetadataPolicy()).thenReturn(metadataPolicy);
     when(msp.getNamespaceService()).thenReturn(ns);
 
@@ -558,7 +625,7 @@ public class TestSourceMetadataManager {
     ExtendedStoragePlugin sp = mock(ExtendedStoragePlugin.class);
 
     when(sp.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
-    when(msp.getMetadata()).thenReturn(sp);
+    when(msp.getMetadata()).thenReturn(Optional.of(sp));
     when(msp.getNamespaceService()).thenReturn(ns);
     doThrow(new NamespaceNotFoundException("not found")).when(ns).getDataset(any());
 
@@ -590,7 +657,7 @@ public class TestSourceMetadataManager {
     ExtendedStoragePlugin storagePlugin = mock(ExtendedStoragePlugin.class);
 
     when(storagePlugin.getDatasetHandle(any(), any(), any())).thenReturn(Optional.empty());
-    when(metadataBridge.getMetadata()).thenReturn(storagePlugin);
+    when(metadataBridge.getMetadata()).thenReturn(Optional.of(storagePlugin));
     when(metadataBridge.getNamespaceService()).thenReturn(namespaceService);
 
     NamespaceKey key = new NamespaceKey("testing");
@@ -611,11 +678,199 @@ public class TestSourceMetadataManager {
             RuntimeException.class,
             () ->
                 manager.refresh(
-                    CatalogServiceImpl.UpdateType.FULL,
+                    SourceUpdateType.FULL,
                     new MetadataPolicy()
                         .setAutoPromoteDatasets(true)
                         .setDeleteUnavailableDatasets(true),
                     true));
     assertThat(e).hasMessage(String.format("Source %s does not exist", key.getName()));
+  }
+
+  private void setUpTestForBackgroudRefresh(
+      NamespaceKey namespaceKey,
+      NamespaceService namespaceService,
+      ManagedStoragePlugin.MetadataBridge bridge,
+      SourceConfig sourceConfig)
+      throws NamespaceException {
+    LegacyKVStore kvStore = mock(LegacyKVStore.class);
+    MetadataPolicy metadataPolicy = mock(MetadataPolicy.class);
+    SourceInternalData sourceInternalData = mock(SourceInternalData.class);
+
+    // Mock returns
+    doReturn(sourceInternalData).when(sourceInternalData).setLastFullRefreshDateMs(any());
+    doReturn(sourceInternalData).when(sourceInternalData).setLastNameRefreshDateMs(any());
+    doReturn(metadataPolicy).when(bridge).getMetadataPolicy();
+    doReturn(UpdateMode.PREFETCH).when(metadataPolicy).getDatasetUpdateMode();
+    doReturn(Optional.of(mock(SourceMetadata.class))).when(bridge).getMetadata();
+    doReturn(mock(DatasetRetrievalOptions.class)).when(bridge).getDefaultRetrievalOptions();
+    doReturn(1L).when(metadataPolicy).getDatasetDefinitionRefreshAfterMs();
+    doReturn(1L).when(metadataPolicy).getNamesRefreshMs();
+    doReturn(SourceState.GOOD).when(bridge).getState();
+    doReturn(namespaceService).when(bridge).getNamespaceService();
+    doReturn(sourceConfig).when(namespaceService).getSource(any());
+    doReturn(1000L).when(optionManager).getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS);
+    doReturn(sourceInternalData).when(kvStore).get(namespaceKey);
+    doReturn(true).when(namespaceService).exists(namespaceKey, NameSpaceContainer.Type.SOURCE);
+
+    SourceMetadataManager sourceMetadataManager =
+        new SourceMetadataManager(
+            namespaceKey,
+            modifiableSchedulerService,
+            true,
+            kvStore,
+            bridge,
+            optionManager,
+            new CatalogServiceMonitor() {
+              @Override
+              public boolean isActiveSourceChange() {
+                return false;
+              }
+            },
+            () -> broadcaster);
+  }
+
+  @Test
+  public void saveRefreshData_updatesSourceChangeState() throws NamespaceException {
+    NamespaceKey namespaceKey = new NamespaceKey("testing");
+    NamespaceService namespaceService = mock(NamespaceService.class);
+    ManagedStoragePlugin.MetadataBridge bridge = mock(ManagedStoragePlugin.MetadataBridge.class);
+    SourceConfig sourceConfig = spy(new SourceConfig());
+    sourceConfig.setSourceChangeState(SourceChangeState.SOURCE_CHANGE_STATE_CREATING);
+
+    setUpTestForBackgroudRefresh(namespaceKey, namespaceService, bridge, sourceConfig);
+
+    // verify that sourceChangeState is updated to SOURCE_CHANGE_STATE_NONE during background
+    // refresh when the SourceChangeState is stuck in NONE..
+    Awaitility.waitAtMost(Duration.ofSeconds(5))
+        .until(
+            () ->
+                bridge.getNamespaceService().getSource(namespaceKey).getSourceChangeState()
+                    == SourceChangeState.SOURCE_CHANGE_STATE_NONE);
+  }
+
+  @Test
+  public void saveRefreshData_updatesSourceChangeStateDoesNotUpdateSourceConfig()
+      throws NamespaceException {
+    NamespaceKey namespaceKey = new NamespaceKey("testing");
+    NamespaceService namespaceService = mock(NamespaceService.class);
+    ManagedStoragePlugin.MetadataBridge bridge = mock(ManagedStoragePlugin.MetadataBridge.class);
+    SourceConfig sourceConfig = spy(new SourceConfig());
+    sourceConfig.setSourceChangeState(SourceChangeState.SOURCE_CHANGE_STATE_NONE);
+    sourceConfig.setTag("0");
+
+    setUpTestForBackgroudRefresh(namespaceKey, namespaceService, bridge, sourceConfig);
+
+    // waiting few seconds for ensure two cycles of background refresh is completed.
+    Awaitility.await().atMost(Duration.ofSeconds(5));
+
+    // Assert that there's no sourceConfig update.
+    verify(namespaceService, never()).addOrUpdateSource(eq(namespaceKey), any());
+    // Assert that there's no changes in sourceChangeState.
+    assertEquals(
+        bridge.getNamespaceService().getSource(namespaceKey).getSourceChangeState(),
+        SourceChangeState.SOURCE_CHANGE_STATE_NONE);
+    // Assert the tag has not changed.
+    assertEquals(sourceConfig.getTag(), "0");
+  }
+
+  @Test
+  public void testRefreshDatasetWithIcebergView()
+      throws NamespaceException, ConnectorException, SourceMalfunctionException {
+    NamespaceService namespaceService = mock(NamespaceService.class);
+    ExtendedStoragePlugin storagePlugin = mock(ExtendedStoragePlugin.class);
+    DatasetViewMetadata datasetViewMetadata = mock(DatasetViewMetadata.class);
+
+    ManagedStoragePlugin.MetadataBridge bridge = mock(ManagedStoragePlugin.MetadataBridge.class);
+    NamespaceKey sourceKey = new NamespaceKey("testSource");
+    when(bridge.getMetadata()).thenReturn(Optional.of(storagePlugin));
+    when(bridge.getNamespaceService()).thenReturn(namespaceService);
+    when(bridge.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
+    when(bridge.getMaxNestedLevels()).thenReturn(MAX_NESTED_LEVELS);
+    when(optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    when(namespaceService.exists(sourceKey, NameSpaceContainer.Type.SOURCE)).thenReturn(true);
+    ViewDatasetHandle handle =
+        () -> new EntityPath(Lists.newArrayList("testSource", "viewdataset"));
+
+    DatasetMetadata datasetMetadata = mock(DatasetMetadata.class);
+    when(datasetMetadata.unwrap(DatasetViewMetadata.class)).thenReturn(datasetViewMetadata);
+    when(storagePlugin.getDatasetMetadata(any(), any(), any(GetMetadataOption[].class)))
+        .thenReturn(datasetMetadata);
+    SourceMetadataManager sourceMetadataManager =
+        new SourceMetadataManager(
+            sourceKey,
+            modifiableSchedulerService,
+            true,
+            mock(LegacyKVStore.class),
+            bridge,
+            optionManager,
+            CatalogServiceMonitor.DEFAULT,
+            () -> broadcaster);
+    NamespaceKey datasetKey = new NamespaceKey("testSource.dataset");
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+    datasetConfig.setFullPathList(datasetKey.getPathComponents());
+    datasetConfig.setVirtualDataset(
+        new VirtualDataset().setIcebergViewAttributes(new IcebergViewAttributes()));
+
+    when(namespaceService.getDataset(datasetKey)).thenReturn(datasetConfig);
+    when(bridge.getNamespaceService()).thenReturn(namespaceService);
+    when(bridge.getMetadata()).thenReturn(Optional.of(storagePlugin));
+    when(storagePlugin.getDatasetHandle(any(EntityPath.class), any(GetDatasetOption[].class)))
+        .thenReturn(Optional.of(handle));
+    DatasetMetadataSaver datasetMetadataSaver = mock(DatasetMetadataSaver.class);
+    when(namespaceService.newDatasetMetadataSaver(any(), any(), any(), anyLong(), anyBoolean()))
+        .thenReturn(datasetMetadataSaver);
+    doNothing().when(datasetMetadataSaver).saveDataset(any(), anyBoolean(), any(), any());
+    when(namespaceService.newDatasetMetadataSaver(any(), any(), any(), anyLong(), anyBoolean()))
+        .thenReturn(mock(DatasetMetadataSaver.class));
+
+    DatasetRetrievalOptions options = DatasetRetrievalOptions.DEFAULT;
+    sourceMetadataManager.refreshDataset(datasetKey, options);
+    verify(datasetViewMetadata).newDeepConfig(datasetConfig);
+  }
+
+  @Test
+  public void testRefreshDatasetWithIcebergViewWithoutSupportOptionSet()
+      throws NamespaceException, ConnectorException, SourceMalfunctionException {
+    NamespaceService namespaceService = mock(NamespaceService.class);
+    ExtendedStoragePlugin storagePlugin = mock(ExtendedStoragePlugin.class);
+
+    ManagedStoragePlugin.MetadataBridge bridge = mock(ManagedStoragePlugin.MetadataBridge.class);
+    NamespaceKey sourceKey = new NamespaceKey("testSource");
+    when(bridge.getMetadata()).thenReturn(Optional.of(storagePlugin));
+    when(bridge.getNamespaceService()).thenReturn(namespaceService);
+    when(bridge.getMaxMetadataColumns()).thenReturn(MAX_COLUMNS);
+    when(bridge.getMaxNestedLevels()).thenReturn(MAX_NESTED_LEVELS);
+    when(optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(false);
+    when(namespaceService.exists(sourceKey, NameSpaceContainer.Type.SOURCE)).thenReturn(true);
+    ViewDatasetHandle handle =
+        () -> new EntityPath(Lists.newArrayList("testSource", "viewdataset"));
+
+    SourceMetadataManager sourceMetadataManager =
+        new SourceMetadataManager(
+            sourceKey,
+            modifiableSchedulerService,
+            true,
+            mock(LegacyKVStore.class),
+            bridge,
+            optionManager,
+            CatalogServiceMonitor.DEFAULT,
+            () -> broadcaster);
+    NamespaceKey datasetKey = new NamespaceKey("testSource.dataset");
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+    datasetConfig.setFullPathList(datasetKey.getPathComponents());
+    datasetConfig.setVirtualDataset(
+        new VirtualDataset().setIcebergViewAttributes(new IcebergViewAttributes()));
+
+    when(namespaceService.getDataset(datasetKey)).thenReturn(datasetConfig);
+    when(bridge.getNamespaceService()).thenReturn(namespaceService);
+    when(bridge.getMetadata()).thenReturn(Optional.of(storagePlugin));
+    when(storagePlugin.getDatasetHandle(any(EntityPath.class), any(GetDatasetOption[].class)))
+        .thenReturn(Optional.of(handle));
+    DatasetRetrievalOptions options = DatasetRetrievalOptions.DEFAULT;
+    assertThatThrownBy(() -> sourceMetadataManager.refreshDataset(datasetKey, options))
+        .hasMessageContaining(
+            "Only tables can be refreshed. Dataset \"testSource.dataset\" is a view");
   }
 }

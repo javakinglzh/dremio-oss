@@ -26,7 +26,6 @@ import static com.dremio.sabot.op.tablefunction.TableFunctionOperator.Metric.NUM
 import static com.dremio.sabot.op.tablefunction.TableFunctionOperator.Metric.NUM_POS_DELETE_FILES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.expression.SchemaPath;
@@ -297,7 +296,7 @@ public class TestManifestScanTableFunction extends BaseTestTableFunction {
   public void prepareMocks() throws Exception {
     when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
     SupportsIcebergRootPointer sirp = (SupportsIcebergRootPointer) plugin;
-    when(sirp.createFSWithAsyncOptions(anyString(), anyString(), any())).thenReturn(fs);
+    when(sirp.createFS(any())).thenReturn(fs);
     when(sirp.getFsConfCopy()).thenReturn(CONF);
     when(sirp.createIcebergFileIO(any(), any(), any(), any(), any()))
         .thenReturn(

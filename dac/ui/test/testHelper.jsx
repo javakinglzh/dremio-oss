@@ -252,6 +252,10 @@ Module.prototype.require = function (module) {
     return () => {};
   }
 
+  if (module === "dremio-ui-common/utilities/formatDuration.js") {
+    return () => {};
+  }
+
   module = applyAliases(module); // use webpack aliases for correct module resolving
 
   // since we are not in webpack, make glob-loader

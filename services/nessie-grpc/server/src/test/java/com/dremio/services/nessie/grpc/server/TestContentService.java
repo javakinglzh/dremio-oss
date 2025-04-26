@@ -22,6 +22,8 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.projectnessie.versioned.RequestMeta.API_READ;
+import static org.projectnessie.versioned.RequestMeta.API_WRITE;
 
 import com.dremio.services.nessie.grpc.client.GrpcClientBuilder;
 import io.grpc.ManagedChannel;
@@ -76,7 +78,7 @@ class TestContentService {
   void resetMocks() throws NessieNotFoundException {
     reset(bridge);
 
-    when(bridge.getMultipleContents(any(), any(), any(), anyBoolean(), anyBoolean()))
+    when(bridge.getMultipleContents(any(), any(), any(), anyBoolean(), any()))
         .thenReturn(
             GetMultipleContentsResponse.of(
                 Collections.singletonList(
@@ -88,18 +90,18 @@ class TestContentService {
   @Test
   void testForWrite() throws NessieNotFoundException {
     api.getContent().refName("main").key(ContentKey.of("test")).forWrite(false).get();
-    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(false));
+    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(API_READ));
 
     api.getContent().refName("main").key(ContentKey.of("test")).forWrite(true).get();
-    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(true));
+    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(API_WRITE));
   }
 
   @Test
   void testForWriteSingle() throws NessieNotFoundException {
     api.getContent().refName("main").getSingle(ContentKey.of("test"));
-    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(false));
+    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(API_READ));
 
     api.getContent().refName("main").forWrite(true).getSingle(ContentKey.of("test"));
-    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(true));
+    verify(bridge, times(1)).getMultipleContents(any(), any(), any(), anyBoolean(), eq(API_WRITE));
   }
 }

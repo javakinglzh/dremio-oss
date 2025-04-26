@@ -132,7 +132,7 @@ public class InTransformer implements Transformer {
    * Check the list of DateIntervals to merge, if any of the intervals contains a non-RexLiteral
    * begin or end, just return null
    *
-   * @return True - IN(...); False - NOT IN(...)
+   * @return True - IN(...); False - NOT IN(...); null - Not a interval
    */
   private Boolean checkDateIntervals(List<DateInterval> output) {
     RexCall call = lhsCall;
@@ -144,50 +144,54 @@ public class InTransformer implements Transformer {
       for (int i = 0; i < call.operands.size(); i++) {
         RexNode param = call.operands.get(i);
         if (!(param instanceof RexCall)) {
-          continue;
+          return null;
         }
         RexCall paramCall = (RexCall) param;
         if (!paramCall.getKind().equals(SqlKind.AND) || paramCall.operands.size() != 2) {
-          break;
+          return null;
         }
         RexCall beginCond = (RexCall) paramCall.operands.get(0);
         RexCall endCond = (RexCall) paramCall.operands.get(1);
-        if (!beginCond.operands.get(0).equals(column) || !endCond.operands.get(0).equals(column)) {
-          break;
+        DateInterval dateInterval = getValidInterval(beginCond, endCond, column);
+        if (dateInterval == null) {
+          return null;
         }
-        RexLiteral beginLiteral = (RexLiteral) beginCond.operands.get(1);
-        RexLiteral endLiteral = (RexLiteral) endCond.operands.get(1);
-        DateInterval interval = (new DateInterval(beginLiteral, endLiteral));
-        if (interval.isNotValid()) {
-          break;
-        }
-        output.add(interval);
+        output.add(dateInterval);
       }
       return true;
     } else if (call.getKind().equals(SqlKind.AND)) {
       for (int i = 0; i < call.operands.size(); i++) {
         RexNode param = call.operands.get(i);
         if (!(param instanceof RexCall)) {
-          continue;
+          return null;
         }
         RexCall paramCall = (RexCall) param;
         if (!paramCall.getKind().equals(SqlKind.OR) || paramCall.operands.size() != 2) {
-          break;
+          return null;
         }
         RexCall beginCond = (RexCall) paramCall.operands.get(0);
         RexCall endCond = (RexCall) paramCall.operands.get(1);
-        if (!beginCond.operands.get(0).equals(column) || !endCond.operands.get(0).equals(column)) {
-          break;
+        DateInterval dateInterval = getValidInterval(beginCond, endCond, column);
+        if (dateInterval == null) {
+          return null;
         }
-        RexLiteral beginLiteral = (RexLiteral) beginCond.operands.get(1);
-        RexLiteral endLiteral = (RexLiteral) endCond.operands.get(1);
-        DateInterval interval = (new DateInterval(beginLiteral, endLiteral));
-        if (interval.isNotValid()) {
-          break;
-        }
-        output.add(interval);
+        output.add(dateInterval);
       }
       return false;
+    }
+    return null;
+  }
+
+  /** Return a DateInterval if it is valid, otherwise return null */
+  private DateInterval getValidInterval(RexCall beginCond, RexCall endCond, RexNode column) {
+    if (beginCond.operands.get(0).equals(column)
+        && endCond.operands.get(0).equals(column)
+        && beginCond.op.getKind().equals(SqlKind.GREATER_THAN_OR_EQUAL)
+        && endCond.op.getKind().equals(SqlKind.LESS_THAN)) {
+      RexLiteral beginLiteral = (RexLiteral) beginCond.operands.get(1);
+      RexLiteral endLiteral = (RexLiteral) endCond.operands.get(1);
+      DateInterval interval = (new DateInterval(beginLiteral, endLiteral));
+      return interval.isNotValid() ? null : interval;
     }
     return null;
   }

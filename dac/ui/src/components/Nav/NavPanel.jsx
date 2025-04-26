@@ -17,16 +17,19 @@ import { PureComponent } from "react";
 import PropTypes from "prop-types";
 import Immutable from "immutable";
 import clsx from "clsx";
+import { withTabsKeyboardListener } from "dremio-ui-lib/components";
+
 import { tabLabel } from "#oss/uiTheme/less/layout.less";
 import { nav, navBtn, navBtnActive, icon } from "./NavPanel.less";
 
-export default class NavPanel extends PureComponent {
+class NavPanel extends PureComponent {
   static propTypes = {
     changeTab: PropTypes.func.isRequired,
     activeTab: PropTypes.string,
     tabs: PropTypes.instanceOf(Immutable.OrderedMap),
     showSingleTab: PropTypes.bool,
     className: PropTypes.string,
+    setTabsEl: PropTypes.func,
   };
 
   static defaultProps = {
@@ -34,7 +37,7 @@ export default class NavPanel extends PureComponent {
   };
 
   render() {
-    const { showSingleTab, tabs, className } = this.props;
+    const { showSingleTab, tabs, className, setTabsEl } = this.props;
 
     const invalidTabCount = showSingleTab
       ? tabs.count() < 1
@@ -56,7 +59,7 @@ export default class NavPanel extends PureComponent {
               this.props.activeTab === key ? navBtnActive : navBtn,
               this.props.activeTab !== key && "hover",
             )}
-            tabIndex={0}
+            tabIndex={this.props.activeTab === key ? 0 : -1}
             onKeyUp={(e) =>
               e.code === "Enter" && this.props.changeTab.bind(this, key)()
             }
@@ -73,9 +76,15 @@ export default class NavPanel extends PureComponent {
       .toArray();
 
     return (
-      <div data-qa="nav-panel" className={clsx(nav, className)}>
+      <div
+        ref={(r) => setTabsEl(r)}
+        data-qa="nav-panel"
+        className={clsx(nav, className)}
+      >
         {children}
       </div>
     );
   }
 }
+
+export default withTabsKeyboardListener(NavPanel);

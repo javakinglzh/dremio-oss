@@ -15,7 +15,6 @@
  */
 package com.dremio.plugins.s3.store;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static org.junit.Assert.assertEquals;
 
 import com.amazonaws.auth.AWSStaticCredentialsProvider;
@@ -78,7 +77,6 @@ public class TestWhiteListedBuckets extends BaseTestQuery {
 
   @Test
   public void s3TestAllBucketsAreListedWhenWhiteListedBucketsAreEmpty() throws Exception {
-    assumeNonMaprProfile();
     try (FileSystem fs =
         new S3FileSystem() {
           @Override
@@ -99,7 +97,6 @@ public class TestWhiteListedBuckets extends BaseTestQuery {
   @Test
   public void s3TestOnlyWhiteListedBucketsAreListedWhenWhiteListedBucketsAreSpecified()
       throws Exception {
-    assumeNonMaprProfile();
     try (FileSystem fs =
         new S3FileSystem() {
           @Override
@@ -119,7 +116,6 @@ public class TestWhiteListedBuckets extends BaseTestQuery {
   @Test(expected = RuntimeException.class)
   public void s3TestInvalidCredentialsThrowRuntimeExceptionWhenWhiteListedBucketsAreEmpty()
       throws Exception {
-    assumeNonMaprProfile();
     try (FileSystem fs = new S3FileSystem()) {
       Configuration config = setupTestConfiguration(Lists.newArrayList());
       fs.initialize(new URI("dremioS3:///"), config);
@@ -129,7 +125,6 @@ public class TestWhiteListedBuckets extends BaseTestQuery {
   @Test(expected = RuntimeException.class)
   public void s3TestInvalidCredentialsThrowRuntimeExceptionWhenWhiteListedBucketsAreSpecified()
       throws Exception {
-    assumeNonMaprProfile();
     try (FileSystem fs = new S3FileSystem()) {
       Configuration config = setupTestConfiguration(Lists.newArrayList("bucket-a", "bucket-c"));
       fs.initialize(new URI("dremioS3:///"), config);

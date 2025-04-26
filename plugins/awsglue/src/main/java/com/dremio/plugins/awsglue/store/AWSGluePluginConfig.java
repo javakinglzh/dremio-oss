@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.awsglue.store;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.AWSRegionSelection;
@@ -27,7 +28,6 @@ import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import io.protostuff.Tag;
 import java.util.List;
 import javax.inject.Provider;
@@ -102,7 +102,9 @@ public class AWSGluePluginConfig extends ConnectionConf<AWSGluePluginConfig, AWS
 
   @Override
   public AWSGlueStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new AWSGlueStoragePlugin(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new AWSGlueStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 }

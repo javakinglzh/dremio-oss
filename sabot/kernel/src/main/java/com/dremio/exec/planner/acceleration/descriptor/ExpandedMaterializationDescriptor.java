@@ -20,6 +20,7 @@ import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
 import com.dremio.exec.planner.sql.SqlConverter;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.google.common.base.Preconditions;
 import java.util.Set;
 import org.apache.calcite.plan.CopyWithCluster;
@@ -46,9 +47,9 @@ public class ExpandedMaterializationDescriptor extends BaseMaterializationDescri
         descriptor.getPath(),
         descriptor.getOriginalCost(),
         descriptor.getJobStart(),
-        descriptor.getPartition(),
         descriptor.getIncrementalUpdateSettings(),
-        descriptor.isStale());
+        descriptor.isStale(),
+        descriptor.getMatchingHash());
     this.materialization =
         Preconditions.checkNotNull(materialization, "materialization is required");
   }
@@ -63,9 +64,9 @@ public class ExpandedMaterializationDescriptor extends BaseMaterializationDescri
         cachedDescriptor.getPath(),
         cachedDescriptor.getOriginalCost(),
         cachedDescriptor.getJobStart(),
-        cachedDescriptor.getPartition(),
         cachedDescriptor.getIncrementalUpdateSettings(),
-        isStale);
+        isStale,
+        cachedDescriptor.getMatchingHash());
     this.materialization =
         Preconditions.checkNotNull(
             cachedDescriptor.getMaterialization(), "materialization is required");
@@ -130,5 +131,13 @@ public class ExpandedMaterializationDescriptor extends BaseMaterializationDescri
       Set<SubstitutionUtils.ExternalQueryDescriptor> externalQueries) {
     return SubstitutionUtils.usesTableOrVds(
         queryTablesUsed, queryVdsUsed, externalQueries, materialization.getQueryRel());
+  }
+
+  @Override
+  public LayoutMaterializedViewProfile getLayoutMaterializedViewProfile(boolean verbose) {
+    return LayoutMaterializedViewProfile.newBuilder(
+            materialization.getLayoutMaterializedViewProfile(verbose))
+        .setIsStale(isStale())
+        .build();
   }
 }

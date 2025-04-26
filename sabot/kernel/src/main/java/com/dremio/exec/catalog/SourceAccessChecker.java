@@ -15,9 +15,17 @@
  */
 package com.dremio.exec.catalog;
 
+import static com.dremio.exec.store.dfs.SystemTableUtils.DremioSystemTables.SYSTEM_MANAGED_VIEWS;
+import static com.dremio.exec.store.dfs.SystemTableUtils.isSystemStoragePlugin;
+
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.exception.UnsupportedForgetTableException;
 import com.dremio.catalog.model.CatalogEntityId;
 import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.CatalogFolder;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
@@ -31,6 +39,7 @@ import com.dremio.connector.metadata.AttributeValue;
 import com.dremio.datastore.SearchTypes;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.FindByCondition;
+import com.dremio.datastore.api.FindByRange;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.physical.base.ViewOptions;
 import com.dremio.exec.physical.base.WriterOptions;
@@ -49,34 +58,60 @@ import com.dremio.service.catalog.Schema;
 import com.dremio.service.catalog.SearchQuery;
 import com.dremio.service.catalog.Table;
 import com.dremio.service.catalog.TableSchema;
+import com.dremio.service.namespace.BoundedDatasetCount;
+import com.dremio.service.namespace.DatasetConfigAndEntitiesOnPath;
+import com.dremio.service.namespace.DatasetMetadataSaver;
+import com.dremio.service.namespace.EntityNamespaceFindOption;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceFindByRange;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
+import com.dremio.service.namespace.NamespaceType;
+import com.dremio.service.namespace.PartitionChunkId;
+import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.dremio.service.namespace.SourceState;
+import com.dremio.service.namespace.dataset.DatasetMetadata;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.function.proto.FunctionConfig;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
+import com.dremio.service.namespace.source.SourceMetadata;
 import com.dremio.service.namespace.source.proto.SourceConfig;
+import com.dremio.service.namespace.space.proto.FolderConfig;
+import com.dremio.service.namespace.space.proto.HomeConfig;
+import com.dremio.service.namespace.space.proto.SpaceConfig;
 import com.dremio.service.users.SystemUser;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.apache.arrow.vector.types.pojo.Field;
 
-/** Catalog decorator that handles source access checks. */
+/**
+ * This decorator blocks users from querying Dremio internally created and managed sources, such as
+ * certain system tables like "__logs".
+ */
 final class SourceAccessChecker implements Catalog {
 
   private final MetadataRequestOptions options;
   private final Catalog delegate;
+
+  @VisibleForTesting
+  public SourceAccessChecker(Catalog delegate) {
+    this.options = null;
+    this.delegate = delegate;
+  }
 
   private SourceAccessChecker(MetadataRequestOptions options, Catalog delegate) {
     this.options = options;
@@ -84,21 +119,23 @@ final class SourceAccessChecker implements Catalog {
   }
 
   private static boolean isInternal(String name) {
-    return name.startsWith("__") || name.startsWith("$");
+    return isSystemStoragePlugin(name);
   }
 
   private boolean isInvisible(NamespaceKey key) {
     final String root = key.getRoot();
     return isInternal(root)
         && !"__home".equalsIgnoreCase(root)
-        && !"$scratch".equalsIgnoreCase(root);
+        && !"$scratch".equalsIgnoreCase(root)
+        && !SYSTEM_MANAGED_VIEWS.getTableName().equalsIgnoreCase(root);
   }
 
   private boolean isInvisible(CatalogEntityKey key) {
     final String root = key.getRootEntity();
     return isInternal(root)
         && !"__home".equalsIgnoreCase(root)
-        && !"$scratch".equalsIgnoreCase(root);
+        && !"$scratch".equalsIgnoreCase(root)
+        && !SYSTEM_MANAGED_VIEWS.getTableName().equalsIgnoreCase(root);
   }
 
   private void throwIfInvisible(NamespaceKey key) {
@@ -265,6 +302,11 @@ final class SourceAccessChecker implements Catalog {
   }
 
   @Override
+  public boolean exists(CatalogEntityKey catalogEntityKey) {
+    return delegate.exists(catalogEntityKey);
+  }
+
+  @Override
   public NamespaceKey resolveToDefault(NamespaceKey key) {
     return delegate.resolveToDefault(key);
   }
@@ -291,16 +333,19 @@ final class SourceAccessChecker implements Catalog {
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     throwIfInvisible(key);
     return delegate.createNewTable(
-        key, icebergTableProps, writerOptions, storageOptions, isResultsTable);
+        key, icebergTableProps, writerOptions, storageOptions, createTableOptions);
   }
 
   @Override
   public void createView(
       NamespaceKey key, View view, ViewOptions viewOptions, NamespaceAttribute... attributes)
-      throws IOException {
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     throwIfInvisible(key);
 
     delegate.createView(key, view, viewOptions, attributes);
@@ -309,7 +354,10 @@ final class SourceAccessChecker implements Catalog {
   @Override
   public void updateView(
       NamespaceKey key, View view, ViewOptions viewOptions, NamespaceAttribute... attributes)
-      throws IOException {
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     throwIfInvisible(key);
 
     delegate.updateView(key, view, viewOptions, attributes);
@@ -471,18 +519,24 @@ final class SourceAccessChecker implements Catalog {
   }
 
   @Override
-  public void createSource(SourceConfig config, NamespaceAttribute... attributes) {
-    delegate.createSource(config, attributes);
+  public void createSource(
+      SourceConfig config,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes) {
+    delegate.createSource(config, sourceRefreshOption, attributes);
   }
 
   @Override
-  public void updateSource(SourceConfig config, NamespaceAttribute... attributes) {
-    delegate.updateSource(config, attributes);
+  public void updateSource(
+      SourceConfig config,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes) {
+    delegate.updateSource(config, sourceRefreshOption, attributes);
   }
 
   @Override
-  public void deleteSource(SourceConfig config) {
-    delegate.deleteSource(config);
+  public void deleteSource(SourceConfig config, SourceRefreshOption sourceRefreshOption) {
+    delegate.deleteSource(config, sourceRefreshOption);
   }
 
   private <T> Iterable<T> checkAndGetList(
@@ -562,7 +616,8 @@ final class SourceAccessChecker implements Catalog {
 
   @Override
   public boolean alterDataset(
-      final CatalogEntityKey catalogEntityKey, final Map<String, AttributeValue> attributes) {
+      final CatalogEntityKey catalogEntityKey, final Map<String, AttributeValue> attributes)
+      throws CatalogUnsupportedOperationException {
     throwIfInvisible(catalogEntityKey.toNamespaceKey());
     return delegate.alterDataset(catalogEntityKey, attributes);
   }
@@ -586,11 +641,6 @@ final class SourceAccessChecker implements Catalog {
   @Override
   public void dropPrimaryKey(NamespaceKey namespaceKey, VersionContext statementVersion) {
     delegate.dropPrimaryKey(namespaceKey, statementVersion);
-  }
-
-  @Override
-  public List<String> getPrimaryKey(NamespaceKey namespaceKey) {
-    return delegate.getPrimaryKey(namespaceKey);
   }
 
   @Override
@@ -729,13 +779,12 @@ final class SourceAccessChecker implements Catalog {
   }
 
   @Override
-  public DatasetConfig getDataset(NamespaceKey datasetPath) throws NamespaceException {
+  public DatasetConfig getDataset(NamespaceKey datasetPath) throws NamespaceNotFoundException {
     return delegate.getDataset(datasetPath);
   }
 
   @Override
-  public Iterable<NamespaceKey> getAllDatasets(final NamespaceKey parent)
-      throws NamespaceException {
+  public Iterable<NamespaceKey> getAllDatasets(final NamespaceKey parent) {
     return delegate.getAllDatasets(parent);
   }
 
@@ -744,6 +793,26 @@ final class SourceAccessChecker implements Catalog {
       NamespaceKey datasetPath, String version, NamespaceAttribute... attributes)
       throws NamespaceException {
     delegate.deleteDataset(datasetPath, version, attributes);
+  }
+
+  @Override
+  public int getDownstreamsCount(NamespaceKey path) {
+    return delegate.getDownstreamsCount(path);
+  }
+
+  @Override
+  public List<DatasetConfig> getAllDownstreams(NamespaceKey path) throws NamespaceException {
+    return delegate.getAllDownstreams(path);
+  }
+
+  @Override
+  public List<NamespaceKey> getUpstreamPhysicalDatasets(NamespaceKey path) {
+    return delegate.getUpstreamPhysicalDatasets(path);
+  }
+
+  @Override
+  public List<String> getUpstreamSources(NamespaceKey path) {
+    return delegate.getUpstreamSources(path);
   }
 
   @Override
@@ -764,6 +833,314 @@ final class SourceAccessChecker implements Catalog {
   @Override
   public List<SourceConfig> getSourceConfigs() {
     return delegate.getSourceConfigs();
+  }
+
+  @Override
+  public boolean exists(NamespaceKey key, NameSpaceContainer.Type type) {
+    return delegate.exists(key, type);
+  }
+
+  @Override
+  public boolean exists(NamespaceKey key) {
+    return delegate.exists(key);
+  }
+
+  @Override
+  public boolean hasChildren(NamespaceKey key) {
+    return delegate.hasChildren(key);
+  }
+
+  @Override
+  public Optional<NameSpaceContainer> getEntityById(EntityId id) {
+    return delegate.getEntityById(id);
+  }
+
+  @Override
+  public List<NameSpaceContainer> list(
+      NamespaceKey entityPath, String startChildName, int maxResults) throws NamespaceException {
+    return delegate.list(entityPath, startChildName, maxResults);
+  }
+
+  @Override
+  public Iterable<NameSpaceContainer> getAllDescendants(NamespaceKey root) {
+    return delegate.getAllDescendants(root);
+  }
+
+  @Override
+  public Iterable<Document<NamespaceKey, NameSpaceContainer>> find(
+      FindByCondition condition, EntityNamespaceFindOption... options) {
+    return delegate.find(condition, options);
+  }
+
+  @Override
+  public Iterable<Document<NamespaceKey, NameSpaceContainer>> findByRange(
+      NamespaceFindByRange findByRange) {
+    return delegate.findByRange(findByRange);
+  }
+
+  @Override
+  public void deleteEntity(NamespaceKey entityPath) throws NamespaceException {
+    delegate.deleteEntity(entityPath);
+  }
+
+  @Override
+  public boolean tryCreatePhysicalDataset(
+      NamespaceKey datasetPath, DatasetConfig config, NamespaceAttribute... attributes)
+      throws NamespaceException {
+    return delegate.tryCreatePhysicalDataset(datasetPath, config, attributes);
+  }
+
+  @Override
+  public DatasetMetadataSaver newDatasetMetadataSaver(
+      NamespaceKey datasetPath,
+      EntityId datasetId,
+      SplitCompression splitCompression,
+      long maxSinglePartitionChunks,
+      boolean datasetMetadataConsistencyValidate) {
+    return delegate.newDatasetMetadataSaver(
+        datasetPath,
+        datasetId,
+        splitCompression,
+        maxSinglePartitionChunks,
+        datasetMetadataConsistencyValidate);
+  }
+
+  @Override
+  public DatasetMetadata getDatasetMetadata(NamespaceKey datasetPath) throws NamespaceException {
+    return delegate.getDatasetMetadata(datasetPath);
+  }
+
+  @Override
+  public DatasetConfigAndEntitiesOnPath getDatasetAndEntitiesOnPath(NamespaceKey datasetPath)
+      throws NamespaceException {
+    return delegate.getDatasetAndEntitiesOnPath(datasetPath);
+  }
+
+  @Override
+  public int getAllDatasetsCount(NamespaceKey path) throws NamespaceException {
+    return delegate.getAllDatasetsCount(path);
+  }
+
+  @Override
+  public BoundedDatasetCount getDatasetCount(
+      NamespaceKey root, long searchTimeLimitMillis, int countLimitToStopSearch)
+      throws NamespaceException {
+    return delegate.getDatasetCount(root, searchTimeLimitMillis, countLimitToStopSearch);
+  }
+
+  @Override
+  public Optional<DatasetConfig> getDatasetById(EntityId entityId) {
+    return delegate.getDatasetById(entityId);
+  }
+
+  @Override
+  public Map<NamespaceKey, NamespaceType> getDatasetNamespaceTypes(NamespaceKey... datasetPaths) {
+    return delegate.getDatasetNamespaceTypes(datasetPaths);
+  }
+
+  @Override
+  public void addOrUpdateFolder(
+      NamespaceKey folderPath, FolderConfig folderConfig, NamespaceAttribute... attributes)
+      throws NamespaceException {
+    delegate.addOrUpdateFolder(folderPath, folderConfig, attributes);
+  }
+
+  @Override
+  public FolderConfig getFolder(NamespaceKey folderPath) throws NamespaceException {
+    return delegate.getFolder(folderPath);
+  }
+
+  @Override
+  public void deleteFolder(NamespaceKey folderPath, @Nullable String version)
+      throws NamespaceException {
+    delegate.deleteFolder(folderPath, version);
+  }
+
+  @Override
+  public List<FolderConfig> getFolders(NamespaceKey rootPath) throws NamespaceException {
+    return delegate.getFolders(rootPath);
+  }
+
+  @Override
+  public void addOrUpdateFunction(
+      NamespaceKey functionPath, FunctionConfig functionConfig, NamespaceAttribute... attributes)
+      throws NamespaceException {
+    delegate.addOrUpdateFunction(functionPath, functionConfig, attributes);
+  }
+
+  @Override
+  public FunctionConfig getFunction(NamespaceKey functionPath) throws NamespaceException {
+    return delegate.getFunction(functionPath);
+  }
+
+  @Override
+  public List<FunctionConfig> getFunctions() {
+    return delegate.getFunctions();
+  }
+
+  @Override
+  public List<FunctionConfig> getTopLevelFunctions() {
+    return delegate.getTopLevelFunctions();
+  }
+
+  @Override
+  public void deleteFunction(NamespaceKey functionPath) throws NamespaceException {
+    delegate.deleteFunction(functionPath);
+  }
+
+  @Override
+  public void addOrUpdateHome(NamespaceKey homePath, HomeConfig homeConfig)
+      throws NamespaceException {
+    delegate.addOrUpdateHome(homePath, homeConfig);
+  }
+
+  @Override
+  public HomeConfig getHome(NamespaceKey homePath) throws NamespaceException {
+    return delegate.getHome(homePath);
+  }
+
+  @Override
+  public List<HomeConfig> getHomeSpaces() {
+    return delegate.getHomeSpaces();
+  }
+
+  @Override
+  public void deleteHome(NamespaceKey homePath, String version) throws NamespaceException {
+    delegate.deleteHome(homePath, version);
+  }
+
+  @Override
+  public void addOrUpdateSource(
+      NamespaceKey sourcePath, SourceConfig sourceConfig, NamespaceAttribute... attributes)
+      throws NamespaceException {
+    delegate.addOrUpdateSource(sourcePath, sourceConfig, attributes);
+  }
+
+  @Override
+  public SourceConfig getSource(NamespaceKey sourcePath) throws NamespaceException {
+    return delegate.getSource(sourcePath);
+  }
+
+  @Override
+  public SourceMetadata getSourceMetadata(NamespaceKey sourcePath) throws NamespaceException {
+    return delegate.getSourceMetadata(sourcePath);
+  }
+
+  @Override
+  public SourceConfig getSourceById(EntityId id) throws NamespaceException {
+    return delegate.getSourceById(id);
+  }
+
+  @Override
+  public List<SourceConfig> getSources() {
+    return delegate.getSources();
+  }
+
+  @Override
+  public void deleteSourceChildren(NamespaceKey sourcePath, String version, DeleteCallback callback)
+      throws NamespaceException {
+    delegate.deleteSourceChildren(sourcePath, version, callback);
+  }
+
+  @Override
+  public void deleteSourceChild(
+      NamespaceKey path, String version, boolean deleteRoot, DeleteCallback callback)
+      throws NamespaceNotFoundException {
+    delegate.deleteSourceChild(path, version, deleteRoot, callback);
+  }
+
+  @Override
+  public void deleteSourceChildIfExists(
+      NamespaceKey path, String version, boolean deleteRoot, DeleteCallback callback) {
+    delegate.deleteSourceChildIfExists(path, version, deleteRoot, callback);
+  }
+
+  @Override
+  public void deleteSourceWithCallBack(
+      NamespaceKey sourcePath, String version, DeleteCallback callback) throws NamespaceException {
+    delegate.deleteSourceWithCallBack(sourcePath, version, callback);
+  }
+
+  @Override
+  public void deleteSource(NamespaceKey sourcePath, String version) throws NamespaceException {
+    delegate.deleteSource(sourcePath, version);
+  }
+
+  @Override
+  public void canSourceConfigBeSaved(
+      SourceConfig newConfig, SourceConfig existingConfig, NamespaceAttribute... attributes)
+      throws ConcurrentModificationException, NamespaceException {
+    delegate.canSourceConfigBeSaved(newConfig, existingConfig, attributes);
+  }
+
+  @Override
+  public void addOrUpdateSpace(
+      NamespaceKey spacePath, SpaceConfig spaceConfig, NamespaceAttribute... attributes)
+      throws NamespaceException {
+    delegate.addOrUpdateSpace(spacePath, spaceConfig, attributes);
+  }
+
+  @Override
+  public SpaceConfig getSpace(NamespaceKey spacePath) throws NamespaceException {
+    return delegate.getSpace(spacePath);
+  }
+
+  @Override
+  public List<SpaceConfig> getSpaces() {
+    return delegate.getSpaces();
+  }
+
+  @Override
+  public void deleteSpace(NamespaceKey spacePath, String version) throws NamespaceException {
+    delegate.deleteSpace(spacePath, version);
+  }
+
+  @Override
+  public Iterable<PartitionChunkMetadata> findSplits(FindByCondition condition) {
+    return delegate.findSplits(condition);
+  }
+
+  @Override
+  public Iterable<PartitionChunkMetadata> findSplits(FindByRange<PartitionChunkId> range) {
+    return delegate.findSplits(range);
+  }
+
+  @Override
+  public int getPartitionChunkCount(FindByCondition condition) {
+    return delegate.getPartitionChunkCount(condition);
+  }
+
+  @Override
+  public int deleteSplitOrphans(
+      PartitionChunkId.SplitOrphansRetentionPolicy policy,
+      boolean datasetMetadataConsistencyValidate) {
+    return delegate.deleteSplitOrphans(policy, datasetMetadataConsistencyValidate);
+  }
+
+  @Override
+  public void deleteSplits(Iterable<PartitionChunkId> datasetSplits) {
+    delegate.deleteSplits(datasetSplits);
+  }
+
+  @Override
+  public Optional<CatalogFolder> createFolder(CatalogFolder catalogFolder) throws CatalogException {
+    return delegate.createFolder(catalogFolder);
+  }
+
+  @Override
+  public Optional<CatalogFolder> updateFolder(CatalogFolder catalogFolder) throws CatalogException {
+    return delegate.updateFolder(catalogFolder);
+  }
+
+  @Override
+  public void deleteFolder(CatalogEntityKey catalogEntityKey, @Nullable String version)
+      throws CatalogException {
+    delegate.deleteFolder(catalogEntityKey, version);
+  }
+
+  @Override
+  public Optional<CatalogFolder> getFolder(CatalogEntityKey catalogEntityKey) {
+    return delegate.getFolder(catalogEntityKey);
   }
   //// End: NamespacePassthrough Methods
 }

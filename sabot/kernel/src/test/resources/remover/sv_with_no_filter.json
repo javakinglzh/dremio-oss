@@ -24,13 +24,13 @@
             id:2,
             child: 1,
             pop:"selection-vector-remover",
-            props: {"operatorId": 2, "targetBatchSize":1024, "schemaHashCode": -444278285}
+            props: {"operatorId": 2, "targetBatchSize":1024, "schemaHashCode": -1049233815}
         },
         {
             id: 3,
             child: 2,
             pop: "screen",
-            props: {"operatorId": 3, "schemaHashCode": -444278285}
+            props: {"operatorId": 3, "schemaHashCode": -1049233815}
         }
     ]
 }

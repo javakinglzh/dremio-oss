@@ -50,6 +50,8 @@ import org.apache.parquet.schema.MessageType;
  */
 public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
   private final List<SchemaPath> projectedColumns;
+
+  private final List<SchemaPath> projectedParquetColumns;
   private CaseInsensitiveImmutableBiMap<Integer> icebergColumnIDMap;
   private Set<String> parquetColumnNamesUsedInParquetSchema =
       new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
@@ -79,6 +81,8 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
     if (shouldUseBatchSchemaForResolvingProjectedColumn) {
       this.fieldInfoMap = getFieldsMapForBatchSchema(batchSchema);
     }
+
+    this.projectedParquetColumns = getProjectedParquetColumnsImpl();
   }
 
   public ParquetColumnIcebergResolver(
@@ -134,11 +138,17 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
 
   @Override
   public List<SchemaPath> getProjectedParquetColumns() {
-    // create a map for projected columns between segment paths to SchemaPath
+    return projectedParquetColumns;
+  }
+
+  private List<SchemaPath> getProjectedParquetColumnsImpl() {
+    // a map for projected columns between segment paths to SchemaPath
     CaseInsensitiveImmutableBiMap<SchemaPath> projectedColumnNames =
         CaseInsensitiveImmutableBiMap.newImmutableMap(
             projectedColumns.stream()
-                .collect(Collectors.toMap(this::getProjectedColumnSegmentPath, col -> col)));
+                .collect(
+                    Collectors.toMap(
+                        this::getProjectedColumnSegmentPath, col -> col, (a, b) -> a)));
     Map<SchemaPath, SchemaPath> projectSchemaColumnToProjectedParquetColumnMap = new HashMap<>();
     for (String parquetColumnName : parquetColumnNamesUsedInParquetSchema) {
       Integer colId = parquetColumnIDs.get(parquetColumnName);
@@ -154,9 +164,15 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
       if (!projectedColumnNames.containsKey(schemaColumnName)) {
         continue;
       }
+      SchemaPath schemaColumnPath = projectedColumnNames.get(schemaColumnName);
+      boolean hasComplexSegments =
+          schemaColumnPath.getNameSegments().size() > 1
+              || schemaColumnPath.getComplexNameSegments().size() > 1;
       projectSchemaColumnToProjectedParquetColumnMap.put(
-          projectedColumnNames.get(schemaColumnName),
-          SchemaPath.getCompoundPath(parquetColumnName));
+          schemaColumnPath,
+          hasComplexSegments
+              ? SchemaPath.getCompoundPath(parquetColumnName.split("\\."))
+              : SchemaPath.getCompoundPath(parquetColumnName));
     }
 
     // return columns in the order of projected schema columns
@@ -168,11 +184,10 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
 
   @Override
   public String getBatchSchemaColumnName(String columnInParquetFile) {
-    if (!this.parquetColumnIDs.containsKey(columnInParquetFile)) {
+    Integer id = this.parquetColumnIDs.get(columnInParquetFile);
+    if (id == null) {
       return null;
     }
-
-    int id = this.parquetColumnIDs.get(columnInParquetFile);
 
     if (!this.icebergColumnIDMap.containsValue(id)) {
       return null;
@@ -185,11 +200,10 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
   public List<String> getBatchSchemaColumnName(List<String> columnInParquetFile) {
     String columnName = String.join(".", columnInParquetFile);
 
-    if (!this.parquetColumnIDs.containsKey(columnName)) {
+    Integer id = this.parquetColumnIDs.get(columnName);
+    if (id == null) {
       return null;
     }
-
-    int id = this.parquetColumnIDs.get(columnName);
 
     if (!this.icebergColumnIDMap.containsValue(id)) {
       return null;
@@ -224,11 +238,10 @@ public class ParquetColumnIcebergResolver implements ParquetColumnResolver {
 
   @Override
   public String getParquetColumnName(String name) {
-    if (!this.icebergColumnIDMap.containsKey(name)) {
+    Integer id = this.icebergColumnIDMap.get(name);
+    if (id == null) {
       return null;
     }
-
-    Integer id = this.icebergColumnIDMap.get(name);
 
     if (!this.parquetColumnIDs.containsValue(id)) {
       return null;

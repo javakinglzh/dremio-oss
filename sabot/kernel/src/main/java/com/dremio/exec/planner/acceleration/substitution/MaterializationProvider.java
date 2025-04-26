@@ -50,4 +50,8 @@ public interface MaterializationProvider {
 
   /** Returns true when materialization cache is ready */
   boolean isMaterializationCacheInitialized();
+
+  List<String> dumpMaterializationStateToJson();
+
+  List<DremioMaterialization> getMaterializationsByHash(String hash);
 }

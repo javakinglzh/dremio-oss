@@ -34,7 +34,9 @@ public final class TestMessageConsumer<T extends Message> implements MessageCons
         throw new RuntimeException(e);
       }
     }
-    messages.add(message);
+    synchronized (messages) {
+      messages.add(message);
+    }
     latch.countDown();
   }
 

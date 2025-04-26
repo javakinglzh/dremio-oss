@@ -60,26 +60,19 @@ import org.apache.arrow.vector.FieldVector;
 public final class LBlockHashTable implements HashTable, AutoCloseable {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(LBlockHashTable.class);
-  private static final int SKIP = -1;
-
-  public static final int CONTROL_WIDTH = 8;
-  public static final int VAR_OFFSET_SIZE = 4;
-  public static final int VAR_LENGTH_SIZE = 4;
-  public static final int FREE = -1; // same for both int and long.
-  public static final long LFREE = -1L; // same for both int and long.
-
-  private static final int RETRY_RETURN_CODE = -2;
-  public static final int ORDINAL_SIZE = 4;
-
-  // Minimum batch size for reserved vectors
-  public static final int MIN_RESERVATION_BATCH_SIZE = 128;
-
+  /* per data batch inserted into hash table, we have 2 buffers
+   * that store hash table data.
+   * one buffer that stores the data from all the fixed width group by
+   * key columns and other buffer that stores data from variable
+   * width key columns.
+   */
+  private static final int NUM_HASHTABLE_BUFFERS_PERBATCH = 2;
   private final HashConfigWrapper config;
   private ResizeListener resizeListener;
   private SpaceCheckListener spaceCheckListener;
 
   private final PivotDef pivot;
-  private final BufferAllocator allocator;
+  private BufferAllocator allocator;
   private final NullComparator nullComparator;
   private final boolean fixedOnly;
 
@@ -135,7 +128,8 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
         createArgs.getDefaultVarLengthSize(),
         createArgs.isEnforceVarWidthBufferLimit(),
         createArgs.getMaxHashTableBatchSize(),
-        createArgs.getNullComparator());
+        createArgs.getNullComparator(),
+        createArgs.isLightWeightInstance());
   }
 
   public LBlockHashTable(
@@ -154,7 +148,8 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
         defaultVariableLengthSize,
         enforceVarWidthBufferLimit,
         maxHashTableBatchSize,
-        null);
+        null,
+        false);
   }
 
   public LBlockHashTable(
@@ -165,7 +160,8 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
       int defaultVariableLengthSize,
       final boolean enforceVarWidthBufferLimit,
       final int maxHashTableBatchSize,
-      NullComparator nullComparator) {
+      NullComparator nullComparator,
+      boolean lightWeightInstance) {
     this.pivot = pivot;
     this.nullComparator = nullComparator;
     this.config = new HashConfigWrapper(config);
@@ -185,13 +181,22 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
         (pivot.getVariableCount() == 0)
             ? 0
             : (batchSizeForPivotVectors
-                * (((defaultVariableLengthSize + VAR_OFFSET_SIZE) * pivot.getVariableCount())
+                * (((defaultVariableLengthSize + VAR_LENGTH_SIZE) * pivot.getVariableCount())
                     + VAR_LENGTH_SIZE));
     this.allocatedForFixedBlocks = 0;
     this.allocatedForVarBlocks = 0;
     this.unusedForFixedBlocks = 0;
     this.unusedForVarBlocks = 0;
     this.maxOrdinalBeforeExpand = 0;
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Creating LBlockHashTable for blockWidth, {} with fixedOnly {} ",
+          pivot.getBlockWidth(),
+          fixedOnly);
+    }
+    if (lightWeightInstance) {
+      return;
+    }
     try (RollbackCloseable rc = new RollbackCloseable(true)) {
       this.allocator =
           rc.add(
@@ -212,24 +217,39 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
         MAX_VALUES_PER_BATCH);
   }
 
+  @Override
   public int getMaxValuesPerBatch() {
     return MAX_VALUES_PER_BATCH;
   }
 
+  @Override
   public int getActualValuesPerBatch() {
     return ACTUAL_VALUES_PER_BATCH;
   }
 
+  @Override
+  public int getMaxPerBlock() {
+    return MAX_VALUES_PER_BATCH;
+  }
+
+  @Override
   public int getBitsInChunk() {
     return BITS_IN_CHUNK;
   }
 
+  @Override
   public int getChunkOffsetMask() {
     return CHUNK_OFFSET_MASK;
   }
 
+  @Override
   public int getVariableBlockMaxLength() {
     return variableBlockMaxLength;
+  }
+
+  @Override
+  public int getNumHashTableBuffersPerBatch() {
+    return NUM_HASHTABLE_BUFFERS_PERBATCH;
   }
 
   @Override
@@ -278,6 +298,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    * @param keyHash hashvalue (hashing is external to the hash table)
    * @return ordinal (of newly inserted key or existing key)
    */
+  @Override
   public int add(
       final long keyFixedVectorAddr,
       final long keyVarVectorAddr,
@@ -640,8 +661,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
       keyVarAddr = keyVarVectorAddr + keyVarOffset;
       keyVarLen = PlatformDependent.getInt(keyVarAddr);
       // check bound of the var section
-      Preconditions.checkState(
-          keyVarOffset + LBlockHashTable.VAR_OFFSET_SIZE + keyVarLen <= keyVarVectorSize);
+      Preconditions.checkState(keyVarOffset + VAR_OFFSET_SIZE + keyVarLen <= keyVarVectorSize);
     }
 
     return getOrInsertWithRetry(keyFixedAddr, keyVarAddr, keyVarLen, keyHash, dataWidth, insertNew);
@@ -683,6 +703,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return returnValue;
   }
 
+  @Override
   public int getOrInsertWithAccumSpaceCheck(
       final long keyFixedAddr,
       final long keyVarAddr,
@@ -899,20 +920,29 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     }
   }
 
+  @Override
   public long getAllocatedForFixedBlocks() {
     return allocatedForFixedBlocks;
   }
 
+  @Override
   public long getUnusedForFixedBlocks() {
     return unusedForFixedBlocks;
   }
 
+  @Override
   public long getAllocatedForVarBlocks() {
     return allocatedForVarBlocks;
   }
 
+  @Override
   public long getUnusedForVarBlocks() {
     return unusedForVarBlocks;
+  }
+
+  @Override
+  public int getMaxHashTableBatchSize() {
+    return ACTUAL_VALUES_PER_BATCH;
   }
 
   /**
@@ -1142,7 +1172,8 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    * @param batchIndex hash table batch/block/chunk index
    * @return number of records in batch
    */
-  public int getRecordsInBatch(final int batchIndex) {
+  @Override
+  public int getNumRecordsInBlock(final int batchIndex) {
     Preconditions.checkArgument(batchIndex < blocks(), "Error: invalid batch index");
     /* If blockWidth == 0, there will be only one entry */
     if (pivot.getBlockWidth() == 0) {
@@ -1158,6 +1189,19 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return records;
   }
 
+  @Override
+  public int[] getRecordsInBlocks() {
+    int numBlocks = blocks();
+    if (numBlocks == 0) {
+      return new int[0];
+    }
+    int[] records = new int[numBlocks];
+    for (int batchIndex = 0; batchIndex < numBlocks; batchIndex++) {
+      records[batchIndex] = getNumRecordsInBlock(batchIndex);
+    }
+    return records;
+  }
+
   /**
    * Get underlying buffers storing hash table data for fixed width key column(s) Note that we don't
    * account for control block buffers here since the main purpose of this method is to get the data
@@ -1165,6 +1209,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    *
    * @return list of ArrowBufs for hash table's fixed data blocks.
    */
+  @Override
   public List<ArrowBuf> getFixedBlockBuffers() {
     final int blocks = blocks();
     final List<ArrowBuf> blockBuffers = new ArrayList<>(blocks);
@@ -1182,6 +1227,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    *
    * @return list of ArrowBufs for hash table's variable data blocks.
    */
+  @Override
   public List<ArrowBuf> getVariableBlockBuffers() {
     final int blocks = blocks();
     final List<ArrowBuf> blockBuffers = new ArrayList<>(blocks);
@@ -1192,6 +1238,27 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return blockBuffers;
   }
 
+  @Override
+  public List<ArrowBuf> getKeyBuffers(int batchIdx) {
+    int numBatches = blocks();
+    Preconditions.checkArgument(
+        batchIdx <= numBatches,
+        "Request batch index %s is greater than " + "number of batches %s in the hash table",
+        batchIdx,
+        numBatches);
+    List<ArrowBuf> spillBuffers = new ArrayList<>();
+    ArrowBuf arrowBuf = fixedBlocks[batchIdx].getUnderlying();
+    spillBuffers.add(arrowBuf);
+    arrowBuf = variableBlocks[batchIdx].getUnderlying();
+    spillBuffers.add(arrowBuf);
+    return spillBuffers;
+  }
+
+  @Override
+  public int getNumChunks() {
+    return blocks();
+  }
+
   /**
    * Get the size of hash table structure in bytes. This peeks at ArrowBuf for each internal
    * structure (fixed blocks, variable blocks, control blocks) and gets the total size of buffers in
@@ -1199,6 +1266,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    *
    * @return hash table size (in bytes).
    */
+  @Override
   public long getSizeInBytes() {
     if (size() == 0) {
       /* hash table is empty if currentOrdinal is 0. as long as there is at least
@@ -1471,6 +1539,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return currentOrdinal - gaps;
   }
 
+  @Override
   public int blocks() {
     return (int) Math.ceil(currentOrdinal / (MAX_VALUES_PER_BATCH * 1.0d));
   }
@@ -1516,6 +1585,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return rehashTimer.elapsed(unit);
   }
 
+  @Override
   public long getSpliceTime(TimeUnit unit) {
     return spliceTimer.elapsed(unit);
   }
@@ -1525,14 +1595,17 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return rehashCount;
   }
 
+  @Override
   public int getSpliceCount() {
     return spliceCount;
   }
 
+  @Override
   public int getAccumCompactionCount() {
     return resizeListener.getAccumCompactionCount();
   }
 
+  @Override
   public long getAccumCompactionTime(TimeUnit unit) {
     return resizeListener.getAccumCompactionTime(unit);
   }
@@ -1591,9 +1664,14 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     int maxValuesPerBatch = Numbers.nextPowerOfTwo(hashTableBatchSize);
     capacity = Math.max(maxValuesPerBatch, capacity);
     final int blocks = (int) Math.ceil(capacity / (maxValuesPerBatch * 1.0d));
-    return (LBlockHashTable.CONTROL_WIDTH * maxValuesPerBatch * blocks);
+    int controlBlockSize = (LBlockHashTable.CONTROL_WIDTH * maxValuesPerBatch * blocks);
+    if (controlBlockSize < PAGE_SIZE) {
+      controlBlockSize = PAGE_SIZE;
+    }
+    return controlBlockSize;
   }
 
+  @Override
   public void unpivot(int startBatchIndex, int[] recordsInBatches) {
     Unpivots.unpivotBatches(
         pivot,
@@ -1795,6 +1873,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    * Resets the HashTable to minimum size which has capacity to contain {@link
    * #MAX_VALUES_PER_BATCH}.
    */
+  @Override
   public void resetToMinimumSize() throws Exception {
     final List<AutoCloseable> toRelease = Lists.newArrayList();
 
@@ -1847,6 +1926,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    * the next batch.
    * For now, it is okay as until resetToMinimumSize() we don't touch the data.
    */
+  @Override
   public void releaseBatch(final int batchIdx) throws Exception {
     if (batchIdx == 0) {
       fixedBlocks[0].reset();
@@ -1869,6 +1949,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
   }
 
   /** Preallocate memory for storing a single batch of data in hashtable (and accumulators). */
+  @Override
   public void preallocateSingleBatch() {
     Preconditions.checkArgument(fixedBlocks.length == 0, "Error: expecting 0 batches in hashtable");
     Preconditions.checkArgument(
@@ -1883,6 +1964,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     Preconditions.checkArgument(size() == 0, "Error: Expecting empty hashtable");
   }
 
+  @Override
   public int getCurrentNumberOfBlocks() {
     Preconditions.checkArgument(
         fixedBlocks.length == variableBlocks.length,
@@ -2233,12 +2315,13 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
    * @param seed seed to use when rehashing the keys
    * @return index of newly added batch
    */
+  @Override
   public int splice(final int batchIndex, final long seed) {
     final int dstBatchIndex;
     try {
       ++spliceCount;
       spliceTimer.start();
-      final int numRecords = this.getRecordsInBatch(batchIndex);
+      final int numRecords = this.getNumRecordsInBlock(batchIndex);
       Preconditions.checkArgument(numRecords > 1);
 
       resizeListener.verifyBatchCount(fixedBlocks.length);
@@ -2304,6 +2387,7 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     return dstBatchIndex;
   }
 
+  @Override
   public final int getBatchIndexForOrdinal(final int ordinal) {
     final int batchIndex = ordinal >>> BITS_IN_CHUNK;
     return batchIndex;
@@ -2313,10 +2397,12 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
     this.spaceCheckListener = spaceCheckListener;
   }
 
+  @Override
   public void registerResizeListener(ResizeListener resizeListener) {
     this.resizeListener = resizeListener;
   }
 
+  @Override
   public int getMaxVarLenKeySize() {
     return resizeListener.getMaxVarLenKeySize();
   }

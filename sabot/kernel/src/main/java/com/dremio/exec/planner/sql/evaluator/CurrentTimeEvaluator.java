@@ -34,7 +34,7 @@ public final class CurrentTimeEvaluator implements FunctionEval {
             cx.getContextInformation().getQueryStartTime(), zone);
     TimeString timeString =
         new TimeString(currentTime.getHour(), currentTime.getMinute(), currentTime.getSecond());
-    timeString.withMillis(getMillis(currentTime));
+    timeString = timeString.withMillis(getMillis(currentTime));
     return cx.getRexBuilder().makeTimeLiteral(timeString, call.getType().getPrecision());
   }
 }

@@ -22,7 +22,6 @@ import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.testing.ControlsInjector;
 import com.dremio.exec.testing.ControlsInjectorFactory;
-import com.dremio.exec.util.Utilities;
 import com.dremio.resource.ResourceAllocator;
 import com.dremio.resource.ResourceSchedulingDecisionInfo;
 import com.dremio.resource.ResourceSchedulingObserver;
@@ -85,8 +84,7 @@ public class ResourceTracker implements AutoCloseable {
     resourceSchedulingProperties.setQueryCost(planCost);
     resourceSchedulingProperties.setRoutingQueue(context.getSession().getRoutingQueue());
     resourceSchedulingProperties.setRoutingTag(context.getSession().getRoutingTag());
-    resourceSchedulingProperties.setQueryType(
-        Utilities.getHumanReadableWorkloadType(context.getWorkloadType()));
+    resourceSchedulingProperties.setQueryType(context.getWorkloadTypeForWlmRules());
     resourceSchedulingProperties.setRoutingEngine(context.getSession().getRoutingEngine());
     resourceSchedulingProperties.setQueryLabel(context.getSession().getQueryLabel());
 

@@ -47,15 +47,18 @@ public final class ReflectionLineageTable implements TranslatableTable {
   private static final String REFLECTION_NAME = "reflection_name";
   private static final String DATASET_NAME = "dataset_name";
 
+  // Schema for reflection lineage table is composed of optional fields
+  // as the corresponding gRPC descriptor (ListReflectionLineageResponse)
+  // contains optional fields.
   private static final BatchSchema RESULT_SCHEMA =
       SchemaConverter.getBuilder()
           .build()
           .fromIceberg(
               new org.apache.iceberg.Schema(
-                  Types.NestedField.required(1, BATCH_NUMBER, Types.IntegerType.get()),
-                  Types.NestedField.required(2, REFLECTION_ID, Types.StringType.get()),
-                  Types.NestedField.required(3, REFLECTION_NAME, Types.StringType.get()),
-                  Types.NestedField.required(4, DATASET_NAME, Types.StringType.get())));
+                  Types.NestedField.optional(1, BATCH_NUMBER, Types.IntegerType.get()),
+                  Types.NestedField.optional(2, REFLECTION_ID, Types.StringType.get()),
+                  Types.NestedField.optional(3, REFLECTION_NAME, Types.StringType.get()),
+                  Types.NestedField.optional(4, DATASET_NAME, Types.StringType.get())));
 
   private final String reflectionId;
 

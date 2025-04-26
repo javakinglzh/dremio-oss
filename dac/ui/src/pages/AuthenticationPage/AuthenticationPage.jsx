@@ -13,31 +13,38 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { PureComponent } from "react";
-
-import PropTypes from "prop-types";
 import LoginFormContainer from "./components/LoginFormContainer";
 
-export class AuthenticationPage extends PureComponent {
-  static propTypes = {
-    style: PropTypes.object,
-  };
+import { useColorScheme } from "dremio-ui-common/appTheme";
 
-  render() {
-    return (
-      <div id="authentication-page" className="page" style={styles.base}>
-        <LoginFormContainer />
-      </div>
-    );
-  }
-}
+import dremioWordMarkLight from "./images/dremio-wordmark-light.svg";
+import dremioWordMarkDark from "./images/dremio-wordmark-dark.svg";
 
-const styles = {
-  base: {
-    justifyContent: "center",
-    alignItems: "center",
-    backgroundColor: "var(--fill--login)",
-    overflow: "hidden",
-  },
+import "./AuthenticationPage.less";
+
+export const AuthenticationPageWrapper = ({ children }) => {
+  const colorScheme = useColorScheme();
+  return (
+    <div
+      id="authentication-page"
+      className="page authentication-page flex items-center overflow-hidden"
+    >
+      <img
+        src={colorScheme === "dark" ? dremioWordMarkDark : dremioWordMarkLight}
+        alt="Dremio"
+        className="authentication-page__logo"
+      />
+      {children}
+    </div>
+  );
 };
+
+const AuthenticationPage = () => {
+  return (
+    <AuthenticationPageWrapper>
+      <LoginFormContainer />
+    </AuthenticationPageWrapper>
+  );
+};
+
 export default AuthenticationPage;

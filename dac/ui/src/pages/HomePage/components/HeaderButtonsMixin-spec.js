@@ -15,7 +15,7 @@
  */
 import { shallow } from "enzyme";
 import Immutable from "immutable";
-
+import { browserHistory } from "react-router";
 import { Capabilities } from "#oss/utils/authUtils";
 
 import { HeaderButtons as HeaderButtonsBase } from "./HeaderButtons";
@@ -27,7 +27,7 @@ class HeaderButtons extends HeaderButtonsBase {}
 describe("HeaderButtonsMixin", () => {
   let minimalProps;
   let commonProps;
-  let context;
+  let location;
   beforeEach(() => {
     minimalProps = {
       toggleVisibility: sinon.spy(),
@@ -36,14 +36,12 @@ describe("HeaderButtonsMixin", () => {
       ...minimalProps,
       rootEntityType: "home",
     };
-    context = {
-      location: {},
-    };
+    location = browserHistory.getCurrentLocation();
   });
 
   describe("getSpaceSettingsButtons", () => {
     it("should return config for setting button if entityType  is space", () => {
-      const wrapper = shallow(<HeaderButtons {...commonProps} />, { context });
+      const wrapper = shallow(<HeaderButtons {...commonProps} />);
       const instance = wrapper.instance();
 
       wrapper.setProps({
@@ -55,7 +53,7 @@ describe("HeaderButtonsMixin", () => {
           qa: "settings",
           iconType: "interface/settings",
           to: {
-            ...context.location,
+            ...location,
             state: { modal: "SpaceModal", entityId: "Prod-sample" },
           },
           authRule: {
@@ -87,7 +85,7 @@ describe("HeaderButtonsMixin", () => {
           qa: "settings",
           iconType: "interface/settings",
           to: {
-            ...context.location,
+            ...location,
             state: {
               modal: "EditSourceModal",
               query: { name: "Mongo", type: "mongo" },

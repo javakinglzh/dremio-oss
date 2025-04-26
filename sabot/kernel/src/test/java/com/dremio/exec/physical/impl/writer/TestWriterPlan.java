@@ -32,6 +32,7 @@ import com.dremio.exec.planner.TestDml;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.physical.FilterPrel;
 import com.dremio.exec.planner.physical.Prel;
+import com.dremio.exec.planner.physical.RoundRobinExchangePrel;
 import com.dremio.exec.planner.physical.SingleMergeExchangePrel;
 import com.dremio.exec.planner.physical.SortPrel;
 import com.dremio.exec.planner.physical.TableFunctionPrel;
@@ -233,8 +234,8 @@ public class TestWriterPlan extends BaseTestQuery {
       List<UnionAllPrel> unions = findNodes(plan, UnionAllPrel.class, null);
       assertThat(unions.size()).isEqualTo(2);
       UnionAllPrel smallFileCombiningUnion = unions.get(1);
-      // the small file combining sub-plan dos not start with RR Exchange for trivial plan
-      assertThat(smallFileCombiningUnion.getInput(0)).isInstanceOf(WriterPrel.class);
+      // the small file combining sub-plan should start with RR Exchange
+      assertThat(smallFileCombiningUnion.getInput(0)).isInstanceOf(RoundRobinExchangePrel.class);
 
       SingleMergeExchangePrel singleMergeExchangePrel =
           findSingleNode(plan, SingleMergeExchangePrel.class, null);

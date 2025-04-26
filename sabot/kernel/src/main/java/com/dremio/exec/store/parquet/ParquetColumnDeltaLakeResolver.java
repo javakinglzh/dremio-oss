@@ -235,13 +235,17 @@ public class ParquetColumnDeltaLakeResolver implements ParquetColumnResolver {
           parquetName = fieldName;
         }
       } else {
+        // Update both parquetToSchema and schemaToParquet
         this.parquetToSchema.put(parquetName, fieldName);
+        this.schemaToParquet.put(fieldName, parquetName);
       }
 
       String[] parquetPath = appendString(baseParquetPath, parquetName);
       String[] schemaPath = appendString(baseSchemaPath, fieldName);
 
+      // Update both parquetToSchema and schemaToParquet
       this.parquetToSchema.put(String.join(".", parquetPath), String.join(".", schemaPath));
+      this.schemaToParquet.put(String.join(".", schemaPath), String.join(".", parquetPath));
       addColumnMapping(schemaPath, parquetPath, field.getChildren(), resolveName);
     }
   }

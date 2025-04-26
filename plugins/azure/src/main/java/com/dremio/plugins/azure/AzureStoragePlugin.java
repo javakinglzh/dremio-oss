@@ -23,12 +23,15 @@ import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
+import com.dremio.exec.catalog.CreateTableOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.DirectorySupportLackingFileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
@@ -58,7 +61,7 @@ public class AzureStoragePlugin
 
   public AzureStoragePlugin(
       AbstractAzureStorageConf config,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> idProvider) {
     super(config, context, name, idProvider);
@@ -125,7 +128,7 @@ public class AzureStoragePlugin
     properties.add(new Property("fs.dremioAzureStorage.impl.disable.cache", "true"));
 
     // configure azure properties.
-    properties.add(new Property(AzureStorageFileSystem.ACCOUNT, config.accountName));
+    properties.add(new Property(AzureStorageConfProperties.ACCOUNT, config.accountName));
     properties.add(new Property(AzureStorageFileSystem.SECURE, Boolean.toString(config.enableSSL)));
     properties.add(new Property(AzureStorageFileSystem.MODE, config.accountKind.name()));
     properties.add(
@@ -194,6 +197,13 @@ public class AzureStoragePlugin
         }
         break;
 
+      case SAS_SIGNATURE:
+        properties.add(
+            new Property(
+                AzureStorageFileSystem.CREDENTIALS_TYPE,
+                AzureAuthenticationType.SAS_SIGNATURE.name()));
+        break;
+
       default:
         throw new IllegalStateException("Unrecognized credential type: " + credentialsType);
     }
@@ -234,7 +244,7 @@ public class AzureStoragePlugin
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     final String containerName = getAndCheckContainerName(tableSchemaPath);
     final CreateTableEntry entry =
         super.createNewTable(
@@ -243,7 +253,7 @@ public class AzureStoragePlugin
             icebergTableProps,
             writerOptions,
             storageOptions,
-            isResultsTable);
+            createTableOptions);
 
     final AzureStorageFileSystem fs = getSystemUserFS().unwrap(AzureStorageFileSystem.class);
 

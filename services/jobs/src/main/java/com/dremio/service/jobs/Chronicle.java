@@ -26,6 +26,7 @@ import com.dremio.service.job.JobAndUserStats;
 import com.dremio.service.job.JobAndUserStatsRequest;
 import com.dremio.service.job.JobCounts;
 import com.dremio.service.job.JobCountsRequest;
+import com.dremio.service.job.JobCountsRequestDaily;
 import com.dremio.service.job.JobDetails;
 import com.dremio.service.job.JobDetailsRequest;
 import com.dremio.service.job.JobStats;
@@ -43,15 +44,13 @@ import com.dremio.service.job.ReflectionJobSummaryRequest;
 import com.dremio.service.job.SearchJobsRequest;
 import com.dremio.service.job.SearchReflectionJobsRequest;
 import com.dremio.service.job.StoreJobResultRequest;
-import com.dremio.service.job.UniqueUserStats;
-import com.dremio.service.job.UniqueUserStatsRequest;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.protobuf.Empty;
 import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import java.util.Iterator;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,10 +62,11 @@ import org.slf4j.LoggerFactory;
 public class Chronicle extends ChronicleGrpc.ChronicleImplBase {
 
   private final Provider<LocalJobsService> localJobsServiceProvider;
-  private final Provider<Executor> executor;
+  private final Provider<ExecutorService> executor;
   private static final Logger LOGGER = LoggerFactory.getLogger(Chronicle.class);
 
-  public Chronicle(final Provider<LocalJobsService> jobsService, Provider<Executor> executor) {
+  public Chronicle(
+      final Provider<LocalJobsService> jobsService, Provider<ExecutorService> executor) {
     this.localJobsServiceProvider = jobsService;
     this.executor = executor;
   }
@@ -87,14 +87,14 @@ public class Chronicle extends ChronicleGrpc.ChronicleImplBase {
   }
 
   @Override
-  public void getJobStats(JobStatsRequest request, StreamObserver<JobStats> responseObserver) {
-    handleUnaryCall(getJobsService()::getJobStats, request, responseObserver);
+  public void getJobCountsDaily(
+      JobCountsRequestDaily request, StreamObserver<JobCounts> responseObserver) {
+    handleUnaryCall(getJobsService()::getJobCountsDaily, request, responseObserver);
   }
 
   @Override
-  public void getUniqueUserStats(
-      UniqueUserStatsRequest request, StreamObserver<UniqueUserStats> responseObserver) {
-    handleUnaryCall(getJobsService()::getUniqueUserStats, request, responseObserver);
+  public void getJobStats(JobStatsRequest request, StreamObserver<JobStats> responseObserver) {
+    handleUnaryCall(getJobsService()::getJobStats, request, responseObserver);
   }
 
   @Override

@@ -70,8 +70,9 @@ public final class GoldenFileTestBuilder<I, O, I_W> {
   private static final Logger LOGGER = LoggerFactory.getLogger(GoldenFileTestBuilder.class);
   private static final Path LICENSE_HEADER_PATH =
       Paths.get(Resources.getResource("goldenfiles/header.txt").getPath());
-  private static final ObjectMapper objectMapperForComparison = createObjectMapper();
   private static final ObjectMapper objectMapper = createObjectMapper();
+
+  private final ObjectMapper objectMapperForComparison = createObjectMapper();
 
   private final List<DescriptionAndInput<I>> descriptionAndInputs = new ArrayList<>();
   private final ThrowingFunction<I, O> executeTestFunction;

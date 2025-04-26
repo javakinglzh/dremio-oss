@@ -21,11 +21,14 @@ import static com.dremio.exec.store.metadatarefresh.RefreshDatasetTestUtils.fsDe
 import static com.dremio.exec.store.metadatarefresh.RefreshDatasetTestUtils.verifyIcebergMetadata;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.hadoop.fs.FileSystem;
@@ -74,14 +77,9 @@ public class ITHiveRefreshDatasetIncrementalMetadataRefresh extends LazyDataGene
 
   @BeforeClass
   public static void generateHiveWithoutData() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
     LazyDataGeneratingHiveTestBase.generateHiveWithoutData();
     finalIcebergMetadataLocation = getDfsTestTmpSchemaLocation();
     fs = setupLocalFS();
-  }
-
-  @AfterClass
-  public static void close() throws Exception {
   }
 
   @After
@@ -215,6 +213,44 @@ public class ITHiveRefreshDatasetIncrementalMetadataRefresh extends LazyDataGene
     }
   }
 
+  /*
+   * Test Metadata table's schema is not increased as the incremental refresh queries are issued.
+   */
+  @Test
+  public void testMetadataTableSchemaNotIncrease() throws Exception {
+    // If the Parquet table's schema does not change, including complex data type,
+    // its Iceberg metadata table's schema should not increase during incremental metadata refresh.
+    final String tableName = "incrrefresh_v2_test_repeat_complex_" + getFileFormatLowerCase();
+    try {
+      createTable(tableName, "(a INT, b STRUCT<a:INT>, c INT)");
+
+      // First insert and refresh metadata
+      final String insertCmd = "INSERT INTO " + tableName + " SELECT 1, named_struct('a', 1), 1";
+      dataGenerator.executeDDL(insertCmd);
+      runFullRefresh(tableName);
+      Table icebergTable = getIcebergTable();
+      Long firstRefreshSnapshotId = icebergTable.currentSnapshot().snapshotId();
+      Map<Integer, Schema> schemasMap = icebergTable.schemas();
+      assertNotNull(schemasMap);
+      assertEquals("Should have one schema", 1, schemasMap.size());
+
+      // Second insert and refresh metadata
+      final String insertCmd2 = "INSERT INTO " + tableName + " SELECT 2, named_struct('a', 2), 2";
+      dataGenerator.executeDDL(insertCmd2);
+      runFullRefresh(tableName);
+      //Refresh the same iceberg table again
+      icebergTable.refresh();
+      Long secondRefreshSnapshotId  = icebergTable.currentSnapshot().snapshotId();
+      Map<Integer, Schema> schemasMap2 = icebergTable.schemas();
+      assertNotNull(schemasMap2);
+      assertEquals("Should have one schema", 1, schemasMap2.size());
+
+      assertNotEquals("Snapshot id should be increased", firstRefreshSnapshotId, secondRefreshSnapshotId);
+    } finally {
+      forgetMetadata(tableName);
+      dropTable(tableName);
+    }
+  }
 
   @Test
   public void testIncrementalRefreshFileAddition() throws Exception {

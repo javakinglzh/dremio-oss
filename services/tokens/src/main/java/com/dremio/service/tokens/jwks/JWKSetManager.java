@@ -18,7 +18,6 @@ package com.dremio.service.tokens.jwks;
 import com.dremio.service.Service;
 import com.dremio.service.tokens.jwt.JWTSigner;
 import com.dremio.service.tokens.jwt.JWTValidator;
-import java.util.Map;
 
 /**
  * This class manages the JSON Web Key Set (JWKS) used to sign and validate Dremio JWTs, allows
@@ -39,5 +38,5 @@ public interface JWKSetManager extends Service {
   /**
    * @return Dremio's current public JWKS.
    */
-  Map<String, Object> getPublicJWKS();
+  JWKS getPublicJWKS();
 }

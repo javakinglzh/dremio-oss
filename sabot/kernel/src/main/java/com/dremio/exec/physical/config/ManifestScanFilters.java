@@ -37,6 +37,10 @@ public abstract class ManifestScanFilters implements MetadataFilters {
   @Nullable
   public abstract LongRange getSkipDataFileSizeRange();
 
+  // Filter the files by data file sequence number
+  @Nullable
+  public abstract SkipDataFileBySequenceNumberFilter getSkipDataFileBySequenceFilter();
+
   // Filter to identify if manifest is operating on an old partition spec id. Ignored if null or
   // zero.
   @Value.Default
@@ -55,6 +59,10 @@ public abstract class ManifestScanFilters implements MetadataFilters {
   public boolean doesSkipDataFileSizeRangeExist() {
     return getSkipDataFileSizeRange() != null
         && !getSkipDataFileSizeRange().equals(new LongRange(0, 0));
+  }
+
+  public boolean doesSkipDataFileBySequenceFilterExist() {
+    return getSkipDataFileBySequenceFilter() != null;
   }
 
   public boolean doesMinPartitionSpecIdExist() {

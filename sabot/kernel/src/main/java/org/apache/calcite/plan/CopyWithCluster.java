@@ -195,6 +195,7 @@ public class CopyWithCluster extends StatelessRelShuttleImpl {
     return AggregateCall.create(
         call.getAggregation(), // doesn't look we need to copy this
         call.isDistinct(),
+        call.isApproximate(),
         call.getArgList(),
         call.filterArg,
         copyOf(call.getType()),

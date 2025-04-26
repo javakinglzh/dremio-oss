@@ -21,7 +21,14 @@ import com.dremio.sabot.op.common.ht2.HashTable.HashTableCreateArgs;
 public class LBlockHashTableFactory implements HashTableFactory {
 
   @Override
-  public HashTable getInstance(OptionManager optionManager, HashTableCreateArgs createArgs) {
+  public HashTable getInstanceForHashAgg(
+      OptionManager optionManager, HashTableCreateArgs createArgs) {
+    return new LBlockHashTable(createArgs);
+  }
+
+  @Override
+  public HashTable getInstanceForHashJoin(
+      OptionManager optionManager, HashTableCreateArgs createArgs) {
     return new LBlockHashTable(createArgs);
   }
 }

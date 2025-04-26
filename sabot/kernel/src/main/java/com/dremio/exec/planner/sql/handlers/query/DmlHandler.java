@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql.handlers.query;
 
 import static com.dremio.exec.physical.config.TableFunctionConfig.FunctionType.DATA_FILE_SCAN;
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
 import static com.dremio.exec.planner.physical.visitor.WriterUpdater.getCollation;
 import static com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler.refreshDataset;
 import static com.dremio.exec.planner.sql.parser.DmlUtils.resolveVersionContextForDml;
@@ -27,6 +28,8 @@ import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.catalog.model.dataset.TableVersionType;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.context.ContextUtil;
+import com.dremio.context.RequestContext;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
@@ -52,7 +55,6 @@ import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.planner.sql.handlers.DrelTransformer;
 import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DmlUtils;
@@ -188,10 +190,14 @@ public abstract class DmlHandler extends TableManagementHandler {
       final ResolvedVersionContext version =
           resolveVersionContextForDml(config, sqlDmlOperator, sourceName);
       CatalogUtil.validateResolvedVersionIsBranch(version);
+      RequestContext currentContext = RequestContext.current();
       Runnable committer =
           !CatalogUtil.requestedPluginSupportsVersionedTables(
                   path, config.getContext().getCatalog())
-              ? () -> refreshDataset(config.getContext().getCatalog(), path, false)
+              ? () ->
+                  ContextUtil.runWithUserContext(
+                      currentContext,
+                      () -> refreshDataset(config.getContext().getCatalog(), path, false))
               : null;
       // cleaner will call refreshDataset to avoid the issues like DX-49928
       Runnable cleaner = committer;
@@ -254,7 +260,7 @@ public abstract class DmlHandler extends TableManagementHandler {
         resolveVersionContextForDml(config, dmlOperator, sourceName);
     CreateTableEntry createTableEntry =
         IcebergUtils.getIcebergCreateTableEntry(
-            config, config.getContext().getCatalog(), table, getSqlOperator(), null, version);
+            config, config.getContext().getCatalog(), table, getSqlOperator(), null, null, version);
 
     WriterOptions options = createTableEntry.getOptions();
     if (checkIfRowSplitterNeeded(dmlWriteMode, options, sqlNode)) {
@@ -265,9 +271,7 @@ public abstract class DmlHandler extends TableManagementHandler {
         DrelTransformer.convertToDrel(config, createTableEntryShuttle(relNode, createTableEntry));
 
     // below is for results to be returned to client - delete/update/merge operation summary output
-    convertedRelNode =
-        SqlHandlerUtil.storeQueryResultsIfNeeded(
-            config.getConverter().getParserConfig(), config.getContext(), convertedRelNode);
+    convertedRelNode = storeQueryResultsIfNeeded(config, convertedRelNode);
 
     return new ScreenRel(
         convertedRelNode.getCluster(), convertedRelNode.getTraitSet(), convertedRelNode);

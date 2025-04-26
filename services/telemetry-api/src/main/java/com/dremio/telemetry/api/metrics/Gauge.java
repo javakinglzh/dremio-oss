@@ -15,7 +15,11 @@
  */
 package com.dremio.telemetry.api.metrics;
 
+import io.micrometer.core.instrument.Tags;
+
 /** Prometheus Gauge abstraction. */
 public interface Gauge {
-  void set(double value, String... labels);
+  void set(double value, String... labelValues);
+
+  void set(double value, Tags tags);
 }

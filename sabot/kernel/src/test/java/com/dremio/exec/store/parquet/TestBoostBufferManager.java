@@ -179,7 +179,7 @@ public class TestBoostBufferManager {
               try {
                 ParquetProtobuf.ParquetDatasetSplitScanXAttr parquetDatasetSplitScanXAttr =
                     LegacyProtobufSerializer.parseFrom(
-                        ParquetProtobuf.ParquetDatasetSplitScanXAttr.PARSER,
+                        ParquetProtobuf.ParquetDatasetSplitScanXAttr.parser(),
                         x.getDatasetSplitInfo().getExtendedProperty());
                 boostBufferManager.addSplit(x, parquetDatasetSplitScanXAttr, columns);
               } catch (IOException e) {
@@ -267,7 +267,7 @@ public class TestBoostBufferManager {
               try {
                 ParquetProtobuf.ParquetDatasetSplitScanXAttr parquetDatasetSplitScanXAttr =
                     LegacyProtobufSerializer.parseFrom(
-                        ParquetProtobuf.ParquetDatasetSplitScanXAttr.PARSER,
+                        ParquetProtobuf.ParquetDatasetSplitScanXAttr.parser(),
                         x.getDatasetSplitInfo().getExtendedProperty());
                 boostBufferManager.addSplit(x, parquetDatasetSplitScanXAttr, columns);
               } catch (IOException e) {
@@ -371,9 +371,9 @@ public class TestBoostBufferManager {
 
   private TableFunctionConfig getTableFunctionConfig() {
     TableFunctionContext functionContext = mock(TableFunctionContext.class);
-    BatchSchema fullSchema = new BatchSchema(Collections.EMPTY_LIST);
+    BatchSchema fullSchema = new BatchSchema(Collections.emptyList());
     when(functionContext.getFullSchema()).thenReturn(fullSchema);
-    when(functionContext.getColumns()).thenReturn(Collections.EMPTY_LIST);
+    when(functionContext.getColumns()).thenReturn(Collections.emptyList());
     when(functionContext.isArrowCachingEnabled()).thenReturn(true);
 
     return new TableFunctionConfig(

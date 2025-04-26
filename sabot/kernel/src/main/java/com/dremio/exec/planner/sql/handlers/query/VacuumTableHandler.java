@@ -15,9 +15,12 @@
  */
 package com.dremio.exec.planner.sql.handlers.query;
 
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
 import static com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler.refreshDataset;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.context.ContextUtil;
+import com.dremio.context.RequestContext;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
@@ -33,7 +36,6 @@ import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.planner.sql.handlers.DrelTransformer;
 import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DremioHint;
@@ -109,12 +111,11 @@ public class VacuumTableHandler extends TableManagementHandler {
             config.getContext().getCatalog(),
             catalog.getTableWithSchema(path),
             getSqlOperator(),
+            null,
             null);
     Rel convertedRelNode =
         DrelTransformer.convertToDrel(config, createTableEntryShuttle(relNode, createTableEntry));
-    convertedRelNode =
-        SqlHandlerUtil.storeQueryResultsIfNeeded(
-            config.getConverter().getParserConfig(), config.getContext(), convertedRelNode);
+    convertedRelNode = storeQueryResultsIfNeeded(config, convertedRelNode);
 
     return new ScreenRel(
         convertedRelNode.getCluster(), convertedRelNode.getTraitSet(), convertedRelNode);
@@ -127,9 +128,14 @@ public class VacuumTableHandler extends TableManagementHandler {
     try {
       Runnable refresh = null;
       final PlannerCatalog catalog = config.getConverter().getPlannerCatalog();
+      RequestContext currentContext = RequestContext.current();
       if (!CatalogUtil.requestedPluginSupportsVersionedTables(
           path, config.getContext().getCatalog())) {
-        refresh = () -> refreshDataset(config.getContext().getCatalog(), path, false);
+        refresh =
+            () ->
+                ContextUtil.runWithUserContext(
+                    currentContext,
+                    () -> refreshDataset(config.getContext().getCatalog(), path, false));
         // Always use the latest snapshot before vacuum.
         refresh.run();
       } else {

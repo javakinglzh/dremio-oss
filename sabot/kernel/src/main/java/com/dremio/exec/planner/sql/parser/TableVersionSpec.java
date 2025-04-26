@@ -25,7 +25,6 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.sabot.exec.context.ContextInformation;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
@@ -99,7 +98,7 @@ public class TableVersionSpec {
     }
 
     Preconditions.checkNotNull(value);
-    return new TableVersionContext(tableVersionType, value, getTimestampAsInstant());
+    return new TableVersionContext(tableVersionType, value, getTimestampAsMillis());
   }
 
   public TableVersionContext getTableVersionContext() {
@@ -197,13 +196,12 @@ public class TableVersionSpec {
     return timestamp;
   }
 
-  public Instant getTimestampAsInstant() {
+  public @Nullable Long getTimestampAsMillis() {
     if (timestamp == null) {
       return null;
     }
-    return Instant.ofEpochMilli(
-        SqlHandlerUtil.convertToTimeInMillis(
-            ((SqlLiteral) timestamp).getValueAs(String.class), timestamp.getParserPosition()));
+    return SqlHandlerUtil.convertToTimeInMillis(
+        ((SqlLiteral) timestamp).getValueAs(String.class), timestamp.getParserPosition());
   }
 
   public void unparseVersionSpec(SqlWriter writer, int leftPrec, int rightPrec) {

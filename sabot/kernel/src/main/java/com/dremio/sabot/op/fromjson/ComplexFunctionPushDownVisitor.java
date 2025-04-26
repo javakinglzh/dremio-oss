@@ -42,7 +42,9 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.sql.SqlOperator;
@@ -254,7 +256,7 @@ public abstract class ComplexFunctionPushDownVisitor
     private final RexBuilder rexBuilder;
     private final int fieldCount;
     private final List<RexNode> convertFromJsonList;
-    private final Map<Integer, Integer> convertFromJsonIndexMap;
+    private final Map<String, Integer> convertFromJsonIndexMap;
 
     public ConvertFromJsonReplacer(
         RexBuilder rexBuilder, int fieldCount, List<RexNode> convertFromJsonList) {
@@ -268,27 +270,41 @@ public abstract class ComplexFunctionPushDownVisitor
     @Override
     public RexNode visitCall(RexCall call) {
       if (call.getOperator().getName().equalsIgnoreCase("convert_fromjson")) {
-        List<RexNode> args = call.getOperands();
-        Preconditions.checkArgument(args.size() == 1);
-        final RexNode input = args.get(0);
-        if (input instanceof RexInputRef) {
+        // Compute a signature for the call, if this is non-null it can be pushed down.  The
+        // signature includes the input field and the return type.
+        String callSignature = getCallSignature(call);
+        if (callSignature != null) {
           // Copy the convert_fromjson expression to be added to the project below
           // and replace it with its reference
-          RexInputRef rexInputRef = (RexInputRef) input;
-          int index = rexInputRef.getIndex();
-          if (!convertFromJsonIndexMap.containsKey(index)) {
+          if (!convertFromJsonIndexMap.containsKey(callSignature)) {
             convertFromJsonList.add(call);
             // Put this index in the map as key and the value as the location in the list
             // so that we can retrieve it later if we see this again
             convertFromJsonIndexMap.put(
-                index, convertFromJsonList.size() - 1); // -1 because of 0 valued index
+                callSignature, convertFromJsonList.size() - 1); // -1 because of 0 valued index
           }
           return rexBuilder.makeInputRef(
-              call.getType(), fieldCount + convertFromJsonIndexMap.get(index));
+              call.getType(), fieldCount + convertFromJsonIndexMap.get(callSignature));
         } // else pass through
       }
 
       return super.visitCall(call);
+    }
+
+    private String getCallSignature(RexCall call) {
+      List<RexNode> args = call.getOperands();
+      RexNode input = args.get(0);
+      // only pushdown cases where it's a field input
+      if (!(input instanceof RexInputRef || input instanceof RexFieldAccess)) {
+        return null;
+      }
+
+      ConvertFromErrorMode errorMode =
+          args.size() == 2
+              ? (ConvertFromErrorMode) ((RexLiteral) args.get(1)).getValue()
+              : ConvertFromErrorMode.ERROR_ON_ERROR;
+
+      return String.format("%s:%s:%s", input, errorMode, call.getType().getFullTypeString());
     }
   }
 

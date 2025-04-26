@@ -21,6 +21,7 @@ import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.physical.config.BoostPOP;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.easy.arrow.ArrowRecordReader;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.ParquetOperatorCreator;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
 import com.dremio.io.file.FileSystem;
@@ -68,7 +69,11 @@ public class BoostOperatorCreator implements ProducerOperator.Creator<BoostPOP> 
     FileSystemPlugin<?> plugin = fragmentExecContext.getStoragePlugin(config.getPluginId());
     FileSystem fs;
     try {
-      fs = plugin.createFS(config.getProps().getUserName(), context);
+      fs =
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context));
     } catch (IOException e) {
       throw new ExecutionSetupException("Cannot access plugin filesystem", e);
     }
@@ -98,12 +103,16 @@ public class BoostOperatorCreator implements ProducerOperator.Creator<BoostPOP> 
     try {
       EasyProtobuf.EasyDatasetSplitXAttr extended =
           LegacyProtobufSerializer.parseFrom(
-              EasyProtobuf.EasyDatasetSplitXAttr.PARSER,
+              EasyProtobuf.EasyDatasetSplitXAttr.parser(),
               config.getSplits().get(0).getDatasetSplitInfo().getExtendedProperty());
       arrowFilePath = new Path(extended.getPath());
       localFileSystem =
           HadoopFileSystem.get(arrowFilePath.getFileSystem(SpillServiceImpl.getSpillingConfig()));
-      distFileSystem = plugin.createFS(config.getProps().getUserName(), context);
+      distFileSystem =
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context));
     } catch (IOException e) {
       throw new ExecutionSetupException("Cannot access plugin filesystem", e);
     }

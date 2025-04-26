@@ -68,7 +68,7 @@ public final class DataTypeUtil {
       case TIME:
       case TIMETZ:
         return DataType.TIME;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case TIMESTAMPTZ:
         return DataType.DATETIME;
       case LIST:
@@ -78,8 +78,8 @@ public final class DataTypeUtil {
       case STRUCT:
       case GENERIC_OBJECT:
         return DataType.STRUCT;
-        //    case ???:
-        //      return DataType.GEO;
+      //    case ???:
+      //      return DataType.GEO;
       case MONEY:
       case NULL:
       case INTERVAL:

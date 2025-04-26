@@ -11,18 +11,18 @@ MAKEFLAGS += --no-builtin-rules
 
 UI_LIB=../ui-lib
 JS_SDK=../../ui/dremio-js
+DESIGN_SYSTEM=../../ui/design-system
 
 SRC = $(shell find src -type f)
 LANG_DIR = $(shell find lang -type f)
 SQL_GRAMMAR = $(shell find sql-grammar -type f)
-
-export NODE_NO_WARNINGS=1
 
 clean: ## Clean all build and install artifacts
 	@git clean -dfX
 
 dependencies:
 	@make --quiet --directory=$(UI_LIB) prepare
+	@make --quiet --directory=$(DESIGN_SYSTEM) prepare
 	@make --quiet --directory=$(JS_SDK) prepare
 
 dist-cjs: node_modules tsconfig.json $(SRC) target/generated-sources/antlr

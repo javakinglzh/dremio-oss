@@ -76,7 +76,7 @@ describe("AccelerationForm", () => {
       handleSubmit: sinon.stub().returns(sinon.spy()),
       onSubmitSuccess: sinon.spy(),
       onCancel: sinon.spy(),
-      location: {},
+      location: { state: {} },
       dataset: Immutable.Map(),
       reflections: Immutable.Map(),
       values,
@@ -91,7 +91,7 @@ describe("AccelerationForm", () => {
     commonProps = {
       showConfirmationDialog: sinon.stub(),
       fullPath: "",
-      location: {},
+      location: { state: {} },
       errors: {},
       submitFailed: false,
       ...minimalProps,

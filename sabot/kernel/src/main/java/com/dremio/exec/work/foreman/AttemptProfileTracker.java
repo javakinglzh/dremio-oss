@@ -19,14 +19,15 @@ import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.DremioVersionInfo;
 import com.dremio.common.utils.PathUtils;
+import com.dremio.exec.catalog.CatalogAccessStats;
 import com.dremio.exec.ops.OperatorMetricRegistry;
 import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.PlanCaptureAttemptObserver;
+import com.dremio.exec.planner.common.PlannerMetrics;
 import com.dremio.exec.planner.observer.AbstractAttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObservers;
 import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.planner.serialization.RelSerializerFactory;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.record.BatchSchema;
@@ -42,7 +43,6 @@ import com.dremio.service.jobtelemetry.PutTailProfileRequest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;
 import com.google.common.util.concurrent.ListenableFuture;
-import com.google.protobuf.ByteString;
 import com.google.protobuf.Empty;
 import io.grpc.Context;
 import java.util.ArrayList;
@@ -89,6 +89,7 @@ public class AttemptProfileTracker {
   private volatile UserBitShared.QueryProfile planningProfile;
   private volatile UserBitShared.QueryId prepareId;
   private volatile String cancelReason;
+  private volatile String cancelType;
   private volatile UserException userException;
   private volatile ResourceSchedulingDecisionInfo resourceSchedulingDecisionInfo;
   private final Context grpcContext;
@@ -130,8 +131,7 @@ public class AttemptProfileTracker {
         optionManager.getOption(PlannerSettings.INCLUDE_DATASET_PROFILE),
         queryContext.getFunctionRegistry(),
         queryContext.getAccelerationManager().newPopulator(),
-        RelSerializerFactory.getProfileFactory(
-            queryContext.getConfig(), queryContext.getScanResult()));
+        queryContext.getCatalogAccessListener());
   }
 
   void setPrepareId(UserBitShared.QueryId prepareId) {
@@ -145,6 +145,14 @@ public class AttemptProfileTracker {
 
   String getCancelReason() {
     return cancelReason;
+  }
+
+  void setCancelType(String cancelType) {
+    this.cancelType = cancelType;
+  }
+
+  String getCancelType() {
+    return cancelType;
   }
 
   // Send planning profile to JTS.
@@ -170,12 +178,7 @@ public class AttemptProfileTracker {
   }
 
   // Send tail profile to JTS (used after query terminates).
-  UserBitShared.QueryProfile sendTailProfile(UserException userException) throws Exception {
-    this.userException = userException;
-    // DX-28440 : when query is cancelled from flight service
-    // sometimes the original context might not be valid.
-    // fork a new context always.
-    UserBitShared.QueryProfile profile = getPlanningProfile();
+  void sendTailProfile(UserBitShared.QueryProfile profile) {
     grpcContext.run(
         () -> {
           jobTelemetryClient
@@ -190,7 +193,10 @@ public class AttemptProfileTracker {
                                   .setProfile(profile)
                                   .build()));
         });
-    return profile;
+  }
+
+  void sendUserException(UserException userException) {
+    this.userException = userException;
   }
 
   private UserBitShared.QueryProfile getPlanningProfileFunction(boolean ignoreExceptions)
@@ -258,7 +264,7 @@ public class AttemptProfileTracker {
    * @throws UserException
    * @throws com.dremio.common.exceptions.UserCancellationException
    */
-  private void addPlanningDetails(UserBitShared.QueryProfile.Builder builder)
+  protected void addPlanningDetails(UserBitShared.QueryProfile.Builder builder)
       throws UserException, com.dremio.common.exceptions.UserCancellationException {
     builder.setQuery(queryDescription);
     builder.setUser(queryContext.getQueryUserName());
@@ -288,7 +294,7 @@ public class AttemptProfileTracker {
     if (capturer != null) {
       builder.setTotalFragments(capturer.getNumFragments());
       builder.addAllDatasetProfile(capturer.getDatasets());
-      builder.setNumPlanCacheUsed(capturer.getNumPlanCacheUses());
+      builder.setNumPlanCacheUsed(capturer.isUsedCachedPlan() ? 1 : 0);
       if (capturer.getNumJoinsInUserQuery() != null) {
         builder.setNumJoinsInUserQuery(capturer.getNumJoinsInUserQuery());
       }
@@ -322,10 +328,6 @@ public class AttemptProfileTracker {
         builder.addAllPlanPhases(planPhases);
       }
 
-      byte[] serializedPlan = capturer.getSerializedPlan();
-      if (serializedPlan != null) {
-        builder.setSerializedPlan(ByteString.copyFrom(serializedPlan));
-      }
       // This method might throw exception, hence moved it to the bottom
       builder.setAccelerationProfile(capturer.buildAccelerationProfile(false));
     }
@@ -333,7 +335,7 @@ public class AttemptProfileTracker {
     // Adds final planning stats for catalog access
     if (endPlanningTime > 0) {
       // Adds stats for individual table access (does not include versioned sources)
-      addCatalogStats(builder);
+      addMetadataStats(builder);
     }
     // Populates source version mapping and marks the ones relevant to the current datasets in the
     // query
@@ -368,11 +370,13 @@ public class AttemptProfileTracker {
     }
   }
 
-  protected void addCatalogStats(UserBitShared.QueryProfile.Builder builder) {
+  protected void addMetadataStats(UserBitShared.QueryProfile.Builder builder) {
     builder.addAllPlanPhases(
         queryContext.getCatalog().getMetadataStatsCollector().getPlanPhaseProfiles());
-    builder.addAllPlanPhases(
-        queryContext.getCatalog().getCatalogAccessStats().toPlanPhaseProfiles());
+
+    CatalogAccessStats accessStats =
+        queryContext.getCatalogAccessListener().getAllCatalogAccesses();
+    builder.addPlanPhases(accessStats.getAverageCatalogAccessProfile());
   }
 
   private void populateGlobalVersionContextMapping(
@@ -458,6 +462,9 @@ public class AttemptProfileTracker {
 
     if (cancelReason != null) {
       builder.setCancelReason(cancelReason);
+    }
+    if (cancelType != null) {
+      builder.setCancelType(PlannerMetrics.toCancelTypeCode(cancelType));
     }
     if (cancelStartTime != -1) {
       builder.setCancelStartTime(cancelStartTime);

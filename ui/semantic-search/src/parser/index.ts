@@ -3,13 +3,13 @@ import {LRParser} from "@lezer/lr"
 export const parser = LRParser.deserialize({
   version: 14,
   states: "!pOVQPOOOOQO'#C_'#C_OOQO'#Cd'#CdO_QPO'#C`OOQO'#C^'#C^QjQPOOOOQO-E6b-E6bOVQPO'#CaOOQO'#Ce'#CeQjQPOOOOQO'#Cc'#CcOOQO,58{,58{OOQO-E6c-E6c",
-  stateData: "r~O[OS~O]PO^QO~O^QOUSXYSX~OUVO~OU^~",
+  stateData: "t~O[OS~O]PO^QO~O^QOUSXYSX~OUVO~O[U^U~",
   goto: "xYPPZ^^dPhkrRTOQSORYVTWTXRZVSROVRURQXTR[X",
   nodeNames: "⚠ DremioSemanticSearch SearchText QuotedString UnquotedString Filter FilterKeyword FilterValue",
   maxTerm: 14,
   skippedNodes: [0],
   repeatNodeCount: 2,
-  tokenData: "%o~R]X^zpqzrs!o!c!}%X#T#o%X#y#zz$f$gz#BY#BZz$IS$I_z$I|$JOz$JT$JUz$KV$KWz&FU&FVz~!PY[~X^zpqz#y#zz$f$gz#BY#BZz$IS$I_z$I|$JOz$JT$JUz$KV$KWz&FU&FVz~!rWpq!oqr!ors#[s#O!o#O#P#a#P;'S!o;'S;=`%R<%lO!o~#aO]~~#dXrs!o!P!Q!o#O#P!o#U#V!o#Y#Z!o#b#c!o#f#g!o#h#i!o#i#j$P~$SR!Q![$]!c!i$]#T#Z$]~$`R!Q![$i!c!i$i#T#Z$i~$lR!Q![$u!c!i$u#T#Z$u~$xR!Q![!o!c!i!o#T#Z!o~%UP;=`<%l!o~%^S^~!Q![%X![!]%j!c!}%X#T#o%X~%oOU~",
+  tokenData: ")f~RmX^!|pq!|qr#qrs$zst#qtu#quw#q!Q![#q!a!c#q!c!}#q#R#S#q#T#o#q#y#z!|$f$g!|$g#BY#q#BY#BZ'd#BZ$IS#q$IS$I_'d$I_$I|#q$I|$JO'd$JO$JT#q$JT$JU'd$JU$KV#q$KV$KW'd$KW&FU#q&FU&FV'd&FV;'S#q;'S;=`$t<%lO#q~#RY[~X^!|pq!|#y#z!|$f$g!|#BY#BZ!|$IS$I_!|$I|$JO!|$JT$JU!|$KV$KW!|&FU&FV!|~#v]^~qr#qst#qtu#quw#q!Q![#q![!]$o!a!c#q!c!}#q#R#S#q#T#o#q$g;'S#q;'S;=`$t<%lO#q~$tOU~~$wP;=`<%l#q~$}Wpq$zqr$zrs%gs#O$z#O#P%l#P;'S$z;'S;=`'^<%lO$z~%lO]~~%oXrs$z!P!Q$z#O#P$z#U#V$z#Y#Z$z#b#c$z#f#g$z#h#i$z#i#j&[~&_R!Q![&h!c!i&h#T#Z&h~&kR!Q![&t!c!i&t#T#Z&t~&wR!Q!['Q!c!i'Q#T#Z'Q~'TR!Q![$z!c!i$z#T#Z$z~'aP;=`<%l$z~'km[~^~X^!|pq!|qr#qst#qtu#quw#q!Q![#q![!]$o!a!c#q!c!}#q#R#S#q#T#o#q#y#z!|$f$g!|$g#BY#q#BY#BZ'd#BZ$IS#q$IS$I_'d$I_$I|#q$I|$JO'd$JO$JT#q$JT$JU'd$JU$KV#q$KV$KW'd$KW&FU#q&FU&FV'd&FV;'S#q;'S;=`$t<%lO#q",
   tokenizers: [0],
   topRules: {"DremioSemanticSearch":[0,1]},
   tokenPrec: 31

@@ -32,6 +32,7 @@ public class ProjectConfigImpl implements ProjectConfig {
   public static final String ACCELERATION_PLUGIN_SUB_PATH = "/accelerator";
   public static final String UPLOADS_PLUGIN_SUB_PATH = "/uploads";
   public static final String SCRATCH_PLUGIN_SUB_PATH = "/scratch";
+  public static final String PROFILE_PLUGIN_SUB_PATH = "/profile";
   public static final String METADATA_PLUGIN_SUB_PATH = "/metadata";
   public static final String GANDIVA_PERSISTENT_CACHE_PLUGIN_SUB_PATH = "/gandiva";
   public static final String SYSTEM_ICEBERG_TABLES_PLUGIN_SUB_PATH = "/system_iceberg_tables";
@@ -54,6 +55,11 @@ public class ProjectConfigImpl implements ProjectConfig {
   @Override
   public DistPathConfig getScratchConfig() {
     return getDistPathConfig(DremioConfig.SCRATCH_PATH_STRING, SCRATCH_PLUGIN_SUB_PATH);
+  }
+
+  @Override
+  public DistPathConfig getProfileConfig() {
+    return getDistPathConfig(DremioConfig.PROFILE_PATH_STRING, PROFILE_PLUGIN_SUB_PATH);
   }
 
   @Override

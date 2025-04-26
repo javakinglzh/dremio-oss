@@ -14,11 +14,15 @@
  * limitations under the License.
  */
 
-import type { CatalogReference } from "@dremio/dremio-js/interfaces";
+import type { CatalogReference } from "@dremio/dremio-js/oss";
 
 export const getIdListString = (
   catalogReferences: CatalogReference[],
+  pathPrefix?: string,
 ): string =>
   catalogReferences
-    .reduce((accum, curr) => accum + " " + curr.id, "")
+    .reduce(
+      (accum, curr) => accum + (pathPrefix ? ` ${pathPrefix}-` : " ") + curr.id,
+      "",
+    )
     .trimStart();

@@ -28,8 +28,6 @@ import org.apache.arrow.vector.holders.NullableIntervalYearHolder;
 import org.apache.arrow.vector.holders.NullableTimeMilliHolder;
 import org.apache.arrow.vector.holders.NullableTimeStampMilliHolder;
 import org.apache.arrow.vector.types.Types;
-import org.joda.time.DateTimeZone;
-import org.joda.time.LocalDateTime;
 import org.joda.time.Period;
 
 /* TODO: this is temporary setup to skip GetObject calls on Arrow vectors.
@@ -53,8 +51,7 @@ public class DremioGetObject {
           if (holder.isSet == 0) {
             return null;
           } else {
-            long millis = holder.value;
-            return new LocalDateTime(millis, DateTimeZone.UTC);
+            return DateTimes.parseLocalDateFromMillis(holder.value);
           }
         }
       case TIMEMILLI:
@@ -64,8 +61,7 @@ public class DremioGetObject {
           if (holder.isSet == 0) {
             return null;
           } else {
-            int millis = holder.value;
-            return new LocalDateTime(millis, DateTimeZone.UTC);
+            return DateTimes.parseLocalTimeFromMillis(holder.value);
           }
         }
       case TIMESTAMPMILLI:
@@ -75,8 +71,7 @@ public class DremioGetObject {
           if (holder.isSet == 0) {
             return null;
           } else {
-            final long millis = holder.value;
-            return new LocalDateTime(millis, DateTimeZone.UTC);
+            return DateTimes.parseLocalDateTimeFromMillis(holder.value);
           }
         }
       case INTERVALDAY:

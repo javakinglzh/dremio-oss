@@ -18,7 +18,9 @@ package com.dremio.sabot.op.join.vhash.spill.slicer;
 import com.dremio.sabot.op.copier.FieldBufferPreAllocedCopier;
 import com.dremio.sabot.op.join.vhash.spill.SV2UnsignedUtil;
 import com.google.common.collect.ImmutableList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.FieldVector;
@@ -70,6 +72,24 @@ public class DenseUnionSizer implements Sizer {
       totalDataLength += childVectorSizer.getDataLengthFromIndex(incoming.getOffset(startIndex), 1);
     }
     return totalDataLength;
+  }
+
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    Map<Byte, Sizer> typeIdToSizer = new HashMap<>();
+    for (int index = 0; index < recordCount; index++) {
+      if (!typeIdToSizer.containsKey(incoming.getTypeId(index))) {
+        typeIdToSizer.put(
+            incoming.getTypeId(index),
+            Sizer.get(incoming.getVectorByType(incoming.getTypeId(index))));
+      }
+      rowLengthAccumulator.setInt(
+          index * 4L,
+          rowLengthAccumulator.getInt(index * 4L)
+              + typeIdToSizer
+                  .get(incoming.getTypeId(index))
+                  .getDataLengthFromIndex(incoming.getOffset(index), 1));
+    }
   }
 
   /**

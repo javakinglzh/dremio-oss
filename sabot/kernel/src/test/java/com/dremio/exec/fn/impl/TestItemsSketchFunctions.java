@@ -42,8 +42,8 @@ public class TestItemsSketchFunctions extends PlanTestBase {
 
   private void runTestExpected(boolean twoPhase) throws Exception {
     final String sql = "select items_sketch(full_name) as td from cp.\"employees.json\"";
-    final String twoPhase1 = "StreamAgg(group=[{}], td=[items_sketch_merge_varchar($0)])";
-    final String twoPhase2 = "StreamAgg(group=[{}], td=[ITEMS_SKETCH($0)])";
+    final String twoPhase1 = "StreamAgg(group=[{}], td=[items_sketch_merge_varchar($0)]";
+    final String twoPhase2 = "StreamAgg(group=[{}], td=[ITEMS_SKETCH($0)]";
     if (twoPhase) {
       test("set planner.slice_target = 1");
       testPlanSubstrPatterns(sql, new String[] {twoPhase1, twoPhase2}, null);

@@ -99,7 +99,8 @@ public class IcebergManifestScanPrel extends TableFunctionPrel {
       Long survivingRecords,
       String user,
       boolean includeIcebergPartitionInfo,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> dataset) {
     this(
         cluster,
         traitSet,
@@ -107,7 +108,7 @@ public class IcebergManifestScanPrel extends TableFunctionPrel {
         child,
         null,
         TableFunctionUtil.getAllManifestContentScanTableFunctionConfig(
-            storagePluginId, internalStoragePlugin, projectedCols, schema, schemeVariate),
+            storagePluginId, internalStoragePlugin, projectedCols, schema, schemeVariate, dataset),
         rowType,
         survivingRecords,
         user,
@@ -205,6 +206,13 @@ public class IcebergManifestScanPrel extends TableFunctionPrel {
       LongRange range = manifestScanFilters.getSkipDataFileSizeRange();
       pw.item("data_file.file_size_in_bytes between", range);
     }
+
+    if (manifestScanFilters.doesSkipDataFileBySequenceFilterExist()) {
+      pw.item(
+          "data_file.sequence_filers : ",
+          manifestScanFilters.getSkipDataFileBySequenceFilter().toString());
+    }
+
     // write as manifestContent (instead of manifestContentType) to not cause a regression for
     // normal cases
     pw.item("manifestContent", context.getManifestContentType());

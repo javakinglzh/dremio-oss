@@ -17,7 +17,6 @@ package org.joda.time.chrono;
 
 import java.util.Locale;
 import org.joda.time.Chronology;
-import org.joda.time.DateTimeConstants;
 import org.joda.time.DateTimeFieldType;
 import org.joda.time.DurationField;
 import org.joda.time.field.PreciseDurationDateTimeField;
@@ -112,7 +111,7 @@ final class DayOfWeekFromSundayDateTimeField extends PreciseDurationDateTimeFiel
   @Override
   public int getMinimumValue() {
     // returns 1 which corresponds to SUNDAY for this impl
-    return DateTimeConstants.MONDAY;
+    return 1;
   }
 
   /**
@@ -123,7 +122,7 @@ final class DayOfWeekFromSundayDateTimeField extends PreciseDurationDateTimeFiel
   @Override
   public int getMaximumValue() {
     // returns 7 which corresponds to SATURDAY for this impl
-    return DateTimeConstants.SUNDAY;
+    return 7;
   }
 
   /**

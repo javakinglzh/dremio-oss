@@ -17,6 +17,7 @@ package com.dremio.sabot;
 
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.Describer;
+import com.dremio.common.util.DateTimes;
 import com.dremio.common.util.DremioGetObject;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
@@ -417,7 +418,8 @@ public final class Fixtures {
               isValid
                   ? getVectorObject(actualHolder.data.vectors.get(columnIndex), vectorOffset)
                   : null;
-          actualValues[columnIndex] = actualCellValue.toString();
+          actualValues[columnIndex] =
+              (actualCellValue == null) ? "null" : actualCellValue.toString();
         }
       }
 
@@ -565,7 +567,7 @@ public final class Fixtures {
       return false;
     }
 
-    if (!expected.equals(actual)) {
+    if (!compareFieldsIgnoreNullability(expected, actual)) {
       ok = false;
       sb.append(" (");
       sb.append(Describer.describe(expected));
@@ -573,6 +575,14 @@ public final class Fixtures {
     }
 
     return ok;
+  }
+
+  private static boolean compareFieldsIgnoreNullability(Field expected, Field actual) {
+    return Objects.equals(expected.getName(), actual.getName())
+        && Objects.equals(expected.getType(), actual.getType())
+        && Objects.equals(expected.getDictionary(), actual.getDictionary())
+        && Objects.equals(expected.getMetadata(), actual.getMetadata())
+        && Objects.equals(expected.getChildren(), actual.getChildren());
   }
 
   private static Field mergeField(Field field, ColumnHeader header, Cell c) {
@@ -993,6 +1003,13 @@ public final class Fixtures {
 
       if (!(obj.getClass().equals(this.obj.getClass())
           || (obj instanceof List && this.obj instanceof List))) {
+
+        if (this.obj instanceof org.joda.time.LocalDateTime) {
+          return new CellCompare(
+              DateTimes.compareDateTimeLikeObjects((org.joda.time.LocalDateTime) this.obj, obj),
+              objectToString(obj) + "(" + objectToString(this.obj) + ")");
+        }
+
         return new CellCompare(false, objectToString(obj) + "(" + objectToString(this.obj) + ")");
       }
 

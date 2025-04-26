@@ -24,6 +24,7 @@ import com.dremio.dac.service.catalog.CatalogServiceHelper;
 import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.reflection.ReflectionUtils;
 import com.dremio.service.reflection.analysis.ReflectionSuggester.ReflectionSuggestionType;
 import com.dremio.service.reflection.proto.ReflectionGoal;
 import com.google.common.base.Function;
@@ -50,12 +51,16 @@ import org.apache.commons.lang3.EnumUtils;
 public class DatasetResource {
   private ReflectionServiceHelper reflectionServiceHelper;
   private CatalogServiceHelper catalogServiceHelper;
+  private ReflectionUtils reflectionUtils;
 
   @Inject
   public DatasetResource(
-      ReflectionServiceHelper reflectionServiceHelper, CatalogServiceHelper catalogServiceHelper) {
+      ReflectionServiceHelper reflectionServiceHelper,
+      CatalogServiceHelper catalogServiceHelper,
+      ReflectionUtils reflectionUtils) {
     this.reflectionServiceHelper = reflectionServiceHelper;
     this.catalogServiceHelper = catalogServiceHelper;
+    this.reflectionUtils = reflectionUtils;
   }
 
   @GET
@@ -119,7 +124,7 @@ public class DatasetResource {
             new Function<ReflectionGoal, Reflection>() {
               @Override
               public Reflection apply(ReflectionGoal goal) {
-                return new Reflection(goal);
+                return new Reflection(goal, reflectionUtils);
               }
             });
     return new ResponseList<>(recommendations);

@@ -120,7 +120,6 @@ const SearchableMultiSelect = (props) => {
       removeValue(selectedValue);
     }
     setFilterText("");
-    inputRef.current.focus();
   };
 
   const handleChipClick = (e) => {
@@ -138,6 +137,12 @@ const SearchableMultiSelect = (props) => {
   }
 
   const handleInputKeyDown = (e) => {
+    if (e.key === "Escape") {
+      handleClose();
+      e.stopPropagation();
+      return;
+    }
+
     const noFilterText = !filterText || filterText === "";
     if (noFilterText && value && value.length > 0 && e.key === "Backspace") {
       removeValue(value[value.length - 1]);
@@ -156,7 +161,7 @@ const SearchableMultiSelect = (props) => {
       setFilterText("");
     }
 
-    if (!showMenu) {
+    if (!showMenu && e.key !== "Tab" && e.key !== "Shift") {
       setShowMenu(true);
     }
   };
@@ -181,7 +186,20 @@ const SearchableMultiSelect = (props) => {
               label={selectedVal.label}
               onClick={handleChipClick}
               onDelete={(ev) => handleDelete(ev, selectedVal.value)}
-              deleteIcon={<XIcon />}
+              deleteIcon={
+                <div
+                  tabIndex={0}
+                  onClick={(ev) => handleDelete(ev, selectedVal.value)}
+                  onKeyDown={(e) => {
+                    if (e.code === "Space" || e.code === "Enter")
+                      handleDelete(e, selectedVal.value);
+                  }}
+                  aria-label="remove"
+                  style={{ height: 24 }}
+                >
+                  <XIcon />
+                </div>
+              }
             />
           ))}
           {visibleValues.length < value.length && (
@@ -199,6 +217,7 @@ const SearchableMultiSelect = (props) => {
               onKeyDown={handleInputKeyDown}
               autoComplete="off"
               placeholder={placeholder && !hasValue ? placeholder : null}
+              disabled={disabled}
             />
           )}
         </div>
@@ -206,7 +225,14 @@ const SearchableMultiSelect = (props) => {
           {hasValue && (
             <span
               className="SearchableMultiSelect__clearIcon"
+              tabIndex={0}
+              aria-label={"Clear selections"}
               onClick={handleClear}
+              onKeyDown={(e) => {
+                if (e.code === "Enter" || e.code === "Space") {
+                  handleClear(e);
+                }
+              }}
             >
               <XIcon />
             </span>
@@ -275,6 +301,7 @@ const SearchableMultiSelect = (props) => {
             width: valueContainerRef.current?.clientWidth,
           },
         }}
+        container={valueContainerRef.current || document.body}
       >
         {renderMenuItems()}
       </Menu>

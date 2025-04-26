@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.physical.config.copyinto;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
@@ -26,6 +25,7 @@ import com.dremio.exec.store.StoragePluginResolver;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.dfs.copyinto.CopyIntoHistoryEventHandler;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePlugin;
+import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -107,7 +107,7 @@ public class CopyIntoHistoryWriterCommitterPOP extends WriterCommitterPOP {
       NamespaceKey datasetPath,
       Optional<DatasetConfig> datasetConfig,
       PhysicalOperator child,
-      MutablePlugin plugin,
+      SupportsIcebergMutablePlugin plugin,
       StoragePlugin sourceTablePlugin,
       boolean isPartialRefresh,
       boolean isReadSignatureEnabled,
@@ -142,7 +142,7 @@ public class CopyIntoHistoryWriterCommitterPOP extends WriterCommitterPOP {
         getDatasetPath(),
         getDatasetConfig(),
         child,
-        getPlugin(),
+        (SupportsIcebergMutablePlugin) getPlugin(),
         (StoragePlugin) getSourceTablePlugin(),
         isPartialRefresh(),
         isReadSignatureEnabled(),

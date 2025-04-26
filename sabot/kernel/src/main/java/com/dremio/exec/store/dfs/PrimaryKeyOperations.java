@@ -17,8 +17,8 @@ package com.dremio.exec.store.dfs;
 
 import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants.METADATA_STORAGE_PLUGIN_NAME;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.VersionedPlugin;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
@@ -27,6 +27,7 @@ import com.dremio.exec.store.iceberg.model.IcebergTableIdentifier;
 import com.dremio.io.file.Path;
 import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.PrimaryKey;
 import java.util.List;
@@ -41,7 +42,7 @@ public class PrimaryKeyOperations extends MetadataOperations {
 
   public PrimaryKeyOperations(
       DatasetConfig datasetConfig,
-      SabotContext context,
+      PluginSabotContext context,
       NamespaceKey table,
       SchemaConfig schemaConfig,
       IcebergModel model,
@@ -81,21 +82,19 @@ public class PrimaryKeyOperations extends MetadataOperations {
         columns.stream()
             .map(f -> f.getName().toLowerCase(Locale.ROOT))
             .collect(Collectors.toList());
-    saveInKvStore(
-        table, datasetConfig, schemaConfig.getUserName(), storagePlugin, context, primaryKey);
+    if (!(storagePlugin.isWrapperFor(VersionedPlugin.class))) {
+      DatasetNamespaceService userNamespaceService =
+          context.getNamespaceService(schemaConfig.getUserName());
+      updatePrimaryKeyInNamespaceService(table, datasetConfig, userNamespaceService, primaryKey);
+    }
   }
 
-  public static void saveInKvStore(
+  public static void updatePrimaryKeyInNamespaceService(
       NamespaceKey table,
       DatasetConfig datasetConfig,
-      String userName,
-      StoragePlugin storagePlugin,
-      SabotContext context,
+      DatasetNamespaceService userNamespaceService,
       List<String> primaryKey) {
-    if (!(storagePlugin.isWrapperFor(
-        VersionedPlugin.class))) { // Don't store in the namespace for versioned plugins.
-      datasetConfig.getPhysicalDataset().setPrimaryKey(new PrimaryKey().setColumnList(primaryKey));
-      save(table, datasetConfig, userName, context);
-    }
+    datasetConfig.getPhysicalDataset().setPrimaryKey(new PrimaryKey().setColumnList(primaryKey));
+    updateDatasetInNamespaceService(table, datasetConfig, userNamespaceService);
   }
 }

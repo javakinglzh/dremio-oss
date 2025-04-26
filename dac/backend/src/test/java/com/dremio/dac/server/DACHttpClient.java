@@ -44,6 +44,10 @@ public class DACHttpClient extends BaseClientUtils {
         client.target("http://localhost:" + dacDaemon.getLivenessService().getLivenessPort());
   }
 
+  public WebTarget getWebRoot() {
+    return webRoot;
+  }
+
   public WebTarget getAPIv2() {
     return webRoot.path("apiv2");
   }
@@ -74,6 +78,10 @@ public class DACHttpClient extends BaseClientUtils {
 
   public WebTarget getMetricsEndpoint() {
     return livenessRoot.path("metrics");
+  }
+
+  public WebTarget getLivenessRoot() {
+    return livenessRoot;
   }
 
   public WebTarget getUserApiV2(final String username) {

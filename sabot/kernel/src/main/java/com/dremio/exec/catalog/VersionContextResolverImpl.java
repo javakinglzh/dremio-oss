@@ -27,6 +27,7 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
 import com.google.common.cache.LoadingCache;
 import com.google.common.util.concurrent.UncheckedExecutionException;
+import java.util.Optional;
 import javax.validation.constraints.NotNull;
 import org.apache.commons.lang3.tuple.ImmutablePair;
 import org.projectnessie.error.NessieRuntimeException;
@@ -91,10 +92,10 @@ public class VersionContextResolverImpl implements VersionContextResolver {
       VersionContext versionContext = key.right;
       ManagedStoragePlugin msp = pluginRetriever.getPlugin(sourceName, false);
       if (msp != null) {
-        StoragePlugin source = msp.getPlugin();
-        if (source.isWrapperFor(VersionedPlugin.class)) {
+        Optional<StoragePlugin> source = msp.getPlugin();
+        if (source.isPresent() && source.get().isWrapperFor(VersionedPlugin.class)) {
           ResolvedVersionContext resolvedVersionContext =
-              source.unwrap(VersionedPlugin.class).resolveVersionContext(versionContext);
+              source.get().unwrap(VersionedPlugin.class).resolveVersionContext(versionContext);
           logger.debug(
               "Calling Nessie to resolve version {} for source {} ", versionContext, sourceName);
           return resolvedVersionContext;

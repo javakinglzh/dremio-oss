@@ -58,7 +58,7 @@ import com.dremio.test.DremioTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nimbusds.jose.proc.BadJWSException;
 import java.io.IOException;
-import java.net.URL;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
@@ -112,12 +112,12 @@ public class TestTokenManagerImplV2 {
             .withOptionManager(mock(SystemOptionManager.class))
             .build();
     withJwtAccessTokensEnabled(true);
-    when(optionManager.getOption("token.jwt-access-token.expiration.minutes"))
+    when(optionManager.getOption("token.access-token-v2.expiration.minutes"))
         .thenReturn(
             OptionValue.createOption(
                 OptionValue.Kind.LONG,
                 OptionValue.OptionType.SYSTEM,
-                "token.jwt-access-token.expiration.minutes",
+                "token.access-token-v2.expiration.minutes",
                 "" + JWT_EXPIRATION_MINUTES));
     when(optionManager.getOption("token.expiration.min"))
         .thenReturn(
@@ -140,11 +140,17 @@ public class TestTokenManagerImplV2 {
                 OptionValue.OptionType.SYSTEM,
                 "token.temporary.expiration.sec",
                 "5"));
+    when(optionManager.getOption("token.jwks-key-rotation-period.days"))
+        .thenReturn(
+            OptionValue.createOption(
+                OptionValue.Kind.LONG,
+                OptionValue.OptionType.SYSTEM,
+                "token.jwks-key-rotation-period.days",
+                "15"));
 
     provider = LegacyKVStoreProviderAdapter.inMemory(DremioTest.CLASSPATH_SCAN_RESULT);
     provider.start();
 
-    final URL baseUrl = new URL("https://localhost:9047");
     webServerInfoProvider =
         new WebServerInfoProvider() {
           @Override
@@ -153,8 +159,8 @@ public class TestTokenManagerImplV2 {
           }
 
           @Override
-          public URL getBaseURL() {
-            return baseUrl;
+          public URI getIssuer() {
+            return URI.create("https://localhost:9047");
           }
         };
 
@@ -529,7 +535,9 @@ public class TestTokenManagerImplV2 {
   }
 
   @Test
-  public void createAndValidateThirdPartyToken() {
+  public void createAndValidateThirdPartyTokenJwtsDisabled() {
+    withJwtAccessTokensEnabled(false);
+
     final String clientId = UUID.randomUUID().toString();
     final List<String> expectedScopes = List.of("openid", "profile", "email");
     final TokenDetails tokenDetails =
@@ -537,8 +545,19 @@ public class TestTokenManagerImplV2 {
             username, clientAddress, clientId, expectedScopes, Duration.ofHours(1).toMillis());
     final TokenDetails validatedToken = tokenManager.validateToken(tokenDetails.token);
     assertEquals(username, validatedToken.username);
-    assertEquals(clientId, validatedToken.clientId);
     assertEquals(new HashSet<>(expectedScopes), new HashSet<>(validatedToken.getScopes()));
+  }
+
+  @Test
+  public void createAndValidateThirdPartyTokenJwtsEnabled() {
+    final String clientId = UUID.randomUUID().toString();
+    final List<String> expectedScopes = List.of("openid", "profile", "email");
+    final TokenDetails tokenDetails =
+        tokenManager.createThirdPartyToken(
+            username, clientAddress, clientId, expectedScopes, Duration.ofHours(1).toMillis());
+    final TokenDetails validatedToken = tokenManager.validateToken(tokenDetails.token);
+    assertEquals(username, validatedToken.username);
+    assertEquals(List.of("dremio.all"), validatedToken.getScopes());
   }
 
   @Test

@@ -15,8 +15,6 @@
  */
 package com.dremio.exec.planner.sql;
 
-import static com.dremio.exec.planner.sql.SqlOperand.Type.REGULAR;
-
 import com.dremio.common.exceptions.UserException;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -50,7 +48,6 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorNamespace;
 import org.apache.calcite.sql.validate.SqlValidatorScope;
-import org.apache.calcite.sql.validate.implicit.TypeCoercion;
 import org.apache.calcite.util.Pair;
 
 /**
@@ -186,7 +183,7 @@ public final class SqlOperatorBuilder {
     public SqlOperatorBuilderFinalStage operandTypes(SqlTypeName... operandTypes) {
       List<SqlOperand> sqlOperands =
           Arrays.stream(operandTypes)
-              .map(sqlTypeName -> SqlOperand.regular(sqlTypeName))
+              .map(SqlTypeNameSqlOperand::regular)
               .collect(Collectors.toList());
       return operandTypes(sqlOperands);
     }
@@ -315,7 +312,7 @@ public final class SqlOperatorBuilder {
               .filter(
                   rule ->
                       rule.isValidSource(userSuppliedType)
-                          && sqlOperand.typeRange.contains(rule.destinationType()))
+                          && sqlOperand.accepts(rule.destinationType(), sqlCallBinding))
               .findFirst()
               .ifPresent(
                   rule ->
@@ -373,53 +370,13 @@ public final class SqlOperatorBuilder {
 
       @Override
       public boolean checkOperandTypes(SqlCallBinding callBinding, boolean throwOnFailure) {
-        TypeCoercion typeCoercion = callBinding.getValidator().getTypeCoercion();
-        RelDataTypeFactory relDataTypeFactory = callBinding.getValidator().getTypeFactory();
         List<Pair<SqlOperand, RelDataType>> zipping =
             zipOperandWithTypes(operands, callBinding.collectOperandTypes());
         for (Pair<SqlOperand, RelDataType> pair : zipping) {
           SqlOperand specOperand = pair.left;
           RelDataType userType = pair.right;
 
-          boolean anyMatch = specOperand.typeRange.contains(userType.getSqlTypeName());
-          if (!anyMatch) {
-            // Check to see if any of the types are "wider"
-            anyMatch =
-                specOperand.typeRange.stream()
-                    .anyMatch(
-                        acceptedType -> {
-                          if (acceptedType == SqlTypeName.ANY) {
-                            // getTightestCommonType doesn't work for ANY for whatever reason ...
-                            return true;
-                          }
-
-                          // For non sql types we can't call createSqlType, so we need to add manual
-                          // checks
-                          if (acceptedType == SqlTypeName.ARRAY) {
-                            return userType.getSqlTypeName() == SqlTypeName.ARRAY;
-                          }
-
-                          if (acceptedType == SqlTypeName.MAP) {
-                            return userType.getSqlTypeName() == SqlTypeName.MAP;
-                          }
-
-                          // Technically this should only support going up a bigger interval type
-                          if (SqlTypeName.INTERVAL_TYPES.contains(acceptedType)) {
-                            return SqlTypeName.INTERVAL_TYPES.contains(userType.getSqlTypeName());
-                          }
-
-                          RelDataType acceptedRelDataType =
-                              relDataTypeFactory.createSqlType(acceptedType);
-                          RelDataType commonType =
-                              typeCoercion.getTightestCommonType(acceptedRelDataType, userType);
-                          if (commonType == null) {
-                            return false;
-                          }
-
-                          return commonType.getSqlTypeName() == acceptedType;
-                        });
-          }
-
+          boolean anyMatch = specOperand.accepts(userType, callBinding);
           if (!anyMatch) {
             if (throwOnFailure) {
               throw UserException.validationError()

@@ -123,7 +123,7 @@ public class TestFlattenPlanning extends PlanTestBase {
       PlanTestBase.testPlanMatchingPatterns(
           onvds,
           new String[] {
-            "(?s)Flatten\\(flattenField=\\[\\$0\\]\\).*Flatten\\(flattenField=\\[\\$0\\]\\)"
+            "(?s)Flatten\\(flattenField=\\[\\$1\\]\\).*Flatten\\(flattenField=\\[\\$0\\]\\)"
           },
           new String[] {});
     } finally {

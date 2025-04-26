@@ -15,7 +15,7 @@
  */
 import { RSAA } from "redux-api-middleware";
 import { APIV2Call } from "#oss/core/APICall";
-import { VIEW_ID as HOME_CONTENTS_VIEW_ID } from "pages/HomePage/subpages/HomeContents";
+import { VIEW_ID as HOME_CONTENTS_VIEW_ID } from "pages/HomePage/subpages/homeContentsUtils";
 
 import sqlFunctions from "customData/sqlFunctions.json";
 import { constructFullPath } from "#oss/utils/pathUtils";

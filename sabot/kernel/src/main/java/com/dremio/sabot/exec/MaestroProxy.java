@@ -38,6 +38,7 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.Empty;
+import io.grpc.stub.StreamObserver;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
@@ -106,14 +107,19 @@ public class MaestroProxy implements AutoCloseable {
    * @param querySentTime
    * @return true if the query was started successfully.
    */
-  boolean tryStartQuery(QueryId queryId, QueryTicket ticket, Long querySentTime) {
+  boolean tryStartQuery(
+      QueryId queryId,
+      QueryTicket ticket,
+      Long querySentTime,
+      StreamObserver<Empty> startFragmentObserver) {
     QueryTracker queryTracker = trackers.getUnchecked(queryId);
     queryTracker.setQuerySentTime(querySentTime);
     return queryTracker.tryStart(
         ticket,
         ticket.getForeman(),
         maestroServiceClientFactoryProvider.get().getMaestroClient(ticket.getForeman()),
-        jobTelemetryClientFactoryProvider.get().getClient(ticket.getForeman()));
+        jobTelemetryClientFactoryProvider.get().getClient(ticket.getForeman()),
+        startFragmentObserver);
   }
 
   boolean isQueryStarted(QueryId queryId) {
@@ -285,5 +291,11 @@ public class MaestroProxy implements AutoCloseable {
       }
     }
     return queryIdsToCancel;
+  }
+
+  public void markStartFragmentDone(
+      QueryId queryId, StreamObserver<Empty> startFragmentObserver, Throwable throwable) {
+    QueryTracker queryTracker = trackers.getUnchecked(queryId);
+    queryTracker.markStartFragmentDone(startFragmentObserver, throwable);
   }
 }

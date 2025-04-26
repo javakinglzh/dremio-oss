@@ -28,15 +28,6 @@
       "TRUNCATE",
       "ALTER",
       "REFRESH",
-      [
-        "LOAD",
-        "MATERIALIZATION",
-        "METADATA"
-      ],
-      [
-        "COMPACT",
-        "MATERIALIZATION"
-      ],
       "EXPLAIN",
       "GRANT",
       "REVOKE",
@@ -109,15 +100,6 @@
       "TRUNCATE",
       "ALTER",
       "REFRESH",
-      [
-        "LOAD",
-        "MATERIALIZATION",
-        "METADATA"
-      ],
-      [
-        "COMPACT",
-        "MATERIALIZATION"
-      ],
       "EXPLAIN",
       "GRANT",
       "REVOKE",
@@ -166,6 +148,7 @@
       "TIMESTAMP",
       "INTERVAL",
       "CEIL",
+      "TRY_CONVERT_FROM",
       "MATCH_NUMBER",
       "FINAL",
       "RUNNING",
@@ -292,6 +275,7 @@
       "TIMESTAMP",
       "INTERVAL",
       "CEIL",
+      "TRY_CONVERT_FROM",
       "MATCH_NUMBER",
       "FINAL",
       "RUNNING",
@@ -613,6 +597,7 @@
       "TIMESTAMP",
       "INTERVAL",
       "CEIL",
+      "TRY_CONVERT_FROM",
       "MATCH_NUMBER",
       "FINAL",
       "RUNNING",

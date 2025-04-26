@@ -25,6 +25,7 @@ public class PreparedPlan {
   private final QueryId prepareId;
   private final String username;
   private final boolean queryRequiresGroupsInfo;
+  private final String queryLabel;
   private final String query;
   private final PhysicalPlan plan;
   private final RecordingObserver observer;
@@ -33,12 +34,14 @@ public class PreparedPlan {
       QueryId prepareId,
       String username,
       boolean queryRequiresGroupsInfo,
+      String queryLabel,
       String query,
       PhysicalPlan plan,
       RecordingObserver observer) {
     this.prepareId = prepareId;
     this.username = username;
     this.queryRequiresGroupsInfo = queryRequiresGroupsInfo;
+    this.queryLabel = queryLabel;
     this.query = query;
     this.plan = plan;
     this.observer = observer;
@@ -62,6 +65,10 @@ public class PreparedPlan {
 
   public String getQuery() {
     return query;
+  }
+
+  public String getQueryLabel() {
+    return queryLabel;
   }
 
   public boolean getQueryRequiresGroupsInfo() {

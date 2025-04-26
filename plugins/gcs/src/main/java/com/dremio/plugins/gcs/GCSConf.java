@@ -17,15 +17,16 @@ package com.dremio.plugins.gcs;
 
 import static com.dremio.io.file.UriSchemes.DREMIO_GCS_SCHEME;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
+import com.dremio.exec.catalog.conf.GCSAuthType;
 import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.dfs.CacheProperties;
 import com.dremio.exec.store.dfs.FileSystemConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
@@ -50,17 +51,8 @@ public class GCSConf extends FileSystemConf<GCSConf, GoogleStoragePlugin> {
   public String projectId = "";
 
   /** Authorization Mode for GCS */
-  public enum AuthMode {
-    @Tag(1)
-    @DisplayMetadata(label = "Service Account Keys")
-    SERVICE_ACCOUNT_KEYS,
-    @Tag(2)
-    @DisplayMetadata(label = "Automatic/Service Account")
-    AUTO
-  }
-
   @Tag(2)
-  public AuthMode authMode = AuthMode.SERVICE_ACCOUNT_KEYS;
+  public GCSAuthType authMode = GCSAuthType.SERVICE_ACCOUNT_KEYS;
 
   @Tag(4)
   public List<Property> propertyList;
@@ -158,8 +150,8 @@ public class GCSConf extends FileSystemConf<GCSConf, GoogleStoragePlugin> {
 
   @Override
   public GoogleStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> idProvider) {
-    return new GoogleStoragePlugin(this, context, name, idProvider);
+      PluginSabotContext pluginSabotContext, String name, Provider<StoragePluginId> idProvider) {
+    return new GoogleStoragePlugin(this, pluginSabotContext, name, idProvider);
   }
 
   @Override

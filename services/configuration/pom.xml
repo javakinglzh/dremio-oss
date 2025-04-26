@@ -32,6 +32,14 @@
       <artifactId>protobuf-java</artifactId>
     </dependency>
     <dependency>
+      <groupId>io.protostuff</groupId>
+      <artifactId>protostuff-api</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.protostuff</groupId>
+      <artifactId>protostuff-core</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-datastore</artifactId>
     </dependency>

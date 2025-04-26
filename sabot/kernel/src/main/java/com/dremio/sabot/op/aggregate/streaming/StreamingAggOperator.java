@@ -17,11 +17,14 @@ package com.dremio.sabot.op.aggregate.streaming;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.FunctionCall;
 import com.dremio.common.expression.IfExpression;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.logical.data.NamedExpression;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.sig.GeneratorMapping;
 import com.dremio.exec.compile.sig.MappingSet;
 import com.dremio.exec.expr.ClassGenerator;
@@ -37,11 +40,14 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.collect.ImmutableList;
 import com.sun.codemodel.JExpr;
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.Decimal256Vector;
 import org.apache.arrow.vector.DecimalVector;
@@ -51,6 +57,7 @@ import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.SmallIntVector;
 import org.apache.arrow.vector.TinyIntVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.util.TransferPair;
 
@@ -88,6 +95,14 @@ public class StreamingAggOperator implements SingleInputOperator {
   private boolean allocateNewOutput = true;
   private int nextOutputCount;
   private long consumedCount;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
+  private boolean isFixedAccumulatorOnly;
 
   /*
    * DRILL-2277, DRILL-2411: For straight aggregates without a group by clause we need to perform special handling when
@@ -109,6 +124,11 @@ public class StreamingAggOperator implements SingleInputOperator {
     this.context = context;
     this.stats = context.getStats();
     this.outgoing = context.createOutputVectorContainer();
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
@@ -141,6 +161,7 @@ public class StreamingAggOperator implements SingleInputOperator {
       keyOutputIds[i] = outgoing.add(vector);
     }
 
+    isFixedAccumulatorOnly = true;
     for (int i = 0; i < valueExprs.length; i++) {
       final NamedExpression ne = config.getAggrExprs().get(i);
       final LogicalExpression expr =
@@ -156,13 +177,18 @@ public class StreamingAggOperator implements SingleInputOperator {
 
       final Field outputField = expr.getCompleteType().toField(ne.getRef());
       ValueVector vector = TypeHelper.getNewVector(outputField, context.getAllocator());
+      if (!(vector instanceof BaseFixedWidthVector)) {
+        isFixedAccumulatorOnly = false;
+      }
       TypedFieldId id = outgoing.add(vector);
       valueExprs[i] = new ValueVectorWriteExpression(id, expr, true);
     }
 
     List<TransferPair> transfers = new ArrayList<>();
     for (VectorWrapper<?> w : onDeckInput) {
-      TransferPair pair = w.getValueVector().getTransferPair(context.getAllocator());
+      ValueVector valueVector = w.getValueVector();
+      TransferPair pair =
+          valueVector.getTransferPair(valueVector.getField(), context.getAllocator());
       atBatInput.add(pair.getTo());
       transfers.add(pair);
     }
@@ -186,8 +212,33 @@ public class StreamingAggOperator implements SingleInputOperator {
         context.getTargetBatchSize(),
         new TransferOnDeckAtBat());
 
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (isFixedAccumulatorOnly) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+      }
+    }
     state = State.CAN_CONSUME;
     return outgoing;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
   }
 
   private void transitionOnDeckToAtBat() {
@@ -258,7 +309,10 @@ public class StreamingAggOperator implements SingleInputOperator {
           return 0;
         }
       } else {
-        return outgoing.setAllCount(aggregator.closeLastAggregation());
+        int outCount = aggregator.closeLastAggregation();
+        outgoing.setAllCount(outCount);
+        checkForRowSizeOverLimit(outCount);
+        return outCount;
       }
     }
 
@@ -267,7 +321,9 @@ public class StreamingAggOperator implements SingleInputOperator {
     if (nextOutputCount != 0) {
       int localOutputCount = nextOutputCount;
       nextOutputCount = 0;
-      return outgoing.setAllCount(localOutputCount);
+      outgoing.setAllCount(localOutputCount);
+      checkForRowSizeOverLimit(localOutputCount);
+      return localOutputCount;
     }
 
     // let's try to consume more of our current batch.
@@ -284,7 +340,25 @@ public class StreamingAggOperator implements SingleInputOperator {
     }
 
     // we filled another outgoing batch, let's return it.
-    return outgoing.setAllCount(outputBatchFinishedCount);
+    outgoing.setAllCount(outputBatchFinishedCount);
+    checkForRowSizeOverLimit(outputBatchFinishedCount);
+    return outputBatchFinishedCount;
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   @Override
@@ -489,7 +563,8 @@ public class StreamingAggOperator implements SingleInputOperator {
 
   @Override
   public void close() throws Exception {
-    AutoCloseables.close((AutoCloseable) atBatInput, outgoing);
+    AutoCloseables.close((AutoCloseable) atBatInput, outgoing, rowSizeAccumulator);
+    rowSizeAccumulator = null;
   }
 
   public static class Creator implements SingleInputOperator.Creator<StreamingAggregate> {

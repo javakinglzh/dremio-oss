@@ -15,12 +15,12 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "packageManager": "pnpm@9.9.0",
+  "packageManager": "pnpm@9.13.2",
   "devDependencies": {
     "@lezer/generator": "^1.7.0",
     "@types/node": "^20.12.12",
     "tsx": "^4.10.5",
-    "typescript": "5.5.4"
+    "typescript": "5.7.2"
   },
   "dependencies": {
     "@codemirror/language": "^6.10.2",
@@ -32,7 +32,7 @@
   },
   "peerDependencies": {
     "react": ">=16.8.0",
-    "@types/react": ">=18"
+    "@types/react": "^18.3.12"
   },
   "peerDependenciesMeta": {
     "@types/react": {

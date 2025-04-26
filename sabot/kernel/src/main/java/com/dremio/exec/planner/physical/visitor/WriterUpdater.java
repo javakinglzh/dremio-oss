@@ -21,6 +21,8 @@ import static com.dremio.exec.ExecConstants.ENABLE_ICEBERG_COMBINE_SMALL_FILES_F
 import static com.dremio.exec.ExecConstants.FORCE_USE_MOR_VECTOR_SORTER_FOR_PARTITION_TABLES_WITH_UNDEFINED_SORT_ORDER;
 import static com.dremio.exec.store.RecordWriter.OPERATION_TYPE_COLUMN;
 import static com.dremio.exec.store.RecordWriter.RECORDS_COLUMN;
+import static com.dremio.exec.store.SystemSchemas.CLUSTERING_INDEX;
+import static com.dremio.exec.store.SystemSchemas.FILE_GROUP_INDEX;
 import static com.dremio.exec.store.iceberg.IcebergUtils.hasNonIdentityPartitionColumns;
 import static com.dremio.exec.store.iceberg.IcebergUtils.isIdentityPartitionColumn;
 
@@ -28,7 +30,9 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.physical.base.ClusteringOptions;
 import com.dremio.exec.physical.base.CombineSmallFileOptions;
+import com.dremio.exec.physical.base.TableFormatWriterOptions;
 import com.dremio.exec.physical.base.TableFormatWriterOptions.TableFormatOperation;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.physical.config.TableFunctionConfig;
@@ -86,6 +90,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -234,11 +239,12 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
       // changeDirection detection columns
       List<Integer> hashFieldIndex = ImmutableList.of(project.getRowType().getFieldCount() - 1);
 
-      return updateWriterWithPartition(
+      return updateWriterWithSortAndChangeDirectionProject(
           prel, project, hashFieldIndex, tableEntry, addSort, expectedWriterInboundRowType);
-    } else if (options.hasPartitions()) {
-      return updateWriterWithPartition(prel, input, ImmutableList.of(), tableEntry, addSort, null);
-    } else if (options.hasSort()) {
+    } else if (options.hasPartitions() || requireSortBeforeWriteForClustering(options)) {
+      return updateWriterWithSortAndChangeDirectionProject(
+          prel, input, ImmutableList.of(), tableEntry, addSort, null);
+    } else if (!options.isWriteAsClustering() && options.hasSort()) {
       // no partitions or distributions.
       // insert a sort on sort fields.
 
@@ -262,6 +268,16 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     }
   }
 
+  public static boolean requireSortBeforeWriteForClustering(WriterOptions options) {
+    if (!options.isWriteAsClustering()) {
+      return false;
+    }
+    return Optional.ofNullable(options.getTableFormatOptions())
+        .map(TableFormatWriterOptions::getClusteringOptions)
+        .map(ClusteringOptions::requireSortBeforeWrite)
+        .orElse(true);
+  }
+
   private Prel addSort(
       Prel prel,
       Prel input,
@@ -282,7 +298,9 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     }
 
     // then sort by sort keys, if available.
-    if (options.hasSort()) {
+    if (options.isWriteAsClustering()) {
+      addClusteringColumnsToSort(inputRowType, sortKeys);
+    } else if (options.hasSort()) {
       List<Integer> sortRequestKeys = getFieldIndices(options.getSortColumns(), inputRowType);
       for (Integer key : sortRequestKeys) {
         if (sortedKeys.contains(key)) {
@@ -353,7 +371,20 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     sortKeys.add(inputRowType.getField(ColumnUtils.ROW_INDEX_COLUMN_NAME, false, false).getIndex());
   }
 
-  private Prel updateWriterWithPartition(
+  /** When writing data into clusters, sort data by cluster id and index */
+  private void addClusteringColumnsToSort(RelDataType inputRowType, List<Integer> sortKeys) {
+    // Final Check: system columns must exist.
+    Set<String> fieldNames = new HashSet<>(inputRowType.getFieldNames());
+    // Check if system columns exist
+    if (!fieldNames.contains(FILE_GROUP_INDEX) || !fieldNames.contains(CLUSTERING_INDEX)) {
+      return;
+    }
+
+    sortKeys.add(inputRowType.getField(FILE_GROUP_INDEX, false, false).getIndex());
+    sortKeys.add(inputRowType.getField(CLUSTERING_INDEX, false, false).getIndex());
+  }
+
+  private Prel updateWriterWithSortAndChangeDirectionProject(
       Prel prel,
       Prel input,
       List<Integer> additionalFieldIndices,
@@ -383,7 +414,9 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
 
     List<Integer> fieldIndices = new ArrayList<>();
     fieldIndices.addAll(additionalFieldIndices);
-    fieldIndices.addAll(getFieldIndices(partitionColumns, inputRowType));
+    if (partitionColumns != null) {
+      fieldIndices.addAll(getFieldIndices(partitionColumns, inputRowType));
+    }
 
     // we need to sort by the partitions.
     final Prel changeDetectionPrel = addChangeDetectionProject(input, fieldIndices);
@@ -1271,23 +1304,25 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     return (Prel) prel.copy(prel.getTraitSet(), newInputs);
   }
 
-  RelDataType getRowType(BatchSchema newSchema, RelOptCluster relOptCluster) {
+  static RelDataType getRowType(BatchSchema newSchema, RelOptCluster relOptCluster) {
     final RelDataTypeFactory factory = relOptCluster.getTypeFactory();
     final RelDataTypeFactory.FieldInfoBuilder builder =
         new RelDataTypeFactory.FieldInfoBuilder(factory);
     for (Field field : newSchema) {
       builder.add(
           field.getName(),
-          CalciteArrowHelper.wrap(CompleteType.fromField(field)).toCalciteType(factory, true));
+          CalciteArrowHelper.wrap(CompleteType.fromField(field), field.isNullable())
+              .toCalciteType(factory, true));
     }
     return builder.build();
   }
 
-  BatchSchema getNewBatchSchema(
+  static BatchSchema getNewBatchSchema(
       BatchSchema batchSchema,
       PartitionSpec partitionSpec,
       List<String> partitionColumns,
-      RelDataType inputRowType) {
+      RelDataType inputRowType,
+      WriterOptions options) {
     List<Field> fields = new ArrayList<>();
     Schema schema = partitionSpec.schema();
 
@@ -1304,17 +1339,25 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
       fields.add(newField);
       partitionColumns.add(newField.getName());
     }
-    if (inputRowType.getFieldList().stream()
-        .map(RelDataTypeField::getName)
-        .anyMatch(ColumnUtils.COPY_HISTORY_COLUMN_NAME::equals)) {
+    Set<String> fieldNameSet =
+        inputRowType.getFieldList().stream()
+            .map(RelDataTypeField::getName)
+            .collect(Collectors.toSet());
+    if (fieldNameSet.contains(ColumnUtils.COPY_HISTORY_COLUMN_NAME)) {
       fields.add(
           Field.nullablePrimitive(
               ColumnUtils.COPY_HISTORY_COLUMN_NAME, ArrowType.PrimitiveType.Utf8.INSTANCE));
     }
+    if (DmlUtils.isMergeOnReadDmlOperation(options)) {
+      if (fieldNameSet.stream().anyMatch(ColumnUtils.DML_SYSTEM_COLUMNS::contains)) {
+        fields.add(ColumnUtils.DREMIO_INTERNAL_FILE_PATH_FIELD);
+        fields.add(ColumnUtils.DREMIO_INTERNAL_ROW_INDEX_FIELD);
+      }
+    }
     return batchSchema.cloneWithFields(fields);
   }
 
-  List<SchemaPath> getColumns(BatchSchema newbatchSchema) {
+  public static List<SchemaPath> getColumns(BatchSchema newbatchSchema) {
     List<SchemaPath> schemaPathList = new ArrayList<>();
     for (Field field : newbatchSchema.getFields()) {
       schemaPathList.add(SchemaPath.getSimplePath(field.getName()));
@@ -1336,12 +1379,28 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     return colIdMap;
   }
 
-  private Prel getTableFunctionOnPartitionColumns(
+  public static Prel getTableFunctionOnPartitionColumns(
       WriterOptions options,
       Prel input,
       Prel prel,
       List<String> partitionColumns,
       PartitionSpec partitionSpec) {
+    if (PrelUtil.getSettings(prel.getCluster())
+        .getOptions()
+        .getOption(PlannerSettings.CTAS_BALANCE)) {
+      List<String> partitionSpecColumns =
+          partitionSpec.fields().stream().map(PartitionField::name).collect(Collectors.toList());
+      if (partitionSpecColumns.stream()
+              .allMatch(f -> Objects.nonNull(input.getRowType().getField(f, false, false)))
+          && input
+              .getTraitSet()
+              .getTrait(DistributionTraitDef.INSTANCE)
+              .satisfies(
+                  WriterOptions.hashDistributedOn(partitionSpecColumns, input.getRowType()))) {
+        partitionColumns.addAll(partitionSpecColumns);
+        return input;
+      }
+    }
     IcebergTableProps tableProps =
         options.getTableFormatOptions().getIcebergSpecificOptions().getIcebergTableProps();
     BatchSchema newBatchSchema =
@@ -1349,7 +1408,8 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
             tableProps.getPersistedFullSchema(),
             partitionSpec,
             partitionColumns,
-            input.getRowType());
+            input.getRowType(),
+            options);
     RelDataType rowType = getRowType(newBatchSchema, prel.getCluster());
 
     List<SchemaPath> schemaPathList = getColumns(newBatchSchema);
@@ -1372,7 +1432,7 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
     return getHashToRandomExchangePrel(transformTableFunctionPrel, partitionColumns);
   }
 
-  private Prel getHashToRandomExchangePrel(Prel input, List<String> partitionColumns) {
+  private static Prel getHashToRandomExchangePrel(Prel input, List<String> partitionColumns) {
     DistributionTrait distributionTrait =
         WriterOptions.hashDistributedOn(partitionColumns, input.getRowType());
     RelTraitSet relTraitSet =

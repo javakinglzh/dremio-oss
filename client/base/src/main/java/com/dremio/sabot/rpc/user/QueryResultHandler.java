@@ -81,7 +81,7 @@ public class QueryResultHandler {
    * data result messages
    */
   public void resultArrived(byte[] pBody) throws RpcException {
-    final QueryResult queryResult = RpcBus.get(pBody, QueryResult.PARSER);
+    final QueryResult queryResult = RpcBus.get(pBody, QueryResult.parser());
 
     final QueryId queryId = queryResult.getQueryId();
     final QueryState queryState = queryResult.getQueryState();
@@ -149,7 +149,7 @@ public class QueryResultHandler {
    */
   public void batchArrived(ConnectionThrottle throttle, byte[] pBody, ByteBuf dBody)
       throws RpcException {
-    final QueryData queryData = RpcBus.get(pBody, QueryData.PARSER);
+    final QueryData queryData = RpcBus.get(pBody, QueryData.parser());
     // Current batch coming in.
     final ArrowBuf arrowBuf = dBody != null ? ((NettyArrowBuf) dBody).arrowBuf() : null;
     final QueryDataBatch batch = new QueryDataBatch(queryData, arrowBuf);

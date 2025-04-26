@@ -20,6 +20,7 @@ import com.dremio.dac.server.InputValidation;
 import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.store.CatalogService;
+import com.dremio.service.namespace.SourceChangeStateUtils;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.proto.EntityId;
@@ -64,6 +65,7 @@ public class Source implements CatalogEntity {
   private String nextPageToken;
   private Boolean allowCrossSourceSelection;
   private Boolean disableMetadataValidityCheck;
+  private String sourceChangeState;
 
   private static final InputValidation validator = new InputValidation();
 
@@ -89,6 +91,8 @@ public class Source implements CatalogEntity {
     this.description = config.getDescription();
     this.allowCrossSourceSelection = config.getAllowCrossSourceSelection();
     this.disableMetadataValidityCheck = config.getDisableMetadataValidityCheck();
+    this.sourceChangeState =
+        SourceChangeStateUtils.convertFromSourceChangeState(config.getSourceChangeState());
 
     if (config.getCtime() != null) {
       this.createdAt = config.getCtime();
@@ -348,6 +352,8 @@ public class Source implements CatalogEntity {
     sourceConfig.setAccelerationNeverRefresh(isAccelerationNeverRefresh());
     sourceConfig.setAllowCrossSourceSelection(isAllowCrossSourceSelection());
     sourceConfig.setDisableMetadataValidityCheck(isDisableMetadataValidityCheck());
+    sourceConfig.setSourceChangeState(
+        SourceChangeStateUtils.convertToSourceChangeState(getSourceChangeState()));
     return sourceConfig;
   }
 
@@ -367,5 +373,13 @@ public class Source implements CatalogEntity {
 
   public void setNextPageToken(String value) {
     nextPageToken = value;
+  }
+
+  public String getSourceChangeState() {
+    return sourceChangeState;
+  }
+
+  public void setSourceChangeState(String value) {
+    sourceChangeState = value;
   }
 }

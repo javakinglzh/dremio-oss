@@ -22,7 +22,7 @@ import actionUtils from "utils/actionUtils/actionUtils";
 
 import { constructFullPathAndEncode } from "utils/pathUtils";
 
-import { VIEW_ID as HOME_CONTENTS_VIEW_ID } from "pages/HomePage/subpages/HomeContents";
+import { VIEW_ID as HOME_CONTENTS_VIEW_ID } from "pages/HomePage/subpages/homeContentsUtils";
 import { getEntityType, getNormalizedEntityPath } from "#oss/selectors/home";
 import { ENTITY_TYPES } from "#oss/constants/Constants";
 import { APIV2Call } from "#oss/core/APICall";
@@ -35,12 +35,53 @@ import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
 
 const { t } = getIntlContext();
 
+export const UPDATE_FOLDER_START = "UPDATE_FOLDER_START";
+export const UPDATE_FOLDER_SUCCESS = "UPDATE_FOLDER_SUCCESS";
+export const UPDATE_FOLDER_FAILURE = "UPDATE_FOLDER_FAILURE";
+
+export const updateFolder =
+  (name, url, rootName, storageUri) => (dispatch, getState) => {
+    const state = getState();
+    const parentPath = getNormalizedEntityPath(state);
+
+    const [sourceName] = parentPath.replace("/source/", "").split("/");
+    const params = getRefQueryParams(state.nessie, rootName ?? sourceName);
+
+    const meta = { url };
+    const body = { name, storageUri };
+    const apiCall = new APIV2Call().paths(url).params(params).uncachable();
+
+    return dispatch({
+      [RSAA]: {
+        types: [
+          {
+            type: UPDATE_FOLDER_START,
+            meta,
+          },
+          schemaUtils.getSuccessActionTypeWithSchema(
+            UPDATE_FOLDER_SUCCESS,
+            folderSchema,
+            { ...meta, invalidateViewIds: [HOME_CONTENTS_VIEW_ID] },
+          ),
+          {
+            type: UPDATE_FOLDER_FAILURE,
+            meta,
+          },
+        ],
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        endpoint: apiCall,
+      },
+    });
+  };
+
 export const ADD_FOLDER_START = "ADD_FOLDER_START";
 export const ADD_FOLDER_SUCCESS = "ADD_FOLDER_SUCCESS";
 export const ADD_FOLDER_FAILURE = "ADD_FOLDER_FAILURE";
 
 export const addNewFolderForSpace =
-  (name, rootPath, rootName) => (dispatch, getState) => {
+  (name, rootPath, rootName, storageUri) => (dispatch, getState) => {
     const state = getState();
     const parentType = getEntityType(state);
     const parentPath = getNormalizedEntityPath(state);
@@ -59,7 +100,7 @@ export const addNewFolderForSpace =
     }
 
     const meta = { resourcePath };
-
+    const body = storageUri !== undefined ? { name, storageUri } : { name };
     const apiCall = new APIV2Call()
       .paths(resourcePath)
       .params(params)
@@ -84,9 +125,7 @@ export const addNewFolderForSpace =
         ],
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name,
-        }),
+        body: JSON.stringify(body),
         endpoint: apiCall,
       },
     });
@@ -402,43 +441,4 @@ export function loadDependentDatasets(fullPath) {
   return (dispatch) => {
     return dispatch(fetchDependentDatasets(fullPath));
   };
-}
-
-export const LOAD_PARENTS_START = "LOAD_PARENTS_START";
-export const LOAD_PARENTS_SUCCESS = "LOAD_PARENTS_SUCCESS";
-export const LOAD_PARENTS_FAILURE = "LOAD_PARENTS_FAILURE";
-
-function fetchParents(fullPath, version, viewId) {
-  const href = constructFullPathAndEncode(fullPath);
-  const meta = { viewId };
-
-  const apiCall = new APIV2Call()
-    .paths(`dataset/${href}/version`)
-    .path(version)
-    .path("parents");
-
-  return {
-    [RSAA]: {
-      types: [
-        {
-          type: LOAD_PARENTS_START,
-          meta,
-        },
-        {
-          type: LOAD_PARENTS_SUCCESS,
-          meta,
-        },
-        {
-          type: LOAD_PARENTS_FAILURE,
-          meta,
-        },
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
-}
-
-export function loadParents() {
-  return (dispatch) => dispatch(fetchParents(...arguments));
 }

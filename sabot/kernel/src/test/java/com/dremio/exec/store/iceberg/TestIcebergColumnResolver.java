@@ -368,27 +368,24 @@ public class TestIcebergColumnResolver {
     paths.add(SchemaPath.getCompoundPath("col5", "f2", "sub_f1"));
     paths.add(SchemaPath.getCompoundPath("col5", "f2", "sub_f2"));
     paths.add(SchemaPath.getCompoundPath("col3"));
-    paths.add(SchemaPath.getCompoundPath("col5", "f3"));
+    paths.add(SchemaPath.getCompoundPath("col5.f3"));
     // col5.f2[8]
     PathSegment.NameSegment indexedSegment =
         new PathSegment.NameSegment(
             "col5", new PathSegment.NameSegment("f2", new PathSegment.ArraySegment(8)));
     paths.add(new SchemaPath(indexedSegment));
     ParquetColumnIcebergResolver columnIcebergResolver = getParquetColumnResolver(paths, true);
-    Assert.assertEquals(columnIcebergResolver.getProjectedParquetColumns().size(), paths.size());
+    List<SchemaPath> result = columnIcebergResolver.getProjectedParquetColumns();
+    Assert.assertEquals(result.size(), paths.size());
     Assert.assertEquals(
-        "col2.f2.list.element.list.element.sub_f1",
-        columnIcebergResolver.getProjectedParquetColumns().get(0).toDotString());
+        SchemaPath.getCompoundPath("col2", "f2", "list", "element", "list", "element", "sub_f1"),
+        result.get(0));
     Assert.assertEquals(
-        "col2.f2.list.element.list.element.sub_f2",
-        columnIcebergResolver.getProjectedParquetColumns().get(1).toDotString());
-    Assert.assertEquals(
-        "col3", columnIcebergResolver.getProjectedParquetColumns().get(2).toDotString());
-    Assert.assertEquals(
-        "col5.f3", columnIcebergResolver.getProjectedParquetColumns().get(3).toDotString());
-    Assert.assertEquals(
-        "col2.f2.list.element",
-        columnIcebergResolver.getProjectedParquetColumns().get(4).toDotString());
+        SchemaPath.getCompoundPath("col2", "f2", "list", "element", "list", "element", "sub_f2"),
+        result.get(1));
+    Assert.assertEquals(SchemaPath.getCompoundPath("col3"), result.get(2));
+    Assert.assertEquals(SchemaPath.getCompoundPath("col5.f3"), result.get(3));
+    Assert.assertEquals(SchemaPath.getCompoundPath("col2", "f2", "list", "element"), result.get(4));
   }
 
   private ParquetColumnIcebergResolver getParquetColumnResolver(
@@ -448,6 +445,9 @@ public class TestIcebergColumnResolver {
 
     Map<String, Integer> parquetColumnIDs = new HashMap<>();
     parquetColumnIDs.put("col2.f2.list.element", 7);
+    parquetColumnIDs.put(
+        "col2.f2.list.element",
+        7); // this is intentional to check that function can handle duplicate complex column names
     parquetColumnIDs.put("col2.f2.list.element.list.element.sub_f1", 8);
     parquetColumnIDs.put("col2.f2.list.element.list.element.sub_f2", 9);
     parquetColumnIDs.put("col2.f2", 6);

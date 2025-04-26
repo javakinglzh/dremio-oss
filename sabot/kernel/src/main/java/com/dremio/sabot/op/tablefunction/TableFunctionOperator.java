@@ -57,7 +57,11 @@ public class TableFunctionOperator implements SingleInputOperator {
     NUM_SNAPSHOT_IDS, // Number of snapshot ids
     DELETE_ORPHAN_FILES_TIME, // Time taken to delete orphan files
     NUM_ORPHAN_FILES_DELETED, // Number of orphan files deleted
-    NUM_ORPHAN_FILES_FAIL_TO_DELETE // Number of orphan files not deleted successfully
+    NUM_ORPHAN_FILES_FAIL_TO_DELETE, // Number of orphan files not deleted successfully
+    START_CLUSTERING_DEPTH, // Clustering depth before optimization
+    ESTIMATED_END_CLUSTERING_DEPTH, // Estimated clustering depth after optimization
+    NUM_OVERLAPS, // Number of detected overlaps
+    CLUSTERING_STATUS_SENT // clusteringStatus OOB message is sent
   ;
 
     @Override
@@ -81,7 +85,9 @@ public class TableFunctionOperator implements SingleInputOperator {
   private CombinedSizer sizer;
   private int maxRowSize;
   public long warnThreshold;
-  private long maxAvgRowSize = 0;
+  private long maxAvgRowSize;
+  private final boolean rowLimitEnabled;
+  private final long rowSizeLimit;
 
   public TableFunctionOperator(
       FragmentExecutionContext fec, OperatorContext context, AbstractTableFunctionPOP operator) {
@@ -89,8 +95,11 @@ public class TableFunctionOperator implements SingleInputOperator {
     this.functionOperator = operator;
     this.fec = fec;
     this.tableFunctionFactory = new InternalTableFunctionFactory();
-    this.warnThreshold =
-        context.getOptions().getOption(ExecConstants.WARN_MAX_BATCH_SIZE_THRESHOLD);
+    this.warnThreshold = context.getOptions().getOption(ExecConstants.LIMIT_BATCH_ROW_SIZE_BYTES);
+    this.maxAvgRowSize = warnThreshold;
+    this.rowLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimit = context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES);
   }
 
   @Override
@@ -191,9 +200,7 @@ public class TableFunctionOperator implements SingleInputOperator {
       state = State.CAN_CONSUME;
     }
     int incomingBatchAvgRowSize = Sizer.getAverageRowSize(output, totalOutputRecords);
-    if (totalOutputRecords > 0
-        && incomingBatchAvgRowSize > warnThreshold
-        && incomingBatchAvgRowSize > maxAvgRowSize) {
+    if (!rowLimitEnabled && totalOutputRecords > 0 && incomingBatchAvgRowSize > maxAvgRowSize) {
       maxRowSize = Math.max(maxRowSize, sizer.getMaxRowLengthInBatch(totalOutputRecords));
       maxAvgRowSize = incomingBatchAvgRowSize;
     }

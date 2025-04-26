@@ -223,4 +223,9 @@ public class InMemoryTransientStore<K, V> implements TransientStore<K, V> {
   public Iterable<Document<K, V>> find(String pattern, KVStore.GetOption... options) {
     throw new UnsupportedOperationException("find is not supported");
   }
+
+  @Override
+  public void deleteAll() {
+    cache.invalidateAll();
+  }
 }

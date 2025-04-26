@@ -61,7 +61,7 @@ public class PlanCacheSynchronizer {
     this.lastUpdatedOn = System.currentTimeMillis();
     syncHistogram =
         Timer.builder(
-                PlannerMetrics.createName(PlannerMetrics.PREFIX, PlannerMetrics.PLAN_CACHE_SYNC))
+                PlannerMetrics.createName(PlannerMetrics.PREFIX, PlanCacheMetrics.PLAN_CACHE_SYNC))
             .description("Histogram of plan cache sync times")
             .publishPercentileHistogram()
             .withRegistry(io.micrometer.core.instrument.Metrics.globalRegistry);
@@ -78,7 +78,8 @@ public class PlanCacheSynchronizer {
     long now = System.currentTimeMillis();
 
     boolean success = false;
-    try (PlanCacheInvalidationHelper helper = planCacheInvalidationHelper.get()) {
+    PlanCacheInvalidationHelper helper = planCacheInvalidationHelper.get();
+    try {
       if (!helper.isPlanCacheEnabled()) {
         logger.debug(
             "Plan cache is disabled. Invalidating the plan cache and removing {} plan cache entries",

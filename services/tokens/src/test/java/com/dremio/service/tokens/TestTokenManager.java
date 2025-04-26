@@ -158,7 +158,7 @@ public class TestTokenManager {
   }
 
   @Test
-  public void validThirdPartyToken() throws Exception {
+  public void validThirdPartyToken() {
     final TokenDetails details =
         manager.createThirdPartyToken(
             username,
@@ -168,12 +168,10 @@ public class TestTokenManager {
             TimeUnit.HOURS.toMillis(1));
     TokenDetails validationResult = manager.validateToken(details.token);
     assertEquals(username, validationResult.username);
-    assertEquals("some-client-id", validationResult.clientId);
     assertTrue(
         validationResult.expiresAt > System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(59));
     assertEquals(Arrays.asList("dremio.all", "offline_access"), validationResult.getScopes());
     assertNotNull(manager.getTokenStore().get(details.token));
-    assertEquals("some-client-id", details.clientId);
     assertTrue(details.expiresAt > System.currentTimeMillis() + TimeUnit.MINUTES.toMillis(59));
     assertEquals(Arrays.asList("dremio.all", "offline_access"), details.getScopes());
   }

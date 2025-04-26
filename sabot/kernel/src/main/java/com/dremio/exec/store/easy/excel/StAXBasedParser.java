@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.easy.excel;
 
+import static com.dremio.common.types.TypeProtos.MinorType.VARCHAR;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static javax.xml.stream.XMLStreamConstants.CHARACTERS;
@@ -25,6 +26,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.FieldSizeLimitExceptionHelper;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.types.TypeProtos.MinorType;
+import com.dremio.exec.util.RowSizeUtil;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -55,17 +57,17 @@ import org.openxmlformats.schemas.spreadsheetml.x2006.main.CTXf;
 public class StAXBasedParser implements ExcelParser {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(StAXBasedParser.class);
+  private int currentRowSize;
 
   private static final Map<String, MinorType> TYPE_MAP =
       ImmutableMap.<String, MinorType>builder()
           .put("b", MinorType.BIT) // t="b" - boolean value
-          .put("e", MinorType.VARCHAR) // t="e" - error value, consider as VARCHAR
-          .put("s", MinorType.VARCHAR) // t="s" - value is a string and it is shared strings table
+          .put("e", VARCHAR) // t="e" - error value, consider as VARCHAR
+          .put("s", VARCHAR) // t="s" - value is a string and it is shared strings table
           .put(
               "str",
-              MinorType
-                  .VARCHAR) // t="str" - formula, consider as the evaluated formula value as VARCHAR
-          .put("inlineStr", MinorType.VARCHAR) // t="inlineStr"
+              VARCHAR) // t="str" - formula, consider as the evaluated formula value as VARCHAR
+          .put("inlineStr", VARCHAR) // t="inlineStr"
           .put("n", MinorType.FLOAT8) // t="n" - consider number as double.
           .build();
 
@@ -330,7 +332,6 @@ public class StAXBasedParser implements ExcelParser {
     if (emptySheet) {
       return State.END_OF_STREAM;
     }
-
     writer.start();
     try {
       boolean inValue = false;
@@ -356,6 +357,7 @@ public class StAXBasedParser implements ExcelParser {
           case CHARACTERS:
             {
               if (inValue) {
+                incrementCurrentRowSize(xmlStreamReader.getText());
                 handleValue(xmlStreamReader.getText());
               }
               break;
@@ -403,6 +405,13 @@ public class StAXBasedParser implements ExcelParser {
     return State.END_OF_STREAM;
   }
 
+  @Override
+  public int getAndResetRowSize() {
+    int temp = currentRowSize;
+    currentRowSize = 0;
+    return temp;
+  }
+
   /**
    * Helper method to determine the output types based on the explicit type given as attribute in
    * "cell" element and the type through "style" definition.
@@ -433,7 +442,7 @@ public class StAXBasedParser implements ExcelParser {
         String format = styles.getNumberFormatAt((short) numFmtId);
 
         if (DateUtil.isADateFormat((int) numFmtId, format)) {
-          valueTypeFromStyle = MinorType.TIMESTAMP;
+          valueTypeFromStyle = MinorType.TIMESTAMPMILLI;
         }
       }
     }
@@ -491,15 +500,15 @@ public class StAXBasedParser implements ExcelParser {
 
         case FLOAT8:
           double dValue = Double.valueOf(value);
-          if (valueTypeFromStyle == MinorType.TIMESTAMP && DateUtil.isValidExcelDate(dValue)) {
-            indexToLastTypeCache.put(currentColumnIndex, MinorType.TIMESTAMP);
+          if (valueTypeFromStyle == MinorType.TIMESTAMPMILLI && DateUtil.isValidExcelDate(dValue)) {
+            indexToLastTypeCache.put(currentColumnIndex, MinorType.TIMESTAMPMILLI);
             final long dateMillis =
                 DateUtil.getJavaDate(dValue, false, LocaleUtil.TIMEZONE_UTC).getTime();
             if (projectedAndNotSkipQuery) {
               writer.timeStampMilli(finalColumnName).writeTimeStampMilli(dateMillis);
             }
             if (mergeCellRegion != null) {
-              mergeCellRegion.setValue(MinorType.TIMESTAMP, dateMillis);
+              mergeCellRegion.setValue(MinorType.TIMESTAMPMILLI, dateMillis);
             }
           } else {
             indexToLastTypeCache.put(currentColumnIndex, valueTypeFromAttribute);
@@ -524,7 +533,7 @@ public class StAXBasedParser implements ExcelParser {
             writer.varChar(finalColumnName).writeVarChar(0, b.length, managedBuf);
           }
           if (mergeCellRegion != null) {
-            mergeCellRegion.setValue(MinorType.VARCHAR, b);
+            mergeCellRegion.setValue(VARCHAR, b);
           }
           break;
 
@@ -533,6 +542,14 @@ public class StAXBasedParser implements ExcelParser {
               .message("Unknown type received %s", valueTypeFromAttribute)
               .build(logger);
       }
+    }
+  }
+
+  private void incrementCurrentRowSize(Object value) {
+
+    if (valueTypeFromAttribute == VARCHAR) {
+      currentRowSize +=
+          RowSizeUtil.getFieldSizeForVariableWidthType(((String) value).getBytes(UTF_8));
     }
   }
 
@@ -549,8 +566,8 @@ public class StAXBasedParser implements ExcelParser {
       MinorType type = indexToLastTypeCache.get(currentColumnIndex);
       if (type == null) {
         if (valueTypeFromAttribute == MinorType.FLOAT8
-            && valueTypeFromStyle == MinorType.TIMESTAMP) {
-          type = MinorType.TIMESTAMP;
+            && valueTypeFromStyle == MinorType.TIMESTAMPMILLI) {
+          type = MinorType.TIMESTAMPMILLI;
         } else {
           type = valueTypeFromAttribute;
         }
@@ -565,7 +582,7 @@ public class StAXBasedParser implements ExcelParser {
           writer.float8(finalColumnName);
           break;
 
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           writer.timeStampMilli(finalColumnName);
           break;
 

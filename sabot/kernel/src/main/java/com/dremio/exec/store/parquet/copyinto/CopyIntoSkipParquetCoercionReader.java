@@ -206,7 +206,13 @@ public class CopyIntoSkipParquetCoercionReader extends CopyIntoTransformationPar
   protected void setupProjector(OutputMutator outgoing, VectorContainer projectorOutput) {
     if (isValidationMode) {
       // dummy constructs to direct the projection output into during a copy_errors() run
-      validationContainer = VectorContainer.create(context.getAllocator(), originalSchema);
+      if (isCopyIntoTransformations) {
+        // in case of transformations the targetSchema holds the schema of the target table while
+        // the originalSchema is the schema of the source file
+        validationContainer = VectorContainer.create(context.getAllocator(), targetSchema);
+      } else {
+        validationContainer = VectorContainer.create(context.getAllocator(), originalSchema);
+      }
 
       // in validation mode we would like to know the record position, where an error was seen
       // this is only possible with Java expression evaluation

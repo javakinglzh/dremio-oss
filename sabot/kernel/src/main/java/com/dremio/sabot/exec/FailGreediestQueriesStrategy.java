@@ -16,7 +16,6 @@
 package com.dremio.sabot.exec;
 
 import com.dremio.exec.proto.UserBitShared.QueryId;
-import com.google.common.base.Joiner;
 import java.lang.management.MemoryPoolMXBean;
 import java.util.ArrayList;
 import java.util.List;
@@ -70,12 +69,11 @@ public class FailGreediestQueriesStrategy extends AbstractHeapClawBackStrategy
     }
 
     logger.info(
-        "Canceling {} queries that together consume {}% of memory (cancellation of up to {}% of memory was requested by {}):\n{}",
+        "Canceling {} queries that together consume {}% of memory (cancellation of up to {}% of memory was requested by {}):\n",
         queriesToCancel.size(),
         Math.round(((float) cumulativeMemoryUsageByQueries / totalUsed) * 100),
         this.cancelPercentage,
-        clawBackContext.getTrigger(),
-        Joiner.on("\n").join(queriesToCancel));
+        clawBackContext.getTrigger());
 
     failQueries(queriesToCancel, clawBackContext);
   }

@@ -99,7 +99,7 @@ public class TestWeightBasedClusteredSingletonScheduler extends DremioTest {
     for (int i = 0; i < 10; i++) {
       int idx = i % NUM_TEST_CLIENTS;
       testClients[idx].close();
-      latches[idx + 1].await();
+      latches[i + 1].await();
       testClients[idx] = new TestClient(idx, zkServerResource.getConnectionString(), 10, 5);
       createSchedule(idx, testSchedule, incrementer, latches);
       Assertions.assertThat(incrementer.get()).isGreaterThanOrEqualTo(i);
@@ -189,7 +189,7 @@ public class TestWeightBasedClusteredSingletonScheduler extends DremioTest {
     final AtomicInteger[] incrementers = new AtomicInteger[2];
     final AtomicInteger[] cleanup = new AtomicInteger[2];
     final Schedule[] testSchedules = new Schedule[2];
-    // choose schedule name in such a way that the hashcode for the second schedule false to zero
+    // choose schedule name in such a way that the hashcode for the second schedule falls to zero
     final String[] scheduleNames = {testName.getMethodName() + "0", testName.getMethodName() + "2"};
     Assertions.assertThat((scheduleNames[1].hashCode() & Integer.MAX_VALUE) % 2).isEqualTo(0);
     for (int i = 0; i < 2; i++) {
@@ -285,8 +285,8 @@ public class TestWeightBasedClusteredSingletonScheduler extends DremioTest {
               .schedule(
                   testSchedule,
                   () -> {
-                    latch.countDown();
                     incrementer.incrementAndGet();
+                    latch.countDown();
                   });
     }
     latch.await();

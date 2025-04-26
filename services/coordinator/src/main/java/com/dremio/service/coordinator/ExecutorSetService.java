@@ -17,6 +17,7 @@ package com.dremio.service.coordinator;
 
 import com.dremio.exec.enginemanagement.proto.EngineManagementProtos;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
+import com.dremio.options.OptionManager;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.BooleanValidator;
 import com.dremio.service.Service;
@@ -67,4 +68,6 @@ public interface ExecutorSetService extends Service {
    */
   Map<EngineManagementProtos.SubEngineId, List<NodeEndpoint>> listAllEnginesExecutors()
       throws Exception;
+
+  OptionManager getOptionManager();
 }

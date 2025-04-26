@@ -196,15 +196,22 @@ public class TestSystemTable extends BaseTestQuery {
             "query",
             "is_profile_incomplete",
             "execution_allocated_bytes",
-            "execution_cpu_time_millis")
+            "execution_cpu_time_millis",
+            "query_cost",
+            "memory_allocated",
+            "setup_time_ns",
+            "wait_time_ns",
+            "execution_cpu_time_ns",
+            "context")
         .baselineValues(
             "2", "RUNNING", "UI_RUN", "user", "", "", 0, dateTime, dateTime, dateTime, dateTime,
             dateTime, dateTime, dateTime, dateTime, dateTime, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L,
-            0.0d, 0L, 0L, 0L, 0L, true, "", "", "errmsg", "", true, 2000L, 20L)
+            0.0d, 0L, 0L, 0L, 0L, true, "", "", "errmsg", "", true, 2000L, 20L, 0.0d, 0L, 0L, 0L,
+            0L, "")
         .baselineValues(
             "", "", "", "", "", "", 0, dateTime, dateTime, dateTime, dateTime, dateTime, dateTime,
             dateTime, dateTime, dateTime, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0L, 0.0d, 0L, 0L, 0L, 0L,
-            false, "", "", "", "", false, 0L, 0L)
+            false, "", "", "", "", false, 0L, 0L, 0.0d, 0L, 0L, 0L, 0L, "")
         .build()
         .run();
   }

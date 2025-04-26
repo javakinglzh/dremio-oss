@@ -387,6 +387,7 @@ export class TableControlsView extends PureComponent {
                     variant="secondary"
                     onClick={addField}
                     disabled={disableButtons}
+                    aria-label="Add Column"
                   >
                     <Tooltip content="Add Column">
                       <dremio-icon
@@ -408,6 +409,7 @@ export class TableControlsView extends PureComponent {
                     variant="secondary"
                     onClick={groupBy}
                     disabled={disableButtons}
+                    aria-label="Group By"
                   >
                     <Tooltip content="Group By">
                       <dremio-icon
@@ -429,6 +431,7 @@ export class TableControlsView extends PureComponent {
                     variant="secondary"
                     onClick={join}
                     disabled={disableButtons}
+                    aria-label="Join"
                   >
                     <Tooltip content="Join">
                       <dremio-icon

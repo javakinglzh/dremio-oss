@@ -32,8 +32,10 @@ import org.apache.arrow.flight.RequestContext;
  */
 @SuppressWarnings("checkstyle:FinalClass")
 public class ServerCookieMiddleware implements FlightServerMiddleware {
-  private RequestContext requestContext;
-  private Map<String, String> cookieValues;
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(ServerCookieMiddleware.class);
+  private final RequestContext requestContext;
+  private final Map<String, String> cookieValues;
   private final CallHeaders incomingHeaders;
 
   /** Factory to construct @see com.dremio.service.flight.ServerCookieMiddlewares */
@@ -52,7 +54,7 @@ public class ServerCookieMiddleware implements FlightServerMiddleware {
       CallInfo callInfo, CallHeaders incomingHeaders, RequestContext requestContext) {
     this.incomingHeaders = incomingHeaders;
     this.requestContext = requestContext;
-    this.cookieValues = new HashMap<String, String>();
+    this.cookieValues = new HashMap<>();
   }
 
   /** Retrieve the headers for this call. */
@@ -63,6 +65,25 @@ public class ServerCookieMiddleware implements FlightServerMiddleware {
   public void addCookie(@NotNull String key, @NotNull String value) {
     // Add to the internal map of values
     this.cookieValues.put(key, value);
+    logger.debug("ServerCookieMiddleware.addCookie {} {} = {}", this, key, value);
+  }
+
+  /**
+   * Add a cookie with associated attributes.
+   *
+   * @param key the key of the cookie
+   * @param value the value of the cookie
+   * @param attributes the additional attributes of the cookie
+   */
+  public void addCookie(
+      @NotNull String key, @NotNull String value, @NotNull Map<String, String> attributes) {
+    final String attributeList =
+        attributes.entrySet().stream()
+            .map((entry) -> String.format("%s=%s", entry.getKey(), entry.getValue()))
+            .collect(Collectors.joining(";"));
+    final String newValue = String.format("%s;%s", value, attributeList);
+    // Add to the internal map of values
+    this.cookieValues.put(key, newValue);
   }
 
   public RequestContext getRequestContext() {
@@ -73,6 +94,7 @@ public class ServerCookieMiddleware implements FlightServerMiddleware {
   public void onBeforeSendingHeaders(CallHeaders outgoingHeaders) {
     // if internal values are not empty
     if (cookieValues.isEmpty()) {
+      logger.debug("ServerCookieMiddleware.onBeforeSendingHeaders {} cookieValues is empty", this);
       return;
     }
 
@@ -81,8 +103,13 @@ public class ServerCookieMiddleware implements FlightServerMiddleware {
             .map((entry) -> String.format("%s=%s", entry.getKey(), entry.getValue()))
             .collect(Collectors.joining(";"));
 
-    // set it in the headers
+    // set it in the header
     outgoingHeaders.insert("Set-Cookie", cookies);
+    logger.debug(
+        "ServerCookieMiddleware.onBeforeSendingHeaders {} cookieValues {} outgoingHeaders {}",
+        this,
+        cookies,
+        outgoingHeaders);
   }
 
   @Override

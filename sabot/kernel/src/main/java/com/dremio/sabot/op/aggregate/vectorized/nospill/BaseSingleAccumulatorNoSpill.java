@@ -85,7 +85,8 @@ abstract class BaseSingleAccumulatorNoSpill implements AccumulatorNoSpill {
     System.arraycopy(oldAccumulators, 0, this.accumulators, 0, oldBatches);
 
     for (int i = oldAccumulators.length; i < newBatches; i++) {
-      FieldVector vector = (FieldVector) output.getTransferPair(output.getAllocator()).getTo();
+      FieldVector vector =
+          (FieldVector) output.getTransferPair(output.getField(), output.getAllocator()).getTo();
       ((FixedWidthVector) vector).allocateNew(LBlockHashTableNoSpill.MAX_VALUES_PER_BATCH);
       // need to clear the data since allocate new doesn't do so and we want to start with.
       initialize(vector);

@@ -19,6 +19,7 @@ import org.apache.parquet.io.api.Binary;
 import java.lang.Override;
 import java.lang.RuntimeException;
 import java.util.Arrays;
+import java.util.function.Consumer;
 
 <@pp.dropOutputFile />
 <@pp.changeOutputFile name="/com/dremio/exec/store/ParquetOutputRecordWriter.java" />
@@ -34,6 +35,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.EventBasedRecordWriter.FieldConverter;
 import com.dremio.exec.store.parquet.ParquetTypeHelper;
 import com.dremio.exec.vector.*;
+import com.dremio.sabot.exec.context.OperatorContext;
 import org.apache.arrow.vector.DecimalHelper;
 import org.apache.arrow.vector.complex.reader.FieldReader;
 import org.apache.parquet.io.api.RecordConsumer;
@@ -42,10 +44,7 @@ import org.apache.parquet.io.api.Binary;
 import org.apache.arrow.memory.ArrowBuf;
 import com.dremio.exec.record.BatchSchema;
 
-
 import com.dremio.common.types.TypeProtos;
-
-import org.joda.time.DateTimeConstants;
 
 import java.io.IOException;
 import java.lang.UnsupportedOperationException;
@@ -68,6 +67,10 @@ public abstract class ParquetOutputRecordWriter extends AbstractRowBasedRecordWr
   private RecordConsumer consumer;
   private MessageType schema;
   private boolean isIcebergWriter;
+
+  public ParquetOutputRecordWriter(OperatorContext context) {
+    super(context);
+  }
 
   public void setUp(MessageType schema, RecordConsumer consumer, boolean isIcebergWriter) {
     this.schema = schema;
@@ -129,7 +132,7 @@ public abstract class ParquetOutputRecordWriter extends AbstractRowBasedRecordWr
       consumer.addLong(holder.value);
       <#elseif minor.class == "DateMilli">
       reader.read(holder);
-      consumer.addInteger((int) (holder.value / DateTimeConstants.MILLIS_PER_DAY));
+      consumer.addInteger((int) (holder.value / com.dremio.common.util.DateTimes.MILLIS_PER_DAY));
       <#elseif
       minor.class == "Float8">
       reader.read(holder);

@@ -86,6 +86,7 @@ public abstract class FakeGcsServer implements AutoCloseable {
 
     private final FakeGcsServerContainer container;
 
+    @SuppressWarnings("DremioRestrictedTestcontainersUsage")
     public TestContainersFakeGcsServer(int httpPort) {
       this.container = new FakeGcsServerContainer(httpPort);
     }

@@ -65,6 +65,8 @@ public class ReflectionIndexKeys {
       IndexKey.newBuilder("gma", "GOAL_MOD_AT", Long.class)
           .setSortedValueType(SearchTypes.SearchFieldSorting.FieldType.LONG)
           .build();
+  static final IndexKey REFLECTION_IS_DREMIO_MANAGED =
+      IndexKey.newBuilder("dm", "IS_DREMIO_MANAGED", String.class).build();
 
   static final IndexKey REFRESH_REFLECTION_ID =
       IndexKey.newBuilder("rid", "REFRESH_REFLECTION_ID", String.class).build();

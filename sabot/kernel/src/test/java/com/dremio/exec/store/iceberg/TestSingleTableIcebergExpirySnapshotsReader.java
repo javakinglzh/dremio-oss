@@ -35,6 +35,7 @@ import com.dremio.exec.proto.ExecProtos.FragmentHandle;
 import com.dremio.exec.proto.UserBitShared.QueryId;
 import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.TestOutputMutator;
+import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.hadoop.IcebergHadoopModel;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
@@ -119,7 +120,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
         new SnapshotsScanOptions(LIVE_SNAPSHOTS, System.currentTimeMillis(), 1);
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     reader.setup(outputMutator());
     int recordCount = reader.next();
 
@@ -137,7 +145,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
     Table table = createTable(5);
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     OutputMutator outputMutator = outputMutator();
 
     reader.setup(outputMutator);
@@ -164,7 +179,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
     Table table = createTable(5);
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     OutputMutator outputMutator = outputMutator();
 
     reader.setup(outputMutator);
@@ -181,7 +203,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
 
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     OutputMutator outputMutator = outputMutator();
 
     reader.setup(outputMutator);
@@ -207,7 +236,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
 
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     OutputMutator outputMutator = outputMutator();
 
     reader.setup(outputMutator);
@@ -234,7 +270,14 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
 
     SingleTableIcebergExpirySnapshotsReader reader =
         new SingleTableIcebergExpirySnapshotsReader(
-            operatorContext(), toSplit(table), plugin(), props(), scanOptions, schemeVariate);
+            operatorContext(),
+            toSplit(table),
+            plugin(),
+            props(),
+            scanOptions,
+            schemeVariate,
+            null,
+            Collections.emptyList());
     OutputMutator outputMutator = outputMutator();
 
     reader.setup(outputMutator);
@@ -314,8 +357,8 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
   }
 
   private SupportsIcebergMutablePlugin plugin() throws IOException {
-    SupportsIcebergMutablePlugin plugin = mock(SupportsIcebergMutablePlugin.class);
-    when(plugin.createFS(anyString(), anyString(), any(OperatorContext.class))).thenReturn(fs);
+    FileSystemPlugin plugin = mock(FileSystemPlugin.class);
+    when(plugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
 
     FileIO io =
         new DremioFileIO(
@@ -329,7 +372,13 @@ public class TestSingleTableIcebergExpirySnapshotsReader {
     when(plugin.getSystemUserFS()).thenReturn(fs);
     when(plugin.getFsConfCopy()).thenReturn(CONF);
 
-    IcebergModel icebergModel = new IcebergHadoopModel(plugin);
+    IcebergModel icebergModel =
+        new IcebergHadoopModel(
+            "",
+            plugin.getFsConfCopy(),
+            plugin.createIcebergFileIO(plugin.getSystemUserFS(), null, null, null, null),
+            null,
+            null);
     when(plugin.getIcebergModel(
             any(IcebergTableProps.class), anyString(), any(OperatorContext.class), eq(io), any()))
         .thenReturn(icebergModel);

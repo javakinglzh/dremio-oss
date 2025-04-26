@@ -18,6 +18,8 @@ package com.dremio.dac.service.datasets;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.model.spaces.SpaceName;
@@ -30,10 +32,14 @@ import com.dremio.dac.server.test.SampleDataPopulator;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.exec.ExecConstants;
+import com.dremio.options.OptionManager;
+import com.dremio.options.TypeValidators;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.jobs.JobRequest;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceOptions;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -45,12 +51,18 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Optional;
+import javax.annotation.Nullable;
 import org.apache.commons.lang3.tuple.Pair;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 /** Tests for {@link DatasetVersionTrimmer}. */
+@ExtendWith(MockitoExtension.class)
 public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
   private static final String SPACE_NAME1 = "space1";
   private static final String VIEW_NAME = "view";
@@ -65,6 +77,7 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
 
   private DatasetVersionMutator mutator;
   private NamespaceService namespaceService;
+  @Mock private OptionManager optionManager;
 
   @BeforeEach
   public void setup() throws Exception {
@@ -92,6 +105,63 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     createView(FULL_VIEW_NAME2_UPPER);
   }
 
+  private OptionManager mockOptionManager(int maxVersionsToKeep, int minAgeInDays, boolean enable) {
+    // Mock enable.
+    doAnswer(
+            (args) -> {
+              TypeValidators.BooleanValidator validator = args.getArgument(0);
+              if (validator
+                  .getOptionName()
+                  .equals(NamespaceOptions.DATASET_VERSION_TRIMMER_ENABLED.getOptionName())) {
+                return enable;
+              }
+              return validator.getDefault().getBoolVal();
+            })
+        .when(optionManager)
+        .getOption(any(TypeValidators.BooleanValidator.class));
+
+    if (enable) {
+      // Mock limits.
+      doAnswer(
+              (args) -> {
+                TypeValidators.LongValidator validator = args.getArgument(0);
+                if (validator
+                    .getOptionName()
+                    .equals(NamespaceOptions.DATASET_VERSIONS_LIMIT.getOptionName())) {
+                  return (long) maxVersionsToKeep;
+                }
+                if (validator
+                    .getOptionName()
+                    .equals(ExecConstants.JOB_MAX_AGE_IN_DAYS.getOptionName())) {
+                  return (long) (minAgeInDays - 1);
+                }
+                return validator.getDefault().getNumVal();
+              })
+          .when(optionManager)
+          .getOption(any(TypeValidators.LongValidator.class));
+    }
+    return optionManager;
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  public void testDisabled(boolean enable) throws Exception {
+    var viewPath = new DatasetPath(FULL_VIEW_NAME1);
+    addVersions(viewPath, 3);
+
+    assertThat(getAllVersions(viewPath).size()).isEqualTo(4);
+
+    Clock clock = Clock.fixed(Instant.now().plus(100, ChronoUnit.DAYS), ZoneId.of("UTC"));
+    DatasetVersionTrimmer.trimHistory(
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 1, enable));
+
+    assertThat(getAllVersions(viewPath).size()).isEqualTo(enable ? 1 : 4);
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {FULL_VIEW_NAME1, FULL_VIEW_NAME2})
   public void testTrimVersions_deleteOne(String fullViewName) throws Exception {
@@ -113,11 +183,107 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     List<VirtualDatasetUI> versionsBefore = getAllVersions(viewPath);
 
     DatasetVersionTrimmer.trimHistory(
-        Clock.systemUTC(), datasetVersionsStore, namespaceService, ImmutableSet.of(), 10, 30);
+        Clock.systemUTC(),
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(10, 30, true));
 
     // Verify versions are the same.
     List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
     assertEquals(versionsBefore, versionsAfter);
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {2, 1})
+  public void testTrimVersions_previewVersionsDontAffectTrimming(int maxVersions) throws Exception {
+    DatasetPath viewPath = new DatasetPath(FULL_VIEW_NAME1);
+
+    // Add normal version.
+    DatasetVersion latestVersion = addVersions(viewPath, 1).getLeft();
+    List<VirtualDatasetUI> versionsBeforePreview = getAllVersions(viewPath);
+    assertThat(versionsBeforePreview.size()).isEqualTo(2);
+    DatasetConfig datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    // Add "preview" version w/o storing it in the dataset.
+    addVersion(viewPath, latestVersion, false);
+    List<VirtualDatasetUI> versionsBefore = getAllVersions(viewPath);
+    assertThat(versionsBefore.size()).isEqualTo(3);
+    datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    Clock clock = Clock.fixed(Instant.now().plus(100, ChronoUnit.DAYS), ZoneId.of("UTC"));
+    DatasetVersionTrimmer.trimHistory(
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(maxVersions, 30, true));
+
+    // Verify that trimming occurred in case of maxVersions = 1 and didn't in case of
+    // maxVersions = 2. In both cases, the head points to the latest version, not the preview one.
+    List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
+    assertThat(versionsAfter.size()).isEqualTo(maxVersions + 1);
+    datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    // Verify last version points to null/not-null.
+    Optional<VirtualDatasetUI> optionalView =
+        versionsAfter.stream().filter(v -> v.getVersion().equals(latestVersion)).findFirst();
+    assertThat(optionalView).isPresent();
+    if (maxVersions == 1) {
+      assertThat(optionalView.get().getPreviousVersion()).isNull();
+    } else {
+      assertThat(optionalView.get().getPreviousVersion()).isNotNull();
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {2, 1})
+  public void testTrimVersions_multiplePreviewVersionsDontAffectTrimming(int maxVersions)
+      throws Exception {
+    DatasetPath viewPath = new DatasetPath(FULL_VIEW_NAME1);
+
+    // Add normal version.
+    DatasetVersion latestVersion = addVersions(viewPath, 1).getLeft();
+    List<VirtualDatasetUI> versionsBeforePreview = getAllVersions(viewPath);
+    assertThat(versionsBeforePreview.size()).isEqualTo(2);
+    DatasetConfig datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    // Add 3 "preview" versions.
+    addVersion(viewPath, latestVersion, false);
+    addVersion(viewPath, latestVersion, false);
+    addVersion(viewPath, versionsBeforePreview.get(0).getVersion(), false);
+    List<VirtualDatasetUI> versionsBefore = getAllVersions(viewPath);
+    assertThat(versionsBefore.size()).isEqualTo(5);
+    datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    Clock clock = Clock.fixed(Instant.now().plus(100, ChronoUnit.DAYS), ZoneId.of("UTC"));
+    DatasetVersionTrimmer.trimHistory(
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(maxVersions, 30, true));
+
+    // In both cases, the head points to the latest version, not any of the preview ones.
+    List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
+    assertThat(versionsAfter.size()).isEqualTo(maxVersions + 3);
+    datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
+    assertEquals(latestVersion, datasetConfig.getVirtualDataset().getVersion());
+
+    // Verify last version points to null/not-null.
+    Optional<VirtualDatasetUI> optionalView =
+        versionsAfter.stream().filter(v -> v.getVersion().equals(latestVersion)).findFirst();
+    assertThat(optionalView).isPresent();
+    if (maxVersions == 1) {
+      assertThat(optionalView.get().getPreviousVersion()).isNull();
+    } else {
+      assertThat(optionalView.get().getPreviousVersion()).isNotNull();
+    }
   }
 
   @ParameterizedTest
@@ -131,7 +297,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
 
     // Should not trim with system clock as age is under 30 days.
     DatasetVersionTrimmer.trimHistory(
-        Clock.systemUTC(), datasetVersionsStore, namespaceService, ImmutableSet.of(), 3, 30);
+        Clock.systemUTC(),
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(3, 30, true));
     List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
     assertEquals(4, versionsAfter.size());
     assertEquals(latestVersion, versionsAfter.get(3).getVersion());
@@ -139,7 +309,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     // Should trim to 3 with clock in the future as age of last version is greater than 30 days.
     Clock clock = Clock.fixed(Instant.now().plus(100, ChronoUnit.DAYS), ZoneId.of("UTC"));
     DatasetVersionTrimmer.trimHistory(
-        clock, datasetVersionsStore, namespaceService, ImmutableSet.of(), 3, 30);
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(3, 30, true));
     versionsAfter = getAllVersions(viewPath);
     assertEquals(3, versionsAfter.size());
     assertEquals(latestVersion, versionsAfter.get(2).getVersion());
@@ -158,7 +332,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     // Should not trim because of the loop, should remove the loop and point dataset to the
     // version before the loop.
     DatasetVersionTrimmer.trimHistory(
-        Clock.systemUTC(), datasetVersionsStore, namespaceService, ImmutableSet.of(), 1, 30);
+        Clock.systemUTC(),
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 30, true));
     List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
     assertEquals(2, versionsAfter.size());
     DatasetConfig datasetConfig = namespaceService.getDataset(viewPath.toNamespaceKey());
@@ -185,7 +363,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     // Should not trim because of the corruption.
     List<VirtualDatasetUI> versionsBefore = getAllVersions(viewPath);
     DatasetVersionTrimmer.trimHistory(
-        Clock.systemUTC(), datasetVersionsStore, namespaceService, ImmutableSet.of(), 1, 30);
+        Clock.systemUTC(),
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 30, true));
     List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
     assertEquals(versionsBefore.size(), versionsAfter.size());
   }
@@ -209,7 +391,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     // Should not trim the list and should update dataset to point to latest version.
     List<VirtualDatasetUI> versionsBefore = getAllVersions(viewPath);
     DatasetVersionTrimmer.trimHistory(
-        Clock.systemUTC(), datasetVersionsStore, namespaceService, ImmutableSet.of(), 1, 30);
+        Clock.systemUTC(),
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 30, true));
     List<VirtualDatasetUI> versionsAfter = getAllVersions(viewPath);
     assertThat(versionsAfter).hasSize(versionsBefore.size());
     assertThat(
@@ -244,7 +430,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     Clock clock =
         Clock.fixed(Instant.now().plus(orphansAreOld ? 14 : 0, ChronoUnit.DAYS), ZoneId.of("UTC"));
     DatasetVersionTrimmer.trimHistory(
-        clock, datasetVersionsStore, namespaceService, ImmutableSet.of(), 1, 30);
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 30, true));
 
     // Verify versions were deleted.
     if (orphansAreOld) {
@@ -269,7 +459,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
 
     Clock clock = Clock.fixed(Instant.now().plus(100, ChronoUnit.DAYS), ZoneId.of("UTC"));
     DatasetVersionTrimmer.trimHistory(
-        clock, datasetVersionsStore, namespaceService, ImmutableSet.of(), 1, 30);
+        clock,
+        datasetVersionsStore,
+        namespaceService,
+        ImmutableSet.of(),
+        mockOptionManager(1, 30, true));
 
     // Verify there is one remaining version pointing to null.
     versions = getAllVersions(viewPath);
@@ -296,13 +490,20 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
   }
 
   private Pair<DatasetVersion, DatasetVersion> addVersion(DatasetPath path) throws Exception {
+    return addVersion(path, null, true);
+  }
+
+  private Pair<DatasetVersion, DatasetVersion> addVersion(
+      DatasetPath path, @Nullable DatasetVersion previousVersion, boolean saveDataset)
+      throws Exception {
     DatasetVersion latestVersion;
-    DatasetVersion previousVersion;
     VirtualDatasetUI vds = mutator.get(path);
     // The version is based on system millis, make sure there is at least 1ms between versions.
     Thread.sleep(1);
     latestVersion = DatasetVersion.newVersion();
-    previousVersion = vds.getVersion();
+    if (previousVersion == null) {
+      previousVersion = vds.getVersion();
+    }
     vds.setVersion(latestVersion);
     vds.setPreviousVersion(
         new NameDatasetRef(DatasetPath.defaultImpl(vds.getFullPathList()).toString())
@@ -310,9 +511,11 @@ public class TestDatasetVersionTrimmer extends BaseTestServerJunit5 {
     mutator.putVersion(vds);
 
     // Update dataset so that it points to the latest version.
-    DatasetConfig updatedDatasetConfig = DatasetsUtil.toVirtualDatasetVersion(vds).getDataset();
-    namespaceService.addOrUpdateDataset(
-        new NamespaceKey(updatedDatasetConfig.getFullPathList()), updatedDatasetConfig);
+    if (saveDataset) {
+      DatasetConfig updatedDatasetConfig = DatasetsUtil.toVirtualDatasetVersion(vds).getDataset();
+      namespaceService.addOrUpdateDataset(
+          new NamespaceKey(updatedDatasetConfig.getFullPathList()), updatedDatasetConfig);
+    }
 
     return Pair.of(latestVersion, previousVersion);
   }

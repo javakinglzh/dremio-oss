@@ -76,7 +76,8 @@ public class NessieIcebergExpiryAction extends IcebergExpiryAction {
         fileIO,
         commitExpiry,
         schemeVariate,
-        fsScheme);
+        fsScheme,
+        null);
   }
 
   @Override
@@ -136,7 +137,7 @@ public class NessieIcebergExpiryAction extends IcebergExpiryAction {
     // TableName.like(folder1.folder2.table)
     // here dbName is a list of folders.
     if (!StringUtils.isEmpty(dbName)) {
-      tableProps.setTableName(dbName + "." + tableName);
+      tableProps.setTableName(String.join(".", dbName, tableName));
     }
     return tableProps;
   }

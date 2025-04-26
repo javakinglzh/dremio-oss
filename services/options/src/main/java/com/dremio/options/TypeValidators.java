@@ -321,7 +321,7 @@ public class TypeValidators {
     private final ImmutableSet<String> valuesSet;
 
     public EnumValidator(String name, Class<E> clazz, E def) {
-      super(name, def.toString().toLowerCase(Locale.ROOT));
+      super(name, def.name());
 
       ImmutableSet.Builder<String> builder = ImmutableSet.builder();
 

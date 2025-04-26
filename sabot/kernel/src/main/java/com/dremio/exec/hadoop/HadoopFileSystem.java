@@ -440,9 +440,12 @@ public class HadoopFileSystem implements FileSystem, OpenFileTracker {
         // path or permissions, but preserve if inaccessible because JVM shutdown is in progress.
         // Ref:
         // https://github.com/apache/hadoop/blob/735e35d6484ca9908efeaa7c2f6f4d654b1fcf41/hadoop-tools/hadoop-aws/src/main/java/org/apache/hadoop/fs/s3a/S3AFileSystem.java#L4070
+
+        // DX-91951: Below is likely unnecessary now - keeping unchecked as a precaution.
         throw new IllegalStateException(e);
       }
     }
+
     return exists;
   }
 

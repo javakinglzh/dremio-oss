@@ -47,7 +47,6 @@ import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.ass
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.getSubPathFromNessieTableContent;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.dremio.exec.catalog.CatalogOptions;
 import com.dremio.exec.catalog.dataplane.test.ITDataplanePluginTestSetup;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -75,6 +74,8 @@ public class ITDataplanePluginConcurrency extends ITDataplanePluginTestSetup {
   }
 
   static class QueryOperationThread extends Thread {
+    private final String threadName;
+
     private final List<List<String>> tablePaths;
     private final List<List<String>> viewPaths;
     private final CountDownLatch latch;
@@ -92,6 +93,7 @@ public class ITDataplanePluginConcurrency extends ITDataplanePluginTestSetup {
         int totalRows,
         AtomicBoolean isExceptionFound,
         Set<Operation> operations) {
+      this.threadName = threadName;
       this.tablePaths = tablePaths;
       this.viewPaths = viewPaths;
       this.latch = latch;
@@ -410,7 +412,6 @@ public class ITDataplanePluginConcurrency extends ITDataplanePluginTestSetup {
 
   @Test
   public void createUdfsWithSameKeyConcurrently() throws Exception {
-    withSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     // Arrange
     final String functionName = generateUniqueFunctionName();
     List<String> functionKey = tablePathWithFolders(functionName);

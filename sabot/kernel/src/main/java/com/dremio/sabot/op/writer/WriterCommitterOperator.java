@@ -20,10 +20,12 @@ import static com.dremio.exec.store.iceberg.IcebergUtils.isIncrementalRefresh;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.exec.physical.config.WriterCommitterPOP;
+import com.dremio.exec.proto.ExecProtos;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.store.RecordWriter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.manifestwriter.IcebergCommitOpHelper;
 import com.dremio.exec.store.iceberg.model.IcebergCommandType;
 import com.dremio.exec.testing.ControlsInjector;
@@ -34,6 +36,7 @@ import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.MetricDef;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.exec.fragment.OutOfBandMessage;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
@@ -79,7 +82,8 @@ public class WriterCommitterOperator implements SingleInputOperator {
     NUM_EXPIRED_SNAPSHOTS, // Number of expired snapshots
     NUM_VALID_SNAPSHOTS, // Number of valid snapshots
     NUM_ORPHAN_FILES_DELETED, // Number of orphan files deleted
-    CLEAR_EXPIRE_SNAPSHOTS_TIME // Time taken to clean old expire snapshots
+    CLEAR_EXPIRE_SNAPSHOTS_TIME, // Time taken to clean old expire snapshots
+    CLUSTERING_STATUS_RECEIVED // clusteringStatus OOB message is received
   ;
 
     @Override
@@ -144,13 +148,18 @@ public class WriterCommitterOperator implements SingleInputOperator {
     }
 
     Stopwatch stopwatch = Stopwatch.createStarted();
+    // TODO(DX-96947): specify dataset for createFS
     fs =
         config
             .getPlugin()
             .createFS(
-                Optional.ofNullable(config.getTempLocation()).orElse(config.getFinalLocation()),
-                config.getProps().getUserName(),
-                context);
+                SupportsFsCreation.builder()
+                    .filePath(
+                        Optional.ofNullable(config.getTempLocation())
+                            .orElse(config.getFinalLocation()))
+                    .userName(config.getProps().getUserName())
+                    .dataset(config.getDatasetPath().getPathComponents())
+                    .operatorContext(context));
     addMetricStat(Metric.FILE_SYSTEM_CREATE_TIME, stopwatch.elapsed(TimeUnit.MILLISECONDS));
 
     icebergCommitHelper = IcebergCommitOpHelper.getInstance(context, config, fs);
@@ -320,5 +329,13 @@ public class WriterCommitterOperator implements SingleInputOperator {
     if (context.getStats() != null) {
       context.getStats().addLongStat(metric, time);
     }
+  }
+
+  @Override
+  public void workOnOOB(OutOfBandMessage message) {
+    final ExecProtos.ClusteringStatus clusteringStatus =
+        message.getPayload(ExecProtos.ClusteringStatus.parser());
+    icebergCommitHelper.consumeClusteringStatus(clusteringStatus);
+    context.getStats().addLongStat(WriterCommitterOperator.Metric.CLUSTERING_STATUS_RECEIVED, 1);
   }
 }

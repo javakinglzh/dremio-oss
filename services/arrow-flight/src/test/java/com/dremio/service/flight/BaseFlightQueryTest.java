@@ -28,7 +28,6 @@ import com.dremio.datastore.adapter.LegacyKVStoreProviderAdapter;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.rpc.ssl.SSLConfigurator;
 import com.dremio.exec.rpc.user.security.testing.UserServiceTestImpl;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.work.protector.UserWorker;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValue;
@@ -47,6 +46,7 @@ import com.dremio.service.usersessions.store.UserSessionStoreProvider;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.ssl.SSLConfig;
 import com.dremio.test.DremioTest;
+import com.google.common.base.Preconditions;
 import com.google.inject.AbstractModule;
 import com.google.inject.Provider;
 import com.google.inject.util.Providers;
@@ -128,6 +128,8 @@ public class BaseFlightQueryTest extends BaseTestQuery {
   }
 
   public static void setupDefaultTestCluster(boolean backpressureHandling) throws Exception {
+    Preconditions.checkState(kvStore == null, "Old kvstore not stopped properly");
+
     kvStore = LegacyKVStoreProviderAdapter.inMemory(DremioTest.CLASSPATH_SCAN_RESULT);
     kvStore.start();
 
@@ -153,14 +155,6 @@ public class BaseFlightQueryTest extends BaseTestQuery {
             .build();
     userService.createUser(user, DUMMY_PASSWORD);
 
-    getSabotContext()
-        .getOptionManager()
-        .setOption(
-            OptionValue.createBoolean(
-                OptionValue.OptionType.SYSTEM,
-                DremioFlightServiceOptions.ENABLE_BACKPRESSURE_HANDLING.getOptionName(),
-                backpressureHandling));
-
     SABOT_NODE_RULE.register(
         new AbstractModule() {
           @Override
@@ -176,10 +170,23 @@ public class BaseFlightQueryTest extends BaseTestQuery {
     defaultProperties.setProperty(UserSession.PASSWORD, DUMMY_PASSWORD);
 
     BaseTestQuery.setupDefaultTestCluster();
+
+    getSabotContext()
+        .getOptionManager()
+        .setOption(
+            OptionValue.createBoolean(
+                OptionValue.OptionType.SYSTEM,
+                DremioFlightServiceOptions.ENABLE_BACKPRESSURE_HANDLING.getOptionName(),
+                backpressureHandling));
   }
 
   public static void createFlightService(
       RunQueryResponseHandlerFactory runQueryResponseHandlerFactory) throws Exception {
+
+    Preconditions.checkState(flightService == null, "Old flightService not stopped properly");
+    Preconditions.checkState(
+        flightClientWrapper == null, "Old flightClientWrapper not stopped properly");
+
     dremioConfig =
         DremioConfig.create(null, config)
             .withValue(DremioConfig.FLIGHT_SERVICE_ENABLED_BOOLEAN, true)
@@ -192,7 +199,6 @@ public class BaseFlightQueryTest extends BaseTestQuery {
             Providers.of(dremioConfig),
             Providers.of(getDremioRootAllocator()),
             getProvider(UserWorker.class),
-            Providers.of(getSabotContext()),
             getProvider(TokenManager.class),
             getProvider(OptionManager.class),
             userSessionServiceProvider,
@@ -203,7 +209,9 @@ public class BaseFlightQueryTest extends BaseTestQuery {
                     getProvider(TokenManager.class)),
             Providers.of(FlightRequestContextDecorator.DEFAULT),
             getProvider(CredentialsService.class),
-            runQueryResponseHandlerFactory);
+            runQueryResponseHandlerFactory,
+            Providers.of(getSabotContext().getOptionValidatorListing()),
+            getProvider(UserService.class));
 
     flightService.start();
     final BufferAllocator flightClientAllocator =
@@ -221,12 +229,13 @@ public class BaseFlightQueryTest extends BaseTestQuery {
 
   @AfterClass
   public static void tearDown() throws Exception {
-    AutoCloseables.close(flightClientWrapper, flightService, kvStore);
-    flightClientWrapper = null;
-    flightService = null;
-    kvStore = null;
-    closeClient();
-    resetNodeCount();
+    try {
+      AutoCloseables.close(flightClientWrapper, flightService, kvStore);
+    } finally {
+      flightClientWrapper = null;
+      flightService = null;
+      kvStore = null;
+    }
   }
 
   @After
@@ -306,13 +315,11 @@ public class BaseFlightQueryTest extends BaseTestQuery {
             .withValue(DremioConfig.FLIGHT_SERVICE_PORT_INT, flightServicePort)
             .withValue(DremioConfig.FLIGHT_SERVICE_AUTHENTICATION_MODE, authMode);
 
-    SabotContext sabotContext = BaseTestQuery.getSabotContext();
     flightService =
         new DremioFlightService(
             Providers.of(dremioConfig),
-            Providers.of(sabotContext.getAllocator()),
+            Providers.of(BaseTestQuery.getSabotContext().getAllocator()),
             getProvider(UserWorker.class),
-            Providers.of(sabotContext),
             getProvider(TokenManager.class),
             getProvider(OptionManager.class),
             userSessionServiceProvider,
@@ -333,7 +340,9 @@ public class BaseFlightQueryTest extends BaseTestQuery {
                             })),
             Providers.of(FlightRequestContextDecorator.DEFAULT),
             getProvider(CredentialsService.class),
-            runQueryResponseHandlerFactory) {
+            runQueryResponseHandlerFactory,
+            Providers.of(getSabotContext().getOptionValidatorListing()),
+            getProvider(UserService.class)) {
 
           @Override
           protected SSLConfig getSSLConfig(DremioConfig config, SSLConfigurator sslConfigurator) {

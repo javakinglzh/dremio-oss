@@ -53,6 +53,11 @@ public class FunctionErrorContextImpl implements FunctionErrorContext {
   }
 
   @Override
+  public int getOutputFieldId() {
+    return outputFieldId;
+  }
+
+  @Override
   public ExceptionBuilder error() {
     return addFullContext(new ExceptionBuilderImpl());
   }

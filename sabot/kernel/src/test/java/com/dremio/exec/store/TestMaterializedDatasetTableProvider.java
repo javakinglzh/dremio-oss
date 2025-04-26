@@ -33,7 +33,6 @@ import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.types.SqlTypeFactoryImpl;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.google.common.collect.Lists;
 import io.protostuff.ByteString;
@@ -104,7 +103,6 @@ public class TestMaterializedDatasetTableProvider {
         storagePlugin,
         mock(StoragePluginId.class, Mockito.RETURNS_DEEP_STUBS),
         mock(SchemaConfig.class, Mockito.RETURNS_DEEP_STUBS),
-        options,
-        mock(OptionManager.class));
+        options);
   }
 }

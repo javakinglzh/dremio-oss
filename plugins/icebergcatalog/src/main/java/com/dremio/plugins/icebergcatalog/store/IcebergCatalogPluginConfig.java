@@ -15,38 +15,28 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
-import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_ENABLED;
-
-import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.ClassPathFileSystem;
-import com.dremio.exec.store.LocalSyncableFileSystem;
 import com.dremio.exec.store.dfs.AsyncStreamConf;
 import com.dremio.exec.store.dfs.CacheProperties;
-import com.dremio.exec.store.hive.exec.FileSystemConfUtil;
+import com.dremio.exec.store.dfs.MutablePluginConf;
 import com.dremio.options.OptionManager;
-import com.google.common.collect.Lists;
 import io.protostuff.Tag;
 import java.util.List;
-import javax.inject.Provider;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
-import org.apache.hadoop.conf.Configuration;
 
 /** Abstract PluginConfig class, that provides common properties for IcebergCatalogPlugin */
 public abstract class IcebergCatalogPluginConfig
     extends ConnectionConf<IcebergCatalogPluginConfig, IcebergCatalogPlugin>
-    implements AsyncStreamConf {
+    implements AsyncStreamConf, MutablePluginConf {
 
   // 1-9   - IcebergCatalogPluginConfig
   // 10-19 - RestIcebergCatalogPluginConfig
-  // 20-99 - Reserved
+  // 20-109 - Reserved by other plugins
 
   @Tag(1)
   @DisplayMetadata(label = "Catalog Properties")
@@ -81,12 +71,6 @@ public abstract class IcebergCatalogPluginConfig
   }
 
   @Override
-  public IcebergCatalogPlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new IcebergCatalogPlugin(this, context, name);
-  }
-
-  @Override
   public CacheProperties getCacheProperties() {
     return new CacheProperties() {
       @Override
@@ -99,40 +83,5 @@ public abstract class IcebergCatalogPluginConfig
         return maxCacheSpacePct;
       }
     };
-  }
-
-  public abstract CatalogAccessor createCatalog(Configuration config, SabotContext context);
-
-  protected List<Property> getProperties() {
-    List<Property> props = Lists.newArrayList();
-    if (propertyList != null) {
-      props.addAll(propertyList);
-    }
-    if (secretPropertyList != null) {
-      props.addAll(secretPropertyList);
-    }
-    return props;
-  }
-
-  protected void initializeHadoopConf(Configuration hadoopConf) {
-    // FileSystemPlugin.start
-    hadoopConf.set("fs.classpath.impl", ClassPathFileSystem.class.getName());
-    hadoopConf.set("fs.dremio-local.impl", LocalSyncableFileSystem.class.getName());
-
-    FileSystemConfUtil.FS_CACHE_DISABLES.forEach(hadoopConf::set);
-
-    FileSystemConfUtil.S3_PROPS.forEach(hadoopConf::set);
-    FileSystemConfUtil.ADL_PROPS.forEach(hadoopConf::set);
-    FileSystemConfUtil.WASB_PROPS.forEach(hadoopConf::set);
-    FileSystemConfUtil.ABFS_PROPS.forEach(hadoopConf::set);
-  }
-
-  public void validateOnStart(SabotContext sabotContext) {
-    // Don't let the plugin start if the feature flag is disabled
-    if (!sabotContext.getOptionManager().getOption(RESTCATALOG_PLUGIN_ENABLED)) {
-      throw UserException.unsupportedError()
-          .message("Iceberg Catalog Source is not supported.")
-          .buildSilently();
-    }
   }
 }

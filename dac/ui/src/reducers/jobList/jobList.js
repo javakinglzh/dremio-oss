@@ -53,10 +53,6 @@ export default function jobList(state = initialState, action) {
         ["dataForFilter", action.meta.tag],
         action.payload.items,
       );
-    case ActionTypes.SET_JOB_LIST_CLUSTER_TYPE:
-      return state
-        .set("clusterType", action.payload.clusterType)
-        .set("isSupport", action.payload.isSupport);
     default:
       return state;
   }

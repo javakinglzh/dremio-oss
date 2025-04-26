@@ -17,6 +17,8 @@ package com.dremio.sabot.exec;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.VM;
+import com.dremio.common.util.FormattingUtils;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.planner.fragment.EndpointsIndex;
 import com.dremio.exec.proto.CoordExecRPC.NodePhaseStatus;
 import com.dremio.exec.proto.CoordExecRPC.NodeQueryStatus;
@@ -29,6 +31,7 @@ import com.google.common.base.Preconditions;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -51,9 +54,14 @@ import org.apache.arrow.memory.BufferAllocator;
  * query-level allocator will throw an {@link IllegalStateException}
  */
 public class QueryTicket extends TicketWithChildren {
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(QueryTicket.class);
   public static final int MAX_EXPECTED_SIZE = 1000;
 
+  private final QueriesClerk queriesClerk;
+
   private final WorkloadTicket workloadTicket;
+
   private final QueryId queryId;
   private final NodeEndpoint foreman;
   private final NodeEndpoint assignment;
@@ -65,8 +73,13 @@ public class QueryTicket extends TicketWithChildren {
   private EndpointsIndex endpointsIndex;
   private volatile NodeQueryStatus finalQueryStatus;
   private static int NUMBER_OF_CORES = VM.availableProcessors();
+  private long staticEstimateFromPlanner;
+  private long maxMemoryNonSpillableOperators;
+  private long sumMemoryNonSpillableOperators;
+  private long amplifyFactor;
 
   public QueryTicket(
+      QueriesClerk queriesClerk,
       WorkloadTicket workloadTicket,
       QueryId queryId,
       BufferAllocator allocator,
@@ -76,6 +89,7 @@ public class QueryTicket extends TicketWithChildren {
       boolean useWeightBasedScheduling,
       int expectedNumTickets) {
     super(allocator);
+    this.queriesClerk = queriesClerk;
     this.workloadTicket = workloadTicket;
     this.queryId = Preconditions.checkNotNull(queryId, "queryId cannot be null");
     this.foreman = foreman;
@@ -88,6 +102,16 @@ public class QueryTicket extends TicketWithChildren {
             .addGroup((queryWeight <= 0) ? 1 : queryWeight, useWeightBasedScheduling);
     this.tunnelProvider = null;
     this.endpointsIndex = null;
+    this.amplifyFactor = queriesClerk.getAmplifyFactor();
+    this.staticEstimateFromPlanner = 0;
+  }
+
+  public void setStaticEstimateFromPlanner(long staticEstimateFromPlanner) {
+    this.staticEstimateFromPlanner = staticEstimateFromPlanner;
+  }
+
+  public long getStaticEstimateFromPlanner() {
+    return this.staticEstimateFromPlanner;
   }
 
   public QueryId getQueryId() {
@@ -131,6 +155,41 @@ public class QueryTicket extends TicketWithChildren {
         });
   }
 
+  public Collection<NodePhaseStatus> getNodePhaseStatusFromPhaseTickets() {
+    ConcurrentHashMap<Integer, PhaseTicket> tmpPhaseTickets =
+        new ConcurrentHashMap<>(this.phaseTickets);
+    Iterator<ConcurrentHashMap.Entry<Integer, PhaseTicket>> iterator =
+        tmpPhaseTickets.entrySet().iterator();
+    Collection<NodePhaseStatus> tmpCollection = new ConcurrentLinkedQueue<>();
+    while (iterator.hasNext()) {
+      ConcurrentHashMap.Entry<Integer, PhaseTicket> entry = iterator.next();
+      NodePhaseStatus status = entry.getValue().getStatus();
+      tmpCollection.add(status);
+    }
+
+    return tmpCollection;
+  }
+
+  public long getSumPeakMemoryNonSpillableOperators() {
+    Collection<NodePhaseStatus> tmpCollection = getNodePhaseStatusFromPhaseTickets();
+    tmpCollection.addAll(completed);
+    long sum = 0;
+    for (NodePhaseStatus nodePhaseStatus : tmpCollection) {
+      sum += nodePhaseStatus.getMaxMemoryNonSpillableOperators();
+    }
+    return sum * this.amplifyFactor;
+  }
+
+  public long getSumPeakMemorySpillableOperators() {
+    Collection<NodePhaseStatus> tmpCollection = getNodePhaseStatusFromPhaseTickets();
+    tmpCollection.addAll(completed);
+    long sum = 0;
+    for (NodePhaseStatus nodePhaseStatus : tmpCollection) {
+      sum += nodePhaseStatus.getMaxMemorySpillableOperators();
+    }
+    return sum;
+  }
+
   /**
    * Remove a phase ticket from this query ticket. When the last phase ticket is removed, this query
    * ticket is removed from the queries clerk.
@@ -150,7 +209,7 @@ public class QueryTicket extends TicketWithChildren {
     } finally {
       if (this.release()) {
         finalQueryStatus = getStatus();
-        workloadTicket.removeQueryTicket(this);
+        queriesClerk.notifyFinishedQuery(this, workloadTicket);
       }
     }
   }
@@ -202,6 +261,10 @@ public class QueryTicket extends TicketWithChildren {
     return b.build();
   }
 
+  public QueriesClerk getQueriesClerk() {
+    return queriesClerk;
+  }
+
   public SchedulingGroup<AsyncTaskWrapper> getSchedulingGroup() {
     return this.queryGroup;
   }
@@ -217,6 +280,37 @@ public class QueryTicket extends TicketWithChildren {
   }
 
   public EndpointsIndex getEndpointsIndex() {
+    if (this.endpointsIndex == null) {
+      logger.error("endpointsIndex is null for queryId {}", QueryIdHelper.getQueryId(queryId));
+    }
     return this.endpointsIndex;
+  }
+
+  public long getMaxMemoryNonSpillableOperators() {
+    return maxMemoryNonSpillableOperators;
+  }
+
+  public long getSumMemoryNonSpillableOperators() {
+    return sumMemoryNonSpillableOperators;
+  }
+
+  @Override
+  public void close() throws Exception {
+    maxMemoryNonSpillableOperators = 0;
+    sumMemoryNonSpillableOperators = 0;
+    for (NodePhaseStatus nodePhaseStatus : completed) {
+      long value = nodePhaseStatus.getMaxMemoryNonSpillableOperators();
+      if (maxMemoryNonSpillableOperators < value) {
+        maxMemoryNonSpillableOperators = value;
+      }
+      sumMemoryNonSpillableOperators += value;
+    }
+    logger.info(
+        "DLL: Query={} with staticEstimate={} consumed memory of Memory consumption of non spillable operators across multiple threads: maxMemory={} sumMemory={}",
+        QueryIdHelper.getQueryId(queryId),
+        FormattingUtils.formatBytes(this.staticEstimateFromPlanner),
+        FormattingUtils.formatBytes(maxMemoryNonSpillableOperators),
+        FormattingUtils.formatBytes(sumMemoryNonSpillableOperators));
+    super.close();
   }
 }

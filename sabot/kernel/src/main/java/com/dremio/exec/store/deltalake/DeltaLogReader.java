@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.deltalake;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -40,13 +40,14 @@ public interface DeltaLogReader {
   /**
    * Parses the DeltaLake commit log file / checkpoint parquet
    *
+   * @param pluginSabotContext
    * @param fs
    * @param fileAttributes List of File Attributes - Cannot be empty or null
    * @return
    */
   DeltaLogSnapshot parseMetadata(
       Path rootFolder,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       FileSystem fs,
       List<FileAttributes> fileAttributes,
       long version)

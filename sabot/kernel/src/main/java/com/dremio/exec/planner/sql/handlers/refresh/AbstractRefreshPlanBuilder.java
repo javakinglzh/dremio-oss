@@ -26,10 +26,7 @@ import com.dremio.connector.metadata.PartitionChunk;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogOptions;
-import com.dremio.exec.catalog.CatalogUser;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.physical.base.IcebergWriterOptions;
 import com.dremio.exec.physical.base.ImmutableIcebergWriterOptions;
 import com.dremio.exec.physical.base.ImmutableTableFormatWriterOptions;
@@ -56,7 +53,6 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.parser.SqlRefreshDataset;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.DatasetRetrievalOptions;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.dfs.CreateParquetTableEntry;
 import com.dremio.exec.store.dfs.FileSelection;
@@ -384,8 +380,7 @@ public abstract class AbstractRefreshPlanBuilder implements MetadataRefreshPlanB
             icebergTableProps.getTableLocation(),
             icebergTableProps,
             writerOptions,
-            tableNSKey,
-            storagePluginId);
+            tableNSKey);
 
     final DistributionTrait childDist =
         childPrel.getTraitSet().getTrait(DistributionTraitDef.INSTANCE);
@@ -527,7 +522,8 @@ public abstract class AbstractRefreshPlanBuilder implements MetadataRefreshPlanB
       if (firstLevelPaths.contains(field.getName())) {
         fields.put(
             field.getName(),
-            CalciteArrowHelper.wrap(CompleteType.fromField(field)).toCalciteType(factory, true));
+            CalciteArrowHelper.wrap(CompleteType.fromField(field), field.isNullable())
+                .toCalciteType(factory, true));
       }
     }
 
@@ -691,25 +687,6 @@ public abstract class AbstractRefreshPlanBuilder implements MetadataRefreshPlanB
     optionsBuilder.setMaxNestedLevel(
         (int) config.getContext().getOptions().getOption(CatalogOptions.MAX_NESTED_LEVELS));
     return optionsBuilder.build();
-  }
-
-  protected List<String> getPrimaryKey() {
-    List<String> primaryKey = null;
-    if (plugin instanceof MutablePlugin) {
-      MutablePlugin mutablePlugin = (MutablePlugin) plugin;
-      try {
-        primaryKey =
-            mutablePlugin.getPrimaryKey(
-                tableNSKey,
-                datasetConfig,
-                SchemaConfig.newBuilder(CatalogUser.from(userName)).build(),
-                null,
-                !(mutablePlugin.isWrapperFor(VersionedPlugin.class)));
-      } catch (Exception ex) {
-        logger.debug("Failed to get primary key", ex);
-      }
-    }
-    return primaryKey;
   }
 
   /*

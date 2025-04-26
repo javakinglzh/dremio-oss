@@ -25,9 +25,15 @@ import com.dremio.common.expression.SupportedEngines;
 import com.dremio.common.expression.TypedNullConstant;
 import com.dremio.common.expression.ValueExpressions;
 import com.dremio.common.expression.visitors.AbstractExprVisitor;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.sig.ConstantExpressionIdentifier;
+import com.dremio.exec.util.RoundUtil;
+import com.dremio.exec.util.Utilities;
+import com.dremio.sabot.exec.context.OperatorContext;
 import com.google.common.collect.Lists;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.Optional;
 
 /* Splits one expression into sub-expressions such that each sub-expression can be evaluated
  * by either Gandiva or Java. Each sub-expression has a unique name that is used to track
@@ -57,8 +63,11 @@ public class PreferenceBasedSplitter
 
   private final CaseExpressionAnalyzer caseAnalyzer;
 
+  private final Integer ifExprPerBranch;
+
   PreferenceBasedSplitter(
       ExpressionSplitter splitter,
+      OperatorContext context,
       SupportedEngines.Engine preferredEngine,
       SupportedEngines.Engine nonPreferredEngine) {
     this.splitter = splitter;
@@ -77,6 +86,14 @@ public class PreferenceBasedSplitter
     this.preferredEngine = preferredEngine;
     this.nonPreferredEngine = nonPreferredEngine;
     this.caseAnalyzer = new CaseExpressionAnalyzer(preferredEngine, nonPreferredEngine);
+    this.ifExprPerBranch =
+        Optional.ofNullable(
+                context
+                    .getOptions()
+                    .getOption(ExecConstants.SPLIT_OR_TO_IF_BRANCH_SIZE_OPTION.getOptionName()))
+            .orElse(ExecConstants.SPLIT_OR_TO_IF_BRANCH_SIZE_OPTION.getDefault())
+            .getNumVal()
+            .intValue();
   }
 
   CodeGenContext visitCodeGenContext(CodeGenContext context, SplitDependencyTracker myTracker)
@@ -546,21 +563,55 @@ public class PreferenceBasedSplitter
 
   CodeGenContext handleOrExpr(BooleanOperator orExpr, SplitDependencyTracker myTracker)
       throws Exception {
-    // TODO: Combine args to reduce the number of if-expressions. See handleAndExpr()
+    List<LogicalExpression> args = orExpr.args;
+
+    if (args.size() / ifExprPerBranch > 1) {
+      CodeGenContext branchedContext = handleOrExprBranches(orExpr);
+      return visitIfExpression(
+          (IfExpression) branchedContext.getChild(), Tuple.of(branchedContext, myTracker));
+    }
+
+    CodeGenContext ifExpressionContext = buildOrExprBranch(args);
+    return visitIfExpression(
+        (IfExpression) ifExpressionContext.getChild(), Tuple.of(ifExpressionContext, myTracker));
+  }
+
+  CodeGenContext handleOrExprBranches(BooleanOperator orExpr) throws Exception {
     int numArgs = orExpr.args.size();
+    int branchCount = RoundUtil.nextPower2(numArgs / ifExprPerBranch);
+
+    List<List<LogicalExpression>> lists = Utilities.splitList(orExpr.args, branchCount);
+
+    List<CodeGenContext> previousLevel = new LinkedList<>();
+    List<CodeGenContext> currentLevel;
+    for (List<LogicalExpression> branchItems : lists) {
+      previousLevel.add(buildOrExprBranch(branchItems));
+    }
+
+    while (previousLevel.size() > 1) {
+      currentLevel = new LinkedList<>();
+      for (int i = 0; i < previousLevel.size(); i += 2) {
+        currentLevel.add(booleanOrToIfExpr(previousLevel.get(i), previousLevel.get(i + 1)));
+      }
+      previousLevel = currentLevel;
+    }
+
+    return previousLevel.get(0);
+  }
+
+  CodeGenContext buildOrExprBranch(List<LogicalExpression> args) {
+    int numArgs = args.size();
     int curIndex = numArgs;
 
     CodeGenContext ifExpressionContext =
-        booleanOrToIfExpr(orExpr.args.get(curIndex - 2), orExpr.args.get(curIndex - 1));
+        booleanOrToIfExpr(args.get(curIndex - 2), args.get(curIndex - 1));
     curIndex -= 2;
 
     while (curIndex > 0) {
-      ifExpressionContext = booleanOrToIfExpr(orExpr.args.get(curIndex - 1), ifExpressionContext);
+      ifExpressionContext = booleanOrToIfExpr(args.get(curIndex - 1), ifExpressionContext);
       curIndex--;
     }
-
-    return visitIfExpression(
-        (IfExpression) ifExpressionContext.getChild(), Tuple.of(ifExpressionContext, myTracker));
+    return ifExpressionContext;
   }
 
   @Override

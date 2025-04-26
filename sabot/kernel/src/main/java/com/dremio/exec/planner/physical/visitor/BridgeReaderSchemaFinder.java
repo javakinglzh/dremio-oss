@@ -15,12 +15,12 @@
  */
 package com.dremio.exec.planner.physical.visitor;
 
-import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.physical.BridgeExchangePrel;
 import com.dremio.exec.planner.physical.BridgeReaderPrel;
 import com.dremio.exec.planner.physical.PhysicalPlanCreator;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.explain.PrelSequencer;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.record.BatchSchema;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
@@ -31,11 +31,11 @@ import java.util.Map;
 import org.apache.calcite.rel.RelNode;
 
 public class BridgeReaderSchemaFinder {
-  public static Prel findAndSetSchemas(RelNode root, QueryContext context) {
+  public static Prel findAndSetSchemas(RelNode root, SqlHandlerConfig sqlHandlerConfig) {
     Map<String, BatchSchema> schemaMap = new HashMap<>();
     Map<String, BridgeExchangePrel> bridgeExchangePrelMap = new HashMap<>();
     findBridgeExchanges(root, bridgeExchangePrelMap);
-    return findAndSetSchemas(root, schemaMap, bridgeExchangePrelMap, context);
+    return findAndSetSchemas(root, schemaMap, bridgeExchangePrelMap, sqlHandlerConfig);
   }
 
   private static void findBridgeExchanges(
@@ -53,15 +53,16 @@ public class BridgeReaderSchemaFinder {
       RelNode rel,
       Map<String, BatchSchema> schemaMap,
       Map<String, BridgeExchangePrel> bridgeExchangeMap,
-      QueryContext context) {
+      SqlHandlerConfig sqlHandlerConfig) {
     List<RelNode> children = new ArrayList<>();
     for (RelNode child : rel.getInputs()) {
-      children.add(findAndSetSchemas(child, schemaMap, bridgeExchangeMap, context));
+      children.add(findAndSetSchemas(child, schemaMap, bridgeExchangeMap, sqlHandlerConfig));
     }
     if (rel instanceof BridgeExchangePrel) {
       BridgeExchangePrel bridgeExchangePrel =
           (BridgeExchangePrel) rel.copy(rel.getTraitSet(), children);
-      schemaMap.put(bridgeExchangePrel.getBridgeSetId(), lookupSchema(bridgeExchangePrel, context));
+      schemaMap.put(
+          bridgeExchangePrel.getBridgeSetId(), lookupSchema(bridgeExchangePrel, sqlHandlerConfig));
       bridgeExchangeMap.put(bridgeExchangePrel.getBridgeSetId(), bridgeExchangePrel);
       return bridgeExchangePrel;
     }
@@ -74,7 +75,7 @@ public class BridgeReaderSchemaFinder {
       BridgeExchangePrel bridgeExchangePrel =
           bridgeExchangeMap.get(bridgeReaderPrel.getBridgeSetId());
       Preconditions.checkNotNull(bridgeExchangePrel);
-      findAndSetSchemas(bridgeExchangePrel, schemaMap, bridgeExchangeMap, context);
+      findAndSetSchemas(bridgeExchangePrel, schemaMap, bridgeExchangeMap, sqlHandlerConfig);
       schema = schemaMap.get(bridgeReaderPrel.getBridgeSetId());
       Preconditions.checkNotNull(schema);
       return bridgeReaderPrel.copyWithSchema(schema);
@@ -82,12 +83,12 @@ public class BridgeReaderSchemaFinder {
     return (Prel) rel.copy(rel.getTraitSet(), children);
   }
 
-  private static BatchSchema lookupSchema(Prel prel, QueryContext context) {
+  private static BatchSchema lookupSchema(Prel prel, SqlHandlerConfig sqlHandlerConfig) {
     // This is need to get row type for execution, we do not have calcite to arrow row type
     // conversion.
     try {
       PhysicalPlanCreator planCreator =
-          new PhysicalPlanCreator(context, PrelSequencer.getIdMap(prel));
+          new PhysicalPlanCreator(sqlHandlerConfig, PrelSequencer.getIdMap(prel));
       return prel.getPhysicalOperator(planCreator).getProps().getSchema();
     } catch (IOException e) {
       throw new RuntimeException(e);

@@ -38,8 +38,8 @@ public class TestAzureSharedKeyCredentials {
       new AzureSharedKeyCredentials("mock-account", () -> Base64.encode("mock-key".getBytes()));
 
   @Test
-  public void testGetAuthzHeaderValue() {
-    String authzHeaderValue = credentials.getAuthzHeaderValue(prepareTestRequest());
+  public void testGetAuthorizationHeader() {
+    String authzHeaderValue = credentials.getAuthorizationHeader(prepareTestRequest());
     assertEquals(
         "SharedKey mock-account:ZwovG4J+nCDc3w58WPei6fvJBQsO96YojteJncy0wwI=", authzHeaderValue);
   }

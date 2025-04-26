@@ -19,18 +19,23 @@ import com.dremio.exec.store.CatalogService;
 import com.dremio.options.OptionManager;
 import com.dremio.services.nessie.proxy.ProxyV2TreeResource;
 import javax.inject.Inject;
+import javax.ws.rs.core.HttpHeaders;
 import org.projectnessie.client.api.NessieApiV2;
 
 /** Resource for providing APIs for Nessie as a Source for Test. */
 public class NessieTestSourceResource extends NessieSourceResource {
 
+  private final HttpHeaders headers;
+
   @Inject
-  public NessieTestSourceResource(CatalogService catalogService, OptionManager optionManager) {
-    super(catalogService, optionManager);
+  public NessieTestSourceResource(
+      CatalogService catalogService, OptionManager optionManager, HttpHeaders headers) {
+    super(catalogService, optionManager, headers);
+    this.headers = headers;
   }
 
   @Override
   protected ProxyV2TreeResource getTreeResource(NessieApiV2 nessieApi) {
-    return new ProxyV2TreeResource(nessieApi);
+    return new ProxyV2TreeResource(nessieApi, headers);
   }
 }

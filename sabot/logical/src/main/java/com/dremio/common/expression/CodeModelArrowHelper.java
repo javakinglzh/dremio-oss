@@ -214,7 +214,7 @@ public final class CodeModelArrowHelper {
             break;
         }
         break;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         switch (mode) {
           case REQUIRED:
             return model._ref(TimeStampMilliHolder.class);

@@ -155,6 +155,11 @@ public class MockCatalog implements SimpleCatalog<MockCatalog> {
   }
 
   @Override
+  public boolean exists(CatalogEntityKey catalogEntityKey) {
+    return true;
+  }
+
+  @Override
   public Map<String, List<ColumnExtendedProperty>> getColumnExtendedProperties(DremioTable table) {
     throw new UnsupportedOperationException();
   }

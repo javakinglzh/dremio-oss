@@ -154,7 +154,7 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
    * @return A new merged mapping.
    */
   @JsonIgnore
-  public ElasticMapping getMergedMapping() {
+  public ElasticMapping getMergedMapping(boolean isValuesCastEnabled) {
     ElasticMapping mapping = null;
     String index_name = "";
     for (ElasticIndex index : indexes) {
@@ -163,7 +163,7 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
           mapping = m;
           index_name = index.name;
         } else {
-          mapping = mapping.merge(m, index_name, index.name);
+          mapping = mapping.merge(m, index_name, index.name, isValuesCastEnabled);
         }
       }
     }
@@ -307,7 +307,8 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
         String curr_mapping,
         String other_mapping,
         String curr_index,
-        String other_index) {
+        String other_index,
+        boolean isValuesCastEnabled) {
       if (equals(field)) {
         return this;
       }
@@ -412,7 +413,8 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
               curr_mapping,
               other_mapping,
               curr_index,
-              other_index),
+              other_index,
+              isValuesCastEnabled),
           fields);
     }
 
@@ -472,7 +474,8 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
         String mappingA,
         String mappingB,
         String indexA,
-        String indexB) {
+        String indexB,
+        boolean isValuesCastEnabled) {
       // There is field variation if the number of fieldA is different from that of fieldB.
       if (fieldsA.size() != fieldsB.size()) {
         mapping.setVariationDetected(true);
@@ -487,7 +490,9 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
         if (fields.containsKey(f.getName())) {
           replacements.put(
               f.getName(),
-              fields.get(f.getName()).merge(mapping, f, mappingA, mappingB, indexA, indexB));
+              fields
+                  .get(f.getName())
+                  .merge(mapping, f, mappingA, mappingB, indexA, indexB, isValuesCastEnabled));
         } else {
           // There is field variation if the field in fieldB is not found in fieldA.
           mapping.setVariationDetected(true);
@@ -650,9 +655,9 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
       return mappings;
     }
 
-    public ElasticMapping getMergedMapping() {
+    public ElasticMapping getMergedMapping(boolean isValuesCastEnabled) {
       return new ElasticMappingSet(ImmutableMap.<String, ElasticIndex>of(this.name, this))
-          .getMergedMapping();
+          .getMergedMapping(isValuesCastEnabled);
     }
 
     public List<String> getAliases() {
@@ -727,11 +732,22 @@ public class ElasticMappingSet implements Iterable<ElasticMappingSet.ElasticInde
       return fields;
     }
 
-    public ElasticMapping merge(ElasticMapping mapping, String curr_index, String other_index) {
+    public ElasticMapping merge(
+        ElasticMapping mapping,
+        String curr_index,
+        String other_index,
+        boolean isValuesCastEnabled) {
       String newName = name.equals(mapping.name) ? name : name + "," + mapping.name;
       List<ElasticField> newFields =
           ElasticField.mergeFields(
-              mapping, fields, mapping.fields, name, mapping.name, curr_index, other_index);
+              mapping,
+              fields,
+              mapping.fields,
+              name,
+              mapping.name,
+              curr_index,
+              other_index,
+              isValuesCastEnabled);
       return new ElasticMapping(newName, newFields, true, mapping.variationDetected);
     }
 

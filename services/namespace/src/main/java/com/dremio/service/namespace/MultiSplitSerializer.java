@@ -22,6 +22,6 @@ import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.MultiSplit;
 public class MultiSplitSerializer extends ProtobufSerializer<MultiSplit> {
 
   public MultiSplitSerializer() {
-    super(MultiSplit.class, MultiSplit.PARSER);
+    super(MultiSplit.class, MultiSplit.parser());
   }
 }

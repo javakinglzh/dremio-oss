@@ -27,6 +27,7 @@ import com.dremio.dac.annotations.Secured;
 import com.dremio.dac.service.errors.ServerErrorException;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.exec.catalog.ConnectionReader;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.server.SourceVerifier;
@@ -150,7 +151,9 @@ public class DeprecatedSourceResource {
         throw new IllegalArgumentException(source.getType() + " source type is not supported.");
       }
 
-      SourceConfig newSourceConfig = sourceService.createSource(source.toSourceConfig());
+      SourceConfig newSourceConfig =
+          sourceService.createSource(
+              source.toSourceConfig(), SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
       return fromSourceConfig(newSourceConfig);
     } catch (NamespaceException | ExecutionSetupException e) {
@@ -190,7 +193,7 @@ public class DeprecatedSourceResource {
   @Path("/{id}")
   public Response deleteSource(@PathParam("id") String id) throws NamespaceException {
     SourceConfig config = sourceService.getById(id);
-    sourceService.deleteSource(config);
+    sourceService.deleteSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     return Response.ok().build();
   }
 
@@ -241,9 +244,14 @@ public class DeprecatedSourceResource {
 
     return connectionConf
         .filter(this::isConfigurable)
-        .map(sourceClass -> SourceTypeTemplate.fromSourceClass(sourceClass, true))
+        .map(sourceClass -> getSourceTypeTemplate(name, sourceClass))
         .orElseThrow(
             () -> new NotFoundException(String.format("Could not find source of type [%s]", name)));
+  }
+
+  protected SourceTypeTemplate getSourceTypeTemplate(
+      String sourceType, Class<? extends ConnectionConf<?, ?>> sourceClass) {
+    return SourceTypeTemplate.fromSourceClass(sourceClass, true);
   }
 
   protected Optional<Class<? extends ConnectionConf<?, ?>>> getConnectionConf(String name) {
@@ -263,6 +271,6 @@ public class DeprecatedSourceResource {
 
   @VisibleForTesting
   protected SourceDeprecated fromSourceConfig(SourceConfig sourceConfig) {
-    return new SourceDeprecated(sourceService.fromSourceConfig(sourceConfig));
+    return new SourceDeprecated(sourceService.fromSourceConfig(sourceConfig, null, null));
   }
 }

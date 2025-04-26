@@ -16,7 +16,6 @@
 
 package com.dremio.exec.store.dfs;
 
-import com.dremio.common.JSONOptions;
 import com.dremio.datastore.LegacyProtobufSerializer;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.physical.base.GroupScan;
@@ -29,20 +28,15 @@ import com.dremio.exec.planner.physical.ProjectPrel;
 import com.dremio.exec.planner.physical.Prule;
 import com.dremio.exec.planner.physical.ValuesPrel;
 import com.dremio.exec.store.TableMetadata;
-import com.dremio.exec.vector.complex.fn.ExtendedJsonOutput;
-import com.dremio.exec.vector.complex.fn.JsonOutput;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf.ColumnValueCount;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf.ParquetDatasetSplitXAttr;
 import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.DatasetSplit;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.util.TokenBuffer;
-import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.protobuf.InvalidProtocolBufferException;
-import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
@@ -54,7 +48,9 @@ import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rel.type.RelRecordType;
+import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 
@@ -149,7 +145,7 @@ public class ConvertCountToDirectScan extends Prule {
         try {
           xattr =
               LegacyProtobufSerializer.parseFrom(
-                  ParquetDatasetSplitXAttr.PARSER, split.getSplitExtendedProperty());
+                  ParquetDatasetSplitXAttr.parser(), split.getSplitExtendedProperty());
         } catch (InvalidProtocolBufferException e) {
           throw new RuntimeException("Could not deserialize Parquet split info", e);
         }
@@ -172,8 +168,8 @@ public class ConvertCountToDirectScan extends Prule {
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    final AggregateRel agg = (AggregateRel) call.rel(0);
-    final FilesystemScanDrel scan = (FilesystemScanDrel) call.rel(call.rels.length - 1);
+    final AggregateRel agg = call.rel(0);
+    final FilesystemScanDrel scan = call.rel(call.rels.length - 1);
     final ProjectRel proj = call.rels.length == 3 ? (ProjectRel) call.rel(1) : null;
 
     // Only apply the rule when :
@@ -235,14 +231,14 @@ public class ConvertCountToDirectScan extends Prule {
         return; // do nothing.
       }
 
+      RexBuilder rexBuilder = call.builder().getRexBuilder();
       RelDataType scanRowType = getCountRowType(agg.getCluster().getTypeFactory());
       final ValuesPrel values =
           new ValuesPrel(
               agg.getCluster(),
               scan.getTraitSet().plus(Prel.PHYSICAL).plus(DistributionTrait.SINGLETON),
               scanRowType,
-              new JSONOptions(getResultsNode(cnt)),
-              1);
+              buildResultTuple(rexBuilder, cnt));
       List<RexNode> exprs = Lists.newArrayList();
       exprs.add(RexInputRef.of(0, scanRowType));
 
@@ -257,30 +253,12 @@ public class ConvertCountToDirectScan extends Prule {
     }
   }
 
-  private JsonNode getResultsNode(long count) {
-    try {
-      TokenBuffer out = new TokenBuffer(MAPPER.getFactory().getCodec(), false);
-      JsonOutput json = new ExtendedJsonOutput(out);
-      json.writeStartArray();
-      json.writeStartObject();
-      json.writeFieldName("count");
-      json.writeBigInt(count);
-      json.writeEndObject();
-      json.writeEndArray();
-      json.flush();
-      return out.asParser().readValueAsTree();
-    } catch (IOException ex) {
-      throw Throwables.propagate(ex);
-    }
-  }
-
-  /** Class to represent the count aggregate result. */
-  public static class CountQueryResult {
-    public long count;
-
-    public CountQueryResult(long cnt) {
-      this.count = cnt;
-    }
+  private ImmutableList<ImmutableList<RexLiteral>> buildResultTuple(
+      RexBuilder rexBuilder, long count) {
+    RelDataTypeFactory typeFactory = rexBuilder.getTypeFactory();
+    return ImmutableList.of(
+        ImmutableList.of(
+            rexBuilder.makeLiteral(count, typeFactory.createSqlType(SqlTypeName.BIGINT))));
   }
 
   private RelDataType getCountRowType(RelDataTypeFactory typeFactory) {

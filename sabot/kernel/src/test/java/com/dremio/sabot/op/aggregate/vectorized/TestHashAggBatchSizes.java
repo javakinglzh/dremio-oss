@@ -27,16 +27,16 @@ import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.HashAggregate;
 import com.dremio.exec.record.RecordBatchData;
 import com.dremio.exec.record.VectorAccessible;
+import com.dremio.sabot.BaseTestOperator;
 import com.dremio.sabot.Fixtures.DataRow;
 import com.dremio.sabot.Fixtures.Table;
 import com.dremio.sabot.Generator;
-import com.dremio.sabot.aggregate.hash.ITSpillingHashAgg;
 import com.dremio.sabot.op.spi.SingleInputOperator.State;
 import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
 
-public class TestHashAggBatchSizes extends ITSpillingHashAgg {
+public class TestHashAggBatchSizes extends BaseTestOperator {
 
   /**
    * Make sure Hash Agg output batch size is always less than max permitted by key

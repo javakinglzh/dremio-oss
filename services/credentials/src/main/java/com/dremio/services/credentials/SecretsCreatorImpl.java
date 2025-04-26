@@ -45,8 +45,22 @@ public class SecretsCreatorImpl implements SecretsCreator {
 
   @Override
   public boolean isEncrypted(String secret) {
+    URI uri;
     try {
-      systemCipher.get().decrypt(secret);
+      uri = CredentialsServiceUtils.safeURICreate(secret);
+    } catch (IllegalArgumentException e) {
+      // An encrypted string must be a form of URI.
+      return false;
+    }
+
+    if (!CredentialsServiceUtils.isEncryptedCredentials(uri)) {
+      // An encrypted string must begin with one of the reserved system-encryption scheme.
+      return false;
+    }
+
+    try {
+      // Stripes out the scheme since Cipher does not take scheme.
+      systemCipher.get().decrypt(uri.getSchemeSpecificPart());
       return true;
     } catch (CredentialsException | IllegalArgumentException | NoSuchElementException e) {
       return false;

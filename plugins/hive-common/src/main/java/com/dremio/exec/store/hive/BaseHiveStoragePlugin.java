@@ -16,8 +16,8 @@
 package com.dremio.exec.store.hive;
 
 import com.dremio.common.logical.FormatPluginConfig;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.deltalake.DeltaLakeFormatConfig;
 import com.dremio.exec.store.deltalake.DeltaLakeFormatPlugin;
 import com.dremio.exec.store.dfs.AsyncStreamConf;
@@ -38,10 +38,10 @@ public abstract class BaseHiveStoragePlugin implements SupportsIcebergRootPointe
   // Advanced option to set default ctas format
   public static final String HIVE_DEFAULT_CTAS_FORMAT = "hive.default.ctas.format";
 
-  private final SabotContext sabotContext;
+  private final PluginSabotContext sabotContext;
   private final String name;
 
-  protected BaseHiveStoragePlugin(SabotContext sabotContext, String pluginName) {
+  protected BaseHiveStoragePlugin(PluginSabotContext sabotContext, String pluginName) {
     this.sabotContext = sabotContext;
     this.name = pluginName;
   }
@@ -50,7 +50,7 @@ public abstract class BaseHiveStoragePlugin implements SupportsIcebergRootPointe
     return name;
   }
 
-  public SabotContext getSabotContext() {
+  public PluginSabotContext getSabotContext() {
     return sabotContext;
   }
 
@@ -103,15 +103,12 @@ public abstract class BaseHiveStoragePlugin implements SupportsIcebergRootPointe
   @Override
   public FormatPlugin getFormatPlugin(FormatPluginConfig formatConfig) {
     if (formatConfig instanceof IcebergFormatConfig) {
-      IcebergFormatPlugin icebergFormatPlugin =
-          new IcebergFormatPlugin(
-              "iceberg", sabotContext, (IcebergFormatConfig) formatConfig, null);
-      icebergFormatPlugin.initialize((IcebergFormatConfig) formatConfig, this);
-      return icebergFormatPlugin;
+      return new IcebergFormatPlugin(
+          "iceberg", sabotContext, (IcebergFormatConfig) formatConfig, this);
     }
     if (formatConfig instanceof DeltaLakeFormatConfig) {
       return new DeltaLakeFormatPlugin(
-          "delta", sabotContext, (DeltaLakeFormatConfig) formatConfig, null);
+          "delta", sabotContext, (DeltaLakeFormatConfig) formatConfig, this);
     }
     throw new UnsupportedOperationException(
         "Format plugins for non iceberg use cases are not supported.");

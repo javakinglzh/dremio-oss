@@ -62,6 +62,7 @@ import { REFLECTION_REFRESH_ENABLED } from "@inject/featureFlags/flags/REFLECTIO
 import { isNotSoftware } from "dyn-load/utils/versionUtils";
 import { addNotification } from "#oss/actions/notification";
 import { getReflectionUiStatus } from "#oss/utils/accelerationUtils";
+import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
 
 const HEADER_HEIGHT = 100;
 const REC_HEADER_HEIGHT = 104;
@@ -286,7 +287,12 @@ export class AccelerationGrid extends Component {
     );
   }
 
-  renderNameInput = (columnIndex, placeholderName, shouldDelete) => {
+  renderNameInput = (
+    columnIndex,
+    placeholderName,
+    shouldDelete,
+    shouldHide,
+  ) => {
     const { isRecommendation, isSubmitting } = this.props;
     return (
       <PrevalidatedTextField
@@ -302,6 +308,7 @@ export class AccelerationGrid extends Component {
           if (e.key === "Enter") e.preventDefault();
         }}
         {...(isRecommendation && { disabled: isSubmitting })}
+        {...(shouldHide && { disabled: true })}
       />
     );
   };
@@ -438,7 +445,12 @@ export class AccelerationGrid extends Component {
     }
   };
 
-  renderHeaderCell = (rowIndex, columnIndex, shouldJumpTo = false) => {
+  renderHeaderCell = (
+    rowIndex,
+    columnIndex,
+    shouldHide,
+    shouldJumpTo = false,
+  ) => {
     const {
       allowPartitionTransform,
       applyPartitionRecommendations,
@@ -480,6 +492,8 @@ export class AccelerationGrid extends Component {
       status === "PENDING" ||
       status === "RUNNING" ||
       !!this.state.disabledRefresh?.[reflectionId];
+    const shouldHideDelete = !localStorageUtils.isUserAnAdmin() && shouldHide;
+    const shouldHideToggle = shouldHide && reflection?.get("enabled");
 
     return (
       <div
@@ -495,16 +509,23 @@ export class AccelerationGrid extends Component {
         >
           <div className={"AccelerationGrid__togglesContainer h4"}>
             {isRecommendation ? (
-              this.renderNameInput(columnIndex, placeholderName, shouldDelete)
+              this.renderNameInput(
+                columnIndex,
+                placeholderName,
+                shouldDelete,
+                shouldHide,
+              )
             ) : (
               <>
-                {
+                {shouldHideToggle ? (
+                  <div className="AccelerationGrid__toggleFiller" />
+                ) : (
                   <Toggle
                     {...fields.enabled}
                     className={"AccelerationGrid__toggle"}
                     size="medium"
                   />
-                }
+                )}
                 {/*
               use PrevalidatedTextField as a buffer against expensive rerender as you type
             */}
@@ -512,6 +533,7 @@ export class AccelerationGrid extends Component {
                   columnIndex,
                   placeholderName,
                   shouldDelete,
+                  shouldHide,
                 )}
                 {shouldShowRecommendationsLoader && (
                   <Tooltip
@@ -568,34 +590,38 @@ export class AccelerationGrid extends Component {
                           />
                         </OldIconButton>
                       )}
-                    <IconButton
-                      aria-label={shouldDelete ? "Add" : "Delete"}
-                      onClick={() =>
-                        fields.shouldDelete.onChange(!shouldDelete)
-                      }
-                      className="AccelerationGrid__layoutHeaderDeleteButton"
-                    >
-                      <dremio-icon
-                        name={
-                          shouldDelete ? "interface/add" : "interface/delete"
+                    {!shouldHideDelete && (
+                      <IconButton
+                        aria-label={shouldDelete ? "Add" : "Delete"}
+                        onClick={() =>
+                          fields.shouldDelete.onChange(!shouldDelete)
                         }
-                        class="AccelerationGrid__layoutHeaderDeleteButton__icon"
-                      />
-                    </IconButton>
-                    <IconButton
-                      aria-label="Settings"
-                      onClick={() =>
-                        this.setState({
-                          visibleLayoutExtraSettingsIndex: columnIndex,
-                        })
-                      }
-                      className="AccelerationGrid__layoutHeaderSettingsButton"
-                    >
-                      <dremio-icon
-                        name="interface/settings"
-                        class="AccelerationGrid__layoutHeaderSettingsButton__icon"
-                      />
-                    </IconButton>
+                        className="AccelerationGrid__layoutHeaderDeleteButton"
+                      >
+                        <dremio-icon
+                          name={
+                            shouldDelete ? "interface/add" : "interface/delete"
+                          }
+                          class="AccelerationGrid__layoutHeaderDeleteButton__icon"
+                        />
+                      </IconButton>
+                    )}
+                    {!shouldHide && (
+                      <IconButton
+                        aria-label="Settings"
+                        onClick={() =>
+                          this.setState({
+                            visibleLayoutExtraSettingsIndex: columnIndex,
+                          })
+                        }
+                        className="AccelerationGrid__layoutHeaderSettingsButton"
+                      >
+                        <dremio-icon
+                          name="interface/settings"
+                          class="AccelerationGrid__layoutHeaderSettingsButton__icon"
+                        />
+                      </IconButton>
+                    )}
                   </>
                 )}
               </>
@@ -742,17 +768,25 @@ export class AccelerationGrid extends Component {
     let jumpToIndex = 0;
     const columnNodes = layoutFields.map((layout, index) => {
       const shouldJumpTo = layout.id.value === layoutId;
+      const shouldHide = this.shouldHideUpdates(layout.id.value);
 
       const columnOutput = (
         <Column
           key={index}
           header={(props) =>
-            this.renderHeaderCell(props.rowIndex, index, shouldJumpTo)
+            this.renderHeaderCell(
+              props.rowIndex,
+              index,
+              shouldHide,
+              shouldJumpTo,
+            )
           }
           headerHeight={isRecommendation ? REC_HEADER_HEIGHT : HEADER_HEIGHT}
           width={width}
           allowCellsRecycling
-          cell={(props) => this.props.renderBodyCell(props.rowIndex, index)}
+          cell={(props) =>
+            this.props.renderBodyCell(props.rowIndex, index, layout)
+          }
         />
       );
 

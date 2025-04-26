@@ -22,6 +22,6 @@ import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.PartitionChu
 public class PartitionChunkSerializer extends LegacyProtobufSerializer<PartitionChunk> {
 
   public PartitionChunkSerializer() {
-    super(PartitionChunk.class, PartitionChunk.PARSER);
+    super(PartitionChunk.class, PartitionChunk.parser());
   }
 }

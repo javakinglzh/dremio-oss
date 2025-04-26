@@ -28,13 +28,18 @@ message Empty {}
 message CommitMeta {
   optional string hash = 1;
   optional string committer = 2;
-  optional string author = 3;
-  optional string signedOffBy = 4;
+  repeated string author = 3;
+  repeated string signedOffBy = 4;
   string message = 5;
   optional google.protobuf.Timestamp commitTime = 6;
   optional google.protobuf.Timestamp authorTime = 7;
-  map<string, string> properties = 8;
+  map<string, string> properties = 8 [deprecated = true]; // kept for backward compatibility
   repeated string parentHashes = 9;
+  map<string, PropertyEntry> propertyEntries = 10;
+}
+
+message PropertyEntry {
+  repeated string value = 1;
 }
 
 message Reference {

@@ -26,6 +26,10 @@ import static java.lang.String.format;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.fail;
 
+import co.elastic.clients.elasticsearch._types.query_dsl.MatchAllQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.json.JsonpUtils;
+import com.dremio.common.collections.Tuple;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.AuthenticationType;
 import com.dremio.exec.catalog.conf.EncryptionValidationMode;
@@ -49,7 +53,6 @@ import com.google.common.io.ByteSource;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import java.io.BufferedReader;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.FileInputStream;
@@ -91,12 +94,6 @@ import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.elasticsearch.Version;
-import org.elasticsearch.common.collect.Tuple;
-import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -113,9 +110,6 @@ public class ElasticsearchCluster implements Closeable {
       Integer.valueOf(System.getProperty("dremio.test.elasticsearch.port", "9200"));
 
   private static final Logger logger = LoggerFactory.getLogger(ElasticsearchCluster.class);
-
-  private static final String CLUSTER_NAME = "dremio-test-cluster";
-  private static final String NODE_NAME_PREFIX = "elastic-test-node-";
 
   private final String host;
   private final Integer port;
@@ -142,7 +136,6 @@ public class ElasticsearchCluster implements Closeable {
   private Server proxy;
   private boolean remote = false;
   private boolean deleteExisting = false;
-  private Version version;
   private final boolean scriptsEnabled;
   private final boolean showIDColumn;
   private final boolean sslEnabled;
@@ -628,8 +621,7 @@ public class ElasticsearchCluster implements Closeable {
 
     PutMapping putMapping = new PutMapping(schema, table);
 
-    final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    XContentBuilder json = XContentFactory.jsonBuilder(baos);
+    ElasticTestContentBuilder json = new ElasticTestContentBuilder();
     json.startObject().startObject(table).startObject("properties");
 
     for (ColumnData datum : data) {
@@ -644,8 +636,7 @@ public class ElasticsearchCluster implements Closeable {
     }
 
     json.endObject().endObject().endObject();
-    json.close();
-    putMapping.setMapping(baos.toString(UTF_8));
+    putMapping.setMapping(json.build());
     try {
       connection.execute(putMapping, elasticVersionBehaviorProvider.geMajorVersion());
     } catch (Exception e) {
@@ -667,8 +658,7 @@ public class ElasticsearchCluster implements Closeable {
 
     for (int i = 0; i < max; i++) {
 
-      final ByteArrayOutputStream entryBaos = new ByteArrayOutputStream();
-      json = XContentFactory.jsonBuilder(entryBaos).startObject();
+      json = new ElasticTestContentBuilder().startObject();
 
       for (ColumnData datum : data) {
         if (datum.rows != null && i < datum.rows.length && datum.rows[i] != null) {
@@ -683,12 +673,13 @@ public class ElasticsearchCluster implements Closeable {
 
       bulk.add(String.format(BULK_INDEX_TEXT, schema, table));
       json.endObject();
-      json.close();
-      bulk.add(entryBaos.toString(UTF_8));
+      bulk.add(json.build());
     }
 
+    logger.debug("Trying JSON " + json.build());
     Result response = getResultWithRetries(bulk);
     if (response.getAsJsonObject().get("errors").getAsBoolean()) {
+      logger.error("failed with " + json.build());
       fail(response.getAsJsonObject().toString());
     }
 
@@ -734,8 +725,7 @@ public class ElasticsearchCluster implements Closeable {
     schema(shards, replicas, schema);
 
     PutMapping putMapping = new PutMapping(schema, table);
-    final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    XContentBuilder json = XContentFactory.jsonBuilder(baos);
+    ElasticTestContentBuilder json = new ElasticTestContentBuilder();
     json.startObject().startObject(table).startObject("properties");
 
     for (ElasticsearchType type : types) {
@@ -798,9 +788,8 @@ public class ElasticsearchCluster implements Closeable {
     }
 
     json.endObject().endObject().endObject();
-    json.close();
 
-    putMapping.setMapping(baos.toString(UTF_8));
+    putMapping.setMapping(json.build());
     elasticVersionBehaviorProvider.executeMapping(connection, putMapping);
   }
 
@@ -985,8 +974,7 @@ public class ElasticsearchCluster implements Closeable {
     for (int i = 0; i < rows; i++) {
 
       bulk.add(String.format(BULK_INDEX_TEXT, schema, table));
-      final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-      XContentBuilder json = XContentFactory.jsonBuilder(baos).startObject();
+      ElasticTestContentBuilder json = new ElasticTestContentBuilder().startObject();
       Tuple<Boolean, Integer> tuple;
 
       for (ElasticsearchType type : types) {
@@ -994,8 +982,8 @@ public class ElasticsearchCluster implements Closeable {
           case INTEGER:
           case LONG:
             tuple = arrayRandomness != null ? arrayRandomness.get(type) : null;
-            if (tuple != null && tuple.v1()) {
-              int size = tuple.v2();
+            if (tuple != null && tuple.first) {
+              int size = tuple.second;
               // Send variable data representations to elastic: [ 2, "2", 1.5 ]
               if (variations) {
                 Object[] oa = new Object[size];
@@ -1026,8 +1014,8 @@ public class ElasticsearchCluster implements Closeable {
             break;
           case FLOAT:
             tuple = arrayRandomness != null ? arrayRandomness.get(type) : null;
-            if (tuple != null && tuple.v1()) {
-              int size = tuple.v2();
+            if (tuple != null && tuple.first) {
+              int size = tuple.second;
 
               // Send variable data representations to elastic: [ 2, "2", 1.5 ]
               if (variations) {
@@ -1059,10 +1047,10 @@ public class ElasticsearchCluster implements Closeable {
             break;
           case DOUBLE:
             tuple = arrayRandomness != null ? arrayRandomness.get(type) : null;
-            if (tuple != null && tuple.v1()) {
-              double[] doubles = new double[tuple.v2()];
+            if (tuple != null && tuple.first) {
+              double[] doubles = new double[tuple.second];
               for (int j = 0; j < doubles.length; j++) {
-                doubles[j] = i + j + tuple.v2();
+                doubles[j] = i + j + tuple.second;
               }
               json.field(type.name().toLowerCase(Locale.ENGLISH) + "_field", doubles);
             } else {
@@ -1085,11 +1073,11 @@ public class ElasticsearchCluster implements Closeable {
             break;
           case TEXT:
             tuple = arrayRandomness != null ? arrayRandomness.get(type) : null;
-            if (tuple != null && tuple.v1()) {
-              String[] strings = new String[tuple.v2()];
+            if (tuple != null && tuple.first) {
+              String[] strings = new String[tuple.second];
               for (int j = 0; j < strings.length; j++) {
                 strings[j] =
-                    "string_value_" + Integer.toString(i) + Integer.toString(j) + tuple.v2();
+                    "string_value_" + Integer.toString(i) + Integer.toString(j) + tuple.second;
               }
               json.field(type.name().toLowerCase(Locale.ENGLISH) + "_field", strings);
             } else {
@@ -1100,16 +1088,14 @@ public class ElasticsearchCluster implements Closeable {
             break;
           case NESTED:
             tuple = arrayRandomness != null ? arrayRandomness.get(type) : null;
-            if (tuple != null && tuple.v1()) {
+            if (tuple != null && tuple.first) {
               json.startArray("person");
               for (int j = 0; j < 5; j++) {
-                // json.startObject("person");
                 json.startObject();
                 json.field("first_name", "my_first_name_" + j + "_" + i);
                 json.field("last_name", "my_last_name_" + j + "_" + i);
                 json.field("ssn", 1234 + j + i);
                 json.endObject();
-                // json.endObject();
               }
               json.endArray();
             } else {
@@ -1165,8 +1151,7 @@ public class ElasticsearchCluster implements Closeable {
       }
 
       json.endObject();
-      json.close();
-      bulk.add(baos.toString(UTF_8));
+      bulk.add(json.build());
     }
 
     Result response = getResultWithRetries(bulk);
@@ -1203,14 +1188,16 @@ public class ElasticsearchCluster implements Closeable {
     return String.format("{ \"query\" : %s } ", query);
   }
 
-  public SearchResults search(String schema, String table, QueryBuilder queryBuilder)
-      throws IOException {
+  public SearchResults search(String schema, String table, Query query) throws IOException {
     String newQuery;
-    newQuery = elasticVersionBehaviorProvider.processElasticSearchQuery(queryBuilder.toString());
+    newQuery =
+        elasticVersionBehaviorProvider.processElasticSearchQuery(
+            JsonpUtils.toString(query).replaceFirst("Query", "\"query\""));
+    logger.debug("elastic query: " + newQuery);
     byte[] response =
         connection.execute(
             new SearchBytes()
-                .setQuery(String.format("{\"query\": %s }", newQuery))
+                .setQuery(String.format("{%s}", newQuery))
                 .setResource(String.format("%s/%s", schema, table))
                 .setParameter("size", "1000"),
             elasticVersionBehaviorProvider.geMajorVersion());
@@ -1225,7 +1212,7 @@ public class ElasticsearchCluster implements Closeable {
   }
 
   public SearchResults search(String schema, String table) throws IOException {
-    return search(schema, table, QueryBuilders.matchAllQuery());
+    return search(schema, table, new MatchAllQuery.Builder().build()._toQuery());
   }
 
   public com.dremio.plugins.Version getMinVersionInCluster() {
@@ -1240,7 +1227,7 @@ public class ElasticsearchCluster implements Closeable {
    */
   public static void main(String[] args) throws Exception {
     ElasticsearchCluster c =
-        new ElasticsearchCluster(4000, new Random(), true, false, false, true, 3, 4443);
+        new ElasticsearchCluster(4000, new Random(), true, false, false, true, 1, 4443);
     System.out.println(c);
     ColumnData[] data = ElasticBaseTestQuery.getBusinessData();
     c.load("foo", "bar", data);

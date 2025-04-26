@@ -37,10 +37,14 @@ import java.util.List;
 public class OptimizeManifestsTableFunctionContext extends TableFunctionContext {
 
   private final IcebergTableProps icebergTableProps;
+  private final String userId;
 
   @JsonIgnore
   public OptimizeManifestsTableFunctionContext(
-      TableMetadata tableMetadata, BatchSchema outputSchema, IcebergTableProps icebergTableProps) {
+      TableMetadata tableMetadata,
+      BatchSchema outputSchema,
+      IcebergTableProps icebergTableProps,
+      String userId) {
     this(
         tableMetadata.getFormatSettings(),
         outputSchema,
@@ -52,7 +56,8 @@ public class OptimizeManifestsTableFunctionContext extends TableFunctionContext 
         tableMetadata.getReadDefinition().getPartitionColumnsList(),
         tableMetadata.getReadDefinition().getExtendedProperty(),
         tableMetadata.getDatasetConfig().getPhysicalDataset().getInternalSchemaSettings(),
-        icebergTableProps);
+        icebergTableProps,
+        userId);
   }
 
   @JsonCreator
@@ -66,7 +71,8 @@ public class OptimizeManifestsTableFunctionContext extends TableFunctionContext 
       @JsonProperty("extendedProperty") ByteString extendedProperty,
       @JsonProperty("userDefinedSchemaSettings")
           UserDefinedSchemaSettings userDefinedSchemaSettings,
-      @JsonProperty("icebergTableProps") IcebergTableProps icebergTableProps) {
+      @JsonProperty("icebergTableProps") IcebergTableProps icebergTableProps,
+      @JsonProperty("userId") String userId) {
     super(
         formatSettings,
         outputSchema,
@@ -84,9 +90,14 @@ public class OptimizeManifestsTableFunctionContext extends TableFunctionContext 
         false,
         userDefinedSchemaSettings);
     this.icebergTableProps = icebergTableProps;
+    this.userId = userId;
   }
 
   public IcebergTableProps getIcebergTableProps() {
     return icebergTableProps;
+  }
+
+  public String getUserId() {
+    return userId;
   }
 }

@@ -86,7 +86,8 @@ public class TestIcebergOptimizeOperationCommitter {
             null,
             null,
             getTableProps(),
-            mock(FileSystem.class));
+            mock(FileSystem.class),
+            null);
     Snapshot commitSnapshot = opCommitter.commit(outputHandler);
 
     assertThat(commitSnapshot).isEqualTo(currentSnapshot).isNotEqualTo(rewriteSnapshot);
@@ -144,7 +145,8 @@ public class TestIcebergOptimizeOperationCommitter {
             2L,
             currentSnapshot.snapshotId(),
             getTableProps(),
-            mock(FileSystem.class));
+            mock(FileSystem.class),
+            null);
     opCommitter.consumeAddDataFile(getDatafile("/a1.parquet"));
     opCommitter.consumeAddDataFile(getDatafile("/a2.parquet"));
     opCommitter.consumeDeleteDataFile(getDatafile("/d1.parquet"));
@@ -202,7 +204,8 @@ public class TestIcebergOptimizeOperationCommitter {
             5L,
             currentSnapshot.snapshotId(),
             getTableProps(),
-            fs);
+            fs,
+            null);
     opCommitter.consumeAddDataFile(getDatafile("/a1.parquet"));
     opCommitter.consumeAddDataFile(getDatafile("/a2.parquet"));
     opCommitter.consumeDeleteDataFile(getDatafile("/d1.parquet"));
@@ -251,7 +254,8 @@ public class TestIcebergOptimizeOperationCommitter {
             null,
             null,
             getTableProps(),
-            mock(FileSystem.class));
+            mock(FileSystem.class),
+            null);
 
     assertThat(opCommitter.getRootPointer()).isEqualTo(rootPointerLocation);
     assertThat(opCommitter.isIcebergTableUpdated()).isTrue();
@@ -268,7 +272,8 @@ public class TestIcebergOptimizeOperationCommitter {
             null,
             null,
             getTableProps(),
-            mock(FileSystem.class));
+            mock(FileSystem.class),
+            null);
 
     assertThatThrownBy(() -> opCommitter.consumeManifestFile(mock(ManifestFile.class)))
         .isInstanceOf(UnsupportedOperationException.class)

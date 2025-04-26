@@ -61,6 +61,7 @@ import AccelerationAdvanced from "./Advanced/AccelerationAdvanced";
 import { isNotSoftware } from "#oss/utils/versionUtils";
 import { REFLECTION_REFRESH_ENABLED } from "@inject/featureFlags/flags/REFLECTION_REFRESH_ENABLED";
 import { postDatasetReflectionRecommendations } from "#oss/endpoints/Reflections/postDatasetReflectionRecommendations";
+import { Spinner } from "dremio-ui-lib/components";
 
 const SECTIONS = [AccelerationBasic, AccelerationAdvanced];
 
@@ -85,6 +86,7 @@ export class AccelerationForm extends Component {
     allowPartitionTransform: PropTypes.bool,
     rawRecommendation: PropTypes.object,
     isTriggerRecommendation: PropTypes.bool,
+    preventSaveChanges: PropTypes.bool,
 
     putReflection: PropTypes.func.isRequired,
     postReflection: PropTypes.func.isRequired,
@@ -658,84 +660,93 @@ export class AccelerationForm extends Component {
   }
 
   submitForm = (values) => {
-    const { allowPartitionTransform, reloadReflections } = this.props;
+    const {
+      allowPartitionTransform,
+      reloadReflections,
+      reflections: initialReflections,
+    } = this.props;
     const { reflections, errors } = this.prepare(values);
+    const initReflections = initialReflections.toList().toJS();
 
     this.setState({ saving: true });
 
-    const promises = reflections.map((reflection) => {
-      const reflectionId = reflection.id;
-      if (errors[reflectionId]) return; // don't save
+    const promises = reflections
+      .filter((reflection) =>
+        this.shouldSubmitReflection(reflection, initReflections),
+      )
+      .map((reflection) => {
+        const reflectionId = reflection.id;
+        if (errors[reflectionId]) return; // don't save
 
-      const shouldDelete = reflection.shouldDelete;
-      delete reflection.shouldDelete;
+        const shouldDelete = reflection.shouldDelete;
+        delete reflection.shouldDelete;
 
-      // add the datasetid before we send the reflections out
-      reflection.datasetId = this.props.dataset.get("id");
+        // add the datasetid before we send the reflections out
+        reflection.datasetId = this.props.dataset.get("id");
 
-      if (allowPartitionTransform) {
-        reflection.partitionFields = formatPartitionFields(reflection);
-      }
+        if (allowPartitionTransform) {
+          reflection.partitionFields = formatPartitionFields(reflection);
+        }
 
-      let promise;
-      let cleanup;
-      if (!reflection.tag) {
-        // new, unsaved, reflections have fake ids for tracking, but no tag
-        delete reflection.id;
-        delete reflection.tag;
+        let promise;
+        let cleanup;
+        if (!reflection.tag) {
+          // new, unsaved, reflections have fake ids for tracking, but no tag
+          delete reflection.id;
+          delete reflection.tag;
 
-        promise = this.props.postReflection(reflection);
-        cleanup = ({ id, tag }) => {
-          this.updateReflection(reflectionId, { tag, id }); // no longer new
-        };
-      } else if (shouldDelete) {
-        promise = this.props.deleteReflection(reflection);
-        cleanup = () => {
-          this.updateReflection(reflectionId, {
-            // it's now new
-            tag: "",
-            id: uuidv4(),
-          });
-        };
-      } else {
-        promise = this.props.putReflection(reflection);
-        cleanup = ({ tag }) => {
-          this.updateReflection(reflectionId, { tag }); // tag may have updated
-        };
-      }
+          promise = this.props.postReflection(reflection);
+          cleanup = ({ id, tag }) => {
+            this.updateReflection(reflectionId, { tag, id }); // no longer new
+          };
+        } else if (shouldDelete) {
+          promise = this.props.deleteReflection(reflection);
+          cleanup = () => {
+            this.updateReflection(reflectionId, {
+              // it's now new
+              tag: "",
+              id: uuidv4(),
+            });
+          };
+        } else {
+          promise = this.props.putReflection(reflection);
+          cleanup = ({ tag }) => {
+            this.updateReflection(reflectionId, { tag }); // tag may have updated
+          };
+        }
 
-      // not using ApiUtils.attachFormSubmitHandlers because not yet ready to map validation errors to specific fields
-      // Also: need to collect all the errors (not default Promise.all behavior), so catching everything without re-reject (until later)
-      return promise
-        .then((action) => {
-          if (!action || !action.error) {
-            const newData =
-              action.payload &&
-              action.payload.get("entities").get("reflection").first().toJS();
-            cleanup(newData); // make it so that if some reflection saving succeeds and some fail the user can correct issues and resubmit safely
-            return action;
-          }
-          const error = action.payload;
-
-          // todo: Charles abort not respected (modal closes) - why????
-          // todo: if a delete succeeds and another call fails then we can end up with no reflections of a type
-
-          // start with fallback
-          errors[reflectionId] = error.message || DEFAULT_ERR_MSG;
-
-          const { response } = error;
-          if (response) {
-            if (response.errorMessage || response.message) {
-              errors[reflectionId] = response;
+        // not using ApiUtils.attachFormSubmitHandlers because not yet ready to map validation errors to specific fields
+        // Also: need to collect all the errors (not default Promise.all behavior), so catching everything without re-reject (until later)
+        return promise
+          .then((action) => {
+            if (!action || !action.error) {
+              const newData =
+                action.payload &&
+                action.payload.get("entities").get("reflection").first().toJS();
+              cleanup(newData); // make it so that if some reflection saving succeeds and some fail the user can correct issues and resubmit safely
+              return action;
             }
-          }
+            const error = action.payload;
 
-          return action;
-        })
-        .catch((error) => {
-          errors[reflectionId] = "Request Error: " + error.statusText; // todo: loc
-        });
-    });
+            // todo: Charles abort not respected (modal closes) - why????
+            // todo: if a delete succeeds and another call fails then we can end up with no reflections of a type
+
+            // start with fallback
+            errors[reflectionId] = error.message || DEFAULT_ERR_MSG;
+
+            const { response } = error;
+            if (response) {
+              if (response.errorMessage || response.message) {
+                errors[reflectionId] = response;
+              }
+            }
+
+            return action;
+          })
+          .catch((error) => {
+            errors[reflectionId] = "Request Error: " + error.statusText; // todo: loc
+          });
+      });
 
     return Promise.all(promises).then(() => {
       this.setState({ saving: false });
@@ -779,6 +790,8 @@ export class AccelerationForm extends Component {
       : this.props.values;
 
     const { rawRecommendation } = this.props;
+
+    if (this.hideBasicView()) return true;
 
     if (aggregationReflections.length > 1 || rawReflections.length > 1) {
       return true;
@@ -939,7 +952,14 @@ export class AccelerationForm extends Component {
   };
 
   render() {
-    const { handleSubmit, onCancel, canSubmit, isModal = true } = this.props;
+    const {
+      handleSubmit,
+      onCancel,
+      canSubmit,
+      isModal = true,
+      preventSaveChanges,
+      fields,
+    } = this.props;
     const { formIsDirty } = this.state;
     const modalFormStyle = isModal ? {} : modalStyles.noModalForm;
     const confirmStyle = isModal ? {} : modalStyles.noModalConfirmCancel;
@@ -949,6 +969,9 @@ export class AccelerationForm extends Component {
     const onCancelClick = isModal ? onCancel : this.resetForm;
     const updatedCanSubmit = (canSubmit && isModal) || formIsDirty;
     const canCancel = isModal || formIsDirty;
+    const isInitializing =
+      !fields.rawReflections.length || !fields.aggregationReflections.length;
+
     return (
       <div className={"AccelerationForm"}>
         <ModalForm
@@ -961,6 +984,9 @@ export class AccelerationForm extends Component {
           onCancel={onCancelClick}
           canSubmit={updatedCanSubmit}
           canCancel={canCancel}
+          renderFooter={
+            isInitializing || preventSaveChanges ? () => null : undefined
+          }
         >
           {this.renderFormErrorMessage()}
           {this.renderExtraErrorMessages()}
@@ -968,8 +994,14 @@ export class AccelerationForm extends Component {
             className={"AccelerationForm__formBody"}
             dataQa="acceleration-form"
           >
-            {this.renderHeader()}
-            {this.renderAccelerationMode()}
+            {isInitializing ? (
+              <Spinner className="AccelerationForm__formBody__loading" />
+            ) : (
+              <>
+                {this.renderHeader()}
+                {this.renderAccelerationMode()}
+              </>
+            )}
           </FormBody>
         </ModalForm>
       </div>

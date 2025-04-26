@@ -62,7 +62,7 @@ public final class ResolverTypePrecedence {
     precMap.put(MinorType.FLOAT4, i += 2);
     precMap.put(MinorType.FLOAT8, i += 2);
     precMap.put(MinorType.DATE, i += 2);
-    precMap.put(MinorType.TIMESTAMP, i += 2);
+    precMap.put(MinorType.TIMESTAMPMILLI, i += 2);
     precMap.put(MinorType.TIME, i += 2);
     precMap.put(MinorType.INTERVALDAY, i += 2);
     precMap.put(MinorType.INTERVALYEAR, i += 2);
@@ -105,7 +105,7 @@ public final class ResolverTypePrecedence {
     rule.add(MinorType.VARCHAR);
     rule.add(MinorType.DATE);
     rule.add(MinorType.TIME);
-    rule.add(MinorType.TIMESTAMP);
+    rule.add(MinorType.TIMESTAMPMILLI);
     rule.add(MinorType.INTERVALYEAR);
     rule.add(MinorType.INTERVALDAY);
     secondaryImplicitCastRules.put(MinorType.VARCHAR, rule);

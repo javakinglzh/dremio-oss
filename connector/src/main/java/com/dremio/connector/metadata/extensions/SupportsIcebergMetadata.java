@@ -91,6 +91,13 @@ public interface SupportsIcebergMetadata {
    */
   Map<String, String> getTableProperties();
 
+  /**
+   * Get the Iceberg format version number, without refreshing metadata.
+   *
+   * @return the format version number if it was loaded and readable, or null otherwise
+   */
+  Integer getFormatVersion();
+
   /** get the latest partition spec id */
   int getDefaultPartitionSpecId();
 }

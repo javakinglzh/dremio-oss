@@ -20,7 +20,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.stream.Collectors;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlWriter;
@@ -72,17 +71,12 @@ public final class DremioSqlRowTypeSpec extends SqlTypeNameSpec implements Valid
   }
 
   @Override
-  public RelDataType deriveType(RelDataTypeFactory typeFactory) {
-    return typeFactory.createStructType(
-        fieldTypes.stream()
-            .map(dt -> dt.deriveType(new DremioSqlValidator(typeFactory)))
-            .collect(Collectors.toList()),
-        fieldNames.stream().map(SqlIdentifier::toString).collect(Collectors.toList()));
-  }
-
-  @Override
   public RelDataType deriveType(SqlValidator sqlValidator) {
-    return deriveType(sqlValidator.getTypeFactory());
+    return sqlValidator
+        .getTypeFactory()
+        .createStructType(
+            fieldTypes.stream().map(dt -> dt.deriveType(sqlValidator)).collect(Collectors.toList()),
+            fieldNames.stream().map(SqlIdentifier::toString).collect(Collectors.toList()));
   }
 
   /**

@@ -30,6 +30,7 @@ import com.dremio.dac.model.sources.SourceUI;
 import com.dremio.dac.model.sources.UIMetadataPolicy;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.util.JSONUtil;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.store.CatalogService;
@@ -483,7 +484,10 @@ public class TestJobResultsStore extends BaseTestServer {
     source.setMetadataPolicy(
         UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
     getSourceService()
-        .registerSourceWithRuntime(source.asSourceConfig(), SystemUser.SYSTEM_USERNAME);
+        .registerSourceWithRuntime(
+            source.asSourceConfig(),
+            SystemUser.SYSTEM_USERNAME,
+            SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     // Query the Folder to auto-promote
     JobId jobId =

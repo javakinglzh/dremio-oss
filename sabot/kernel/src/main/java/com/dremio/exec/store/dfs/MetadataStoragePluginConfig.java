@@ -16,23 +16,25 @@
 package com.dremio.exec.store.dfs;
 
 import static com.dremio.exec.ExecConstants.METADATA_CLOUD_CACHING_ENABLED;
+import static com.dremio.exec.store.dfs.CloudFsConstants.S3_REGION_OVERRIDE;
 import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants.METADATA_STORAGE_PLUGIN_NAME;
 import static com.google.common.base.Strings.isNullOrEmpty;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
 import com.dremio.service.coordinator.proto.DataCredentials;
 import com.dremio.service.namespace.source.proto.SourceConfig;
-import com.google.common.collect.ImmutableList;
 import io.protostuff.Tag;
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
 import javax.inject.Provider;
+import org.apache.commons.lang3.StringUtils;
 
 @SourceType(value = "METADATA", configurable = false)
 public class MetadataStoragePluginConfig
@@ -89,9 +91,10 @@ public class MetadataStoragePluginConfig
   public String accountKind = null;
 
   @Tag(17)
-  public String sharedAccessKey = null;
+  public String sharedAccessKey = null; // This tag has been deprecated. Please do not use.
 
-  // Tag has been deprecated please do not use.
+  @Tag(18)
+  public String awsRegion = null;
 
   public MetadataStoragePluginConfig() {}
 
@@ -122,6 +125,7 @@ public class MetadataStoragePluginConfig
       } else if (dataCredentials.hasDataRole()) {
         this.iamRole = dataCredentials.getDataRole().getIamRole();
         this.externalId = dataCredentials.getDataRole().getExternalId();
+        this.awsRegion = dataCredentials.getDataRole().getRegion();
       } else if (dataCredentials.hasClientAccess()) {
         this.tokenEndpoint = dataCredentials.getClientAccess().getTokenEndpoint();
         this.clientId = dataCredentials.getClientAccess().getClientId();
@@ -134,8 +138,10 @@ public class MetadataStoragePluginConfig
 
   @Override
   public MetadataStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new MetadataStoragePlugin(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new MetadataStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   @Override
@@ -155,7 +161,12 @@ public class MetadataStoragePluginConfig
 
   @Override
   public List<Property> getProperties() {
-    return propertyList == null ? ImmutableList.of() : propertyList;
+    List<Property> properties =
+        propertyList == null ? new ArrayList<>() : new ArrayList<>(propertyList);
+    if (StringUtils.isNotEmpty(awsRegion)) {
+      properties.add(new Property(S3_REGION_OVERRIDE, awsRegion));
+    }
+    return List.copyOf(properties);
   }
 
   @Override

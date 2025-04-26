@@ -35,6 +35,7 @@ import static com.dremio.service.coordinator.ClusterCoordinator.Options.ZK_TIMEO
 import static com.dremio.service.coordinator.zk.ZKClusterClient.ZK_LOST_HANDLER_MODULE_CLASS;
 
 import com.dremio.common.config.SabotConfig;
+import com.dremio.options.TypeValidators;
 import com.dremio.service.coordinator.CoordinatorLostHandle;
 import com.dremio.service.coordinator.ObservableConnectionLostHandler;
 import java.util.function.Predicate;
@@ -126,7 +127,7 @@ public class ZKSabotConfig implements ZKClusterConfig {
   }
 
   @Override
-  public Predicate<String> getFeatureEvaluator() {
+  public Predicate<TypeValidators.BooleanValidator> getFeatureEvaluator() {
     return null;
   }
 

@@ -52,11 +52,19 @@ import org.junit.Test;
 
 /** Test for {@link EnhancedFilterJoinRule}. */
 public class TestEnhancedFilterJoinRule {
-  private static final EnhancedFilterJoinRule ruleWithFilter =
-      EnhancedFilterJoinRule.Config.WITH_FILTER.toRule();
-  private static final EnhancedFilterJoinRule ruleNoFilter =
-      EnhancedFilterJoinRule.Config.WITHOUT_FILTER.toRule();
+  private final EnhancedFilterJoinRule ruleWithFilter;
+  private final EnhancedFilterJoinRule ruleNoFilter;
   private static final RelBuilder relBuilder = makeRelBuilder();
+
+  public TestEnhancedFilterJoinRule() {
+    this(EnhancedFilterJoinRule.WITH_FILTER, EnhancedFilterJoinRule.NO_FILTER);
+  }
+
+  protected TestEnhancedFilterJoinRule(
+      EnhancedFilterJoinRule ruleWithFilter, EnhancedFilterJoinRule ruleNoFilter) {
+    this.ruleWithFilter = ruleWithFilter;
+    this.ruleNoFilter = ruleNoFilter;
+  }
 
   @Test
   public void testWithTopFilterBothHaveConditionExtractBoth() {
@@ -90,8 +98,7 @@ public class TestEnhancedFilterJoinRule {
                 .filter(boolInput(1))
                 .build();
 
-    RelNode rewrite =
-        ruleNoFilter.doMatch(filterRel, (Join) filterRel.getInput(), relBuilder, true);
+    RelNode rewrite = ruleNoFilter.doMatch(filterRel, (Join) filterRel.getInput(), relBuilder);
 
     checkPushdown(rewrite, JoinRelType.INNER, "true", "$1", "true", "true");
   }
@@ -740,7 +747,7 @@ public class TestEnhancedFilterJoinRule {
                 .build();
     Filter filterRel = (Filter) relBuilder.push(joinRel).filter(inputFilterCondition).build();
 
-    RelNode rewrite = ruleWithFilter.doMatch(filterRel, joinRel, relBuilder, true);
+    RelNode rewrite = ruleWithFilter.doMatch(filterRel, joinRel, relBuilder);
     checkPushdown(
         rewrite,
         expectedJoinType,
@@ -768,7 +775,7 @@ public class TestEnhancedFilterJoinRule {
                 .join(joinRelType, inputJoinCondition)
                 .build();
 
-    RelNode rewrite = ruleNoFilter.doMatch(null, joinRel, relBuilder, true);
+    RelNode rewrite = ruleNoFilter.doMatch(null, joinRel, relBuilder);
     checkPushdown(
         rewrite,
         expectedJoinType,
@@ -804,24 +811,23 @@ public class TestEnhancedFilterJoinRule {
       RelNode childOfFilter = rewrite.getInput(0);
       if (childOfFilter instanceof Join) {
         RelNode twiceRewrite =
-            ruleWithFilter.doMatch((Filter) rewrite, (Join) childOfFilter, relBuilder, true);
+            ruleWithFilter.doMatch((Filter) rewrite, (Join) childOfFilter, relBuilder);
         Assert.assertNull(twiceRewrite);
       } else if (childOfFilter instanceof Project) {
         RelNode childOfProject = childOfFilter.getInput(0);
         if (childOfProject instanceof Join) {
-          RelNode twiceRewrite =
-              ruleNoFilter.doMatch(null, (Join) childOfProject, relBuilder, true);
+          RelNode twiceRewrite = ruleNoFilter.doMatch(null, (Join) childOfProject, relBuilder);
           Assert.assertNull(twiceRewrite);
         }
       }
     } else if (rewrite instanceof Project) {
       RelNode childOfProject = rewrite.getInput(0);
       if (childOfProject instanceof Join) {
-        RelNode twiceRewrite = ruleNoFilter.doMatch(null, (Join) childOfProject, relBuilder, true);
+        RelNode twiceRewrite = ruleNoFilter.doMatch(null, (Join) childOfProject, relBuilder);
         Assert.assertNull(twiceRewrite);
       }
     } else if (rewrite instanceof Join) {
-      RelNode twiceRewrite = ruleNoFilter.doMatch(null, (Join) rewrite, relBuilder, true);
+      RelNode twiceRewrite = ruleNoFilter.doMatch(null, (Join) rewrite, relBuilder);
       Assert.assertNull(twiceRewrite);
     }
   }

@@ -30,14 +30,18 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler;
 import com.dremio.exec.planner.sql.parser.DremioSqlColumnDeclaration;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableChangeColumn;
+import com.dremio.exec.planner.sql.parser.SqlColumnPolicyPair;
+import com.dremio.exec.planner.sql.parser.SqlComplexDataTypeSpec;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Throwables;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.rel.InvalidRelException;
+import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 
 /** Changes column name, type specified by {@link SqlAlterTableChangeColumn} */
@@ -92,7 +96,8 @@ public class ChangeColumnHandler extends SimpleDirectHandlerWithValidator {
     DremioSqlColumnDeclaration newColumnSpec = sqlChangeColumn.getNewColumnSpec();
     String columnNewName = newColumnSpec.getName().getSimple();
 
-    if (!table.getSchema().findFieldIgnoreCase(currentColumnName).isPresent()) {
+    Optional<Field> currentColumnField = table.getSchema().findFieldIgnoreCase(currentColumnName);
+    if (!currentColumnField.isPresent()) {
       throw UserException.validationError()
           .message("Column [%s] is not present in table [%s]", currentColumnName, resolvedPath)
           .buildSilently();
@@ -118,7 +123,32 @@ public class ChangeColumnHandler extends SimpleDirectHandlerWithValidator {
     SqlHandlerUtil.checkNestedFieldsForDuplicateNameDeclarations(
         sql, newColumnSpec.getDataType().getTypeName());
 
-    Field columnField = SqlHandlerUtil.fieldFromSqlColDeclaration(newColumnSpec, sql);
+    // At the time of constructing the column spec (DremioSqlColumnDeclaration),
+    // the current column's nullability is not known.
+    // All the cases are handled, except for the case where the current column is nullable.
+    // If the current column is nullable, the updated column must also be nullable.
+    // Here, this existing nullability constraint on the column is reinforced.
+    DremioSqlColumnDeclaration updatedColumnSpec =
+        (currentColumnField.get().isNullable() && !newColumnSpec.getDataType().getNullable())
+            ? new DremioSqlColumnDeclaration(
+                newColumnSpec.getParserPosition(),
+                new SqlColumnPolicyPair(
+                    newColumnSpec.getParserPosition(),
+                    new SqlIdentifier(columnNewName, newColumnSpec.getParserPosition()),
+                    newColumnSpec.getPolicy()),
+                new SqlComplexDataTypeSpec(newColumnSpec.getDataType().withNullable(true)),
+                newColumnSpec.getExpression())
+            : newColumnSpec;
+
+    Field columnField = SqlHandlerUtil.fieldFromSqlColDeclaration(updatedColumnSpec, sql);
+
+    if (columnField.equals(currentColumnField.get())) {
+      return Collections.singletonList(
+          SimpleCommandResult.successful(
+              String.format(
+                  "Column [%s] is already of the same type and name [%s]",
+                  currentColumnName, columnNewName)));
+    }
 
     catalog.changeColumn(
         resolvedPath,

@@ -109,7 +109,6 @@ public class TestAccelerationSettingsFromAPI extends DremioTest {
     when(datasetPath.toPathList()).thenReturn(path);
     when(datasetPath.toPathString()).thenReturn(String.join(".", path));
     when(datasetPath.toNamespaceKey()).thenReturn(new NamespaceKey(path));
-    when(reflectionServiceHelper.isRefreshSchedulePolicyEnabled()).thenReturn(true);
   }
 
   @Test

@@ -100,11 +100,11 @@ public class TestRuntimeFilter {
     CompositeColumnFilter ccf2 = newBloomFilter(Lists.newArrayList("col2", "col1"));
     CompositeColumnFilter ccf3 = newBloomFilter(Lists.newArrayList("col1", "col2", "col3"));
     CompositeColumnFilter ccf4 = newBloomFilter(Lists.newArrayList("col3"));
-    RuntimeFilter filter1 = new RuntimeFilter(ccf1, Collections.EMPTY_LIST, null);
-    RuntimeFilter filter2 = new RuntimeFilter(ccf2, Collections.EMPTY_LIST, null);
-    RuntimeFilter filter3 = new RuntimeFilter(null, Collections.EMPTY_LIST, null);
-    RuntimeFilter filter4 = new RuntimeFilter(ccf3, Collections.EMPTY_LIST, null);
-    RuntimeFilter filter5 = new RuntimeFilter(ccf4, Collections.EMPTY_LIST, null);
+    RuntimeFilter filter1 = new RuntimeFilter(ccf1, Collections.emptyList(), null);
+    RuntimeFilter filter2 = new RuntimeFilter(ccf2, Collections.emptyList(), null);
+    RuntimeFilter filter3 = new RuntimeFilter(null, Collections.emptyList(), null);
+    RuntimeFilter filter4 = new RuntimeFilter(ccf3, Collections.emptyList(), null);
+    RuntimeFilter filter5 = new RuntimeFilter(ccf4, Collections.emptyList(), null);
 
     assertTrue(filter1.isOnSameColumns(filter2));
     assertTrue(filter2.isOnSameColumns(filter1));

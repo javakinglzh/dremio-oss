@@ -15,9 +15,9 @@
  */
 package com.dremio.exec.planner;
 
-import com.dremio.common.exceptions.UserCancellationException;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.expr.fn.FunctionImplementationRegistry;
+import com.dremio.exec.ops.PlannerCatalogAccessListener;
 import com.dremio.exec.ops.ViewExpansionContext;
 import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.RelWithInfo;
@@ -27,13 +27,12 @@ import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo.Substi
 import com.dremio.exec.planner.common.PlannerMetrics;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.observer.AbstractAttemptObserver;
+import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.PrelUtil;
 import com.dremio.exec.planner.physical.visitor.QueryProfileProcessor;
-import com.dremio.exec.planner.plancache.CachedPlan;
-import com.dremio.exec.planner.serialization.RelSerializerFactory;
-import com.dremio.exec.planner.sql.DremioCompositeSqlOperatorTable;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.DatasetProfile.Builder;
@@ -47,7 +46,6 @@ import com.dremio.reflection.hints.ReflectionExplanationsAndQueryDistance;
 import com.dremio.resource.GroupResourceInformation;
 import com.dremio.resource.ResourceSchedulingDecisionInfo;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
-import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
@@ -63,20 +61,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.plan.volcano.VolcanoPlanner;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.RelShuttleImpl;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.SqlExplainFormat;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlNode;
 
 public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
-  public static final String PLAN_CACHE_USED = "Plan Cache Used";
 
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(PlanCaptureAttemptObserver.class);
@@ -90,7 +84,7 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
   private final AccelerationDetailsPopulator detailsPopulator;
   private final ImmutableList.Builder<UserBitShared.DatasetProfile> datasetProfileBuilder =
       ImmutableList.builder();
-  private final RelSerializerFactory relSerializerFactory;
+  private final PlannerCatalogAccessListener catalogAccessListener;
 
   private Map<String, UserBitShared.RelNodeInfo> finalPrelInfo = new HashMap<>();
 
@@ -100,6 +94,7 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
   private String schemaJSON;
 
   private boolean accelerated = false;
+  private boolean usedCachedPlan = false;
   private long findMaterializationMillis = 0;
   private long normalizationMillis = 0;
   private long substitutionMillis = 0;
@@ -108,9 +103,6 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
   private List<String> normalizedQueryPlans;
 
   private volatile ByteString accelerationDetails;
-  private byte[] serializedPlan;
-
-  private int numPlanCacheUses = 0;
 
   private Integer numJoinsInUserQuery = null;
 
@@ -121,12 +113,12 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
       final boolean includeDatasetProfiles,
       final FunctionImplementationRegistry funcRegistry,
       AccelerationDetailsPopulator detailsPopulator,
-      RelSerializerFactory relSerializerFactory) {
+      PlannerCatalogAccessListener catalogAccessListener) {
     this.verbose = verbose;
     this.includeDatasetProfiles = includeDatasetProfiles;
     this.funcRegistry = funcRegistry;
     this.detailsPopulator = detailsPopulator;
-    this.relSerializerFactory = relSerializerFactory;
+    this.catalogAccessListener = catalogAccessListener;
   }
 
   public AccelerationProfile buildAccelerationProfile(boolean truncate) {
@@ -164,12 +156,13 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
   }
 
   @Override
-  public void addAccelerationProfileToCachedPlan(CachedPlan cachedPlan) {
-    cachedPlan.setAccelerationProfile(buildAccelerationProfile(true));
+  public void addAccelerationProfileToCachedPlan(PlanCacheEntry planCacheEntry) {
+    planCacheEntry.setAccelerationProfile(buildAccelerationProfile(true));
   }
 
   @Override
   public void restoreAccelerationProfileFromCachedPlan(AccelerationProfile accelerationProfile) {
+    usedCachedPlan = true;
     accelerated = accelerationProfile.getAccelerated();
     numSubstitutions = accelerationProfile.getNumSubstitutions();
     findMaterializationMillis = accelerationProfile.getMillisTakenGettingMaterializations();
@@ -191,18 +184,15 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
     return planPhases;
   }
 
-  public byte[] getSerializedPlan() {
-    return serializedPlan;
-  }
-
   @Override
-  public void planText(String text, long millisTaken) {
+  public void planFinalPhysical(String text, long millisTaken, List<PlannerPhaseRulesStats> stats) {
     this.text = text;
     planPhases.add(
         PlanPhaseProfile.newBuilder()
             .setPhaseName(PlannerPhase.PLAN_FINAL_PHYSICAL)
             .setDurationMillis(millisTaken)
             .setPlan(text)
+            .addAllRulesBreakdownStats(stats)
             .build());
   }
 
@@ -318,20 +308,32 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
         toStringOrEmpty(relWithInfo.getRel(), false));
   }
 
+  @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+    final String key = profile.getLayoutId();
+    final LayoutMaterializedViewProfile oldProfile = mapIdToAccelerationProfile.get(key);
+    final LayoutMaterializedViewProfile.Builder layoutBuilder;
+    if (oldProfile == null) {
+      layoutBuilder = LayoutMaterializedViewProfile.newBuilder(profile);
+    } else {
+      layoutBuilder = LayoutMaterializedViewProfile.newBuilder(oldProfile);
+    }
+    if (target != null) {
+      layoutBuilder.addNormalizedPlans(toProfilePlan(target));
+    }
+    mapIdToAccelerationProfile.put(key, layoutBuilder.build());
+    detailsPopulator.planConsidered(profile);
+  }
+
   /**
-   * planSubstituted is called for both considered and matched target materializations. This method
-   * can be called multiple times for the same reflection as it can have different target
-   * materializations and substitutions. When called for considered target materializations,
-   * substitutions should be empty as we haven't done matching yet. When called for matched target
-   * materializations, substitutions will never be empty. Furthermore, we don't need to worry about
-   * capturing the normalized target plans (i.e. canonicalized reflection plan) because they have
-   * already been saved earlier when tracking the considered target materializations.
+   * planSubstituted is called to update the profile with both materialization targets and
+   * replacements. It is not for whether a reflection was considered or whether it was chosen.
    *
    * @param materialization
-   * @param substitutions number of plans returned after substitution finished
-   * @param target
-   * @param millisTaken
-   * @param defaultReflection
+   * @param substitutions Replacement plans
+   * @param target Materialization target
+   * @param millisTaken Time to generate the match including target normalization
+   * @param defaultReflection true for a successful default match
    */
   @Override
   public void planSubstituted(
@@ -340,6 +342,7 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
       RelWithInfo target,
       long millisTaken,
       boolean defaultReflection) {
+
     final String key = materialization.getReflectionId();
     final LayoutMaterializedViewProfile oldProfile = mapIdToAccelerationProfile.get(key);
 
@@ -363,15 +366,14 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
               .setPlan(toStringOrEmpty(materialization.getQueryRel(), false))
               .addNormalizedPlans(toProfilePlan(target))
               .setSnowflake(materialization.isSnowflake())
-              .setDefaultReflection(defaultReflection);
+              .setDefaultReflection(defaultReflection)
+              .setReflectionMode(materialization.getLayoutInfo().getReflectionMode());
     } else {
       layoutBuilder =
           LayoutMaterializedViewProfile.newBuilder(oldProfile)
               .setNumSubstitutions(oldProfile.getNumSubstitutions() + substitutions.size())
-              .setMillisTakenSubstituting(oldProfile.getMillisTakenSubstituting() + millisTaken);
-      if (substitutions.isEmpty()) {
-        layoutBuilder.addNormalizedPlans(toProfilePlan(target));
-      }
+              .setMillisTakenSubstituting(oldProfile.getMillisTakenSubstituting() + millisTaken)
+              .setDefaultReflection(defaultReflection);
     }
     if (verbose) {
       layoutBuilder.addAllSubstitutions(
@@ -458,25 +460,18 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
         PlanPhaseProfile.newBuilder()
             .setPhaseName(PlannerPhase.PLAN_VALIDATED)
             .setDurationMillis(millisTaken)
-            .setPlan("")
+            .setPlan(getCatalogAccessStr(catalogAccessListener))
             .build());
   }
 
   @Override
-  public void planCacheUsed(int count) {
+  public void planStepLogging(String phaseName, String text, long millisTaken) {
     planPhases.add(
         PlanPhaseProfile.newBuilder()
-            .setPhaseName(PLAN_CACHE_USED)
-            .setPlan(
-                String.format(
-                    "Cached Plan is used for the query, the cached plan entry has been used %d times",
-                    count))
+            .setPhaseName(phaseName)
+            .setPlan(text)
+            .setDurationMillis(millisTaken)
             .build());
-    numPlanCacheUses = count;
-  }
-
-  public int getNumPlanCacheUses() {
-    return numPlanCacheUses;
   }
 
   public Integer getNumJoinsInUserQuery() {
@@ -487,40 +482,15 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
     return numJoinsInFinalPrel;
   }
 
-  // Serializes and stores plans
-  private void serializeAndStoreRel(RelNode converted) throws Exception {
-    PlannerSettings settings = PrelUtil.getSettings(converted.getCluster());
-    if (!settings.isPlanSerializationEnabled()) {
-      return;
-    }
-    RelNode toSerialize = converted.accept(new RelShuttleImpl());
-    String planString = RelOptUtil.toString(toSerialize);
-    if (planString != null && planString.length() < settings.getSerializationLengthLimit()) {
-      this.serializedPlan =
-          relSerializerFactory
-              .getSerializer(
-                  converted.getCluster(), DremioCompositeSqlOperatorTable.create(funcRegistry))
-              .serializeToBytes(toSerialize);
-    } else {
-      logger.debug("Plan Serialization skipped due to size");
-    }
-  }
-
   @Override
   public void planConvertedToRel(RelNode converted, long millisTaken) {
     final String convertedRelTree = toStringOrEmpty(converted, true);
-    try {
-      final Stopwatch stopwatch = Stopwatch.createStarted();
-      serializeAndStoreRel(converted);
-      millisTaken += stopwatch.elapsed(TimeUnit.MILLISECONDS);
-    } catch (Throwable e) {
-      logger.debug("Error", e);
-    }
+    final String catalogAccessStr = getCatalogAccessStr(catalogAccessListener);
     planPhases.add(
         PlanPhaseProfile.newBuilder()
             .setPhaseName(PlannerPhase.PLAN_CONVERTED_TO_REL)
             .setDurationMillis(millisTaken)
-            .setPlan(convertedRelTree)
+            .setPlan(convertedRelTree + catalogAccessStr)
             .build());
 
     detailsPopulator.planConvertedToRel(converted);
@@ -562,8 +532,10 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
       final RelNode after,
       final long millisTaken,
       final List<PlannerPhaseRulesStats> rulesBreakdownStats) {
+
     final boolean noTransform = before == after;
     final String planAsString = toStringOrEmpty(after, noTransform || phase.forceVerbose());
+    final String catalogAccessStr = getCatalogAccessStr(catalogAccessListener);
     final long millisTakenFinalize =
         (phase.useMaterializations)
             ? millisTaken - (findMaterializationMillis + normalizationMillis + substitutionMillis)
@@ -574,7 +546,7 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
             .setPhaseName(phase.description)
             .setDurationMillis(millisTakenFinalize)
             .addAllRulesBreakdownStats(rulesBreakdownStats)
-            .setPlan(planAsString);
+            .setPlan(planAsString + catalogAccessStr);
 
     // dump state of volcano planner to troubleshoot costing issues (or long planning issues).
     // only add it if the plan string is empty, or it's the logical/physical planning phase, because
@@ -636,6 +608,16 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
     // Print the current tree otherwise
     RelNode root = planner.getRoot();
     return RelOptUtil.toString(root);
+  }
+
+  // Generates catalog access string output and resets the listener
+  protected String getCatalogAccessStr(PlannerCatalogAccessListener catalogAccessListener) {
+    String getCatalogAccessStr =
+        catalogAccessListener.getCurrentPhaseCatalogAccesses().isEmpty()
+            ? ""
+            : catalogAccessListener.getCurrentPhaseCatalogAccesses().toString();
+    catalogAccessListener.newPlanPhase();
+    return getCatalogAccessStr;
   }
 
   @Override
@@ -804,26 +786,19 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
   }
 
   public String toStringOrEmpty(final RelNode plan, boolean ensureDump) {
-    if (!verbose && !ensureDump) {
-      return "";
-    }
-
-    if (plan == null) {
-      return "";
-    }
-
-    try {
-      return RelOptUtil.dumpPlan(
-          "",
-          plan,
-          SqlExplainFormat.TEXT,
-          verbose ? SqlExplainLevel.ALL_ATTRIBUTES : SqlExplainLevel.EXPPLAN_ATTRIBUTES);
-    } catch (UserCancellationException userCancellationException) {
-      return "";
-    }
+    return AttemptObserver.toStringOrEmpty(plan, verbose, ensureDump);
   }
 
   public int getNumFragments() {
     return numFragments;
+  }
+
+  public boolean isUsedCachedPlan() {
+    return usedCachedPlan;
+  }
+
+  @Override
+  public boolean isVerbose() {
+    return verbose;
   }
 }

@@ -146,7 +146,6 @@ public class TableDefinitionGenerator {
   }
 
   private static void generatePartitionColumns(SqlWriter writer, DatasetConfig datasetConfig) {
-    List<String> partitionColumns = datasetConfig.getReadDefinition().getPartitionColumnsList();
     PartitionSpec partitionSpec =
         IcebergUtils.getCurrentPartitionSpec(datasetConfig.getPhysicalDataset());
     List<PartitionField> partitionFields = partitionSpec == null ? null : partitionSpec.fields();
@@ -156,16 +155,17 @@ public class TableDefinitionGenerator {
 
     writer.keyword("PARTITION BY");
     writer.keyword("(");
-    generateOnePartitionField(writer, partitionFields.get(0), partitionColumns.get(0));
+    generateOnePartitionField(writer, partitionFields.get(0), partitionSpec.schema());
     for (int i = 1; i < partitionFields.size(); ++i) {
       writer.keyword(",");
-      generateOnePartitionField(writer, partitionFields.get(i), partitionColumns.get(i));
+      generateOnePartitionField(writer, partitionFields.get(i), partitionSpec.schema());
     }
     writer.keyword(")");
   }
 
   private static void generateOnePartitionField(
-      SqlWriter writer, PartitionField field, String fieldName) {
+      SqlWriter writer, PartitionField field, Schema schema) {
+    String fieldName = IcebergUtils.getColumnName(field, schema);
     Transform transform = field.transform();
     if (transform.isIdentity()) {
       writer.identifier(fieldName);
@@ -215,7 +215,7 @@ public class TableDefinitionGenerator {
   }
 
   private void generateSortColumns(SqlWriter writer) {
-    List<String> sortColumns = getSortColumnListFromIcebergMetadata();
+    List<String> sortColumns = getSortColumnListFromIcebergMetadata(datasetConfig);
     if (CollectionUtils.isEmpty(sortColumns)) {
       return;
     }
@@ -230,16 +230,16 @@ public class TableDefinitionGenerator {
     writer.keyword(")");
   }
 
-  private List<String> getSortColumnListFromIcebergMetadata() {
+  public static List<String> getSortColumnListFromIcebergMetadata(DatasetConfig datasetConfig) {
     IcebergMetadata icebergMetadata = datasetConfig.getPhysicalDataset().getIcebergMetadata();
     if (icebergMetadata == null || icebergMetadata.getSortOrder() == null) {
-      return Collections.EMPTY_LIST;
+      return Collections.emptyList();
     }
     String sortOrder = icebergMetadata.getSortOrder();
 
     ByteString recordSchema = datasetConfig.getRecordSchema();
     if (recordSchema == null || ArrayUtils.isEmpty(recordSchema.toByteArray())) {
-      return Collections.EMPTY_LIST;
+      return Collections.emptyList();
     }
 
     Schema icebergSchema =
@@ -249,7 +249,7 @@ public class TableDefinitionGenerator {
 
     SortOrder deserializedSortOrder =
         IcebergSerDe.deserializeSortOrderFromJson(icebergSchema, sortOrder);
-    return IcebergUtils.getColumnsFromSortOrder(deserializedSortOrder, optionManager);
+    return IcebergUtils.getColumnsFromSortOrder(deserializedSortOrder);
   }
 
   private void generateTableProperties(SqlWriter writer) {

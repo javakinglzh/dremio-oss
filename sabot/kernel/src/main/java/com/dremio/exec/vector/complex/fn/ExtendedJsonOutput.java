@@ -34,7 +34,7 @@ public class ExtendedJsonOutput extends BasicJsonOutput {
   @Override
   public void writeBigInt(long value) throws IOException {
     gen.writeStartObject();
-    gen.writeFieldName(ExtendedType.INTEGER.serialized);
+    gen.writeFieldName(ExtendedType.LONG.serialized);
     super.writeBigInt(value);
     gen.writeEndObject();
   }
@@ -155,7 +155,10 @@ public class ExtendedJsonOutput extends BasicJsonOutput {
 
   @Override
   public void writeInt(int value) throws IOException {
-    writeBigInt(value);
+    gen.writeStartObject();
+    gen.writeFieldName(ExtendedType.INTEGER.serialized);
+    super.writeInt(value);
+    gen.writeEndObject();
   }
 
   @Override
@@ -171,5 +174,21 @@ public class ExtendedJsonOutput extends BasicJsonOutput {
   @Override
   public void writeIntNull() throws IOException {
     writeBigIntNull();
+  }
+
+  @Override
+  public void writeFloat(float value) throws IOException {
+    gen.writeStartObject();
+    gen.writeFieldName(ExtendedType.FLOAT.serialized);
+    super.writeFloat(value);
+    gen.writeEndObject();
+  }
+
+  @Override
+  public void writeDouble(double value) throws IOException {
+    gen.writeStartObject();
+    gen.writeFieldName(ExtendedType.DOUBLE.serialized);
+    super.writeDouble(value);
+    gen.writeEndObject();
   }
 }

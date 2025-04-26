@@ -70,7 +70,7 @@ public final class CopyFileHistoryTableVectorContainerBuilder {
     for (Types.NestedField col : schema.columns()) {
       FieldVector vector;
       switch (col.fieldId()) {
-          // Initialize vectors based on the schema column definitions
+        // Initialize vectors based on the schema column definitions
         case 1: // event_timestamp
         case 10: // file_notification_timestamp
           vector = new TimeStampMilliVector(col.name(), allocator);

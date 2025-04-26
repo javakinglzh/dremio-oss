@@ -65,6 +65,12 @@
     background: var(--color--brand--100);
     color: var(--text--primary);
   }
+  @media (prefers-contrast: more) {
+    ::selection {
+      background: var(--color--brand--200);
+      color: var(--text--primary);
+    }
+  }
 }
 
 .dremio-dark {
@@ -75,16 +81,15 @@
   }
 }
 
-.dremio-high-contrast {
-  color-scheme: light;
-  ::selection {
-    background: var(--color--brand--200);
-    color: var(--text--primary);
-  }
-}
-
 mark {
   background: var(--fill--mark);
   border-radius: 2px;
   color: inherit;
+}
+
+input,
+textarea {
+  // Keep contextual alternates off so that the glyphs don't
+  // shift around while the user types
+  font-feature-settings: "calt" off;
 }

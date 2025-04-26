@@ -30,14 +30,14 @@ public class TimestampArrayAggAccumulator extends ArrayAggAccumulator<Long> {
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -53,7 +53,7 @@ public class TimestampArrayAggAccumulator extends ArrayAggAccumulator<Long> {
 
   @Override
   protected ArrayAggAccumulatorHolder<Long> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new TimestampArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

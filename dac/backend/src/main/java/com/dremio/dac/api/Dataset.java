@@ -22,10 +22,8 @@ import com.dremio.service.namespace.proto.RefreshPolicyType;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import java.util.List;
 import javax.annotation.Nullable;
-import org.apache.arrow.vector.types.pojo.Field;
 
 /** Dataset model */
 @JsonIgnoreProperties(
@@ -43,8 +41,7 @@ public class Dataset implements CatalogEntity {
   private final DatasetType type;
   private final List<String> path;
 
-  @JsonSerialize(using = DatasetFieldSerializer.class)
-  private List<Field> fields;
+  private final DatasetFields fields;
 
   @JsonISODateTime private final Long createdAt;
   private final String tag;
@@ -61,6 +58,7 @@ public class Dataset implements CatalogEntity {
   // for VDS
   private final String sql;
   private final List<String> sqlContext;
+  private final Boolean schemaOutdated;
 
   // for PDS
   private final Boolean approximateStatisticsAllowed;
@@ -72,14 +70,15 @@ public class Dataset implements CatalogEntity {
       String id,
       DatasetType type,
       List<String> path,
-      List<Field> fields,
+      DatasetFields fields,
       Long createdAt,
       String tag,
       RefreshSettings accelerationRefreshPolicy,
       String sql,
       List<String> sqlContext,
       FileFormat format,
-      Boolean approximateStatisticsAllowed) {
+      Boolean approximateStatisticsAllowed,
+      Boolean schemaOutdated) {
     this.id = id;
     this.type = type;
     this.path = path;
@@ -91,6 +90,7 @@ public class Dataset implements CatalogEntity {
     this.sqlContext = sqlContext;
     this.format = format;
     this.approximateStatisticsAllowed = approximateStatisticsAllowed;
+    this.schemaOutdated = schemaOutdated;
   }
 
   @JsonCreator
@@ -104,7 +104,8 @@ public class Dataset implements CatalogEntity {
       @JsonProperty("sql") String sql,
       @JsonProperty("sqlContext") List<String> sqlContext,
       @JsonProperty("format") FileFormat format,
-      @JsonProperty("approximateStatisticsAllowed") Boolean approximateStatisticsAllowed) {
+      @JsonProperty("approximateStatisticsAllowed") Boolean approximateStatisticsAllowed,
+      @JsonProperty("schemaOutdated") Boolean schemaOutdated) {
     // we don't want to deserialize fields ever since they are immutable anyways
     this(
         id,
@@ -117,7 +118,8 @@ public class Dataset implements CatalogEntity {
         sql,
         sqlContext,
         format,
-        approximateStatisticsAllowed);
+        approximateStatisticsAllowed,
+        schemaOutdated);
   }
 
   /**
@@ -143,7 +145,7 @@ public class Dataset implements CatalogEntity {
     return path;
   }
 
-  public List<Field> getFields() {
+  public DatasetFields getFields() {
     return fields;
   }
 
@@ -183,6 +185,11 @@ public class Dataset implements CatalogEntity {
   /** Optional time in millis for when metadata validity was last run. */
   public Long getLastMetadataRefreshAtMillis() {
     return lastMetadataRefreshAtMillis;
+  }
+
+  /** Whether schema is outdated because any underlying dataset changed. */
+  public Boolean getSchemaOutdated() {
+    return schemaOutdated;
   }
 
   /** Dataset acceleration refresh settings */

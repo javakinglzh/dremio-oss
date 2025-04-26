@@ -46,7 +46,12 @@ class BaseSchedule implements Schedule {
   private final IntSupplier weightProvider;
 
   // constructor for multi shot local schedules
-  BaseSchedule(Instant at, TemporalAmount period, TemporalAdjuster adjuster, ZoneId zoneId) {
+  BaseSchedule(
+      Instant at,
+      TemporalAmount period,
+      TemporalAdjuster adjuster,
+      ZoneId zoneId,
+      Function<Schedule, Schedule> scheduleModifier) {
     this(
         null,
         at,
@@ -56,7 +61,7 @@ class BaseSchedule implements Schedule {
         null,
         null,
         () -> {},
-        (x) -> null,
+        scheduleModifier,
         null,
         false,
         true,

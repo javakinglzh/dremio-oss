@@ -20,6 +20,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.types.TypeProtos.MinorType;
+import com.dremio.common.util.DateTimes;
 import com.dremio.connector.metadata.PartitionValue;
 import com.dremio.connector.metadata.PartitionValue.PartitionValueType;
 import com.dremio.datastore.SearchQueryUtils;
@@ -45,7 +46,6 @@ import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.util.NlsString;
 import org.apache.parquet.io.api.Binary;
-import org.joda.time.DateTimeConstants;
 
 /** Utils to serialize storage plugin specific structures to/from namespace. */
 public class MetadataUtils {
@@ -118,7 +118,7 @@ public class MetadataUtils {
       case INTERVALYEAR:
         return PartitionValue.of(name, ((Number) value).intValue(), partitionType);
 
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         if (value instanceof Binary) {
           // int96.
           return PartitionValue.of(
@@ -129,9 +129,7 @@ public class MetadataUtils {
 
       case DATE:
         return PartitionValue.of(
-            name,
-            ((Number) value).longValue() * (long) DateTimeConstants.MILLIS_PER_DAY,
-            partitionType);
+            name, ((Number) value).longValue() * DateTimes.MILLIS_PER_DAY, partitionType);
 
       case BIGINT:
       case INTERVALDAY:
@@ -238,7 +236,7 @@ public class MetadataUtils {
   public static FieldType getFieldType(CompleteType type) {
     switch (type.toMinorType()) {
       case BIGINT:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case DATE:
         return FieldType.LONG;
 
@@ -354,7 +352,7 @@ public class MetadataUtils {
                   rangeQueryInput.includeMax);
           break;
         case DATE:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           rangeQueryInput =
               new RangeQueryInput(
                   ((GregorianCalendar) literal.getValue()).getTimeInMillis(), filter.getKind());

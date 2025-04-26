@@ -71,7 +71,8 @@ public class WorkloadTicket extends TicketWithChildren {
       final long maxAllocation,
       final CoordinationProtos.NodeEndpoint foreman,
       final CoordinationProtos.NodeEndpoint assignment,
-      final QueryStarter queryStarter) {
+      final QueryStarter queryStarter,
+      final QueriesClerk queriesClerk) {
     QueryTicket queryTicket =
         queryTickets.compute(
             queryId,
@@ -81,6 +82,7 @@ public class WorkloadTicket extends TicketWithChildren {
                     makeQueryAllocator(getAllocator(), queryId, maxAllocation);
                 final QueryTicket qTicket =
                     new QueryTicket(
+                        queriesClerk,
                         this,
                         queryId,
                         queryAllocator,
@@ -134,7 +136,11 @@ public class WorkloadTicket extends TicketWithChildren {
     ExecutionMetrics.getExecutorEndedQueries().increment();
     ExecutionMetrics.getQueryPeakMemoryDistribution()
         .record(removedQueryTicket.getAllocator().getPeakMemoryAllocation());
+    ExecutionMetrics.getQueryPeakMemoryNonSpillableOpeartors()
+        .record(removedQueryTicket.getMaxMemoryNonSpillableOperators());
 
+    ExecutionMetrics.getQuerySumMemoryNonSpillableOpeartors()
+        .record(removedQueryTicket.getSumMemoryNonSpillableOperators());
     Preconditions.checkState(
         removedQueryTicket == queryTicket,
         "closed query ticket was not found in the query tickets' map");

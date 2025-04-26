@@ -23,7 +23,6 @@ import static org.mockito.Mockito.when;
 
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.connector.metadata.DatasetSplit;
-import com.dremio.connector.metadata.DatasetSplitListing;
 import com.dremio.connector.metadata.PartitionChunk;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.PartitionValue;
@@ -168,9 +167,7 @@ public class TestEasyFormatDatasetAccessor extends DremioTest {
       Directory dir = (Directory) attr;
 
       // validate split-level path and mod time info
-      DatasetSplitListing splitListing = chunk.getSplits();
-      for (Iterator<? extends DatasetSplit> it = splitListing.iterator(); it.hasNext(); ) {
-        DatasetSplit split = it.next();
+      for (DatasetSplit split : chunk.getSplits()) {
         assertThat(split.getSizeInBytes()).isEqualTo(1000);
         ByteArrayOutputStream stream = new ByteArrayOutputStream();
         split.getExtraInfo().writeTo(stream);

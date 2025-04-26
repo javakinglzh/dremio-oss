@@ -47,7 +47,7 @@ import org.slf4j.LoggerFactory;
 /** UserDefinedFunctionListManagerImpl */
 public class UserDefinedFunctionServiceImpl implements UserDefinedFunctionService {
   public static final Logger logger = LoggerFactory.getLogger(UserDefinedFunctionServiceImpl.class);
-  protected final Provider<NamespaceService> namespaceServiceProvider;
+  protected final Provider<NamespaceService> systemUserNamespaceServiceProvider;
   protected final Provider<CatalogService> catalogServiceProvider;
   protected final Provider<OptionManager> optionManagerProvider;
   protected final Provider<Optional<CoordinationProtos.NodeEndpoint>> serviceLeaderProvider;
@@ -59,7 +59,7 @@ public class UserDefinedFunctionServiceImpl implements UserDefinedFunctionServic
   protected FunctionTunnelCreator functionTunnelCreator;
 
   public UserDefinedFunctionServiceImpl(
-      Provider<NamespaceService> namespaceServiceProvider,
+      Provider<NamespaceService> systemUserNamespaceServiceProvider,
       Provider<CatalogService> catalogServiceProvider,
       Provider<OptionManager> optionManagerProvider,
       Provider<Optional<CoordinationProtos.NodeEndpoint>> serviceLeaderProvider,
@@ -68,8 +68,9 @@ public class UserDefinedFunctionServiceImpl implements UserDefinedFunctionServic
       Provider<DremioConfig> dremioConfigProvider,
       boolean isMaster,
       boolean isCoordinator) {
-    this.namespaceServiceProvider =
-        Preconditions.checkNotNull(namespaceServiceProvider, "NamespaceService service required");
+    this.systemUserNamespaceServiceProvider =
+        Preconditions.checkNotNull(
+            systemUserNamespaceServiceProvider, "NamespaceService service required");
     this.catalogServiceProvider =
         Preconditions.checkNotNull(catalogServiceProvider, "CatalogService service required");
     this.optionManagerProvider =
@@ -139,7 +140,7 @@ public class UserDefinedFunctionServiceImpl implements UserDefinedFunctionServic
           });
     }
     Iterator<FunctionInfo> namespaceFunctionIterator =
-        namespaceServiceProvider.get().getFunctions().stream()
+        systemUserNamespaceServiceProvider.get().getFunctions().stream()
             .map(
                 functionConfig -> {
                   FunctionInfo functionInfo =

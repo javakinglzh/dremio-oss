@@ -18,6 +18,7 @@ package com.dremio.exec.planner.logical;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.exec.catalog.CatalogIdentity;
+import com.dremio.exec.catalog.DatasetMetadataState;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
@@ -44,9 +45,30 @@ public class ViewTable implements DremioTable {
   private BatchSchema schema;
   private final VersionContext versionContext;
   private final boolean hasAtSpecifier;
+  private final @Nullable DatasetMetadataState datasetMetadataState;
+
+  public ViewTable(ViewTable viewTable) {
+    this(
+        viewTable.path,
+        viewTable.view,
+        viewTable.viewOwner,
+        viewTable.config,
+        viewTable.schema,
+        viewTable.versionContext,
+        viewTable.hasAtSpecifier,
+        viewTable.datasetMetadataState);
+  }
 
   public ViewTable(NamespaceKey path, View view, CatalogIdentity viewOwner, BatchSchema schema) {
-    this(path, view, viewOwner, null, schema, null, false);
+    this(
+        path,
+        view,
+        viewOwner,
+        null,
+        schema,
+        null,
+        false,
+        DatasetMetadataState.builder().setIsComplete(false).setIsExpired(true).build());
   }
 
   public ViewTable(
@@ -55,7 +77,25 @@ public class ViewTable implements DremioTable {
       CatalogIdentity viewOwner,
       DatasetConfig config,
       BatchSchema schema) {
-    this(path, view, viewOwner, config, schema, null, false);
+    this(
+        path,
+        view,
+        viewOwner,
+        config,
+        schema,
+        null,
+        false,
+        DatasetMetadataState.builder().setIsComplete(false).setIsExpired(true).build());
+  }
+
+  public ViewTable(
+      NamespaceKey path,
+      View view,
+      CatalogIdentity viewOwner,
+      DatasetConfig config,
+      BatchSchema schema,
+      DatasetMetadataState datasetMetadataState) {
+    this(path, view, viewOwner, config, schema, null, false, datasetMetadataState);
   }
 
   public ViewTable(
@@ -65,7 +105,8 @@ public class ViewTable implements DremioTable {
       DatasetConfig config,
       BatchSchema schema,
       VersionContext versionContext,
-      boolean hasAtSpecifier) {
+      boolean hasAtSpecifier,
+      DatasetMetadataState datasetMetadataState) {
     this.view = view;
     this.path = path;
     this.viewOwner = viewOwner;
@@ -73,6 +114,7 @@ public class ViewTable implements DremioTable {
     this.schema = schema;
     this.versionContext = versionContext;
     this.hasAtSpecifier = hasAtSpecifier;
+    this.datasetMetadataState = datasetMetadataState;
   }
 
   @Override
@@ -136,11 +178,17 @@ public class ViewTable implements DremioTable {
   }
 
   public ViewTable withVersionContext(VersionContext versionContext) {
-    return new ViewTable(path, view, viewOwner, config, schema, versionContext, true);
+    return new ViewTable(
+        path, view, viewOwner, config, schema, versionContext, true, datasetMetadataState);
   }
 
   @Override
   public boolean hasAtSpecifier() {
     return hasAtSpecifier;
+  }
+
+  @Override
+  public @Nullable DatasetMetadataState getDatasetMetadataState() {
+    return datasetMetadataState;
   }
 }

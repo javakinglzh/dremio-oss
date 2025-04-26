@@ -21,6 +21,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RuntimeFilter;
 import com.dremio.exec.store.SplitAndPartitionInfo;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
 import com.dremio.io.file.FileSystem;
@@ -88,8 +89,12 @@ public class DirListingRecordReaderIterator implements RecordReaderIterator {
     if (fs == null) {
       try {
         fs =
-            plugin.createFSWithoutHDFSCache(
-                dirListInputSplit.getRootPath(), config.getProps().getUserName(), context);
+            plugin.createFS(
+                SupportsFsCreation.builder()
+                    .withoutHDFSCache(true)
+                    .filePath(dirListInputSplit.getRootPath())
+                    .userName(config.getProps().getUserName())
+                    .operatorContext(context));
       } catch (IOException e) {
         throw UserException.ioExceptionError(e).buildSilently();
       }

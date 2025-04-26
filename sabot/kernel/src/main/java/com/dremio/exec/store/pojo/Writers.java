@@ -188,7 +188,7 @@ public class Writers {
   }
 
   public static class TimeStampMilliWriter extends AbstractWriter<TimeStampMilliVector> {
-    public static final MajorType TYPE = Types.optional(MinorType.TIMESTAMP);
+    public static final MajorType TYPE = Types.optional(MinorType.TIMESTAMPMILLI);
 
     public TimeStampMilliWriter(Field field) {
       super(field, TYPE);

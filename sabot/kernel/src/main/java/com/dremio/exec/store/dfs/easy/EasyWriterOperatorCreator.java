@@ -26,6 +26,6 @@ public class EasyWriterOperatorCreator implements SingleInputOperator.Creator<Ea
   @Override
   public SingleInputOperator create(OperatorContext context, EasyWriter operator)
       throws ExecutionSetupException {
-    return operator.getFormatPlugin().getWriterBatch(context, operator);
+    return operator.getEasyFormatPlugin().getWriterBatch(context, operator);
   }
 }

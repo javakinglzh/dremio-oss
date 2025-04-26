@@ -15,51 +15,6 @@
  */
 @import "./DataColumn.variables.less";
 
-.wrapperHover {
-  composes: flex-container from "~#oss/uiTheme/less/layout.less";
-  composes: form-label from "~#oss/uiTheme/less/typography.less";
-
-  align-items: center;
-  padding-left: @left-padding;
-  height: 30px;
-
-  &:hover {
-    background-color: #f5f8f9; // take from design sketch file
-  }
-}
-
-.wrapper {
-  composes: flex-container from "~#oss/uiTheme/less/layout.less";
-  composes: form-label from "~#oss/uiTheme/less/typography.less";
-
-  align-items: center;
-  height: 30px;
-}
-
-.icon,
-.name {
-  display: inline-block;
-}
-
-.nameWiki {
-  display: inline-block;
-  font-size: var(--dremio--font-size--default);
-  font-weight: 400;
-}
-
-.icon {
-  height: 22px;
-  width: 29.33px;
-  margin-left: -5px; // needed for vertial alignment of icon with column title
-  margin-right: 5px; // controls spacing between column name and type icon
-}
-
-.iconWiki {
-  height: 18px;
-  width: 18px;
-  margin-right: 4px;
-}
-
 .columnHighlight {
   font-weight: 600;
   color: var(--color--brand--300);

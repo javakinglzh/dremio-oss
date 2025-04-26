@@ -172,7 +172,8 @@ public class TestEarlyLimit0Optimization extends BaseTestQuery {
             Pair.of(SchemaPath.getSimplePath("position_id"), Types.optional(MinorType.INT)),
             Pair.of(SchemaPath.getSimplePath("department_id"), Types.optional(MinorType.BIGINT)),
             Pair.of(SchemaPath.getSimplePath("birth_date"), Types.optional(MinorType.DATE)),
-            Pair.of(SchemaPath.getSimplePath("hire_date"), Types.optional(MinorType.TIMESTAMP)),
+            Pair.of(
+                SchemaPath.getSimplePath("hire_date"), Types.optional(MinorType.TIMESTAMPMILLI)),
             Pair.of(SchemaPath.getSimplePath("salary"), Types.optional(MinorType.FLOAT8)),
             Pair.of(SchemaPath.getSimplePath("fsalary"), Types.optional(MinorType.FLOAT4)),
             Pair.of(SchemaPath.getSimplePath("single"), Types.required(MinorType.BIT)),

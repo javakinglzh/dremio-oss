@@ -46,7 +46,13 @@ const EmptyStateContainer = (props: EmptyStateContainerProps) => {
   } = props;
   const { formatMessage } = intl;
   return (
-    <div className={classNames(classes["empty-state-container"], className)}>
+    <div
+      className={classNames(
+        classes["empty-state-container"],
+        className,
+        "empty-state-container",
+      )}
+    >
       {icon && <dremio-icon class={classes["empty-state-icon"]} name={icon} />}
       {title && (
         <span

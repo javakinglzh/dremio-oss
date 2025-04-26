@@ -33,8 +33,8 @@ import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.RefreshPolicyType;
-import com.dremio.service.reflection.MaterializationCache.CacheViewer;
 import com.dremio.service.reflection.ReflectionStatus.COMBINED_STATUS;
+import com.dremio.service.reflection.descriptor.MaterializationCacheViewer;
 import com.dremio.service.reflection.proto.ExternalReflection;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
@@ -67,7 +67,7 @@ public class TestReflectionStatusService {
 
   private final COMBINED_STATUS expected;
 
-  static class ConstantCacheViewer implements CacheViewer {
+  static class ConstantCacheViewer implements MaterializationCacheViewer {
     private final boolean isCached;
 
     ConstantCacheViewer(boolean isCached) {
@@ -109,7 +109,8 @@ public class TestReflectionStatusService {
     statusService =
         new ReflectionStatusServiceImpl(
             () -> clusterCoordinator,
-            DirectProvider.<CacheViewer>wrap(new ConstantCacheViewer(isMaterializationCached)),
+            DirectProvider.<MaterializationCacheViewer>wrap(
+                new ConstantCacheViewer(isMaterializationCached)),
             goalsStore,
             entriesStore,
             materializationStore,
@@ -153,7 +154,7 @@ public class TestReflectionStatusService {
     when(materializationStore.getAllDone(eq(reflectionId), Mockito.anyLong()))
         .thenReturn(Collections.singleton(lastMaterialization));
 
-    when(validator.isValid(goal, table)).thenReturn(isValid);
+    when(validator.isValid(goal, table, true)).thenReturn(isValid);
     this.expected = expected;
   }
 
@@ -280,16 +281,6 @@ public class TestReflectionStatusService {
             MATERIALIZATION_STATE.NOT_FOUND,
             false),
         newTestCase(
-            "metadata refreshing",
-            COMBINED_STATUS.REFRESHING,
-            true,
-            false,
-            false,
-            ReflectionState.METADATA_REFRESH,
-            0,
-            MATERIALIZATION_STATE.NOT_FOUND,
-            false),
-        newTestCase(
             "can accelerate, no failures",
             COMBINED_STATUS.CAN_ACCELERATE,
             true,
@@ -407,7 +398,7 @@ public class TestReflectionStatusService {
     ReflectionStatusServiceImpl reflectionStatusService =
         new ReflectionStatusServiceImpl(
             () -> clusterCoordinator,
-            DirectProvider.<CacheViewer>wrap(new ConstantCacheViewer(false)),
+            DirectProvider.wrap(new ConstantCacheViewer(false)),
             goalsStore,
             entriesStore,
             materializationStore,

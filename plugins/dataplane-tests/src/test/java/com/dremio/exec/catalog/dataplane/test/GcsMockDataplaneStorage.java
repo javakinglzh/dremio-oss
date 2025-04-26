@@ -16,17 +16,17 @@
 package com.dremio.exec.catalog.dataplane.test;
 
 import static com.dremio.exec.catalog.dataplane.test.DataplaneStorage.BucketSelection.PRIMARY_BUCKET;
-import static com.dremio.plugins.dataplane.store.AbstractDataplanePluginConfig.StorageProviderType.GOOGLE;
 import static com.dremio.plugins.gcs.GoogleBucketFileSystem.DREMIO_BYPASS_AUTH_CONFIG_FOR_TESTING_WITH_URL;
 import static org.apache.iceberg.gcp.GCPProperties.GCS_PROJECT_ID;
 import static org.apache.iceberg.gcp.GCPProperties.GCS_SERVICE_HOST;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.exec.catalog.conf.GCSAuthType;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
+import com.dremio.exec.catalog.conf.StorageProviderType;
 import com.dremio.plugins.dataplane.store.NessiePluginConfig;
-import com.dremio.plugins.gcs.GCSConf.AuthMode;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
@@ -148,9 +148,9 @@ public class GcsMockDataplaneStorage implements DataplaneStorage {
     nessiePluginConfig.nessieAuthType = NessieAuthType.NONE;
     nessiePluginConfig.secure = false;
 
-    nessiePluginConfig.storageProvider = GOOGLE;
+    nessiePluginConfig.storageProvider = StorageProviderType.GOOGLE;
     nessiePluginConfig.googleProjectId = TESTING_PROJECT_ID;
-    nessiePluginConfig.googleAuthenticationType = AuthMode.SERVICE_ACCOUNT_KEYS;
+    nessiePluginConfig.googleAuthenticationType = GCSAuthType.SERVICE_ACCOUNT_KEYS;
     nessiePluginConfig.googlePrivateKeyId = "unusedPrivateKeyId"; // Unused, just needs to be set
     nessiePluginConfig.googlePrivateKey = // Unused, just needs to be set
         SecretRef.of( // Not a real key
@@ -196,6 +196,11 @@ public class GcsMockDataplaneStorage implements DataplaneStorage {
   @Override
   public String getWarehousePath() {
     return "gs://" + getBucketName(PRIMARY_BUCKET);
+  }
+
+  @Override
+  public String getWarehousePath(BucketSelection bucketSelection) {
+    return "gs://" + getBucketName(bucketSelection);
   }
 
   protected String getGcsMockServerUrl() {

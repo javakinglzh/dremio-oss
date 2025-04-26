@@ -72,9 +72,6 @@ export const getDescendantsList = (state) => {
   return state.resources.entities.getIn(["datasetUI", "descendantsList"]);
 };
 
-export const getParentList = (state) =>
-  state.resources.entities.getIn(["datasetUI", "parentList"]);
-
 export const getDatasetAcceleration = (state, fullPath) => {
   const constructedFullPath = constructFullPathAndEncode(fullPath);
   const allAccelerations = state.resources.entities.get(

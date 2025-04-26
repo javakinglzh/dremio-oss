@@ -17,19 +17,21 @@ package com.dremio.plugins.gcs;
 
 import static com.dremio.hadoop.security.alias.DremioCredentialProvider.DREMIO_SCHEME_PREFIX;
 import static com.dremio.io.file.UriSchemes.DREMIO_GCS_SCHEME;
+import static com.dremio.plugins.Constants.DREMIO_ENABLE_BUCKET_DISCOVERY;
 import static com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystemConfiguration.GCS_STATUS_PARALLEL_ENABLE;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.conf.ConnectionSchema;
+import com.dremio.exec.catalog.conf.GCSAuthType;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.hadoop.MayProvideAsyncStream;
 import com.dremio.exec.store.dfs.DremioFileSystemCache;
 import com.dremio.io.AsyncByteReader;
-import com.dremio.plugins.gcs.GCSConf.AuthMode;
 import com.dremio.plugins.util.ContainerFileSystem;
 import com.dremio.plugins.util.ContainerNotFoundException;
+import com.google.auth.oauth2.AccessToken;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystem;
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystemConfiguration;
@@ -50,6 +52,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Arrays;
+import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -80,6 +83,8 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
   public static final String DREMIO_CLIENT_ID = "dremio.gcs.clientId";
   public static final String DREMIO_PRIVATE_KEY_ID = "dremio.gcs.privateKeyId";
   public static final String DREMIO_PRIVATE_KEY = "dremio.gcs.privateKey";
+  public static final String DREMIO_OAUTH2_TOKEN = "dremio.gcs.oauth2.token";
+  public static final String DREMIO_OAUTH2_TOKEN_EXPIRY = "dremio.gcs.oauth2.token.expiry";
   public static final String DREMIO_WHITELIST_BUCKETS = "dremio.gcs.whitelisted.buckets";
   public static final String DREMIO_BYPASS_AUTH_CONFIG_FOR_TESTING_WITH_URL =
       "dremio.gcs.bypassAuthConfigForTestingWithUrl";
@@ -156,7 +161,7 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
   protected void setup(Configuration conf) throws IOException {
     GCSConf gcsConf = SCHEMA.newMessage();
     if (conf.getBoolean(DREMIO_KEY_FILE, false)) {
-      gcsConf.authMode = AuthMode.SERVICE_ACCOUNT_KEYS;
+      gcsConf.authMode = GCSAuthType.SERVICE_ACCOUNT_KEYS;
       gcsConf.clientId = conf.get(DREMIO_CLIENT_ID, EMPTY_STRING);
       if (gcsConf.clientId.equals(EMPTY_STRING)) {
         gcsConf.clientId = conf.get("fs.gs.auth.client.id", EMPTY_STRING);
@@ -169,8 +174,10 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
       if (gcsConf.privateKeyId.equals(EMPTY_STRING)) {
         gcsConf.privateKeyId = conf.get(CONF_PRIVATE_KEY_ID, EMPTY_STRING);
       }
+    } else if (conf.get(DREMIO_OAUTH2_TOKEN) != null) {
+      gcsConf.authMode = GCSAuthType.OAUTH2_TOKEN;
     } else {
-      gcsConf.authMode = AuthMode.AUTO;
+      gcsConf.authMode = GCSAuthType.AUTO;
     }
 
     gcsConf.projectId = conf.get(DREMIO_PROJECT_ID, EMPTY_STRING);
@@ -233,6 +240,13 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
           InputStream is = new ByteArrayInputStream(connectionCredsJson.toString().getBytes());
           return GoogleCredentials.fromStream(is);
 
+        case OAUTH2_TOKEN:
+          return GoogleCredentials.create(
+              AccessToken.newBuilder()
+                  .setTokenValue(getConf().get(DREMIO_OAUTH2_TOKEN))
+                  .setExpirationTime(
+                      new Date(Long.parseLong(getConf().get(DREMIO_OAUTH2_TOKEN_EXPIRY))))
+                  .build());
         case AUTO:
         default:
           return GoogleCredentials.getApplicationDefault();
@@ -261,12 +275,16 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
         .collect(Collectors.toList());
   }
 
+  private boolean getEnabledBucketDiscovery() {
+    return getConf().getBoolean(DREMIO_ENABLE_BUCKET_DISCOVERY, true);
+  }
+
   @Override
   protected Stream<ContainerCreator> getContainerCreators() throws IOException {
     final Stream<String> bucketNames;
     if (connectionConf.bucketWhitelist != null && !connectionConf.bucketWhitelist.isEmpty()) {
       bucketNames = connectionConf.bucketWhitelist.stream();
-    } else {
+    } else if (getEnabledBucketDiscovery()) {
       try {
         bucketNames =
             StreamSupport.stream(
@@ -280,6 +298,8 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
       } catch (StorageException se) {
         throw UserException.validationError(se).message("Failed to list buckets.").build(logger);
       }
+    } else {
+      bucketNames = Stream.empty();
     }
 
     return bucketNames.map(b -> new GCSContainerCreator(b));
@@ -317,6 +337,9 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
           conf.set(CONF_PRIVATE_KEY, getPrivateKeyUri(getConf()));
           conf.set(CONF_PRIVATE_KEY_ID, connectionConf.privateKeyId);
           conf.setBoolean(CONF_SERVICE_ACCT, true);
+          break;
+        case OAUTH2_TOKEN:
+          // Configuration is already in place, just break from this switch
           break;
         case AUTO:
         default:
@@ -358,7 +381,9 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
   protected ContainerHolder getUnknownContainer(String bucket) throws IOException {
     // run this to ensure we don't fail.
     try {
-      storageProvider.get().list(bucket, BlobListOption.pageSize(1));
+      if (getEnabledBucketDiscovery()) {
+        storageProvider.get().list(bucket, BlobListOption.pageSize(1));
+      }
     } catch (StorageException e) {
       int status = e.getCode();
       throw new ContainerNotFoundException(
@@ -382,8 +407,7 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
   @Override
   public void close() throws IOException {
     try {
-      AutoCloseables.close(
-          Arrays.<AutoCloseable>asList(client, () -> fsCache.closeAll(true), () -> super.close()));
+      AutoCloseables.close(Arrays.<AutoCloseable>asList(client, fsCache::closeAll, super::close));
     } catch (RuntimeException | IOException e) {
       throw e;
     } catch (Exception e) {

@@ -149,7 +149,7 @@ export class FinderNav extends Component {
                   ? "interface/right-chevron"
                   : "interface/down-chevron"
               }
-              class="finder-nav__collapse-control"
+              class="finder-nav__collapse-control mr-05"
             />
             <span>
               {title} {showCount && `(${navItems.size})`}

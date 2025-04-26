@@ -17,7 +17,6 @@ package com.dremio.exec.planner.sql.handlers.direct;
 
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableDropPrimaryKey;
-import com.dremio.exec.planner.sql.parser.SqlGrant;
 import com.dremio.service.namespace.NamespaceKey;
 import java.util.Collections;
 import java.util.List;
@@ -37,7 +36,6 @@ public class DropPrimaryKeyHandler extends SimpleDirectHandler {
         SqlNodeUtil.unwrap(sqlNode, SqlAlterTableDropPrimaryKey.class);
 
     NamespaceKey path = catalog.resolveSingle(sqlDropPrimaryKey.getTable());
-    catalog.validatePrivilege(path, SqlGrant.Privilege.ALTER);
 
     catalog.dropPrimaryKey(
         path,

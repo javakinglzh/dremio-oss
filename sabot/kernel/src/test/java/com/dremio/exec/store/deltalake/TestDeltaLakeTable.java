@@ -251,7 +251,7 @@ public class TestDeltaLakeTable extends BaseTestQuery {
     BytesOutput signature = table.readSignature();
     DeltaLakeProtobuf.DeltaLakeReadSignature deltaLakeReadSignature =
         LegacyProtobufSerializer.parseFrom(
-            DeltaLakeProtobuf.DeltaLakeReadSignature.PARSER,
+            DeltaLakeProtobuf.DeltaLakeReadSignature.parser(),
             MetadataProtoUtils.toProtobuf(signature));
     // Before snapshot list is fetched  metadata should be stable
     assertTrue(table.checkMetadataStale(deltaLakeReadSignature));
@@ -262,7 +262,7 @@ public class TestDeltaLakeTable extends BaseTestQuery {
     signature = table.readSignature();
     deltaLakeReadSignature =
         LegacyProtobufSerializer.parseFrom(
-            DeltaLakeProtobuf.DeltaLakeReadSignature.PARSER,
+            DeltaLakeProtobuf.DeltaLakeReadSignature.parser(),
             MetadataProtoUtils.toProtobuf(signature));
     // after fetching metadata should not be stale
     assertFalse(table.checkMetadataStale(deltaLakeReadSignature));

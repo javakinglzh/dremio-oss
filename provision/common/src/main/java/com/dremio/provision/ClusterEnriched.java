@@ -15,10 +15,12 @@
  */
 package com.dremio.provision;
 
+import com.google.common.base.Preconditions;
+
 /** Enriched cluster */
 public class ClusterEnriched {
   private Cluster cluster;
-  private Containers containers;
+  private Containers containers = Containers.builder().build();
 
   public ClusterEnriched() {}
 
@@ -39,6 +41,7 @@ public class ClusterEnriched {
   }
 
   public void setRunTimeInfo(Containers containers) {
+    Preconditions.checkNotNull(containers, "containers is required");
     this.containers = containers;
   }
 }

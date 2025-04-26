@@ -27,6 +27,7 @@ import com.dremio.exec.expr.fn.impl.ByteArrayWrapper;
 import com.dremio.exec.physical.config.WriterCommitterPOP;
 import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo;
 import com.dremio.exec.planner.sql.parser.DmlUtils;
+import com.dremio.exec.proto.ExecProtos.ClusteringStatus;
 import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.store.OperationType;
@@ -40,6 +41,7 @@ import com.dremio.exec.store.dfs.copyinto.CopyIntoHistoryEventHandler;
 import com.dremio.exec.store.iceberg.IcebergMetadataInformation;
 import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.model.IcebergCommandType;
@@ -280,7 +282,8 @@ public class IcebergCommitOpHelper implements AutoCloseable {
                 config.getTableFormatOptions().getMinInputFilesBeforeOptimize(),
                 config.getTableFormatOptions().getSnapshotId(),
                 icebergTableProps,
-                getFS(config));
+                getFS(config),
+                config.getTableFormatOptions().getClusteringOptions());
         break;
       case FULL_METADATA_REFRESH:
         createReadSignProvider(icebergTableProps, true);
@@ -712,9 +715,13 @@ public class IcebergCommitOpHelper implements AutoCloseable {
       return config
           .getPlugin()
           .createFS(
-              Optional.ofNullable(config.getTempLocation()).orElse(config.getFinalLocation()),
-              config.getProps().getUserName(),
-              context);
+              SupportsFsCreation.builder()
+                  .filePath(
+                      Optional.ofNullable(config.getTempLocation())
+                          .orElse(config.getFinalLocation()))
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context)
+                  .dataset(config.getDatasetPath().getPathComponents()));
     } catch (IOException ioe) {
       throw UserException.ioExceptionError(ioe).buildSilently();
     }
@@ -724,7 +731,14 @@ public class IcebergCommitOpHelper implements AutoCloseable {
     if (fsToCheckIfPartitionExists == null) {
       Stopwatch stopwatch = Stopwatch.createStarted();
       fsToCheckIfPartitionExists =
-          config.getSourceTablePlugin().createFS(path, config.getProps().getUserName(), context);
+          config
+              .getSourceTablePlugin()
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(path)
+                      .userName(config.getProps().getUserName())
+                      .operatorContext(context)
+                      .dataset(config.getDatasetPath().getPathComponents()));
       addMetricStat(
           WriterCommitterOperator.Metric.FILE_SYSTEM_CREATE_TIME,
           stopwatch.elapsed(TimeUnit.MILLISECONDS));
@@ -853,5 +867,9 @@ public class IcebergCommitOpHelper implements AutoCloseable {
     }
 
     return ImmutableSet.of();
+  }
+
+  public void consumeClusteringStatus(ClusteringStatus clusteringStatus) {
+    icebergOpCommitter.consumeClusteringStatus(clusteringStatus);
   }
 }

@@ -28,9 +28,11 @@
       color: var(--text--faded) !important;
       font-weight: 400 !important;
       font-size: 12px !important;
-      padding-bottom: 0 !important;
-      position: absolute !important;
-      bottom: 0 !important;
+      opacity: 0.4;
+      padding: 4px;
+      margin-right: 8px;
+      display: flex;
+      align-items: end;
 
       &.MuiListItem-root.Mui-disabled {
         opacity: 1 !important;
@@ -44,10 +46,14 @@
 
     &-listContainer {
       flex: 1;
+      overflow: auto;
     }
 
     &-item {
       .flex-center();
+      padding: 4px;
+      margin-right: 8px;
+      cursor: pointer;
     }
 
     &-item-icon {

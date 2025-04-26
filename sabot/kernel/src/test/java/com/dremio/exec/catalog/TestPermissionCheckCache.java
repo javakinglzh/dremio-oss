@@ -33,6 +33,7 @@ import com.dremio.service.DirectProvider;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.google.common.collect.Lists;
+import java.util.Optional;
 import org.junit.Test;
 
 public class TestPermissionCheckCache {
@@ -41,9 +42,11 @@ public class TestPermissionCheckCache {
   public void ensureNotCached() throws Exception {
     final String username = "ensureNotCached";
     final StoragePlugin plugin = mock(StoragePlugin.class);
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     final SourceConfig sourceConfig = new SourceConfig();
     final PermissionCheckCache checks =
-        new PermissionCheckCache(DirectProvider.wrap(plugin), DirectProvider.wrap(0L), 1000);
+        new PermissionCheckCache(
+            DirectProvider.wrap(storagePluginOptional), DirectProvider.wrap(0L), 1000);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any())).thenReturn(true);
     assertTrue(
         checks.hasAccess(
@@ -65,8 +68,10 @@ public class TestPermissionCheckCache {
     final String username = "ensureCached";
     final StoragePlugin plugin = mock(StoragePlugin.class);
     final SourceConfig sourceConfig = new SourceConfig();
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     final PermissionCheckCache checks =
-        new PermissionCheckCache(DirectProvider.wrap(plugin), DirectProvider.wrap(10_000L), 1000);
+        new PermissionCheckCache(
+            DirectProvider.wrap(storagePluginOptional), DirectProvider.wrap(10_000L), 1000);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any()))
         .thenReturn(true, false);
     assertTrue(
@@ -96,8 +101,10 @@ public class TestPermissionCheckCache {
     final String username = "ensureReloaded";
     final StoragePlugin plugin = mock(StoragePlugin.class);
     final SourceConfig sourceConfig = new SourceConfig();
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     final PermissionCheckCache checks =
-        new PermissionCheckCache(DirectProvider.wrap(plugin), DirectProvider.wrap(500L), 1000);
+        new PermissionCheckCache(
+            DirectProvider.wrap(storagePluginOptional), DirectProvider.wrap(500L), 1000);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any()))
         .thenReturn(true, false);
     assertTrue(
@@ -128,8 +135,10 @@ public class TestPermissionCheckCache {
     final String username = "throwsProperly";
     final StoragePlugin plugin = mock(StoragePlugin.class);
     final SourceConfig sourceConfig = new SourceConfig();
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     final PermissionCheckCache checks =
-        new PermissionCheckCache(DirectProvider.wrap(plugin), DirectProvider.wrap(1000L), 1000);
+        new PermissionCheckCache(
+            DirectProvider.wrap(storagePluginOptional), DirectProvider.wrap(1000L), 1000);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any()))
         .thenThrow(new RuntimeException("you shall not pass"));
     try {
@@ -151,8 +160,10 @@ public class TestPermissionCheckCache {
     final String username = "ensureCached";
     final StoragePlugin plugin = mock(StoragePlugin.class);
     final SourceConfig sourceConfig = new SourceConfig();
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     final PermissionCheckCache checks =
-        new PermissionCheckCache(DirectProvider.wrap(plugin), DirectProvider.wrap(10_000L), 1000);
+        new PermissionCheckCache(
+            DirectProvider.wrap(storagePluginOptional), DirectProvider.wrap(10_000L), 1000);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any()))
         .thenReturn(false, false);
     assertFalse(
@@ -185,12 +196,14 @@ public class TestPermissionCheckCache {
 
     // can't use mocks here since mockito will lose annotations
     StoragePlugin plugin = mock(StoragePlugin.class);
+    Optional<StoragePlugin> storagePluginOptional = Optional.of(plugin);
     when(plugin.hasAccessPermission(anyString(), any(NamespaceKey.class), any()))
         .thenReturn(true, false);
 
     SourceConfig sourceConfig = new SourceConfig();
     sourceConfig.setType("ESYS");
-    PermissionCheckCache checks = new PermissionCheckCache(() -> plugin, () -> 10_000L, 1000);
+    PermissionCheckCache checks =
+        new PermissionCheckCache(() -> storagePluginOptional, () -> 10_000L, 1000);
     assertTrue(checks.hasAccess(username, key, null, new MetadataStatsCollector(), sourceConfig));
     assertNull(
         checks.getPermissionsCache().getIfPresent(new PermissionCheckCache.Key(username, key)));

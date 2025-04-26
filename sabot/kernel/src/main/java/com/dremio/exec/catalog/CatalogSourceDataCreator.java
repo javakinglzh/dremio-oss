@@ -30,7 +30,7 @@ public class CatalogSourceDataCreator
   public LegacyKVStore<NamespaceKey, SourceInternalData> build(LegacyStoreBuildingFactory factory) {
     return factory
         .<NamespaceKey, SourceInternalData>newStore()
-        .name(CatalogServiceImpl.CATALOG_SOURCE_DATA_NAMESPACE)
+        .name(CatalogConstants.CATALOG_SOURCE_DATA_NAMESPACE)
         .keyFormat(
             Format.wrapped(
                 NamespaceKey.class, NamespaceKey::toString, NamespaceKey::new, Format.ofString()))

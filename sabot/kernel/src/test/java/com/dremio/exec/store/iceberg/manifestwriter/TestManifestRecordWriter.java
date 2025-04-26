@@ -53,6 +53,7 @@ import com.dremio.exec.store.iceberg.IcebergManifestWriterPOP;
 import com.dremio.exec.store.iceberg.IcebergMetadataInformation;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
 import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.model.IcebergCommandType;
 import com.dremio.exec.util.TestUtilities;
 import com.dremio.exec.util.VectorUtil;
@@ -70,7 +71,6 @@ import java.io.ObjectInputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -478,11 +478,9 @@ public class TestManifestRecordWriter extends BaseTestQuery {
       // Create IcebergTable
       PartitionSpec spec = getTestPartitionSpec();
 
-      Map<String, String> map = new HashMap();
-      map.put("compatibility.snapshot-id-inheritance.enabled", "true");
       Table table =
           new HadoopTables(new Configuration())
-              .create(spec.schema(), spec, SortOrder.unsorted(), map, tempFolderLoc);
+              .create(spec.schema(), spec, SortOrder.unsorted(), Map.of(), tempFolderLoc);
       table.newAppend().appendManifest(manifestFile).commit();
       files = metadataFolder.listFiles();
       maniFiles =
@@ -1145,7 +1143,7 @@ public class TestManifestRecordWriter extends BaseTestQuery {
 
     BatchSchema schemaVal = getBatchSchema(2);
     PartitionSpec spec =
-        IcebergUtils.getIcebergPartitionSpec(schemaVal, Collections.EMPTY_LIST, null);
+        IcebergUtils.getIcebergPartitionSpec(schemaVal, Collections.emptyList(), null);
     DataFile dataFile3 = getDatafile("/path/to/datafile-3-pre.parquet", spec, null);
     DataFile dataFile4 = getDatafile("/path/to/datafile-4-pre.parquet", spec, null);
     icebergMeta.set(2, getAddDataFileIcebergMetadata(dataFile3));
@@ -1255,7 +1253,7 @@ public class TestManifestRecordWriter extends BaseTestQuery {
 
     BatchSchema schemaVal = getBatchSchema(2);
     PartitionSpec spec =
-        IcebergUtils.getIcebergPartitionSpec(schemaVal, Collections.EMPTY_LIST, null);
+        IcebergUtils.getIcebergPartitionSpec(schemaVal, Collections.emptyList(), null);
 
     DataFile dataFile1 = getDatafile("/path/to/datafile-1-pre.parquet", spec, null);
     DataFile dataFile2 = getDatafile("/path/to/datafile-2-pre.parquet", spec, null);
@@ -1303,7 +1301,7 @@ public class TestManifestRecordWriter extends BaseTestQuery {
     when(fileSystemPlugin.getFsConfCopy()).thenReturn(configuration);
     final FileSystem fs = HadoopFileSystem.getLocal(new Configuration());
     when(fileSystemPlugin.getSystemUserFS()).thenReturn(fs);
-    when(fileSystemPlugin.createFS(any(), any(), any())).thenReturn(fs);
+    when(fileSystemPlugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
     when(manifestWriterPOP.getLocation()).thenReturn(metadataLocation + "/queryID");
     when(manifestWriterPOP.getPlugin()).thenReturn(fileSystemPlugin);
     WriterOptions writerOptions = mock(WriterOptions.class);

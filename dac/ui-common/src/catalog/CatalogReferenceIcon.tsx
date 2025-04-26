@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 import type { FC } from "react";
-import type { CatalogReference } from "@dremio/dremio-js/interfaces";
+import type { CatalogReference } from "@dremio/dremio-js/oss";
 import { getIntlContext } from "../contexts/IntlContext";
 
 const iconMap = {
   DATASET_DIRECT: "catalog/dataset/table",
+  PHYSICAL_DATASET_HOME_FILE: "catalog/dataset/table",
   DATASET_PROMOTED: "catalog/dataset/promoted",
   DATASET_VIRTUAL: "catalog/dataset/view",
   FILE: "entities/file",
@@ -47,6 +48,7 @@ const mapOldToNewType = (type: string): keyof typeof iconMap => {
 
 export const CatalogReferenceIcon: FC<{
   catalogReference: CatalogReference;
+  style?: Record<string, any>;
 }> = (props) => {
   const { t } = getIntlContext();
 
@@ -63,6 +65,7 @@ export const CatalogReferenceIcon: FC<{
       name={iconName}
       alt={label !== tKey ? label : ""}
       title={label !== tKey ? label : undefined}
+      style={props.style}
     ></dremio-icon>
   );
 };

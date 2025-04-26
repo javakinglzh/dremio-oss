@@ -56,7 +56,7 @@ public interface ZKClusterConfig {
 
   String getConnection();
 
-  Predicate<String> getFeatureEvaluator();
+  Predicate<TypeValidators.BooleanValidator> getFeatureEvaluator();
 
   int getZkSupervisorIntervalMilliSec();
 

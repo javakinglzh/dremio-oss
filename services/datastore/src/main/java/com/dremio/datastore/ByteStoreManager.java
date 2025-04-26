@@ -111,7 +111,9 @@ class ByteStoreManager implements AutoCloseable {
               (RemovalListener<String, ByteStore>)
                   notification -> {
                     try {
-                      notification.getValue().close();
+                      if (notification.getValue() != null) {
+                        notification.getValue().close();
+                      }
                     } catch (Exception ex) {
                       closeException.addException(ex);
                     }
@@ -699,5 +701,10 @@ class ByteStoreManager implements AutoCloseable {
         final List<ColumnFamilyDescriptor> columnNames,
         final List<ColumnFamilyHandle> familyHandles)
         throws RocksDBException;
+  }
+
+  @VisibleForTesting
+  protected LoadingCache<String, ByteStore> getMaps() {
+    return maps;
   }
 }

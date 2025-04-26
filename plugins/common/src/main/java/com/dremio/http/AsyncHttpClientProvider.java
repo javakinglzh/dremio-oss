@@ -23,6 +23,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.NamedThreadFactory;
 import io.netty.handler.ssl.SslContextBuilder;
 import java.io.IOException;
+import java.time.Duration;
 import javax.net.ssl.SSLException;
 import org.asynchttpclient.AsyncHttpClient;
 import org.asynchttpclient.AsyncHttpClientConfig;
@@ -36,9 +37,9 @@ import org.slf4j.LoggerFactory;
  */
 public class AsyncHttpClientProvider {
   private static final Logger logger = LoggerFactory.getLogger(AsyncHttpClientProvider.class);
-  public static final int DEFAULT_REQUEST_TIMEOUT = 10_000;
-  private static final int TTL = 60_000;
-  private static final int DEFAULT_CLEANER_PERIOD = 1_000;
+  public static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofMillis(10_000);
+  private static final Duration TTL = Duration.ofMillis(60_000);
+  private static final Duration DEFAULT_CLEANER_PERIOD = Duration.ofMillis(1_000);
   private static final int MAX_RETRIES = 4;
 
   /**

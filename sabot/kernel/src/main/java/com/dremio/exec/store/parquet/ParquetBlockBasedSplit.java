@@ -69,8 +69,22 @@ public class ParquetBlockBasedSplit implements Comparable<ParquetBlockBasedSplit
     return parquetBlockBasedSplitXAttr.getLastModificationTime();
   }
 
+  public boolean hasFileGroupIndex() {
+    return parquetBlockBasedSplitXAttr.hasFileGroupIndex();
+  }
+
+  public long getFileGroupIndex() {
+    return parquetBlockBasedSplitXAttr.getFileGroupIndex();
+  }
+
   @Override
   public int compareTo(ParquetBlockBasedSplit other) {
+    // For splits in file group, dont sort.
+    // Keep original order instead so that Segment Sort can be used
+    if (hasFileGroupIndex()) {
+      return 0;
+    }
+
     final int ret = getPath().compareTo(other.getPath());
     if (ret == 0) {
       return Long.compare(getStart(), other.getStart());

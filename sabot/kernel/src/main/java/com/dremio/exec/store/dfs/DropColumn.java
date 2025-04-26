@@ -17,8 +17,8 @@ package com.dremio.exec.store.dfs;
 
 import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants.METADATA_STORAGE_PLUGIN_NAME;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.model.AlterTableCommitter;
@@ -37,7 +37,7 @@ public class DropColumn extends ColumnOperations {
 
   public DropColumn(
       NamespaceKey table,
-      SabotContext context,
+      PluginSabotContext context,
       DatasetConfig datasetConfig,
       SchemaConfig schemaConfig,
       IcebergModel model,

@@ -41,6 +41,7 @@ import io.grpc.inprocess.InProcessServerBuilder;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -61,9 +62,7 @@ public class TestExternalJobProgressUpdates extends BaseTestServer {
         InProcessServerBuilder.forName(name)
             .directExecutor()
             .addService(new JobsServiceAdapter(p(LocalJobsService.class)))
-            .addService(
-                new Chronicle(
-                    p(LocalJobsService.class), () -> getSabotContext().getExecutorService()))
+            .addService(new Chronicle(p(LocalJobsService.class), p(ExecutorService.class)))
             .build();
     server.start();
 

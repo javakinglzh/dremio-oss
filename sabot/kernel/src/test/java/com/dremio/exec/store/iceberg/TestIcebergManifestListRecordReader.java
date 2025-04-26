@@ -18,7 +18,6 @@ package com.dremio.exec.store.iceberg;
 import static com.dremio.io.file.UriSchemes.SCHEME_SEPARATOR;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.AutoCloseables;
@@ -86,12 +85,14 @@ public class TestIcebergManifestListRecordReader extends BaseTestOperator {
 
   @Before
   public void beforeTest() throws Exception {
-    context = testContext.getNewOperatorContext(getTestAllocator(), null, DEFAULT_BATCH_SIZE, null);
+    context =
+        (OperatorContextImpl)
+            testContext.getNewOperatorContext(getTestAllocator(), null, DEFAULT_BATCH_SIZE, null);
     testCloseables.add(context);
     conf = new Configuration();
     fs = HadoopFileSystem.get(Path.of("/"), conf, context.getStats());
 
-    when(plugin.createFSWithAsyncOptions(anyString(), anyString(), any())).thenReturn(fs);
+    when(plugin.createFS(any())).thenReturn(fs);
     when(plugin.getFsConfCopy()).thenReturn(conf);
     when(plugin.createIcebergFileIO(any(), any(), any(), any(), any()))
         .thenReturn(

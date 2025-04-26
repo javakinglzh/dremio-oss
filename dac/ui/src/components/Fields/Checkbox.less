@@ -30,6 +30,23 @@
       border: 1px solid var(--fill--toggle--checked--hover);
     }
   }
+
+  &:focus-within:has(> input[type="checkbox"]:focus-visible) {
+    :global(.checked) {
+      outline-offset: 4px;
+      outline: 1.5px solid var(--border--focused);
+    }
+    .customCheckBox {
+      outline-offset: 4px;
+      outline: 1.5px solid var(--border--focused);
+    }
+  }
+  &:focus-within:has(> input[type="radio"]:focus-visible) {
+    :global(.radio) {
+      outline-offset: 4px;
+      outline: 1.5px solid var(--border--focused);
+    }
+  }
 }
 
 .disabled {

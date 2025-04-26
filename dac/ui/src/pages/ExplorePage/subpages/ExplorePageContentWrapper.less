@@ -82,7 +82,7 @@
         border: none;
 
         > input::placeholder {
-          color: var(--text--disabled);
+          color: var(--text--placeholder);
           font-style: italic;
         }
       }
@@ -216,7 +216,7 @@
     &.-default {
       .dremioContent__main {
         display: grid;
-        grid-template-columns: auto auto 1fr auto;
+        grid-template-columns: auto 1fr auto;
         overflow: hidden;
       }
 
@@ -245,14 +245,22 @@
       }
     }
 
-    &.-reflections {
+    &.-reflections,
+    &.-graph {
       .dremioContent__content {
         max-height: unset !important;
         .dremioContent__table {
           height: 100%;
-          grid-template-rows: auto;
+        }
+
+        .dremioContent__table {
+          grid-template-rows: auto auto 1fr;
         }
       }
+    }
+
+    &.-graph .dremioContent__content .dremioContent__table {
+      position: relative;
     }
   }
 

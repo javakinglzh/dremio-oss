@@ -21,6 +21,7 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.store.RecordReader;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -122,7 +123,13 @@ final class IcebergMetadataFunctionsRecordReader implements RecordReader {
     FileSystem fs;
     try {
       fs =
-          pluginForIceberg.createFSWithAsyncOptions(metadataLocation, props.getUserName(), context);
+          pluginForIceberg.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(metadataLocation)
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .withAsyncOptions(true)
+                  .dataset(dataset));
     } catch (IOException e) {
       throw new RuntimeException("Failed creating filesystem", e);
     }

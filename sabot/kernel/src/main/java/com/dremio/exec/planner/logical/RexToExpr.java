@@ -537,7 +537,7 @@ public final class RexToExpr {
           if (MoreRelOptUtil.isDatetimeMinusInterval(call)) {
             return doFunction(call, "-");
           }
-          // fall through
+        // fall through
         default:
           throw new UnsupportedOperationException(
               "Unimplemented syntax: " + syntax + " for (" + call + ")");
@@ -755,7 +755,7 @@ public final class RexToExpr {
                   .build();
           break;
         case TIMESTAMP:
-          castType = Types.required(MinorType.TIMESTAMP);
+          castType = Types.required(MinorType.TIMESTAMPMILLI);
           break;
         case ARRAY:
           castType = Types.required(MinorType.LIST);
@@ -1003,8 +1003,8 @@ public final class RexToExpr {
               timeUnitStr.substring(0, 1).toUpperCase() + timeUnitStr.substring(1).toLowerCase();
           String functionName = funcName + functionPostfix;
           return FunctionCallFactory.createExpression(functionName, args.subList(1, 3));
-          // TODO (DX-11268): Fix TIMESTAMPADD(SQL_TSI_FRAC_SECOND, ..., ...) function
-          // case ("NANOSECOND"):
+        // TODO (DX-11268): Fix TIMESTAMPADD(SQL_TSI_FRAC_SECOND, ..., ...) function
+        // case ("NANOSECOND"):
         default:
           throw UserException.unsupportedError()
               .message(
@@ -1120,7 +1120,7 @@ public final class RexToExpr {
           return (ValueExpressions.getTime(literal.getValueAs(TimeString.class)));
         case TIMESTAMP:
           if (isLiteralNull(literal)) {
-            return createNullExpr(MinorType.TIMESTAMP);
+            return createNullExpr(MinorType.TIMESTAMPMILLI);
           }
           return (ValueExpressions.getTimeStamp(literal.getValueAs(TimestampString.class)));
         case INTERVAL_YEAR:

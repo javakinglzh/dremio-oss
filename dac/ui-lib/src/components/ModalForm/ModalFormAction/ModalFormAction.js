@@ -70,7 +70,7 @@ const ModalFormAction = (props) => {
         <span className={updatedClassName}>
           <Button
             classes={classes}
-            className={className}
+            className={clsx(className, "focus-visible-outline")}
             dataQa={dataQa}
             disabled={disabled}
             disableMargin

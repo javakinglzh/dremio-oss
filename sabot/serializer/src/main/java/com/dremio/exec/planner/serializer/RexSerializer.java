@@ -46,7 +46,6 @@ import com.dremio.plan.serialization.PSqlFunctionCategory;
 import com.dremio.plan.serialization.PSqlIdentifier;
 import com.dremio.plan.serialization.PSqlParserPos;
 import com.dremio.plan.serialization.PSymbol;
-import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -90,7 +89,6 @@ public final class RexSerializer implements RexVisitor<PRexNode> {
   private final RexBuilder rexBuilder;
   private final TypeSerde typeSerializer;
   private final RelSerdeRegistry registry;
-  private final List<Any> nodes = new ArrayList<>();
   private final SqlOperatorSerde sqlOperatorSerde;
 
   public RexSerializer(
@@ -127,12 +125,9 @@ public final class RexSerializer implements RexVisitor<PRexNode> {
 
   @Override
   public PRexNode visitLiteral(RexLiteral literal) {
-    PRexLiteral.Builder builder =
-        PRexLiteral.newBuilder()
-            .setDataType(typeSerializer.toProto(literal.getType()))
-            .setTypeName(TypeSerde.toProto(literal.getTypeName()));
-    builder = addValue(literal, builder);
-    return PRexNode.newBuilder().setRexLiteral(builder).build();
+    PRexLiteral pLiteral = toProto(literal);
+
+    return PRexNode.newBuilder().setRexLiteral(pLiteral).build();
   }
 
   private PRexLiteral.Builder addValue(RexLiteral literal, PRexLiteral.Builder builder) {
@@ -221,6 +216,14 @@ public final class RexSerializer implements RexVisitor<PRexNode> {
       builder.setIndex(((SqlFlattenOperator) op).getIndex());
     }
     return PRexNode.newBuilder().setRexCall(builder).build();
+  }
+
+  public PRexLiteral toProto(RexLiteral literal) {
+    PRexLiteral.Builder builder =
+        PRexLiteral.newBuilder()
+            .setDataType(typeSerializer.toProto(literal.getType()))
+            .setTypeName(TypeSerde.toProto(literal.getTypeName()));
+    return addValue(literal, builder).build();
   }
 
   public PRexNode toProto(RexWinAggCall rexWinAggCall) {

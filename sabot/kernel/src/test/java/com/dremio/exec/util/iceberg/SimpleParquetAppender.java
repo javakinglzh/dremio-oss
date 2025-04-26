@@ -15,17 +15,20 @@
  */
 package com.dremio.exec.util.iceberg;
 
+import com.dremio.exec.store.parquet.ParquetToIcebergStatsConvertor;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import org.apache.iceberg.Metrics;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 
-/** Simple appender for writing parquet files. Currently only supports row count metrics. */
+/** Simple appender for writing parquet files. */
 public class SimpleParquetAppender<T> implements FileAppender<T> {
 
   private ParquetWriter<T> writer;
@@ -33,9 +36,25 @@ public class SimpleParquetAppender<T> implements FileAppender<T> {
   private ParquetMetadata footer;
   private long fileSize;
 
-  public SimpleParquetAppender(ParquetWriter<T> writer, OutputFile outputFile) {
+  private final Schema schema;
+  private final boolean withFullStats;
+  private Map<String, String> tableProperties;
+
+  public SimpleParquetAppender(ParquetWriter<T> writer, OutputFile outputFile, Schema schema) {
+    this(writer, outputFile, schema, false, null);
+  }
+
+  public SimpleParquetAppender(
+      ParquetWriter<T> writer,
+      OutputFile outputFile,
+      Schema schema,
+      boolean withFullStats,
+      Map<String, String> tableProperties) {
     this.writer = writer;
     this.outputFile = outputFile;
+    this.schema = schema;
+    this.withFullStats = withFullStats;
+    this.tableProperties = tableProperties;
   }
 
   @Override
@@ -49,8 +68,12 @@ public class SimpleParquetAppender<T> implements FileAppender<T> {
 
   @Override
   public Metrics metrics() {
-    final Long rowCount = footer.getBlocks().stream().mapToLong(BlockMetaData::getRowCount).sum();
-    return new Metrics(rowCount, null, null, null, null);
+    if (withFullStats) {
+      return ParquetToIcebergStatsConvertor.toMetrics(footer, schema, tableProperties);
+    } else {
+      final Long rowCount = footer.getBlocks().stream().mapToLong(BlockMetaData::getRowCount).sum();
+      return new Metrics(rowCount, null, null, null, null);
+    }
   }
 
   @Override

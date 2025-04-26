@@ -132,7 +132,7 @@ public class BaseExpressionSplitterTest extends BaseTestFunction {
 
     int batchSize = 1;
     final OperatorContextImpl context =
-        testContext.getNewOperatorContext(childAllocator, pop, batchSize);
+        (OperatorContextImpl) testContext.getNewOperatorContext(childAllocator, pop, batchSize);
     testCloseables.add(context);
 
     // materialize expression

@@ -40,7 +40,6 @@ const DataColumns = ({ className, columns, searchTerm }: DataColumnsProps) => {
                 key={column?.name}
                 className={classes["columnCls"]}
                 {...column}
-                detailsView
                 searchTerm={searchTerm}
               />
             );

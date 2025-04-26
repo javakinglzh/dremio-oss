@@ -21,7 +21,9 @@ import static org.mockito.Mockito.when;
 
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.server.SabotContext;
+import com.dremio.options.OptionManager;
 import com.dremio.test.DremioTest;
 import java.util.Arrays;
 import javax.inject.Provider;
@@ -40,10 +42,14 @@ public class TestHDFSStoragePlugin extends DremioTest {
     conf.propertyList = Arrays.asList(new Property("foo", "bar"));
 
     SabotContext context = mock(SabotContext.class);
+    OptionManager optionManager = mock(OptionManager.class);
     when(context.getClasspathScan()).thenReturn(DremioTest.CLASSPATH_SCAN_RESULT);
     final FileSystemWrapper fileSystemWrapper =
         (fs, storageId, pluginConf, operatorContext, enableAsync, isMetadataEnabled) -> fs;
     when(context.getFileSystemWrapper()).thenReturn(fileSystemWrapper);
+    when(context.getOptionManager()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED))
+        .thenReturn((PlannerSettings.VALUES_CAST_ENABLED.getDefault().getBoolVal()));
 
     Provider<StoragePluginId> idProvider =
         () -> {

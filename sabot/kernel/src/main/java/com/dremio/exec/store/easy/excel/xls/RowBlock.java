@@ -121,7 +121,7 @@ class RowBlock {
   static boolean isEndOfRowBlock(int sid) {
     switch (sid) {
       case ViewDefinitionRecord.sid:
-        // should have been prefixed with DrawingRecord (0x00EC), but bug 46280 seems to allow this
+      // should have been prefixed with DrawingRecord (0x00EC), but bug 46280 seems to allow this
       case DrawingRecord.sid:
       case DrawingSelectionRecord.sid:
       case ObjRecord.sid:
@@ -129,7 +129,7 @@ class RowBlock {
       case ColumnInfoRecord.sid: // See Bugzilla 53984
       case GutsRecord.sid: // see Bugzilla 50426
       case WindowOneRecord.sid:
-        // should really be part of workbook stream, but some apps seem to put this before WINDOW2
+      // should really be part of workbook stream, but some apps seem to put this before WINDOW2
       case WindowTwoRecord.sid:
         return true;
 

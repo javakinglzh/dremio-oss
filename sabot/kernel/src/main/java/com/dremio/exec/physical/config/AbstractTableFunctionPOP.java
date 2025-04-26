@@ -40,6 +40,8 @@ public abstract class AbstractTableFunctionPOP extends AbstractSingle {
   @Override
   protected abstract PhysicalOperator getNewWithChild(PhysicalOperator child);
 
+  public abstract PhysicalOperator getNewWithConfig(TableFunctionConfig config);
+
   @Override
   public <T, X, E extends Throwable> T accept(PhysicalVisitor<T, X, E> physicalVisitor, X value)
       throws E {

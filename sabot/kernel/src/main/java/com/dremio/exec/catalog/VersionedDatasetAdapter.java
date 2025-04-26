@@ -48,7 +48,7 @@ import com.dremio.exec.store.Views;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.IcebergViewMetadata;
 import com.dremio.exec.store.iceberg.SchemaConverter;
-import com.dremio.exec.store.iceberg.ViewHandle;
+import com.dremio.exec.store.iceberg.VersionedViewHandle;
 import com.dremio.exec.util.ViewFieldsHelper;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.MetadataProtoUtils;
@@ -74,6 +74,7 @@ import io.protostuff.ByteString;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -129,7 +130,7 @@ public class VersionedDatasetAdapter {
   public DremioTable translateIcebergView(String accessUserName) {
     Preconditions.checkState(
         datasetHandle.unwrap(VersionedDatasetHandle.class).getType() == ICEBERG_VIEW);
-    final ViewHandle viewHandle = datasetHandle.unwrap(ViewHandle.class);
+    final VersionedViewHandle viewHandle = datasetHandle.unwrap(VersionedViewHandle.class);
     final List<String> viewKeyPath = viewHandle.getDatasetPath().getComponents();
 
     final IcebergViewMetadata icebergViewMetadata = viewHandle.getIcebergViewMetadata();
@@ -157,6 +158,7 @@ public class VersionedDatasetAdapter {
             icebergViewMetadata.getDialect());
 
     viewConfig.setTag(viewHandle.getUniqueInstanceId());
+    viewConfig.setCreatedAt(icebergViewMetadata.getCreatedAt());
     VersionedDatasetId versionedDatasetId =
         new VersionedDatasetId(
             versionedTableKey, viewHandle.getContentId(), TableVersionContext.of(versionContext));
@@ -171,6 +173,13 @@ public class VersionedDatasetAdapter {
             viewFieldTypesList,
             viewConfig.getVirtualDataset().getContextList(),
             batchSchema);
+    // A versioned dataset is immutable and therefore always considered complete and up-to-date.
+    final DatasetMetadataState metadataState =
+        DatasetMetadataState.builder()
+            .setIsComplete(true)
+            .setIsExpired(false)
+            .setLastRefreshTimeMillis(System.currentTimeMillis())
+            .build();
 
     CatalogIdentity catalogIdentity = null;
     if (optionManager.getOption(VERSIONED_SOURCE_VIEW_DELEGATION_ENABLED)) {
@@ -197,7 +206,8 @@ public class VersionedDatasetAdapter {
         viewConfig,
         batchSchema,
         TableVersionContext.of(versionContext).asVersionContext(),
-        false);
+        false,
+        metadataState);
   }
 
   private DatasetConfig createShallowVirtualDatasetConfig(
@@ -276,12 +286,8 @@ public class VersionedDatasetAdapter {
             versionedDatasetConfig,
             accessUserName,
             splitsPointer,
-            IcebergUtils.getPrimaryKey(table, versionedDatasetConfig)) {
-          @Override
-          public TableVersionContext getVersionContext() {
-            return TableVersionContext.of(versionContext);
-          }
-        };
+            IcebergUtils.getPrimaryKey(table, versionedDatasetConfig),
+            TableVersionContext.of(versionContext));
 
     // A versioned dataset is immutable and therefore always considered complete and up-to-date.
     final DatasetMetadataState metadataState =
@@ -379,55 +385,7 @@ public class VersionedDatasetAdapter {
     chunkListing.iterator().forEachRemaining(chunkList::add);
     Preconditions.checkArgument(chunkList.size() == 1);
     // For a versioned iceberg table there is just one single split  - the manifest file.
-    return new AbstractSplitsPointer() {
-      @Override
-      public double getSplitRatio() {
-        return 1.0d; // default - same as DatasetSplit implementation.
-      }
-
-      @Override
-      public int getSplitsCount() {
-        return chunkList.size();
-      }
-
-      @Override
-      public SplitsPointer prune(SearchTypes.SearchQuery partitionFilterQuery) {
-        return this;
-      }
-
-      @Override
-      public Iterable<PartitionChunkMetadata> getPartitionChunks() {
-        final PartitionProtobuf.PartitionChunk.Builder builder =
-            PartitionProtobuf.PartitionChunk.newBuilder()
-                .setSize(0)
-                .setRowCount(0)
-                .setPartitionExtendedProperty(
-                    MetadataProtoUtils.toProtobuf(chunkList.get(0).getExtraInfo()))
-                .addAllPartitionValues(
-                    (chunkList.get(0).getPartitionValues().stream()
-                        .map(MetadataProtoUtils::toProtobuf)
-                        .collect(Collectors.toList())))
-                .setDatasetSplit(
-                    MetadataProtoUtils.toProtobuf(chunkList.get(0).getSplits().iterator().next()))
-                .setSplitKey("0")
-                .setSplitCount(1);
-
-        final PartitionChunkMetadata partitionChunkMetadata =
-            new PartitionChunkMetadataImpl(
-                builder.build(), PartitionChunkId.of(datasetConfig, builder.build(), 0));
-        return FluentIterable.of(partitionChunkMetadata);
-      }
-
-      @Override
-      public int getTotalSplitsCount() {
-        return chunkList.size();
-      }
-
-      @Override
-      public long getSplitVersion() {
-        return 0; // Default value - unused for versioned datasets
-      }
-    };
+    return new VersionedDataSetSplitPointer(chunkList, datasetConfig);
   }
 
   /** TBD We need to figure out how to do the access check with dataplane */
@@ -445,5 +403,100 @@ public class VersionedDatasetAdapter {
     icebergMetadata.setTableUuid(tableUUID);
     pds.setIcebergMetadata(icebergMetadata);
     datasetConfig.setPhysicalDataset(pds);
+  }
+
+  public static class VersionedDataSetSplitPointer extends AbstractSplitsPointer {
+    private final List<PartitionChunk> chunkList;
+    private final DatasetConfig datasetConfig;
+
+    public VersionedDataSetSplitPointer(
+        List<PartitionChunk> chunkList, DatasetConfig datasetConfig) {
+      this.chunkList = chunkList;
+      this.datasetConfig = datasetConfig;
+    }
+
+    @Override
+    public double getSplitRatio() {
+      return 1.0d; // default - same as DatasetSplit implementation.
+    }
+
+    @Override
+    public int getSplitsCount() {
+      return chunkList.size();
+    }
+
+    @Override
+    public SplitsPointer prune(SearchTypes.SearchQuery partitionFilterQuery) {
+      return this;
+    }
+
+    @Override
+    public Iterable<PartitionChunkMetadata> getPartitionChunks() {
+      final PartitionProtobuf.PartitionChunk.Builder builder =
+          PartitionProtobuf.PartitionChunk.newBuilder()
+              .setSize(0)
+              .setRowCount(0)
+              .setPartitionExtendedProperty(
+                  MetadataProtoUtils.toProtobuf(chunkList.get(0).getExtraInfo()))
+              .addAllPartitionValues(
+                  (chunkList.get(0).getPartitionValues().stream()
+                      .map(MetadataProtoUtils::toProtobuf)
+                      .collect(Collectors.toList())))
+              .setDatasetSplit(
+                  MetadataProtoUtils.toProtobuf(chunkList.get(0).getSplits().iterator().next()))
+              .setSplitKey("0")
+              .setSplitCount(1);
+
+      final PartitionChunkMetadata partitionChunkMetadata =
+          new PartitionChunkMetadataImpl(
+              builder.build(), PartitionChunkId.of(datasetConfig, builder.build(), 0));
+      return FluentIterable.of(partitionChunkMetadata);
+    }
+
+    @Override
+    public int getTotalSplitsCount() {
+      return chunkList.size();
+    }
+
+    @Override
+    public long getSplitVersion() {
+      return 0; // Default value - unused for versioned datasets
+    }
+
+    public DatasetConfig getDatasetConfig() {
+      return datasetConfig;
+    }
+
+    public List<PartitionChunk> getChunkList() {
+      return chunkList;
+    }
+
+    @Override
+    public String toString() {
+      return "VersionedDataSetSplitPointer{"
+          + "\nchunkList="
+          + chunkList
+          + ",\n datasetConfig="
+          + datasetConfig
+          + '}';
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      } else if (!(o instanceof VersionedDataSetSplitPointer)) {
+        return false;
+      } else {
+        VersionedDataSetSplitPointer that = (VersionedDataSetSplitPointer) o;
+        return Objects.equals(chunkList, that.chunkList)
+            && Objects.equals(datasetConfig, that.datasetConfig);
+      }
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(chunkList, datasetConfig);
+    }
   }
 }

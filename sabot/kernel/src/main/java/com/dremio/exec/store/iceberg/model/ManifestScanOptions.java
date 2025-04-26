@@ -18,6 +18,8 @@ package com.dremio.exec.store.iceberg.model;
 import com.dremio.exec.store.TableMetadata;
 import com.dremio.exec.store.iceberg.ManifestContentType;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import java.util.Collections;
+import java.util.List;
 import org.immutables.value.Value;
 
 @JsonDeserialize(builder = ImmutableManifestScanOptions.Builder.class)
@@ -66,6 +68,14 @@ public interface ManifestScanOptions {
   @Value.Default
   default boolean includesIcebergPartitionInfo() {
     return false;
+  }
+
+  /**
+   * @return column list with "lower_bounds" and "upper_bounds"
+   */
+  @Value.Default
+  default List<String> getColumnListWithLowerAndUpperBounds() {
+    return Collections.emptyList();
   }
 
   /**

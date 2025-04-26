@@ -79,7 +79,7 @@ public class PreparedStatementProvider {
           .put(MinorType.DECIMAL28SPARSE, BigDecimal.class.getName())
           .put(MinorType.DECIMAL38SPARSE, BigDecimal.class.getName())
           .put(MinorType.TIME, Time.class.getName())
-          .put(MinorType.TIMESTAMP, Timestamp.class.getName())
+          .put(MinorType.TIMESTAMPMILLI, Timestamp.class.getName())
           .put(MinorType.VARBINARY, byte[].class.getName())
           .put(MinorType.INTERVALYEAR, Period.class.getName())
           .put(MinorType.INTERVALDAY, Period.class.getName())
@@ -136,25 +136,27 @@ public class PreparedStatementProvider {
   }
 
   public static CreatePreparedStatementArrowResp buildArrow(
-      BatchSchema batchSchema, ServerPreparedStatementState handle, QueryId queryId) {
+      BatchSchema datasetSchema, ServerPreparedStatementState handle, QueryId queryId) {
+    return buildArrow(datasetSchema, handle, queryId, BatchSchema.EMPTY);
+  }
+
+  public static CreatePreparedStatementArrowResp buildArrow(
+      BatchSchema datasetSchema,
+      ServerPreparedStatementState handle,
+      QueryId queryId,
+      BatchSchema parameterSchema) {
     final CreatePreparedStatementArrowResp.Builder respBuilder =
         CreatePreparedStatementArrowResp.newBuilder();
     final PreparedStatementArrow.Builder prepStmtBuilder = PreparedStatementArrow.newBuilder();
     prepStmtBuilder.setServerHandle(
         PreparedStatementHandle.newBuilder().setServerInfo(handle.toByteString()));
 
-    final Schema arrowSchema = buildArrowSchema(batchSchema);
+    final Schema arrowSchema = buildArrowSchema(datasetSchema);
+    final Schema paramArrowSchema = buildArrowSchema(parameterSchema);
 
-    return getCreatePreparedStatementArrowResp(arrowSchema, prepStmtBuilder, respBuilder, queryId);
-  }
-
-  private static CreatePreparedStatementArrowResp getCreatePreparedStatementArrowResp(
-      Schema arrowSchema,
-      PreparedStatementArrow.Builder prepStmtBuilder,
-      CreatePreparedStatementArrowResp.Builder respBuilder,
-      QueryId queryId) {
     // Capture flatbuffer arrow schema representation of fields for use by some clients.
     prepStmtBuilder.setArrowSchema(ByteString.copyFrom(arrowSchema.toByteArray()));
+    prepStmtBuilder.setParameterArrowSchema(ByteString.copyFrom(paramArrowSchema.toByteArray()));
 
     respBuilder.setStatus(RequestStatus.OK);
     respBuilder.setPreparedStatement(prepStmtBuilder.build());

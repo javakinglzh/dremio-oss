@@ -121,6 +121,9 @@ public class ExpressionSplitter implements AutoCloseable {
 
   private final ExpressionSplitCache expressionSplitCache;
 
+  private boolean isGandivaFunctionsLogged;
+  private boolean isVarLengthOutputPresent;
+
   public ExpressionSplitter(
       OperatorContext context,
       VectorAccessible incoming,
@@ -308,7 +311,7 @@ public class ExpressionSplitter implements AutoCloseable {
 
     if (shouldSplit) {
       PreferenceBasedSplitter preferenceBasedSplitter =
-          new PreferenceBasedSplitter(this, preferredEngine, nonPreferredEngine);
+          new PreferenceBasedSplitter(this, context, preferredEngine, nonPreferredEngine);
       CodeGenContext e = expr.accept(preferenceBasedSplitter, myTracker);
       newExpr = new NamedExpression(e, namedExpression.getRef());
       executionEngine = e.getExecutionEngineForExpression();
@@ -401,7 +404,7 @@ public class ExpressionSplitter implements AutoCloseable {
   // setup the pipeline for project operations
   private void projectorSetup(
       VectorContainer outgoing, Stopwatch javaCodeGenWatch, Stopwatch gandivaCodeGenWatch)
-      throws GandivaException {
+      throws Exception {
     for (SplitStageExecutor splitStageExecutor : execPipeline) {
       splitStageExecutor.setupProjector(outgoing, javaCodeGenWatch, gandivaCodeGenWatch, options);
     }
@@ -709,6 +712,9 @@ public class ExpressionSplitter implements AutoCloseable {
     } catch (Exception e) {
       releaseAllBuffers();
       throw e;
+    } finally {
+      // reset the flag
+      isGandivaFunctionsLogged = false;
     }
   }
 
@@ -725,7 +731,11 @@ public class ExpressionSplitter implements AutoCloseable {
           currentThread.setName(newThreadName);
           return () -> currentThread.setName(originalName);
         } else {
-          logger.info("Thread name for gandiva functions evaluation: {} ", suffix);
+          // if the gandiva functions is too long, log it once per batch
+          if (!isGandivaFunctionsLogged) {
+            logger.debug("Thread name for gandiva functions evaluation: {} ", suffix);
+            isGandivaFunctionsLogged = true;
+          }
           return () -> {};
         }
       };
@@ -1011,7 +1021,7 @@ public class ExpressionSplitter implements AutoCloseable {
                 builder.setNamedExpression(namedExpression);
               } else {
                 builder.setNamedExpression("OMIT");
-                logger.info(String.format("Named expression: %s", namedExpression));
+                logger.debug(String.format("Named expression: %s", namedExpression));
               }
               return builder.build();
             })
@@ -1024,6 +1034,14 @@ public class ExpressionSplitter implements AutoCloseable {
 
   public int getOutputFieldCounter() {
     return outputFieldCounter;
+  }
+
+  public boolean isVarLengthOutputPresent() {
+    return isVarLengthOutputPresent;
+  }
+
+  public void setVarLengthOutputPresent(boolean isVarLengthOutputPresent) {
+    this.isVarLengthOutputPresent = isVarLengthOutputPresent;
   }
 
   class TypedFieldIdCorrectionVisitor

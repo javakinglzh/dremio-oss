@@ -64,7 +64,7 @@ public class IcebergManifestWriterPrel extends WriterPrel {
         child,
         createTableEntry.getLocation(),
         createTableEntry.getOptions(),
-        createTableEntry.getPlugin(),
+        (SupportsIcebergMutablePlugin) createTableEntry.getPlugin(),
         singleWriter);
   }
 

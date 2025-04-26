@@ -29,11 +29,12 @@ import static org.apache.hadoop.fs.s3a.Constants.SERVER_SIDE_ENCRYPTION_KEY;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.S3ConnectionConstants;
 import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.exec.catalog.CreateTableOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.DirectorySupportLackingFileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
@@ -56,6 +57,7 @@ import org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider;
 import org.apache.hadoop.fs.s3a.Constants;
 import org.apache.hadoop.fs.s3a.S3AEncryptionMethods;
 import org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider;
+import org.apache.hadoop.fs.s3a.TemporaryAWSCredentialsProvider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -87,13 +89,14 @@ public class S3StoragePlugin
       "com.dremio.service.coordinator" + ".DremioAssumeRoleCredentialsProviderV1";
   public static final String AWS_PROFILE_PROVIDER =
       "com.dremio.plugins.s3.store.AWSProfileCredentialsProviderV1";
+  public static final String SESSION_ACCESS_KEY_PROVIDER = TemporaryAWSCredentialsProvider.NAME;
 
   private final AWSCredentialsConfigurator awsCredentialsConfigurator;
   private final boolean isAuthTypeNone;
 
   public S3StoragePlugin(
       AbstractS3PluginConfig config,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> idProvider,
       AWSCredentialsConfigurator awsCredentialsConfigurator,
@@ -225,7 +228,7 @@ public class S3StoragePlugin
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     Preconditions.checkArgument(tableSchemaPath.size() >= 2, "key must be at least two parts");
     final List<String> resolvedPath =
         resolveTableNameToValidPath(tableSchemaPath.getPathComponents()); // strips source name
@@ -243,7 +246,7 @@ public class S3StoragePlugin
             icebergTableProps,
             writerOptions,
             storageOptions,
-            isResultsTable);
+            createTableOptions);
 
     final S3FileSystem fs = getSystemUserFS().unwrap(S3FileSystem.class);
 

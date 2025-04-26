@@ -17,12 +17,11 @@ import moment from "#oss/utils/dayjs";
 import { useRef, useEffect } from "react";
 import { Link } from "react-router";
 
-import config from "@inject/utils/config";
 import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
-import OverView from "#oss/pages/JobDetailsPageNew/components/OverView/OverView";
-import SQLTab from "#oss/pages/JobDetailsPageNew/components/SQLTab/SQLTab";
-import JobStateIcon from "#oss/pages/JobPage/components/JobStateIcon";
-import Profile from "#oss/pages/JobDetailsPageNew/components/Profile/Profile";
+import OverView from "#oss/pages/JobDetailsPage/components/OverView/OverView";
+import SQLTab from "#oss/pages/JobDetailsPage/components/SQLTab/SQLTab";
+import JobStateIcon from "#oss/pages/JobsPage/components/JobStateIcon";
+import Profile from "#oss/pages/JobDetailsPage/components/Profile/Profile";
 import timeUtils from "./timeUtils";
 import * as jobPaths from "dremio-ui-common/paths/jobs.js";
 import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
@@ -107,6 +106,7 @@ export function renderContent(contentPage, renderProps) {
     jobId,
     location,
   } = renderProps;
+
   switch (contentPage) {
     case "Overview":
       return (
@@ -375,10 +375,6 @@ export class JobsUtils {
       moment.duration(duration, "ms"),
       isNumberFormat,
     );
-  }
-
-  isNewJobsPage() {
-    return config && config.showNewJobsPage;
   }
 
   getReflectionsLink(item, location) {

@@ -99,6 +99,16 @@ public final class CatalogUtil {
     return recordCountFromSplits;
   }
 
+  public static boolean supportsInterface(
+      NamespaceKey namespaceKey, Catalog catalog, Class<?> clazz) {
+    try {
+      return catalog.getSource(namespaceKey.getRoot()).isWrapperFor(clazz);
+    } catch (UserException ignored) {
+      // Source not found
+      return false;
+    }
+  }
+
   @Deprecated(
       since = "Catalog should be the only one running this business logic",
       forRemoval = true)
@@ -134,7 +144,7 @@ public final class CatalogUtil {
     }
     try {
       VersionedPlugin versionedPlugin = catalog.getSource(sourceName);
-      return (versionedPlugin == null ? null : versionedPlugin.getDefaultBranch());
+      return (versionedPlugin == null ? null : versionedPlugin.getDefaultBranch().getRefName());
     } catch (NoDefaultBranchException e1) {
       throw UserException.validationError(e1)
           .message("Unable to get default branch for Source %s", sourceName)
@@ -309,20 +319,23 @@ public final class CatalogUtil {
             .build());
   }
 
+  public static Catalog getSystemCatalogForPlanCacheInvalidation(CatalogService catalogService) {
+    return catalogService.getCatalog(
+        MetadataRequestOptions.newBuilder()
+            .setSchemaConfig(
+                SchemaConfig.newBuilder(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
+                    .exposeInternalSources(true)
+                    .build())
+            .setCheckValidity(false)
+            .setNeverPromote(false)
+            .setErrorOnUnspecifiedSourceVersion(true)
+            .build());
+  }
+
   public static void clearAllDatasetCache(Catalog catalog) {
     catalog
         .getAllRequestedTables()
         .forEach(t -> catalog.clearDatasetCache(t.getPath(), t.getVersionContext()));
-  }
-
-  public static Catalog getSystemCatalogForJobs(CatalogService catalogService) {
-    return catalogService.getCatalog(
-        MetadataRequestOptions.newBuilder()
-            .setSchemaConfig(
-                SchemaConfig.newBuilder(CatalogUser.from(SystemUser.SYSTEM_USERNAME)).build())
-            .setCheckValidity(false)
-            .setNeverPromote(true)
-            .build());
   }
 
   public static Catalog getSystemCatalogForDatasetResource(CatalogService catalogService) {

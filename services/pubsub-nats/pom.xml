@@ -30,8 +30,8 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.dremio</groupId>
-      <artifactId>dremio-common</artifactId>
+      <groupId>com.dremio.common</groupId>
+      <artifactId>dremio-common-core</artifactId>
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
@@ -53,11 +53,16 @@
     <dependency>
       <groupId>io.nats</groupId>
       <artifactId>jnats</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>bcprov-lts8on</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
-      <groupId>org.testcontainers</groupId>
-      <artifactId>testcontainers</artifactId>
-      <scope>test</scope>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
@@ -71,5 +76,25 @@
       <classifier>tests</classifier>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.dremio.tools</groupId>
+      <artifactId>dremio-testcontainers-nats</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <dremio.testcontainers.enabled>true</dremio.testcontainers.enabled>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
 </project>

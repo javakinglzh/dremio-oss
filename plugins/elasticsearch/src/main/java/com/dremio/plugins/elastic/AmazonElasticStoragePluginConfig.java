@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.elastic;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
@@ -23,7 +24,6 @@ import com.dremio.exec.catalog.conf.Host;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.google.common.annotations.VisibleForTesting;
 import io.protostuff.Tag;
 import java.util.ArrayList;
@@ -145,8 +145,10 @@ public class AmazonElasticStoragePluginConfig
 
   @Override
   public ElasticsearchStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new ElasticsearchStoragePlugin(createElasticsearchConf(this), context, name);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new ElasticsearchStoragePlugin(createElasticsearchConf(this), pluginSabotContext, name);
   }
 
   /**

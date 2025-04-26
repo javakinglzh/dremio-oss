@@ -40,17 +40,8 @@ public class MigrationSecretsCreator implements SecretsCreator {
   @Override
   public Optional<URI> encrypt(String secret) throws CredentialsException {
     // Encrypt everything that isn't already encrypted.
-    try {
-      final URI uri = CredentialsServiceUtils.safeURICreate(secret);
-      // Check if already encrypted. isSupport is redundant but helps avoid extra decrypt call in
-      // isEncrypted
-      if (CredentialsServiceUtils.isEncryptedCredentials(uri)) {
-        if (isEncrypted(uri.getSchemeSpecificPart())) {
-          return Optional.empty();
-        }
-      }
-    } catch (IllegalArgumentException ignored) {
-      // Not a URI
+    if (isEncrypted(secret)) {
+      return Optional.empty();
     }
     return delegate.encrypt(CredentialsServiceUtils.encodeAsDataURI(secret).toString());
   }

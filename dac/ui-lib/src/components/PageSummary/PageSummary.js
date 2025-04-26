@@ -32,6 +32,16 @@ const PageSummary = (props) => {
   } = props;
 
   const toggleSummary = () => setIsCollapsed(!isCollapsed);
+  const iconProps = {
+    tabIndex: 0,
+    onKeyDown: (e) => {
+      if (e.code === "Enter" || e.code === "Space") {
+        toggleSummary();
+      }
+    },
+    className: "summary__header__icon",
+    onClick: toggleSummary,
+  };
 
   return (
     <div className={`summary gutter ${root}`}>
@@ -39,15 +49,9 @@ const PageSummary = (props) => {
         <SummaryIcon className="summary__header__icon margin-right" />
         <h3 className="summary__header__title">{title}</h3>
         {isCollapsed ? (
-          <ArrowUpIcon
-            className="summary__header__icon"
-            onClick={toggleSummary}
-          />
+          <ArrowUpIcon aria-label="open summary" {...iconProps} />
         ) : (
-          <ArrowDownIcon
-            className="summary__header__icon"
-            onClick={toggleSummary}
-          />
+          <ArrowDownIcon aria-label="collapse summary" {...iconProps} />
         )}
       </div>
       {!isCollapsed && (

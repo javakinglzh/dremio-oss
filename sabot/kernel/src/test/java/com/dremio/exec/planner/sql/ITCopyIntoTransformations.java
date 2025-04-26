@@ -24,16 +24,19 @@ import org.junit.Test;
 
 public class ITCopyIntoTransformations extends ITDmlQueryBase {
   private static final String SOURCE = TEMP_SCHEMA_HADOOP;
-  private static AutoCloseable enableTransformations;
+  private static AutoCloseable minBatchSize;
+  private static AutoCloseable maxBatchSize;
 
   @BeforeClass
   public static void setup() throws Exception {
-    enableTransformations = withSystemOption(ExecConstants.COPY_INTO_ENABLE_TRANSFORMATIONS, true);
+    minBatchSize = withSystemOption(ExecConstants.TARGET_BATCH_RECORDS_MIN, 8);
+    maxBatchSize = withSystemOption(ExecConstants.TARGET_BATCH_RECORDS_MAX, 8);
   }
 
   @AfterClass
   public static void tearDown() throws Exception {
-    enableTransformations.close();
+    minBatchSize.close();
+    maxBatchSize.close();
   }
 
   @Test
@@ -56,13 +59,13 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   @Test
   public void testWithMappingOnErrorAbort() throws Exception {
     CopyIntoTransformationTests.testWithMapping(
-        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testWithMappingOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testWithMapping(
-        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
@@ -78,49 +81,61 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   @Test
   public void testMultipleInputsOnErrorAbort() throws Exception {
     CopyIntoTransformationTests.testMultipleInputs(
-        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testMultipleInputsOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testMultipleInputs(
-        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
-  public void testIncompatibleTransformationTypesOnErrorAbort() throws Exception {
+  public void testIncompatibleTransformationTypesOnErrorAbortParquet() throws Exception {
     CopyIntoTransformationTests.testIncompatibleTransformationTypes(
         allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
   }
 
   @Test
-  public void testIncompatibleTransformationTypesOnErrorSkipFile() throws Exception {
+  public void testIncompatibleTransformationTypesOnErrorAbortCsv() throws Exception {
+    CopyIntoTransformationTests.testIncompatibleTransformationTypes(
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.CSV);
+  }
+
+  @Test
+  public void testIncompatibleTransformationTypesOnErrorSkipFileParquet() throws Exception {
     CopyIntoTransformationTests.testIncompatibleTransformationTypes(
         allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+  }
+
+  @Test
+  public void testIncompatibleTransformationTypesOnErrorSkipFileCsv() throws Exception {
+    CopyIntoTransformationTests.testIncompatibleTransformationTypes(
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.CSV);
   }
 
   @Test
   public void testPrimitiveTransformationsOnErrorAbort() throws Exception {
     CopyIntoTransformationTests.testPrimitiveTransformations(
-        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testPrimitiveTransformationsOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testPrimitiveTransformations(
-        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testPrimitiveNestedTransformationsOnErrorAbort() throws Exception {
     CopyIntoTransformationTests.testPrimitiveNestedTransformations(
-        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testPrimitiveNestedTransformationsOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testPrimitiveNestedTransformations(
-        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
@@ -174,7 +189,7 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   @Test
   public void testSelectNonExistentColumnFromSource() throws Exception {
     CopyIntoTransformationTests.testSelectNonExistentColumnFromSource(
-        SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
@@ -187,6 +202,32 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   public void testTypeErrorOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testTypeError(
         allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+  }
+
+  @Test
+  public void testTypeErrorOnErrorContinue() throws Exception {
+    CopyIntoTransformationTests.testTypeError(
+        allocator, SOURCE, OnErrorAction.CONTINUE, FileFormat.CSV);
+  }
+
+  @Test
+  public void testTransformationNoHeaderCsv() throws Exception {
+    CopyIntoTransformationTests.testTransformationNoHeaderCsv(allocator, SOURCE);
+  }
+
+  @Test
+  public void testCaseWhenThenCsv() throws Exception {
+    CopyIntoTransformationTests.testCaseWhenThenCsv(allocator, SOURCE);
+  }
+
+  @Test
+  public void testEmptyAsNull() throws Exception {
+    CopyIntoTransformationTests.testEmptyAsNullCsv(allocator, SOURCE);
+  }
+
+  @Test(expected = Exception.class)
+  public void testUnsupportedFormatOption() throws Exception {
+    CopyIntoTransformationTests.testUnsupportedFormatOption(allocator, SOURCE);
   }
 
   @Test
@@ -204,13 +245,13 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   @Test
   public void testMultipleInputsWithErrorOnErrorAbort() throws Exception {
     CopyIntoTransformationTests.testMultipleInputsWithError(
-        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
   public void testMultipleInputsWithErrorOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testMultipleInputsWithError(
-        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET, FileFormat.CSV);
   }
 
   @Test
@@ -222,6 +263,18 @@ public class ITCopyIntoTransformations extends ITDmlQueryBase {
   @Test
   public void testComplexWithRepeatingNamesOnErrorSkipFile() throws Exception {
     CopyIntoTransformationTests.testComplexWithRepeatingNames(
+        allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
+  }
+
+  @Test
+  public void testInvalidSelectListOnErrorAbort() throws Exception {
+    CopyIntoTransformationTests.testInvalidSelectList(
+        allocator, SOURCE, OnErrorAction.ABORT, FileFormat.PARQUET);
+  }
+
+  @Test
+  public void testInvalidSelectListOnErrorSkipFile() throws Exception {
+    CopyIntoTransformationTests.testInvalidSelectList(
         allocator, SOURCE, OnErrorAction.SKIP_FILE, FileFormat.PARQUET);
   }
 }

@@ -17,9 +17,7 @@ package com.dremio.exec.store.parquet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -39,6 +37,7 @@ import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.WritePartition;
 import com.dremio.exec.store.dfs.FileLoadInfo;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.util.ColumnUtils;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -70,7 +69,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
       Path targetPath,
       int minorFragmentId,
       BufferAllocator ALLOCATOR,
-      Long targetBlockSize)
+      Long targetFileSize)
       throws Exception {
     OptionManager optionManager = mock(OptionManager.class);
     when(optionManager.getOption(ExecConstants.PARQUET_WRITER_COMPRESSION_TYPE_VALIDATOR))
@@ -101,10 +100,10 @@ public class TestParquetRecordWriter extends BaseTestQuery {
     when(writerConf.getProps()).thenReturn(props);
     when(writerConf.getProps().getUserName()).thenReturn("testuser");
     when(writerConf.getOptions().getTableFormatOptions().getTargetFileSize())
-        .thenReturn(targetBlockSize);
+        .thenReturn(targetFileSize);
 
     FileSystemPlugin fsPlugin = BaseTestQuery.getMockedFileSystemPlugin();
-    when(fsPlugin.createFS((String) notNull(), (String) notNull(), (OperatorContext) notNull()))
+    when(fsPlugin.createFS(any(SupportsFsCreation.Builder.class)))
         .thenReturn(HadoopFileSystem.getLocal(hadoopConf));
     when(fsPlugin.getFsConfCopy()).thenReturn(hadoopConf);
     when(writerConf.getPlugin()).thenReturn(fsPlugin);
@@ -193,7 +192,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
     ParquetRecordWriter writer =
         prepareRecordWriter("testFileSizeWithTarget", 234236, ALLOCATOR, 100 * 1024 * 1024L);
 
-    assertTrue(writer.getBlockSize() == 100 * 1024 * 1024L);
+    assertEquals(100 * 1024 * 1024L, writer.getDesiredFileSize());
 
     writer.close();
     ALLOCATOR.close();
@@ -208,7 +207,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
     ParquetRecordWriter writer =
         prepareRecordWriter("testFileSizeWithTarget", 234236, ALLOCATOR, null);
 
-    assertTrue(writer.getBlockSize() == 256 * 1024 * 1024L);
+    assertEquals(256 * 1024 * 1024L, writer.getDesiredFileSize());
 
     writer.close();
     ALLOCATOR.close();
@@ -223,7 +222,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
     ParquetRecordWriter writer =
         prepareRecordWriter("testFileSizeWithInvalidTarget", 234236, ALLOCATOR, 0L);
 
-    assertTrue(writer.getBlockSize() == 256 * 1024 * 1024L);
+    assertEquals(256 * 1024 * 1024L, writer.getDesiredFileSize());
 
     writer.close();
     ALLOCATOR.close();
@@ -353,7 +352,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
   }
 
   private ParquetRecordWriter prepareRecordWriter(
-      String directoryName, int minorFragmentId, BufferAllocator allocator, Long targetBolockSize)
+      String directoryName, int minorFragmentId, BufferAllocator allocator, Long targetFileSize)
       throws Exception {
     final Path tmpSchemaPath = new Path(getDfsTestTmpSchemaLocation());
     final Path targetPath = new Path(tmpSchemaPath, directoryName);
@@ -361,7 +360,7 @@ public class TestParquetRecordWriter extends BaseTestQuery {
     final FileSystem newFs = targetPath.getFileSystem(hadoopConf);
     assertThat(newFs.mkdirs(targetPath)).isTrue();
     return mockParquetRecordWriter(
-        hadoopConf, targetPath, minorFragmentId, allocator, targetBolockSize);
+        hadoopConf, targetPath, minorFragmentId, allocator, targetFileSize);
   }
 
   private VectorContainer getContainerWithErrorColumn(

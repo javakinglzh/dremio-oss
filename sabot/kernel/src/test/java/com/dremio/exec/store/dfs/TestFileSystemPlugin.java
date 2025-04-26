@@ -19,15 +19,27 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.datastore.api.FindByRange;
+import com.dremio.exec.catalog.CreateTableOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.hadoop.HadoopFileSystem;
+import com.dremio.exec.physical.base.WriterOptions;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.store.SchemaConfig;
+import com.dremio.exec.store.easy.arrow.ArrowFormatPlugin;
+import com.dremio.exec.store.easy.arrow.ArrowFormatPluginConfig;
 import com.dremio.exec.store.file.proto.FileProtobuf;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
@@ -45,7 +57,10 @@ import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.dremio.service.namespace.file.proto.ParquetFileConfig;
 import com.dremio.service.namespace.file.proto.TextFileConfig;
 import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.service.users.SystemUser;
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import io.protostuff.ByteString;
 import java.io.IOException;
@@ -66,6 +81,8 @@ public class TestFileSystemPlugin {
   private org.apache.hadoop.fs.FileSystem underlyingFs;
 
   private HadoopFileSystem fileSystem;
+
+  private OptionManager optionManager;
 
   private static final String TEST_PARQUET_FILE_PATH = "/user/test/data/file.parquet";
 
@@ -90,6 +107,10 @@ public class TestFileSystemPlugin {
         .thenReturn(fileSystem);
     when(sabotContext.getFileSystemWrapper()).thenReturn(fileSystemWrapper);
     Provider<StoragePluginId> idProvider = () -> null;
+    optionManager = mock(OptionManager.class);
+    when(sabotContext.getOptionManager()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED))
+        .thenReturn((PlannerSettings.VALUES_CAST_ENABLED.getDefault().getBoolVal()));
     fileSystemPlugin = new FileSystemPlugin<>(fileSystemConf, sabotContext, name, idProvider);
   }
 
@@ -255,11 +276,71 @@ public class TestFileSystemPlugin {
         () -> fileSystemPlugin.getDatasetHandle(new EntityPath(ImmutableList.of("a", "b"))));
   }
 
+  @Test
+  public void testCacheOnRemovalCallsClose() throws Exception {
+    LoadingCache<String, org.apache.hadoop.fs.FileSystem> cache = fileSystemPlugin.getHadoopFS();
+    org.apache.hadoop.fs.FileSystem mockFileSystem = mock(org.apache.hadoop.fs.FileSystem.class);
+    cache.put("key", mockFileSystem);
+    cache.invalidate("key");
+    verify(mockFileSystem, times(1)).close();
+  }
+
+  @Test
+  public void testFileSystemPluginCloseCallsFSClose() throws Exception {
+    LoadingCache<String, org.apache.hadoop.fs.FileSystem> cache = fileSystemPlugin.getHadoopFS();
+    org.apache.hadoop.fs.FileSystem mockFileSystem = mock(org.apache.hadoop.fs.FileSystem.class);
+    cache.put("key", mockFileSystem);
+
+    fileSystemPlugin.close();
+    verify(mockFileSystem, times(1)).close();
+  }
+
+  @Test
+  public void testSkipFileExistenceCheck() throws Exception {
+    InternalFileConf config = mock(InternalFileConf.class);
+    when(config.getPath()).thenReturn(Path.of("rc"));
+    when(config.getConnection()).thenReturn("s3:///");
+    when(config.getProperties()).thenReturn(ImmutableList.of());
+    when(config.getSchemaMutability()).thenReturn(SchemaMutability.SYSTEM_TABLE);
+
+    ScanResult scanResult = mock(ScanResult.class);
+    when(scanResult.getImplementations(any(Class.class)))
+        .thenReturn(ImmutableSet.of(ArrowFormatPluginConfig.class))
+        .thenReturn(ImmutableSet.of(ArrowFormatPlugin.class));
+
+    SabotContext context = mock(SabotContext.class);
+    when(context.getClasspathScan()).thenReturn(scanResult);
+
+    FileSystem fs = mock(FileSystem.class);
+
+    FileSystemPlugin<InternalFileConf> fileSystemPlugin =
+        new FileSystemPlugin<>(config, context, "rc", null) {
+          @Override
+          public FileSystem createFS(SupportsFsCreation.Builder builder) {
+            return fs;
+          }
+        };
+    fileSystemPlugin.start();
+
+    fileSystemPlugin.createNewTable(
+        TEST_KEY,
+        SchemaConfig.newBuilder(() -> SystemUser.SYSTEM_USERNAME)
+            .optionManager(optionManager)
+            .build(),
+        null,
+        WriterOptions.DEFAULT,
+        ImmutableMap.of("type", ArrowFormatPlugin.ARROW_DEFAULT_NAME),
+        CreateTableOptions.builder().setSkipFileExistenceCheck(true).build());
+    verify(underlyingFs, never()).exists(any());
+  }
+
   class MockFileSystemConf extends FileSystemConf<MockFileSystemConf, MockFileSystemPlugin> {
 
     @Override
     public MockFileSystemPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
 

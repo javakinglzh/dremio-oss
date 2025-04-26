@@ -19,6 +19,7 @@ import com.dremio.common.DeferredException;
 import com.dremio.datastore.indexed.CommitWrapper;
 import com.dremio.datastore.indexed.LuceneSearchIndex;
 import com.dremio.datastore.indexed.ReadOnlyLuceneSearchIndex;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Throwables;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -46,7 +47,9 @@ class IndexManager implements AutoCloseable {
                 @Override
                 public void onRemoval(RemovalNotification<String, LuceneSearchIndex> notification) {
                   try {
-                    notification.getValue().close();
+                    if (notification.getValue() != null) {
+                      notification.getValue().close();
+                    }
                   } catch (Exception ex) {
                     closeException.addException(ex);
                   }
@@ -131,5 +134,10 @@ class IndexManager implements AutoCloseable {
     indexes.invalidateAll();
     indexes.cleanUp();
     closeException.close();
+  }
+
+  @VisibleForTesting
+  protected LoadingCache<String, LuceneSearchIndex> getIndexes() {
+    return indexes;
   }
 }

@@ -20,6 +20,9 @@ import static com.dremio.common.perf.Timer.time;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.perf.Timer.TimedBlock;
+import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.CatalogUser;
+import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.planner.PlannerPhase;
@@ -37,10 +40,13 @@ import com.dremio.exec.proto.UserProtos.UserProperties;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.server.SabotQueryContext;
 import com.dremio.exec.server.options.SessionOptionManagerImpl;
+import com.dremio.exec.store.CatalogService;
+import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.util.QueryVersionUtils;
 import com.dremio.exec.work.foreman.ExecutionPlan;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.dremio.sabot.rpc.user.UserSession;
+import com.dremio.service.jobs.CatalogUtil;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.jobs.metadata.QueryMetadata;
 import com.dremio.service.jobs.metadata.QueryMetadata.Builder;
@@ -63,6 +69,7 @@ import org.apache.calcite.tools.ValidationException;
 
 /** Query Parsing capabilities */
 public final class QueryParser {
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(QueryParser.class);
   private static final long ID_MAJOR = 3221355214L;
@@ -131,11 +138,11 @@ public final class QueryParser {
       // inner try to make sure query context is closed.
       try (QueryContext context = newQueryContext(query)) {
         context.setGroupResourceInformation(sabotContext.getClusterResourceInformation());
-
+        Catalog systemCatalog =
+            CatalogUtil.getSystemCatalogForJobs(sabotContext.getCatalogService());
+        Catalog userCatalog = getUserCatalog(sabotContext.getCatalogService(), query.getUsername());
         QueryMetadata.Builder builder =
-            QueryMetadata.builder(
-                    sabotContext.getNamespaceService(query.getUsername()),
-                    sabotContext.getCatalogService())
+            QueryMetadata.builder(userCatalog, systemCatalog)
                 .addQuerySql(query.getSql())
                 .addQueryContext(query.getContext());
         AttemptObserver observer = new MetadataCollectingObserver(builder);
@@ -160,6 +167,11 @@ public final class QueryParser {
     } catch (Exception ex) {
       throw Throwables.propagate(ex);
     }
+  }
+
+  private static Catalog getUserCatalog(CatalogService catalogService, String userName) {
+    return catalogService.getCatalog(
+        MetadataRequestOptions.of(SchemaConfig.newBuilder(CatalogUser.from(userName)).build()));
   }
 
   private SqlNode parseQueryInternal(SqlConverter converter, String sql) {
@@ -199,6 +211,7 @@ public final class QueryParser {
   }
 
   private static class MetadataCollectingObserver extends AbstractAttemptObserver {
+
     private final QueryMetadata.Builder builder;
 
     public MetadataCollectingObserver(Builder builder) {
@@ -240,7 +253,7 @@ public final class QueryParser {
           // set final pre-accelerated cost
           builder.addCost(cost);
           break;
-        case REDUCE_EXPRESSIONS:
+        case ENTITY_EXPANSION:
           builder.addExpandedPlan(before);
           break;
         default:

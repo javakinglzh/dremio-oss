@@ -15,7 +15,6 @@
  */
 package com.dremio.sabot.op.receiver;
 
-import com.dremio.exec.ExecConstants;
 import com.dremio.exec.proto.ExecProtos.FragmentHandle;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.threads.sharedres.SharedResource;
@@ -42,15 +41,15 @@ public abstract class BaseRawBatchBuffer<T> implements RawBatchBuffer {
     public void add(T obj);
 
     public void clear();
+
+    public long readableBytesSize();
   }
 
   private AtomicLong queueMonitor = new AtomicLong(0);
-  protected final OptionManager options;
   protected final BufferAllocator allocator;
   protected final FragmentHandle handle;
   protected BufferQueue<T> bufferQueue;
   private volatile BufferState state = BufferState.RUN;
-  protected final int bufferSizePerSocket;
   private AtomicLong remainingStreams;
   private final int fragmentCount;
   private final SharedResource resource;
@@ -61,8 +60,6 @@ public abstract class BaseRawBatchBuffer<T> implements RawBatchBuffer {
       FragmentHandle handle,
       BufferAllocator allocator,
       final int fragmentCount) {
-    bufferSizePerSocket = (int) options.getOption(ExecConstants.INCOMING_BUFFER_SIZE);
-    this.options = options;
     this.fragmentCount = fragmentCount;
     this.remainingStreams = new AtomicLong(fragmentCount);
     this.allocator = allocator;

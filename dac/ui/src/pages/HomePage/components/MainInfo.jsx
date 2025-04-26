@@ -15,7 +15,7 @@
  */
 import { Component } from "react";
 import { connect } from "react-redux";
-import { Link } from "react-router";
+import { Link, browserHistory } from "react-router";
 import Immutable from "immutable";
 import PropTypes from "prop-types";
 import DocumentTitle from "react-document-title";
@@ -27,12 +27,11 @@ import LinkWithRef from "#oss/components/LinkWithRef/LinkWithRef";
 import { loadWiki } from "#oss/actions/home";
 import DatasetMenu from "components/Menus/HomePage/DatasetMenu";
 import FolderMenu from "components/Menus/HomePage/FolderMenu";
-
 import BreadCrumbs, { formatFullPath } from "components/BreadCrumbs";
 import { getRootEntityType } from "utils/pathUtils";
 import { ENTITY_TYPES } from "#oss/constants/Constants";
 import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
-import { IconButton } from "dremio-ui-lib/components";
+import { IconButton, Tooltip } from "@dremio/design-system/components";
 
 import {
   ARCTIC,
@@ -47,7 +46,10 @@ import { getSourceByName } from "#oss/utils/nessieUtils";
 import ProjectHistoryButton from "#oss/exports/pages/VersionedHomePage/components/ProjectHistoryButton/ProjectHistoryButton";
 import { selectState } from "#oss/selectors/nessie/nessie";
 import { constructVersionedEntityUrl } from "#oss/exports/pages/VersionedHomePage/versioned-page-utils";
-import { isVersionedSource as checkIsVersionedSource } from "@inject/utils/sourceUtils";
+import {
+  isVersionedSource as checkIsVersionedSource,
+  isLimitedVersionSource,
+} from "@inject/utils/sourceUtils";
 import { fetchSupportFlagsDispatch } from "@inject/actions/supportFlags";
 import { addProjectBase as wrapBackendLink } from "dremio-ui-common/utilities/projectBase.js";
 import { compose } from "redux";
@@ -60,10 +62,13 @@ import {
 } from "dremio-ui-common/sonar/components/CatalogListingTable/catalogListingColumns.js";
 import { getCatalogData } from "#oss/utils/catalog-listing-utils";
 import { intl } from "#oss/utils/intl";
-import CatalogDetailsPanel from "./CatalogDetailsPanel/CatalogDetailsPanel";
+import CatalogDetailsPanel, {
+  handlePanelDetails,
+} from "./CatalogDetailsPanel/CatalogDetailsPanel";
 import Message from "#oss/components/Message";
 import SettingsPopover from "#oss/components/Buttons/SettingsPopover";
 import { withEntityProps } from "dyn-load/utils/entity-utils";
+import { isSourceDisabled } from "#oss/components/DisabledSourceNavItem";
 
 import { panelIcon } from "./BrowseTable.less";
 
@@ -89,10 +94,6 @@ const getEntityId = (props) => {
 
 @MainInfoMixin
 export class MainInfoView extends Component {
-  static contextTypes = {
-    location: PropTypes.object.isRequired,
-  };
-
   static propTypes = {
     entity: PropTypes.instanceOf(Immutable.Map),
     entityType: PropTypes.oneOf(Object.values(ENTITY_TYPES)),
@@ -123,6 +124,7 @@ export class MainInfoView extends Component {
     datasetDetails: null,
     sort: null,
     filter: "",
+    focusOnOpen: !localStorageUtils.getWikiVisibleState(),
   };
 
   componentDidMount() {
@@ -130,12 +132,15 @@ export class MainInfoView extends Component {
     this.fetchSupportFlags();
   }
 
-  componentDidUpdate(prevProps) {
+  componentDidUpdate(prevProps, prevState) {
     this.fetchWiki(prevProps);
 
     if (getEntityId(prevProps) !== getEntityId(this.props)) {
       this.setState({ filter: "", sort: null });
     }
+
+    if (prevState.datasetDetails === null && this.state.datasetDetails !== null)
+      this.setState({ focusOnOpen: true });
   }
 
   fetchWiki(prevProps) {
@@ -179,13 +184,13 @@ export class MainInfoView extends Component {
 
   getFolderActionButtons(folder, idx) {
     const { isVersionedSource, sourceType, nessieState = {} } = this.props;
+    const location = browserHistory.getCurrentLocation();
     const isFileSystemFolder = !!folder.get("fileSystemFolder");
     const isQueryAble = folder.get("queryable");
     const permissions = folder.get("permissions")
       ? folder.get("permissions").toJS()
       : null;
     const isAdmin = localStorageUtils.isUserAnAdmin();
-
     if (isFileSystemFolder && isQueryAble) {
       return this.getShortcutButtons(folder, "folder", idx);
     } else if (
@@ -197,7 +202,7 @@ export class MainInfoView extends Component {
           icon: <dremio-icon name="interface/format-folder" />,
           tooltip: intl.formatMessage({ id: "Folder.FolderFormat" }),
           to: {
-            ...this.context.location,
+            ...location,
             state: {
               modal: "DatasetSettingsModal",
               tab: "format",
@@ -244,6 +249,7 @@ export class MainInfoView extends Component {
 
   getFileActionButtons(file, permissions, idx) {
     const isAdmin = localStorageUtils.isUserAnAdmin();
+    const location = browserHistory.getCurrentLocation();
     const isQueryAble = file.get("queryable");
     if (isQueryAble) {
       return this.getShortcutButtons(file, "file", idx);
@@ -255,7 +261,7 @@ export class MainInfoView extends Component {
           icon: <dremio-icon name="interface/format-file" />,
           tooltip: intl.formatMessage({ id: "File.FileFormat" }),
           to: {
-            ...this.context.location,
+            ...location,
             state: {
               modal: "DatasetSettingsModal",
               tab: "format",
@@ -290,24 +296,27 @@ export class MainInfoView extends Component {
         .filter((btn) => btn.isShown)
         // return rendered link buttons
         .map((btnType, index) => (
-          <IconButton
-            as={LinkWithRef}
-            to={btnType.link}
-            tooltip={intl.formatMessage({ id: btnType.tooltip })}
+          <Tooltip
             key={item.get("id") + index}
-            className="main-settings-btn min-btn"
-            data-qa={btnType.type}
-            tooltipPortal
+            tooltipPlacement="bottom"
+            content={intl.formatMessage({ id: btnType.tooltip })}
           >
-            {btnType.label}
-          </IconButton>
+            <LinkWithRef
+              className="dremio-icon-button main-settings-btn min-btn"
+              data-qa={btnType.type}
+              to={btnType.link}
+            >
+              {btnType.label}
+            </LinkWithRef>
+          </Tooltip>
         )),
       this.getSettingsBtnByType(
         (closeMenu) => (
           <DatasetMenu
+            sourceType={this.props?.sourceType}
             entity={item}
             entityType={entityType}
-            openWikiDrawer={(dataset) => this.openDetailsPanel(dataset, true)}
+            openWikiDrawer={(dataset) => this.openDetailsPanel(dataset)}
             closeMenu={() => closeMenu.close()}
           />
         ),
@@ -331,13 +340,15 @@ export class MainInfoView extends Component {
     return (
       showButton && (
         <IconButton
-          tooltip="Open details panel"
+          label="Open details panel"
           onClick={(e) => {
             e.preventDefault();
-            this.openDetailsPanel(item, true);
+            this.openDetailsPanel(item, e);
           }}
+          key={item.get("id")}
           className="main-settings-btn min-btn catalog-btn"
-          tooltipPortal
+          testid="DETAILS_PANEL"
+          tooltipPlacement="bottom"
         >
           <dremio-icon name="interface/meta" />
         </IconButton>
@@ -358,7 +369,7 @@ export class MainInfoView extends Component {
     );
   }
 
-  getRow(item, i) {
+  getRow(item, i, sourceType = null) {
     if (!item)
       return {
         id: `${i}`,
@@ -374,6 +385,7 @@ export class MainInfoView extends Component {
           <MainInfoItemNameAndTag
             item={item}
             openDetailsPanel={this.openDetailsPanel}
+            sourceType={sourceType}
           />
         ),
         jobs: (
@@ -407,7 +419,7 @@ export class MainInfoView extends Component {
   }
 
   isReadonly(spaceList) {
-    const { pathname } = this.context.location;
+    const pathname = browserHistory.getCurrentLocation().pathname;
     if (spaceList !== undefined) {
       return !!spaceList.find((item) => {
         if (item.href === pathname) {
@@ -421,6 +433,7 @@ export class MainInfoView extends Component {
   toggleDetailsPanel = () => {
     const { entity } = this.props;
     let newValue;
+    const prevAnchor = this.state.anchorEl;
     this.setState(
       (prevState) => ({
         isDetailsPanelShown: (newValue = !prevState.isDetailsPanelShown),
@@ -428,9 +441,17 @@ export class MainInfoView extends Component {
           ...entity.toJS(),
           fullPath: entity.get("fullPath") || entity.get("fullPathList"),
         }),
+        anchorEl: undefined,
       }),
       () => {
         localStorageUtils.setWikiVisibleState(newValue);
+        if (!prevAnchor) {
+          document.body
+            .querySelector("#browse-table__detailsPanelIcon")
+            ?.focus?.();
+        } else {
+          prevAnchor?.focus?.();
+        }
       },
     );
   };
@@ -456,7 +477,7 @@ export class MainInfoView extends Component {
   constructVersionSourceLink = () => {
     const { source, nessieState = {} } = this.props;
     const { hash, reference } = nessieState;
-    const { pathname } = this.context.location;
+    const pathname = browserHistory.getCurrentLocation().pathname;
     const versionBase = this.isArctic() ? "arctic" : "nessie";
     let namespace = encodeURIComponent(reference?.name) || "";
     if (pathname.includes(folderPath)) {
@@ -478,7 +499,12 @@ export class MainInfoView extends Component {
   };
 
   renderExternalLink = () => {
-    if (this.isNeitherNessieOrArctic()) return null;
+    const { source } = this.props;
+    if (
+      this.isNeitherNessieOrArctic() ||
+      isLimitedVersionSource(source.get("type"))
+    )
+      return null;
     else {
       return <ProjectHistoryButton to={this.constructVersionSourceLink()} />;
     }
@@ -486,7 +512,11 @@ export class MainInfoView extends Component {
 
   renderTitleExtraContent = () => {
     const { source } = this.props;
-    if (this.isNeitherNessieOrArctic()) return null;
+    if (
+      this.isNeitherNessieOrArctic() ||
+      isLimitedVersionSource(source.get("type"))
+    )
+      return null;
     return <SourceBranchPicker source={source.toJS()} />;
   };
 
@@ -496,19 +526,21 @@ export class MainInfoView extends Component {
 
     return (
       <IconButton
-        tooltip={intl.formatMessage({
+        label={intl.formatMessage({
           id: "Wiki.OpenDetails",
         })}
         onClick={this.toggleDetailsPanel}
         tooltipPlacement="top"
         className={panelIcon}
+        id="browse-table__detailsPanelIcon"
+        testid="Wiki.OpenDetails"
       >
         <dremio-icon name="interface/meta" />
       </IconButton>
     );
   };
 
-  openDetailsPanel = async (dataset) => {
+  openDetailsPanel = async (dataset, e) => {
     const { datasetDetails } = this.state;
     const currentDatasetId = dataset.get("id") || dataset?.get("entityId");
     if (currentDatasetId === datasetDetails?.get("entityId")) {
@@ -518,19 +550,16 @@ export class MainInfoView extends Component {
     this.setState({
       isDetailsPanelShown: true,
       datasetDetails: dataset,
+      anchorEl: e?.target,
     });
   };
 
+  setDataset = (dataset) => {
+    this.setState({ datasetDetails: dataset });
+  };
+
   handleUpdatePanelDetails = (dataset) => {
-    if (dataset.get("error")) {
-      this.setState({
-        datasetDetails: this.state.datasetDetails.merge(dataset),
-      });
-    } else if (
-      dataset?.get("entityId") !== this.state.datasetDetails?.get("entityId")
-    ) {
-      this.setState({ datasetDetails: dataset });
-    }
+    handlePanelDetails(dataset, this.state.datasetDetails, this.setDataset);
   };
 
   openDatasetInNewTab = () => {
@@ -557,6 +586,7 @@ export class MainInfoView extends Component {
       isVersionedSource,
       sourceType,
       rootEntityType,
+      source,
     } = this.props;
     const { datasetDetails, isDetailsPanelShown } = this.state;
     const panelItem = datasetDetails
@@ -564,10 +594,14 @@ export class MainInfoView extends Component {
       : this.shouldShowDetailsPanelIcon()
         ? entity
         : null;
-    const { pathname } = this.context.location;
+    const pathname = browserHistory.getCurrentLocation().pathname;
     const tableData = this.getTableData();
     const sortedData =
-      viewState.get("isInProgress") && tableData.size === 0
+      (viewState.get("isInProgress") && tableData.size === 0) ||
+      isSourceDisabled(
+        source?.get("sourceChangeState"),
+        source?.get("entityType"),
+      )
         ? Immutable.fromJS(loadingSkeletonRows)
         : getCatalogData(
             tableData,
@@ -596,6 +630,9 @@ export class MainInfoView extends Component {
       </>
     );
 
+    const isSourceUpdating =
+      source && source.get("sourceChangeState") !== "SOURCE_CHANGE_STATE_NONE";
+
     return (
       <>
         <DocumentTitle
@@ -611,7 +648,8 @@ export class MainInfoView extends Component {
             key={pathname}
             getRow={(i) => {
               const item = sortedData.get(i);
-              return this.getRow(item, i);
+              const sourceType = source && source.get("type");
+              return this.getRow(item, i, sourceType);
             }}
             columns={columns}
             rowCount={sortedData.size}
@@ -639,9 +677,13 @@ export class MainInfoView extends Component {
                 </h3>
               </>
             }
-            rightHeaderButtons={buttons}
+            rightHeaderButtons={isSourceUpdating ? <></> : buttons}
             leftHeaderButtons={this.renderExternalLink()}
-            onFilter={(filter) => this.setState({ filter: filter })}
+            onFilter={
+              isSourceUpdating
+                ? undefined
+                : (filter) => this.setState({ filter: filter })
+            }
             showButtonDivider={
               buttons != null || (!isDetailsPanelShown && panelItem)
             }
@@ -656,6 +698,7 @@ export class MainInfoView extends Component {
             panelItem={panelItem}
             handleDatasetDetailsCollapse={this.toggleDetailsPanel}
             handlePanelDetails={this.handleUpdatePanelDetails}
+            focusOnOpen={this.state.focusOnOpen}
           />
         )}
       </>

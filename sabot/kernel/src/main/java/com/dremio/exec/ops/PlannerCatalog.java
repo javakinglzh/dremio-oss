@@ -23,6 +23,7 @@ import com.dremio.exec.catalog.CatalogIdentity;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.catalog.SimpleCatalog;
+import com.dremio.exec.planner.sql.SqlValidatorAndToRelContext;
 import com.dremio.service.namespace.NamespaceKey;
 import java.util.Collection;
 import java.util.Map;
@@ -214,4 +215,6 @@ public interface PlannerCatalog {
    * lifetime of a single query. This occurs with both plan cache and materialization cache.
    */
   void dispose();
+
+  SqlValidatorAndToRelContext getSqlValidatorAndToRelContext();
 }

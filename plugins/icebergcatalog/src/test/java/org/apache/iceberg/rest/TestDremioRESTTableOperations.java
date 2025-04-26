@@ -15,14 +15,15 @@
  */
 package org.apache.iceberg.rest;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.exec.store.iceberg.DremioFileIO;
+import org.apache.iceberg.TableMetadata;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -82,10 +83,12 @@ public class TestDremioRESTTableOperations {
     assertEquals(mockFileIO, dremioRESTTableOperations.io());
   }
 
-  /** Unsupported methods */
   @Test
-  public void testCommit() {
-    assertThatThrownBy(() -> dremioRESTTableOperations.commit(null, null))
-        .isInstanceOf(UnsupportedOperationException.class);
+  public void testCommitDelegates() {
+    final TableMetadata baseTableMetadata = any(TableMetadata.class);
+    final TableMetadata updateTableMetadata = any(TableMetadata.class);
+
+    dremioRESTTableOperations.commit(baseTableMetadata, updateTableMetadata);
+    verify(mockRestTableOperations, times(1)).commit(baseTableMetadata, updateTableMetadata);
   }
 }

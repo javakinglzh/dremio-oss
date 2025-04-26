@@ -36,6 +36,7 @@ public class APIJobResultsSerializer extends AbstractRowBasedRecordWriter {
   private final DataJsonOutput gen;
 
   public APIJobResultsSerializer(final JsonGenerator jsonGenerator, final boolean convertNumbersToStrings) {
+    super(null);
     this.gen = new DataJsonOutput(jsonGenerator, convertNumbersToStrings);
   }
 

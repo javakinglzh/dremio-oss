@@ -29,14 +29,17 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.plan.hep.HepRelVertex;
 import org.apache.calcite.rel.RelCollations;
+import org.apache.calcite.rel.RelHomogeneousShuttle;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rex.RexCorrelVariable;
 import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexSubQuery;
-import org.apache.calcite.sql2rel.SqlToRelConverter;
+import org.apache.calcite.sql.fun.SqlQuantifyOperator;
 
 public final class RexSubQueryUtils {
 
@@ -56,10 +59,50 @@ public final class RexSubQueryUtils {
     return false;
   }
 
+  public static boolean containsSubQuery(RexNode rexNode) {
+    RexSubQueryFinder rexSubQueryFinder = new RexSubQueryFinder();
+    rexNode.accept(rexSubQueryFinder);
+
+    return rexSubQueryFinder.foundRexSubQuery;
+  }
+
   public static Map<RelNode, Set<RexFieldAccess>> mapCorrelateVariables(RelNode relNode) {
     Map<RelNode, Set<RexFieldAccess>> mapping = new HashMap<>();
     fillCorrelateVariableMap(mapping, relNode);
     return mapping;
+  }
+
+  // TODO: add RexSubQuery.clone(CorrelationId) so we don't need this
+  public static RexSubQuery clone(RexSubQuery rexSubQuery, CorrelationId correlationId) {
+    switch (rexSubQuery.op.kind) {
+      case SCALAR_QUERY:
+        return RexSubQuery.scalar(rexSubQuery.rel, correlationId);
+
+      case EXISTS:
+        return RexSubQuery.exists(rexSubQuery.rel, correlationId);
+
+      case IN:
+        return RexSubQuery.in(rexSubQuery.rel, rexSubQuery.operands, correlationId);
+
+      case SOME:
+        return RexSubQuery.some(
+            rexSubQuery.rel,
+            rexSubQuery.operands,
+            (SqlQuantifyOperator) rexSubQuery.op,
+            correlationId);
+
+      case ARRAY_QUERY_CONSTRUCTOR:
+        return RexSubQuery.array(rexSubQuery.rel, correlationId);
+
+      case MAP_QUERY_CONSTRUCTOR:
+        return RexSubQuery.map(rexSubQuery.rel, correlationId);
+
+      case MULTISET_QUERY_CONSTRUCTOR:
+        return RexSubQuery.multiset(rexSubQuery.rel, correlationId);
+
+      default:
+        throw new UnsupportedOperationException("Unexpected op: " + rexSubQuery.op);
+    }
   }
 
   private static void fillCorrelateVariableMap(
@@ -203,43 +246,6 @@ public final class RexSubQueryUtils {
             parent.getTraitSet().plus(DistributionTrait.ANY).plus(RelCollations.EMPTY));
         newParent = parent.accept(transformer);
       }
-      return super.visitChild(newParent, i, newParent.getInput(i));
-    }
-  }
-
-  /** Calls the sqlToRelConverter's flattenTypes on each RexSubQuery's subtree. */
-  public static class RexSubQueryFlattener extends RexShuttle {
-
-    private final SqlToRelConverter converter;
-
-    public RexSubQueryFlattener(SqlToRelConverter converter) {
-      this.converter = converter;
-    }
-
-    @Override
-    public RexNode visitSubQuery(RexSubQuery subQuery) {
-      final RelNode transformed = converter.flattenTypes(subQuery.rel, true);
-      final RelNode transformed2 =
-          transformed.accept(new RelsWithRexSubQueryFlattener(converter)); // todo
-      return subQuery.clone(transformed2);
-    }
-  }
-
-  /**
-   * Transforms a RelNode with RexSubQuery into JDBC convention. Does so by using {@link
-   * RexSubQueryTransformer}.
-   */
-  public static class RelsWithRexSubQueryFlattener extends StatelessRelShuttleImpl {
-
-    private final RexSubQueryFlattener flattener;
-
-    public RelsWithRexSubQueryFlattener(SqlToRelConverter converter) {
-      flattener = new RexSubQueryFlattener(converter);
-    }
-
-    @Override
-    protected RelNode visitChild(RelNode parent, int i, RelNode child) {
-      RelNode newParent = parent.accept(flattener);
       return super.visitChild(newParent, i, newParent.getInput(i));
     }
   }
@@ -408,5 +414,54 @@ public final class RexSubQueryUtils {
       canPushdownRexSubQuery = false;
       return false;
     }
+  }
+
+  public static Set<RexCorrelVariable> collectCorrelatedVariables(RelNode relNode) {
+    return collectCorrelatedVariables(relNode, null);
+  }
+
+  public static Set<RexCorrelVariable> collectCorrelatedVariables(
+      RelNode relNode, CorrelationId correlationId) {
+    Set<RexCorrelVariable> rexCorrelVariables = new HashSet<>();
+    relNode.accept(
+        new RelHomogeneousShuttle() {
+          @Override
+          public RelNode visit(RelNode other) {
+            if (other instanceof HepRelVertex) {
+              other = ((HepRelVertex) other).getCurrentRel();
+            }
+
+            RelNode visitedRelNode = super.visit(other);
+            rexCorrelVariables.addAll(
+                collectCorrelateVariablesInRelNode(visitedRelNode, correlationId));
+            return visitedRelNode;
+          }
+        });
+
+    return rexCorrelVariables;
+  }
+
+  public static Set<RexCorrelVariable> collectCorrelateVariablesInRelNode(
+      RelNode relNode, CorrelationId correlationId) {
+    Set<RexCorrelVariable> rexCorrelVariables = new HashSet<>();
+    relNode.accept(
+        new RexShuttle() {
+          @Override
+          public RexNode visitCorrelVariable(RexCorrelVariable variable) {
+            if (correlationId == null || (variable.id.getId() == correlationId.getId())) {
+              rexCorrelVariables.add(variable);
+            }
+
+            return super.visitCorrelVariable(variable);
+          }
+
+          @Override
+          public RexNode visitSubQuery(RexSubQuery subQuery) {
+            subQuery.rel.accept(this);
+            return super.visitSubQuery(subQuery);
+          }
+        });
+
+    return rexCorrelVariables;
   }
 }

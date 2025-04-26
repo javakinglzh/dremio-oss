@@ -17,9 +17,12 @@ package com.dremio.dac.options;
 
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators;
+import com.dremio.options.UserControlledOption;
 
 @Options
 public final class PowerBIResourceOptions {
+
+  @UserControlledOption
   public static final TypeValidators.BooleanValidator CLIENT_TOOLS_POWERBI =
       new TypeValidators.BooleanValidator("client.tools.powerbi", true);
 }

@@ -29,6 +29,7 @@ import java.time.temporal.Temporal;
 import java.time.temporal.TemporalAdjuster;
 import java.time.temporal.TemporalAmount;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 /** Builder to create simple {@code Schedule} instances */
 final class ScheduleBuilderImpl implements Builder {
@@ -39,6 +40,7 @@ final class ScheduleBuilderImpl implements Builder {
   private int staggerSeed;
   private long staggerRange = 0;
   private TimeUnit staggerUnit;
+  private Function<Schedule, Schedule> scheduleModifier = (x) -> null;
 
   ScheduleBuilderImpl(TemporalAmount amount) {
     this(Instant.now(), amount, NO_ADJUSTMENT, ZoneOffset.UTC);
@@ -87,8 +89,14 @@ final class ScheduleBuilderImpl implements Builder {
   }
 
   @Override
+  public Builder scheduleModifier(Function<Schedule, Schedule> scheduleModifier) {
+    this.scheduleModifier = scheduleModifier;
+    return this;
+  }
+
+  @Override
   public Schedule build() {
-    Schedule schedule = new BaseSchedule(start, amount, adjuster, zoneId);
+    Schedule schedule = new BaseSchedule(start, amount, adjuster, zoneId, scheduleModifier);
 
     if (staggerRange > 0) {
       schedule =

@@ -19,7 +19,6 @@ import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.VersionedDatasetAdapter;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.store.VersionedDatasetHandle;
@@ -32,7 +31,6 @@ import com.dremio.service.namespace.file.proto.IcebergFileConfig;
 import com.dremio.service.namespace.file.proto.ParquetFileConfig;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.function.Supplier;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 
 /**
@@ -43,33 +41,23 @@ public class TransientIcebergMetadataProvider extends BaseIcebergExecutionDatase
     implements VersionedDatasetHandle {
 
   private final Supplier<Table> tableSupplier;
-  private String contentId;
-  private String uniqueInstanceId;
+  private final String contentId;
+  private final String uniqueInstanceId;
 
   public TransientIcebergMetadataProvider(
       EntityPath datasetPath,
       Supplier<Table> tableSupplier,
-      Configuration configuration,
       TableSnapshotProvider tableSnapshotProvider,
-      MutablePlugin plugin,
       TableSchemaProvider tableSchemaProvider,
       OptionResolver optionResolver,
-      String
-          contentId, // This ContentId in the Nessie ContentId and applies to iceberg tables  with
-      // root pointers in nessie. In other cases can be null or a random string
-      String uniqueInstanceId // uuid extracted from the Iceberg metadata location
-      ) {
-    super(
-        datasetPath,
-        tableSupplier,
-        configuration,
-        tableSnapshotProvider,
-        plugin,
-        tableSchemaProvider,
-        optionResolver);
+      // This ContentId in the Nessie ContentId and applies to iceberg tables with
+      // root pointers in nessie. In other cases can be null or a random string.
+      String contentId,
+      String uuidExtractedFromIcebergMetadataLocation) {
+    super(datasetPath, tableSupplier, tableSnapshotProvider, tableSchemaProvider, optionResolver);
     this.tableSupplier = tableSupplier;
     this.contentId = contentId;
-    this.uniqueInstanceId = uniqueInstanceId;
+    this.uniqueInstanceId = uuidExtractedFromIcebergMetadataLocation;
   }
 
   @Override

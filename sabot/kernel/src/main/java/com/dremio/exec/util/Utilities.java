@@ -26,6 +26,8 @@ import com.dremio.exec.proto.UserBitShared.WorkloadClass;
 import com.dremio.exec.proto.UserBitShared.WorkloadType;
 import com.dremio.exec.proto.UserProtos.QueryPriority;
 import com.google.common.collect.Lists;
+import java.util.ArrayList;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Locale;
 
@@ -144,7 +146,7 @@ public class Utilities {
     return WorkloadType.UNKNOWN;
   }
 
-  public static String getHumanReadableWorkloadType(WorkloadType workloadType) {
+  public static String getWorkloadTypeForWlmRules(WorkloadType workloadType) {
     switch (workloadType) {
       case DDL:
         return "DDL"; // not yet configurable via UI
@@ -178,12 +180,17 @@ public class Utilities {
     }
   }
 
-  public static boolean isAccelerationType(final WorkloadType queryType) {
-    return isAccelerationType(getHumanReadableWorkloadType(queryType));
-  }
-
-  public static boolean isAccelerationType(final String queryType) {
-    return queryType != null
-        && queryType.equals(getHumanReadableWorkloadType(WorkloadType.ACCELERATOR));
+  public static <T> List<List<T>> splitList(List<T> list, int splitCount) {
+    List<List<T>> result = new LinkedList<>();
+    int splitSize = list.size() / splitCount;
+    int extra = list.size() % splitCount;
+    int blockStart = 0;
+    for (int i = 0; i < splitCount; i++) {
+      int currentSize = splitSize + (i < extra ? 1 : 0);
+      int blockEnd = Math.min(blockStart + currentSize, list.size());
+      result.add(new ArrayList<>(list.subList(blockStart, blockEnd)));
+      blockStart = blockEnd;
+    }
+    return result;
   }
 }

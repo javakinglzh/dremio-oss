@@ -63,7 +63,7 @@ class MergeCellRegion {
       case FLOAT8:
         writer = new Float8Writer();
         break;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         writer = new TimeStampMilliWriter();
         break;
       case VARCHAR:

@@ -115,7 +115,7 @@ public class CommandCreatorTest {
     setReusePreparedHandles();
 
     final PreparedPlan preparedPlan =
-        new PreparedPlan(prepareId, USERNAME1, false, QUERY, null, null);
+        new PreparedPlan(prepareId, USERNAME1, false, "NONE", QUERY, null, null);
     plans.put(serverPreparedStatementState.getHandle(), preparedPlan);
 
     final PrepareToExecution expectedCommand =
@@ -140,7 +140,7 @@ public class CommandCreatorTest {
     setNotReusePreparedHandles();
 
     final PreparedPlan preparedPlan =
-        new PreparedPlan(prepareId, USERNAME1, false, QUERY, null, null);
+        new PreparedPlan(prepareId, USERNAME1, false, "NONE", QUERY, null, null);
     plans.put(serverPreparedStatementState.getHandle(), preparedPlan);
 
     final PrepareToExecution expectedCommand =
@@ -165,7 +165,7 @@ public class CommandCreatorTest {
     setReusePreparedHandles();
 
     final PreparedPlan preparedPlan =
-        new PreparedPlan(prepareId, USERNAME1, false, QUERY, null, null);
+        new PreparedPlan(prepareId, USERNAME1, false, "NONE", QUERY, null, null);
     plans.put(serverPreparedStatementState.getHandle(), preparedPlan);
 
     final PrepareToExecution expectedCommand =
@@ -190,7 +190,7 @@ public class CommandCreatorTest {
     setReusePreparedHandles();
 
     final PreparedPlan preparedPlan =
-        new PreparedPlan(prepareId, USERNAME1, false, QUERY, null, null);
+        new PreparedPlan(prepareId, USERNAME1, false, "NONE", QUERY, null, null);
     plans.put(serverPreparedStatementState.getHandle(), preparedPlan);
 
     final CommandCreator commandCreator = spy(buildCommandCreator(0));
@@ -209,7 +209,7 @@ public class CommandCreatorTest {
     setNotReusePreparedHandles();
 
     final PreparedPlan preparedPlan =
-        new PreparedPlan(prepareId, USERNAME1, false, QUERY, null, null);
+        new PreparedPlan(prepareId, USERNAME1, false, "NONE", QUERY, null, null);
     plans.put(serverPreparedStatementState.getHandle(), preparedPlan);
 
     final CommandCreator commandCreator = spy(buildCommandCreator(0));

@@ -30,6 +30,7 @@ message AwsKeys {
 message AwsRole {
   string iam_role = 1;
   string external_id = 2;
+  string region = 3;
 }
 
 message AzureClientAccess {

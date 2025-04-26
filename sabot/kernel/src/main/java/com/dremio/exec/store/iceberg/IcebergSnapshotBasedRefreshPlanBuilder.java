@@ -16,6 +16,7 @@
 package com.dremio.exec.store.iceberg;
 
 import static com.dremio.exec.planner.common.ScanRelBase.getRowTypeFromProjectedColumns;
+import static com.dremio.exec.planner.physical.DmlPlanGeneratorBase.getHashDistributionTraitForFields;
 import static com.dremio.exec.planner.physical.PrelUtil.addLimitPrel;
 import static com.dremio.exec.store.SystemSchemas.ALL_FIELDS_BATCH_SCHEMA;
 import static com.dremio.exec.store.dfs.FileSystemRulesFactory.IcebergMetadataFilesystemScanPrule.getInternalIcebergTableMetadata;
@@ -24,9 +25,11 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ops.SnapshotDiffContext;
 import com.dremio.exec.physical.config.TableFunctionConfig;
+import com.dremio.exec.planner.physical.DistributionTrait;
 import com.dremio.exec.planner.physical.FilterPrel;
 import com.dremio.exec.planner.physical.HashAggPrel;
 import com.dremio.exec.planner.physical.HashJoinPrel;
+import com.dremio.exec.planner.physical.HashToRandomExchangePrel;
 import com.dremio.exec.planner.physical.IncrementalRefreshByPartitionPlaceholderPrel;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
@@ -47,9 +50,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.JoinRelType;
@@ -230,14 +235,22 @@ public final class IcebergSnapshotBasedRefreshPlanBuilder extends IcebergScanPla
       final RelNode right,
       final List<Field> joinOnFields,
       final JoinRelType joinRelType) {
+    // it is possible that the inputs are not partitioned on the same fields,
+    // so we need to add an HashToRandomExchange on the join fields
+    final List<String> joinOnFieldsNames =
+        joinOnFields.stream().map(Field::getName).collect(Collectors.toList());
+    final RelNode leftWithHashExchange = buildHashExchange(left, joinOnFieldsNames);
+    final RelNode rightWithHashExchange = buildHashExchange(right, joinOnFieldsNames);
+
     final RelOptCluster cluster = getIcebergScanPrel().getCluster();
     final Map<RelDataTypeField, RelDataTypeField> relDataTypeFieldMapping = new HashMap<>();
 
     for (final Field field : joinOnFields) {
       relDataTypeFieldMapping.put(
-          getField(left, field.getName()), getField(right, field.getName()));
+          getField(leftWithHashExchange, field.getName()),
+          getField(rightWithHashExchange, field.getName()));
     }
-    final int probeFieldCount = left.getRowType().getFieldCount();
+    final int probeFieldCount = leftWithHashExchange.getRowType().getFieldCount();
     final RexBuilder rexBuilder = cluster.getRexBuilder();
 
     // build the join condition, equal all the matching fields
@@ -264,7 +277,28 @@ public final class IcebergSnapshotBasedRefreshPlanBuilder extends IcebergScanPla
       joinCondition = rexBuilder.makeCall(SqlStdOperatorTable.AND, inputRels);
     }
     return HashJoinPrel.create(
-        cluster, left.getTraitSet(), left, right, joinCondition, null, joinRelType, true);
+        cluster,
+        leftWithHashExchange.getTraitSet(),
+        leftWithHashExchange,
+        rightWithHashExchange,
+        joinCondition,
+        null,
+        joinRelType,
+        true);
+  }
+
+  private RelNode buildHashExchange(RelNode input, List<String> distributionFields) {
+    DistributionTrait dataDistributionTrait =
+        getHashDistributionTraitForFields(input.getRowType(), distributionFields);
+    RelTraitSet dataTraitSet =
+        input
+            .getCluster()
+            .getPlanner()
+            .emptyTraitSet()
+            .plus(Prel.PHYSICAL)
+            .plus(dataDistributionTrait);
+    return new HashToRandomExchangePrel(
+        input.getCluster(), dataTraitSet, input, dataDistributionTrait.getFields());
   }
 
   /**
@@ -406,7 +440,7 @@ public final class IcebergSnapshotBasedRefreshPlanBuilder extends IcebergScanPla
     // this part of the plan is standard, just do Split Gen and Data file scan on the remaining
     // files
     output = buildSplitGen(output);
-    output = getIcebergScanPrel().buildDataFileScan(output, false);
+    output = getIcebergScanPrel().buildDataFileScan(output, null);
 
     return output;
   }
@@ -512,13 +546,19 @@ public final class IcebergSnapshotBasedRefreshPlanBuilder extends IcebergScanPla
    */
   private RelNode buildParameterizedHashAgg(final RelNode input, final List<Field> groupByLevel) {
 
+    // it is possible that the input is in multiple fragments, so we need to make sure that the
+    // exchange is done on the same fields as the hash agg
+    final List<String> joinOnFieldsNames =
+        groupByLevel.stream().map(Field::getName).collect(Collectors.toList());
+    final RelNode inputWithHashExchange = buildHashExchange(input, joinOnFieldsNames);
+
     final RelOptCluster cluster = getIcebergScanPrel().getCluster();
 
     final List<Integer> groupingFields = new ArrayList<>();
 
     for (final Field field : groupByLevel) {
       final RelDataTypeField filePathField =
-          input.getRowType().getField(field.getName(), false, false);
+          inputWithHashExchange.getRowType().getField(field.getName(), false, false);
       groupingFields.add(filePathField.getIndex());
     }
 
@@ -527,10 +567,9 @@ public final class IcebergSnapshotBasedRefreshPlanBuilder extends IcebergScanPla
     try {
       return HashAggPrel.create(
           cluster,
-          input.getTraitSet(),
-          input,
+          inputWithHashExchange.getTraitSet(),
+          inputWithHashExchange,
           groupSet,
-          ImmutableList.of(groupSet),
           ImmutableList.of(),
           null);
     } catch (final InvalidRelException e) {

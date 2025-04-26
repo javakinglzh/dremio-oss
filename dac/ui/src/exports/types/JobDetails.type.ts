@@ -37,6 +37,7 @@ export type JobDetails = {
   id: string;
   isComplete: boolean;
   isOutputLimited: boolean;
+  isProfileUpdateComplete: boolean;
   jobStatus: string;
   outputRecords: number;
   queryType: "UI_RUN" | "UI_PREVIEW"; // only two types when jobs are run from the SQL runner

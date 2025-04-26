@@ -16,20 +16,24 @@
 package com.dremio.exec.planner.plancache;
 
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.catalog.ManagedStoragePlugin;
 import com.dremio.exec.ops.PlannerCatalog;
 import com.dremio.exec.planner.common.PlannerMetrics;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.google.common.base.Preconditions;
 import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
+import com.google.common.cache.Weigher;
+import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Metrics;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.slf4j.Logger;
@@ -38,22 +42,23 @@ import org.slf4j.LoggerFactory;
 public class LegacyPlanCache implements PlanCache {
   private static final Logger LOGGER = LoggerFactory.getLogger(LegacyPlanCache.class);
 
-  private final Cache<String, CachedPlan> cachePlans;
+  private final Cache<String, LegacyPlanCacheEntry> cachePlans;
   private final Multimap<String, String> datasetMap;
 
-  public LegacyPlanCache(Cache<String, CachedPlan> cachePlans, Multimap<String, String> map) {
+  public LegacyPlanCache(
+      Cache<String, LegacyPlanCacheEntry> cachePlans, Multimap<String, String> map) {
     this.cachePlans = cachePlans;
     this.datasetMap = map;
 
     Gauge.builder(
-            PlannerMetrics.createName(PlannerMetrics.PREFIX, PlannerMetrics.PLAN_CACHE_ENTRIES),
+            PlannerMetrics.createName(PlannerMetrics.PREFIX, PlanCacheMetrics.PLAN_CACHE_ENTRIES),
             cachePlans::size)
         .description("Number of plan cache entries")
         .register(Metrics.globalRegistry);
   }
 
   @Override
-  public void putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel) {
+  public boolean putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel) {
     final PlannerCatalog catalog =
         Preconditions.checkNotNull(config.getConverter().getPlannerCatalog());
 
@@ -80,7 +85,7 @@ public class LegacyPlanCache implements PlanCache {
         continue;
       }
       synchronized (datasetMap) {
-        datasetMap.put(datasetConfig.getId().getId(), cachedKey.getHash());
+        datasetMap.put(datasetConfig.getId().getId(), cachedKey.getStringHash());
       }
       addedCacheToDatasetMap = true;
     }
@@ -89,98 +94,40 @@ public class LegacyPlanCache implements PlanCache {
       // planning phases.
       prel.getCluster().invalidateMetadataQuery();
 
-      CachedPlan newCachedPlan = CachedPlan.createCachedPlan(prel, prel.getEstimatedSize());
-      config.getObserver().addAccelerationProfileToCachedPlan(newCachedPlan);
-      cachePlans.put(cachedKey.getHash(), newCachedPlan);
+      LegacyPlanCacheEntry newPlanCacheEntry =
+          LegacyPlanCacheEntry.createCachedPlan(
+              prel, prel.getEstimatedSize(), cachedKey.getMaterializationHashString());
+      config.getObserver().addAccelerationProfileToCachedPlan(newPlanCacheEntry);
+      cachePlans.put(cachedKey.getStringHash(), newPlanCacheEntry);
       config.getConverter().dispose();
-      LOGGER.debug("Physical plan cache created with cacheKey {}", cachedKey);
+      return true;
     } else {
       LOGGER.debug("Physical plan not cached: Query contains no physical datasets.");
+      return false;
     }
   }
 
-  public Cache<String, CachedPlan> getCachePlans() {
+  public Cache<String, LegacyPlanCacheEntry> getCachePlans() {
     return cachePlans;
   }
 
   @Override
-  public @Nullable CachedPlan getIfPresentAndValid(
+  public @Nullable LegacyPlanCacheEntry getIfPresentAndValid(
       SqlHandlerConfig sqlHandlerConfig, PlanCacheKey planCacheKey) {
-    CatalogService catalogService = sqlHandlerConfig.getContext().getCatalogService();
-    final PlannerCatalog catalog =
-        Preconditions.checkNotNull(sqlHandlerConfig.getConverter().getPlannerCatalog());
 
-    if (cachePlans == null) {
+    final LegacyPlanCacheEntry planCacheEntry =
+        cachePlans.getIfPresent(planCacheKey.getStringHash());
+    if (null == planCacheEntry) {
       return null;
+    } else if (!PlanCacheValidationUtils.checkIfValid(
+        sqlHandlerConfig, planCacheKey, planCacheEntry)) {
+      cachePlans.invalidate(planCacheKey.getStringHash());
+      return null;
+    } else {
+      return planCacheEntry;
     }
-    final CachedPlan cachedPlan = cachePlans.getIfPresent(planCacheKey.getHash());
-    if (cachedPlan != null) {
-      Iterable<DremioTable> datasets = catalog.getAllRequestedTables();
-      for (DremioTable dataset : datasets) {
-        try {
-          DatasetConfig datasetConfig = dataset.getDatasetConfig();
-          if (datasetConfig != null) {
-            // DatasetConfig modified
-            if (datasetConfig.getLastModified() != null
-                && datasetConfig.getLastModified() > cachedPlan.getCreationTime()) {
-              // for this case, we can only invalidate this cache entry, other cache entries may
-              // still be valid
-              cachePlans.invalidate(planCacheKey.getHash());
-              LOGGER.debug(
-                  "Physical plan cache hit with cacheKey {}: Cache invalidated due to updated dataset {}. datasetTime={} planTime={}",
-                  planCacheKey,
-                  datasetConfig.getFullPathList(),
-                  datasetConfig.getLastModified(),
-                  cachedPlan.getCreationTime());
-              return null;
-            } else {
-              // Check if source config is modified and invalidate the cache.
-              try {
-                ManagedStoragePlugin plugin =
-                    catalogService.getManagedSource(dataset.getPath().getRoot());
-                if (plugin != null) {
-                  SourceConfig sourceConfig = plugin.getConfig();
-                  if ((sourceConfig != null)) {
-                    long lastModifiedAt =
-                        sourceConfig.getLastModifiedAt() != null
-                            ? sourceConfig.getLastModifiedAt()
-                            : sourceConfig.getCtime();
-                    if (lastModifiedAt > cachedPlan.getCreationTime()) {
-                      cachePlans.invalidate(planCacheKey.getHash());
-                      LOGGER.debug(
-                          "Physical plan cache hit with cacheKey {}: Cache invalidated due to updated source {}. sourceTime={} planTime={}",
-                          planCacheKey,
-                          sourceConfig.getName(),
-                          sourceConfig.getLastModifiedAt(),
-                          cachedPlan.getCreationTime());
-                      return null;
-                    }
-                  }
-                }
-              } catch (RuntimeException e) {
-                LOGGER.error(
-                    "Exception while checking for Source config modification for dataset {}",
-                    dataset.getPath().getRoot(),
-                    e);
-              }
-            }
-          }
-        } catch (IllegalStateException ignore) {
-          LOGGER.debug(
-              String.format(
-                  "Dataset %s is ignored (no dataset config available).", dataset.getPath()),
-              ignore);
-        }
-      }
-      LOGGER.debug("Physical plan cache hit with cacheKey {}", planCacheKey);
-      return cachedPlan;
-    }
-
-    LOGGER.debug("Physical plan cache miss with cacheKey {}", planCacheKey);
-    return null;
   }
 
-  @Override
   public void invalidateCacheOnDataset(String datasetId) {
     List<String> affectedCaches = datasetMap.get(datasetId).stream().collect(Collectors.toList());
     for (String cacheId : affectedCaches) {
@@ -194,12 +141,37 @@ public class LegacyPlanCache implements PlanCache {
     }
   }
 
-  @Override
   public void invalidateAll() {
     cachePlans.invalidateAll();
   }
 
-  public void clearDatasetMapOnCacheGC(String cacheId) {
+  public static LegacyPlanCache create(long maxCacheEntries, long expiresAfterMinute) {
+    Multimap<String, String> datasetMap =
+        Multimaps.synchronizedListMultimap(ArrayListMultimap.create());
+    @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
+    Cache<String, LegacyPlanCacheEntry> cachedPlans =
+        CacheBuilder.newBuilder()
+            .maximumWeight(maxCacheEntries)
+            .expireAfterAccess(expiresAfterMinute, TimeUnit.MINUTES)
+            .weigher(
+                (Weigher<String, LegacyPlanCacheEntry>)
+                    (key, cachedPlan) -> cachedPlan.getEstimatedSize())
+            // plan caches are memory intensive. If there is memory pressure,
+            // let GC release them as last resort before running OOM.
+            .softValues()
+            .removalListener(
+                new RemovalListener<String, PlanCacheEntry>() {
+                  @Override
+                  public void onRemoval(RemovalNotification<String, PlanCacheEntry> notification) {
+                    clearDatasetMapOnCacheGC(datasetMap, notification.getKey());
+                  }
+                })
+            .build();
+    return new LegacyPlanCache(cachedPlans, datasetMap);
+  }
+
+  private static void clearDatasetMapOnCacheGC(
+      Multimap<String, String> datasetMap, String cacheId) {
     synchronized (datasetMap) {
       datasetMap.entries().removeIf(datasetMapEntry -> datasetMapEntry.getValue().equals(cacheId));
     }

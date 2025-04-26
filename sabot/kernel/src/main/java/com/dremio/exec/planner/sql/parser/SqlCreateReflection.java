@@ -39,7 +39,7 @@ public class SqlCreateReflection extends SqlSystemCall {
         public SqlCall createCall(
             SqlLiteral functionQualifier, SqlParserPos pos, SqlNode... operands) {
           Preconditions.checkArgument(
-              operands.length == 12, "SqlCreateReflection.createCall() has to get 12 operands!");
+              operands.length == 11, "SqlCreateReflection.createCall() has to get 11 operands!");
           return new SqlCreateReflection(
               pos,
               (SqlIdentifier) operands[0],
@@ -50,10 +50,9 @@ public class SqlCreateReflection extends SqlSystemCall {
               (SqlNodeList) operands[5],
               (SqlNodeList) operands[6],
               (SqlNodeList) operands[7],
-              (SqlLiteral) operands[8],
-              ((SqlLiteral) operands[9]).symbolValue(PartitionDistributionStrategy.class),
-              (SqlIdentifier) operands[10],
-              (SqlTableVersionSpec) operands[11]);
+              ((SqlLiteral) operands[8]).symbolValue(PartitionDistributionStrategy.class),
+              (SqlIdentifier) operands[9],
+              (SqlTableVersionSpec) operands[10]);
         }
       };
 
@@ -65,7 +64,6 @@ public class SqlCreateReflection extends SqlSystemCall {
   private final SqlNodeList distributionList;
   private final SqlNodeList partitionList;
   private final SqlNodeList sortList;
-  private final SqlLiteral arrowCachingEnabled;
   private final PartitionDistributionStrategy partitionDistributionStrategy;
   private final SqlIdentifier name;
   private final SqlTableVersionSpec tableVersionSpec;
@@ -80,7 +78,6 @@ public class SqlCreateReflection extends SqlSystemCall {
       SqlNodeList distributionList,
       SqlNodeList partitionList,
       SqlNodeList sortList,
-      SqlLiteral arrowCachingEnabled,
       PartitionDistributionStrategy partitionDistributionStrategy,
       SqlIdentifier name,
       SqlTableVersionSpec tableVersionSpec) {
@@ -93,7 +90,6 @@ public class SqlCreateReflection extends SqlSystemCall {
     this.distributionList = distributionList;
     this.partitionList = partitionList;
     this.sortList = sortList;
-    this.arrowCachingEnabled = arrowCachingEnabled;
     this.partitionDistributionStrategy = partitionDistributionStrategy;
     this.name = name;
     this.tableVersionSpec = tableVersionSpec;
@@ -118,7 +114,6 @@ public class SqlCreateReflection extends SqlSystemCall {
             distributionList,
             partitionList,
             sortList,
-            arrowCachingEnabled,
             SqlLiteral.createSymbol(partitionDistributionStrategy, SqlParserPos.ZERO)));
 
     operands.add(name);
@@ -160,10 +155,6 @@ public class SqlCreateReflection extends SqlSystemCall {
 
   public List<String> getSortList() {
     return toStrings(sortList);
-  }
-
-  public Boolean getArrowCachingEnabled() {
-    return this.arrowCachingEnabled.booleanValue();
   }
 
   public PartitionDistributionStrategy getPartitionDistributionStrategy() {
@@ -221,7 +212,6 @@ public class SqlCreateReflection extends SqlSystemCall {
       SqlNodeList distributionList,
       SqlNodeList partitionList,
       SqlNodeList sortList,
-      SqlLiteral arrowCachingEnabled,
       PartitionDistributionStrategy partitionDistributionStrategy,
       SqlIdentifier name,
       SqlTableVersionSpec tableVersionSpec) {
@@ -235,7 +225,6 @@ public class SqlCreateReflection extends SqlSystemCall {
         distributionList,
         partitionList,
         sortList,
-        arrowCachingEnabled,
         partitionDistributionStrategy,
         name,
         tableVersionSpec);
@@ -248,7 +237,6 @@ public class SqlCreateReflection extends SqlSystemCall {
       SqlNodeList distributionList,
       SqlNodeList partitionList,
       SqlNodeList sortList,
-      SqlLiteral arrowCachingEnabled,
       PartitionDistributionStrategy partitionDistributionStrategy,
       SqlIdentifier name,
       SqlTableVersionSpec tableVersionSpec) {
@@ -262,7 +250,6 @@ public class SqlCreateReflection extends SqlSystemCall {
         distributionList,
         partitionList,
         sortList,
-        arrowCachingEnabled,
         partitionDistributionStrategy,
         name,
         tableVersionSpec);

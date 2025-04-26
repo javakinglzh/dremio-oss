@@ -65,7 +65,6 @@ public class ReflectionEntriesStore {
       entry.setCreatedAt(currentTime);
     }
     entry.setModifiedAt(currentTime);
-
     store.get().put(entry.getId(), entry);
   }
 

@@ -46,12 +46,10 @@ import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.OptionValidatorListingImpl;
 import com.dremio.exec.server.options.SystemOptionManager;
 import com.dremio.exec.server.options.SystemOptionManagerImpl;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
@@ -86,7 +84,6 @@ import com.google.common.collect.Sets;
 import java.net.URI;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Provider;
@@ -108,6 +105,7 @@ public class TestFailedToStartPlugin extends DremioTest {
   private SystemOptionManager som;
   private OptionManager optionManager;
   private NamespaceService mockNamespaceService;
+  private NamespaceService.Factory mockNamespaceServiceFactory;
   private Orphanage mockOrphanage;
   private DatasetListingService mockDatasetListingService;
   private SourceConfig mockUpConfig;
@@ -123,6 +121,7 @@ public class TestFailedToStartPlugin extends DremioTest {
     storeProvider = LegacyKVStoreProviderAdapter.inMemory(CLASSPATH_SCAN_RESULT);
     storeProvider.start();
     mockNamespaceService = mock(NamespaceService.class);
+    mockNamespaceServiceFactory = mock(NamespaceService.Factory.class);
     mockOrphanage = mock(Orphanage.class);
     mockDatasetListingService = mock(DatasetListingService.class);
 
@@ -164,6 +163,7 @@ public class TestFailedToStartPlugin extends DremioTest {
     when(sabotContext.getClasspathScan()).thenReturn(CLASSPATH_SCAN_RESULT);
     when(sabotContext.getDatasetListing()).thenReturn(mockDatasetListingService);
     when(sabotContext.getNamespaceService(anyString())).thenReturn(mockNamespaceService);
+    when(mockNamespaceServiceFactory.get(anyString())).thenReturn(mockNamespaceService);
     when(sabotContext.getSecretsCreator()).thenReturn(() -> mockSecretsCreator);
 
     final LogicalPlanPersistence lpp = new LogicalPlanPersistence(CLASSPATH_SCAN_RESULT);
@@ -320,12 +320,18 @@ public class TestFailedToStartPlugin extends DremioTest {
           public void onWakeup() {
             wakeupCounter.incrementCount();
           }
+
+          @Override
+          public boolean isActiveSourceChange() {
+            return true;
+          }
         };
     LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore =
         storeProvider.getStore(CatalogSourceDataCreator.class);
 
     try (PluginsManager plugins =
         new PluginsManager(
+            sabotContext,
             sabotContext,
             mockNamespaceService,
             mockOrphanage,
@@ -339,7 +345,8 @@ public class TestFailedToStartPlugin extends DremioTest {
             () -> broadcaster,
             null,
             modifiableSchedulerService,
-            () -> storeProvider)) {
+            () -> storeProvider,
+            mockNamespaceServiceFactory)) {
 
       mockUpPlugin.setThrowAtStart();
       assertEquals(0, mockUpPlugin.getNumFailedStarts());
@@ -377,6 +384,11 @@ public class TestFailedToStartPlugin extends DremioTest {
           public void onWakeup() {
             wakeupCounter.incrementCount();
           }
+
+          @Override
+          public boolean isActiveSourceChange() {
+            return true;
+          }
         };
 
     LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore =
@@ -384,6 +396,7 @@ public class TestFailedToStartPlugin extends DremioTest {
 
     try (PluginsManager plugins =
         new PluginsManager(
+            sabotContext,
             sabotContext,
             mockNamespaceService,
             mockOrphanage,
@@ -397,7 +410,8 @@ public class TestFailedToStartPlugin extends DremioTest {
             () -> broadcaster,
             null,
             modifiableSchedulerService,
-            () -> storeProvider)) {
+            () -> storeProvider,
+            mockNamespaceServiceFactory)) {
 
       // Setting bad state (eg. offline) at start, wakeup task should be running and no metadata
       // refresh due to bad state
@@ -438,6 +452,11 @@ public class TestFailedToStartPlugin extends DremioTest {
           public void onWakeup() {
             wakeupCounter.incrementCount();
           }
+
+          @Override
+          public boolean isActiveSourceChange() {
+            return true;
+          }
         };
 
     LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore =
@@ -445,6 +464,7 @@ public class TestFailedToStartPlugin extends DremioTest {
 
     try (PluginsManager plugins =
         new PluginsManager(
+            sabotContext,
             sabotContext,
             mockNamespaceService,
             mockOrphanage,
@@ -458,13 +478,15 @@ public class TestFailedToStartPlugin extends DremioTest {
             () -> broadcaster,
             null,
             modifiableSchedulerService,
-            () -> storeProvider)) {
+            () -> storeProvider,
+            mockNamespaceServiceFactory)) {
 
       // create a source with healthy state
       mockUpPlugin.setSimulateBadState(false);
       final String mockUpName = "mockup-source-turns-bad";
       mockUpConfig.setName(mockUpName);
-      plugins.create(mockUpConfig, mockUpName, null);
+      plugins.create(
+          mockUpConfig, mockUpName, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION, null);
       waitForRefresh(wakeupCounter);
       // metadata background refresh should be running right now
       // test metadata background refresh is happening
@@ -508,6 +530,11 @@ public class TestFailedToStartPlugin extends DremioTest {
           public void onWakeup() {
             wakeupCounter.incrementCount();
           }
+
+          @Override
+          public boolean isActiveSourceChange() {
+            return true;
+          }
         };
 
     LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore =
@@ -515,6 +542,7 @@ public class TestFailedToStartPlugin extends DremioTest {
 
     try (PluginsManager plugins =
         new PluginsManager(
+            sabotContext,
             sabotContext,
             mockNamespaceService,
             mockOrphanage,
@@ -528,14 +556,16 @@ public class TestFailedToStartPlugin extends DremioTest {
             () -> broadcaster,
             null,
             modifiableSchedulerService,
-            () -> storeProvider)) {
+            () -> storeProvider,
+            mockNamespaceServiceFactory)) {
 
       // add a source with bad state, SourceMetadataManager should be closed and no wakeup task
       mockUpPlugin.setSimulateBadState(true);
       final String mockUpName = "mockup-bad-source";
       mockUpConfig.setName(mockUpName);
       try {
-        plugins.create(mockUpConfig, mockUpName, null);
+        plugins.create(
+            mockUpConfig, mockUpName, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION, null);
       } catch (UserException expected) {
         confirmNoRefresh(wakeupCounter);
         confirmNoRefresh(refreshCounter);
@@ -548,7 +578,9 @@ public class TestFailedToStartPlugin extends DremioTest {
 
     @Override
     public MockUpPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return mockUpPlugin;
     }
   }
@@ -578,11 +610,6 @@ public class TestFailedToStartPlugin extends DremioTest {
     @Override
     public SourceCapabilities getSourceCapabilities() {
       return SourceCapabilities.NONE;
-    }
-
-    @Override
-    public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-      throw new UnsupportedOperationException();
     }
 
     @Override

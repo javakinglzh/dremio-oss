@@ -15,11 +15,11 @@
  */
 package com.dremio.exec.compile;
 
+import static com.dremio.common.util.TestToolUtils.readTestResourceAsString;
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
-import com.dremio.common.util.TestTools;
 import com.dremio.exec.compile.ClassTransformer.ClassNames;
 import com.dremio.exec.exception.ClassTransformationException;
 import com.google.common.collect.ImmutableList;
@@ -69,7 +69,7 @@ public class TestClassCompilers {
     SimpleJavaFileObject compilationUnit =
         new SimpleJavaFileObject(URI.create("FooTest.java"), Kind.SOURCE) {
           private final String fooTestSource =
-              TestTools.readTestResourceAsString("com/dremio/exec/compile/FooTest.java");
+              readTestResourceAsString("com/dremio/exec/compile/FooTest.java");
 
           @Override
           public CharSequence getCharContent(boolean ignoreEncodingErrors) throws IOException {
@@ -110,8 +110,7 @@ public class TestClassCompilers {
 
   private void testCompilation(ClassCompiler compiler)
       throws IOException, ClassTransformationException, CompileException, ClassNotFoundException {
-    String barTestSource =
-        TestTools.readTestResourceAsString("com/dremio/exec/compile/BarTest.java");
+    String barTestSource = readTestResourceAsString("com/dremio/exec/compile/BarTest.java");
 
     assertNotNull(
         compiler.getClassByteCode(

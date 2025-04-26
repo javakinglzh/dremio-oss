@@ -29,6 +29,8 @@ import org.apache.arrow.vector.FieldVector;
  * output buffers are full or required count is reached.
  */
 public class BoundedPivots {
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(BoundedPivots.class);
   private static final int FOUR_BYTE = 4;
   private static final int EIGHT_BYTE = 8;
   private static final int SIXTEEN_BYTE = 16;
@@ -43,7 +45,7 @@ public class BoundedPivots {
       final VariableBlockVector targetVariable,
       final int start,
       final int count) {
-    final int dataWidth = targetFixed.getBlockWidth() - LBlockHashTable.VAR_OFFSET_SIZE;
+    final int dataWidth = targetFixed.getBlockWidth() - HashTable.VAR_OFFSET_SIZE;
     final int fieldCount = fields.size();
     final long[] bitAddresses = new long[fieldCount];
     final long[] offsetAddresses = new long[fieldCount];
@@ -51,6 +53,7 @@ public class BoundedPivots {
     final int[] nullByteOffset = new int[fieldCount];
     final int[] nullBitOffset = new int[fieldCount];
     long targetFixedAddress = targetFixed.getMemoryAddress();
+    int maxVariableBlockSize = HashTable.getMaxVariableBlockSize(targetFixed.getBlockWidth());
 
     int i = 0;
     for (VectorPivotDef vpd : fields) {
@@ -114,6 +117,13 @@ public class BoundedPivots {
         // update length.
         final int copyLength = (int) (bitVal * len);
 
+        if (copyLength > maxVariableBlockSize) {
+          throw new UnsupportedOperationException(
+              String.format(
+                  "Pivoted variable keys length of %d bytes can't be more than the maximum allowed variable block size of %d bytes",
+                  copyLength, maxVariableBlockSize));
+        }
+
         // check if we are still within the buffer capacity. If not exit
         if (targetVariableAddr + VAR_LENGTH_SIZE + copyLength > maxTargetVariableAddr) {
           // leaving at this point it is possible that we may have partial list written, thats ok as
@@ -146,15 +156,6 @@ public class BoundedPivots {
 
       outputRecordIdx++;
     }
-
-    if (outputRecordIdx == 0) {
-      throw new StringIndexOutOfBoundsException(
-          "Not enough space to pivot single record. Allocated capacity for pivot: "
-              + Long.toString(
-                  targetVariable.getMaxMemoryAddress() - targetVariable.getMemoryAddress())
-              + " bytes.");
-    }
-
     return outputRecordIdx;
   }
 

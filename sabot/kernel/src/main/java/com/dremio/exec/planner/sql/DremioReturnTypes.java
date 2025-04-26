@@ -16,6 +16,8 @@
 package com.dremio.exec.planner.sql;
 
 import static org.apache.calcite.sql.type.ReturnTypes.ARG0_NULLABLE;
+import static org.apache.calcite.sql.type.ReturnTypes.cascade;
+import static org.apache.calcite.sql.type.ReturnTypes.explicit;
 
 import com.dremio.exec.planner.types.RelDataTypeSystemImpl;
 import java.util.LinkedList;
@@ -68,7 +70,7 @@ public class DremioReturnTypes {
    * numeric operands where at least one of the operands is a decimal.
    */
   public static final SqlReturnTypeInference DECIMAL_TRUNCATE_NULLABLE =
-      ReturnTypes.cascade(DECIMAL_TRUNCATE, SqlTypeTransforms.TO_NULLABLE);
+      cascade(DECIMAL_TRUNCATE, SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is {@link #DECIMAL_TRUNCATE_NULLABLE}
@@ -108,7 +110,7 @@ public class DremioReturnTypes {
    * numeric operands where at least one of the operands is a decimal.
    */
   public static final SqlReturnTypeInference DECIMAL_ROUND_NULLABLE =
-      ReturnTypes.cascade(DECIMAL_ROUND, SqlTypeTransforms.TO_NULLABLE);
+      cascade(DECIMAL_ROUND, SqlTypeTransforms.TO_NULLABLE);
 
   /**
    * Type-inference strategy whereby the result type of a call is {@link #DECIMAL_ROUND_NULLABLE}
@@ -143,8 +145,8 @@ public class DremioReturnTypes {
       };
 
   public static final SqlReturnTypeInference VARCHAR_MAX_PRECISION_NULLABLE =
-      ReturnTypes.cascade(
-          ReturnTypes.explicit(SqlTypeName.VARCHAR),
+      cascade(
+          explicit(SqlTypeName.VARCHAR),
           DremioSqlTypeTransforms.MAX_PRECISION,
           SqlTypeTransforms.TO_NULLABLE);
 
@@ -178,5 +180,18 @@ public class DremioReturnTypes {
         RelDataType withNullable =
             typeFactory.createTypeWithNullability(defaultDecimalDivision, true);
         return withNullable;
+      };
+
+  public static final SqlReturnTypeInference VARIANT_NULLABLE =
+      explicit(VariantNullableRelDataType.INSTANCE);
+  public static final SqlReturnTypeInference VARIANT_NEVER_NULL =
+      explicit(VariantNotNullRelDataType.INSTANCE);
+  public static final SqlReturnTypeInference VARIANT_NULL_IF_NULL =
+      opBinding -> {
+        if (opBinding.collectOperandTypes().stream().anyMatch(RelDataType::isNullable)) {
+          return VariantNullableRelDataType.INSTANCE;
+        }
+
+        return VariantNotNullRelDataType.INSTANCE;
       };
 }

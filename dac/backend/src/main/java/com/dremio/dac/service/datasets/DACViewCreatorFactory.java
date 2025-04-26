@@ -15,8 +15,6 @@
  */
 package com.dremio.dac.service.datasets;
 
-import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
-
 import com.dremio.dac.explore.DatasetTool;
 import com.dremio.dac.explore.DatasetVersionResource;
 import com.dremio.dac.explore.QueryExecutor;
@@ -30,12 +28,9 @@ import com.dremio.dac.service.errors.DatasetVersionNotFoundException;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.exec.catalog.CatalogUser;
-import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.catalog.ViewCreatorFactory;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.options.OptionManager;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.namespace.NamespaceAttribute;
@@ -274,12 +269,7 @@ public class DACViewCreatorFactory implements ViewCreatorFactory {
    * @return path in original case
    */
   private List<String> getPathInOriginalCase(List<String> path) {
-    Catalog catalog =
-        catalogService
-            .get()
-            .getCatalog(
-                MetadataRequestOptions.of(
-                    SchemaConfig.newBuilder(CatalogUser.from(SYSTEM_USERNAME)).build()));
+    Catalog catalog = catalogService.get().getSystemUserCatalog();
 
     List<NamespaceKey> keys = new ArrayList<>();
     for (int i = path.size(); i > 0; i--) {

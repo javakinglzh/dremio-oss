@@ -23,6 +23,7 @@ import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.store.StoragePluginResolver;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.FileSystemWriter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.fasterxml.jackson.annotation.JacksonInject;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -36,8 +37,9 @@ public class EasyWriter extends FileSystemWriter {
   static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(EasyWriter.class);
 
   private final String location;
-  private final FileSystemPlugin<?> plugin;
-  private final EasyFormatPlugin<?> formatPlugin;
+  private final FileSystemPlugin fileSystemPlugin;
+  private final EasyFormatPlugin<?> easyFormatPlugin;
+  private final StoragePluginId pluginId;
 
   @JsonCreator
   public EasyWriter(
@@ -51,11 +53,13 @@ public class EasyWriter extends FileSystemWriter {
       @JsonProperty("format") FormatPluginConfig formatConfig,
       @JacksonInject StoragePluginResolver storagePluginResolver) {
     super(props, child, options);
-    this.plugin = storagePluginResolver.getSource(pluginId);
-    this.formatPlugin = (EasyFormatPlugin<?>) plugin.getFormatPlugin(formatConfig);
+    this.fileSystemPlugin = storagePluginResolver.getSource(pluginId);
+    this.easyFormatPlugin =
+        (EasyFormatPlugin<?>) this.fileSystemPlugin.getFormatPlugin(formatConfig);
     Preconditions.checkNotNull(
-        formatPlugin, "Unable to load format plugin for provided format config.");
+        easyFormatPlugin, "Unable to load format plugin for provided format config.");
     this.location = location;
+    this.pluginId = pluginId;
   }
 
   public EasyWriter(
@@ -64,14 +68,15 @@ public class EasyWriter extends FileSystemWriter {
       String userName,
       String location,
       WriterOptions options,
-      FileSystemPlugin<?> plugin,
-      EasyFormatPlugin<?> formatPlugin) {
+      FileSystemPlugin<?> fileSystemPlugin,
+      EasyFormatPlugin<?> easyFormatPlugin) {
     super(props, child, options);
-    this.plugin = plugin;
-    this.formatPlugin = formatPlugin;
+    this.fileSystemPlugin = fileSystemPlugin;
+    this.easyFormatPlugin = easyFormatPlugin;
     Preconditions.checkNotNull(
-        formatPlugin, "Unable to load format plugin for provided format config.");
+        easyFormatPlugin, "Unable to load format plugin for provided format config.");
     this.location = location;
+    this.pluginId = fileSystemPlugin.getId();
   }
 
   @JsonProperty("location")
@@ -80,33 +85,32 @@ public class EasyWriter extends FileSystemWriter {
   }
 
   public StoragePluginId getPluginId() {
-    return plugin.getId();
+    return pluginId;
+  }
+
+  @JsonIgnore
+  public SupportsFsCreation getFileSystemCreator() {
+    return fileSystemPlugin;
   }
 
   @JsonProperty("format")
   public FormatPluginConfig getFormatConfig() {
-    return formatPlugin.getConfig();
+    return easyFormatPlugin.getConfig();
   }
 
   @JsonIgnore
-  public EasyFormatPlugin<?> getFormatPlugin() {
-    return formatPlugin;
+  public EasyFormatPlugin<?> getEasyFormatPlugin() {
+    return easyFormatPlugin;
   }
 
   @Override
   protected PhysicalOperator getNewWithChild(PhysicalOperator child) {
     return new EasyWriter(
-        props, child, props.getUserName(), location, options, plugin, formatPlugin);
+        props, child, props.getUserName(), location, options, fileSystemPlugin, easyFormatPlugin);
   }
 
   @Override
   public int getOperatorType() {
-    return formatPlugin.getWriterOperatorType();
-  }
-
-  @Override
-  @JsonIgnore
-  public boolean isPdfs() {
-    return plugin.getSystemUserFS().isPdfs();
+    return easyFormatPlugin.getWriterOperatorType();
   }
 }

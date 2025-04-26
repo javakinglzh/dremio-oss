@@ -41,9 +41,15 @@ public class TestIcebergPreviousTableMetadataRoot {
   final String HDFS_PATH_ABS =
       "hdfs://fakelocalhost:8020/A/metadata/150ee91d-3db8-4a31-95af-69bacd566dc0/metadata/00008-c707841a-8efe-4736-b303-74dbad99524c.metadata.json";
   final Path HDFS_PATH_EXPECT = Path.of("/A/metadata/150ee91d-3db8-4a31-95af-69bacd566dc0");
-  final String AZURE_PATH_ABS =
+  final String AZURE_WASBS_PATH_ABS =
       "wasbs://end@firstname.blob.core.windows.net/metadata/a6396692-03a7-4eba-a988-de4b1babe588/metadata/00000-0d1a2fc0-f5de-4695-9f0a-c1b1f717fd83.metadata.json";
-  final Path AZURE_PATH_EXPECT = Path.of("/end/metadata/a6396692-03a7-4eba-a988-de4b1babe588");
+  final Path AZURE_WASBS_PATH_EXPECT =
+      Path.of("/end/metadata/a6396692-03a7-4eba-a988-de4b1babe588");
+
+  final String AZURE_ABFSS_PATH_ABS =
+      "abfss://end@firstname.dfs.core.windows.net/metadata/a6396692-03a7-4eba-a988-de4b1babe588/metadata/00000-0d1a2fc0-f5de-4695-9f0a-c1b1f717fd83.metadata.json";
+  final Path AZURE_ABFSS_PATH_EXPECT =
+      Path.of("/end/metadata/a6396692-03a7-4eba-a988-de4b1babe588");
   final String NAS_PATH_ABS =
       "file:///Users/firstname.lastname/myNAS/A/metadata/3def2c01-94bc-4089-abb3-12c9488beeee/metadata/00007-8298eb39-73cc-41ae-9030-be8893c08115.metadata.json";
   final Path NAS_PATH_EXPECT =
@@ -76,12 +82,23 @@ public class TestIcebergPreviousTableMetadataRoot {
   }
 
   /**
-   * Tests IcebergBaseModel.getPreviousTableMetadataRoot() on Azure distributed storage source
+   * Tests IcebergBaseModel.getPreviousTableMetadataRoot() on Azure wasbs distributed storage source
    * config NOTE: test does not actually connect to an Azure container
    */
   @Test
-  public void testAzure() {
-    Assert.assertEquals(AZURE_PATH_EXPECT, testPreviousTableMetadataRoot(AZURE_PATH_ABS));
+  public void testAzureWasbs() {
+    Assert.assertEquals(
+        AZURE_WASBS_PATH_EXPECT, testPreviousTableMetadataRoot(AZURE_WASBS_PATH_ABS));
+  }
+
+  /**
+   * Tests IcebergBaseModel.getPreviousTableMetadataRoot() on Azure abfss distributed storage source
+   * config NOTE: test does not actually connect to an Azure container
+   */
+  @Test
+  public void testAzureAbfss() {
+    Assert.assertEquals(
+        AZURE_ABFSS_PATH_EXPECT, testPreviousTableMetadataRoot(AZURE_ABFSS_PATH_ABS));
   }
 
   private Path testPreviousTableMetadataRoot(String absolutePath) {

@@ -15,14 +15,21 @@
  */
 
 //@ts-ignore
-import { Dremio } from "@dremio/dremio-js/community";
+import type { Dremio } from "@dremio/dremio-js/oss";
+import { getLoggingContext } from "./LoggingContext";
 
 export type DremioContext = ReturnType<typeof Dremio>;
 
 let dremioContext: (pid: string) => DremioContext;
 
-export const setDremioContext = (ctx: () => DremioContext) =>
-  (dremioContext = ctx);
+export const setDremioContext = (ctx: () => DremioContext) => {
+  if (!dremioContext) {
+    dremioContext = ctx;
+  }
+  getLoggingContext()
+    ?.createLogger("DremioContext")
+    .warn("Tried to set DremioContext after it was already initialized");
+};
 
 export const getDremioContext = (pid: string): ReturnType<typeof Dremio> => {
   if (!dremioContext) {

@@ -41,8 +41,8 @@
         <artifactId>guava</artifactId>
         <version>13.0.1</version>
       </dependency>
-      <!--
-           Add scala-library as a managed dependency here.
+      <!-- 
+           Add scala-library as a managed dependency here. 
            Using the latest version of the Scala 2.10.x branch
       -->
       <dependency>

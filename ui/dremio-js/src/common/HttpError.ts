@@ -14,40 +14,79 @@
  * limitations under the License.
  */
 
-import { type UnexpectedError } from "../_internal/SharedErrors.js";
+import { isProblem, type Problem } from "./Problem.ts";
+import { unexpectedError } from "./problems.ts";
 
-const extractResponseBody = async (
-  res: Response,
-): Promise<string | unknown> => {
+const extractResponseBody = async (res: Response) => {
+  let result;
+
   if (res.headers.get("content-type")?.includes("application/json")) {
-    const result = await res.json();
-    if (
-      typeof result === "object" &&
-      Object.prototype.hasOwnProperty.call(result, "errorMessage")
-    ) {
-      return {
-        detail: result.errorMessage,
-        title: "An unexpected error occurred while processing this request.",
-        type: "https://api.dremio.dev/problems/unexpected-error",
-      } satisfies UnexpectedError;
-    }
-    return result;
+    result = await res.json();
+  } else {
+    result = await res.text();
   }
 
-  return res.text();
+  switch (res.status) {
+    case 401:
+      return tokenInvalidError;
+    case 500:
+    case 502:
+    case 503:
+    case 504:
+      return isDremioApiError(result)
+        ? systemError(result.errorMessage)
+        : systemError(result);
+    default:
+      return isDremioApiError(result)
+        ? unexpectedError(result.errorMessage)
+        : unexpectedError(result);
+  }
 };
 
 /**
  * @hidden
  * @internal
  */
-export class HttpError {
-  constructor(
-    public readonly status: number,
-    public readonly body: unknown,
-  ) {}
+export class HttpError extends Error {
+  readonly status: number;
+  readonly body: Problem;
+  constructor(status: number, body: Problem) {
+    if (typeof body === "string") {
+      super(body);
+    } else if (isProblem(body)) {
+      super(body.title);
+    } else {
+      super("An unexpected error occurred while processing this request.");
+    }
+
+    this.status = status;
+    this.body = body;
+  }
 
   static async fromResponse(res: Response) {
     return new HttpError(res.status, await extractResponseBody(res));
   }
 }
+
+const systemError = (detail: string) =>
+  ({
+    detail,
+    title:
+      "An unexpected error occurred while processing your request. Please contact Dremio support if this problem persists.",
+    type: "https://api.dremio.dev/problems/system-error",
+  }) as const satisfies Problem;
+
+export const tokenInvalidError = {
+  title:
+    "The provided authentication token was rejected because it was invalid or may have expired.",
+  type: "https://api.dremio.dev/problems/auth/token-invalid",
+} as const satisfies Problem;
+
+type DremioApiError = {
+  errorMessage: string;
+  moreInfo?: string;
+};
+
+export const isDremioApiError = (body: unknown): body is DremioApiError =>
+  typeof body === "object" &&
+  Object.prototype.hasOwnProperty.call(body, "errorMessage");

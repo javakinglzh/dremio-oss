@@ -23,7 +23,11 @@ import static com.dremio.exec.planner.sql.DmlQueryTestUtils.createBasicTable;
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.createStockIcebergTable;
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.insertRows;
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.loadTable;
+import static com.dremio.optimization.api.OptimizeConstants.OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY;
+import static com.dremio.optimization.api.OptimizeConstants.OPTIMIZE_MINIMAL_INPUT_FILES;
+import static com.dremio.optimization.api.OptimizeConstants.OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY;
 import static org.apache.iceberg.TableProperties.MANIFEST_TARGET_SIZE_BYTES;
+import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -604,6 +608,124 @@ public class OptimizeTests extends ITDmlQueryBase {
                   ImmutableMap.of("`partition_spec_id`", 2),
                   ImmutableMap.of("`partition_spec_id`", 3)))
           .go();
+    }
+  }
+
+  public static void testOptimizeWithTableProperties(String source, BufferAllocator allocator)
+      throws Exception {
+    try (DmlQueryTestUtils.Table table = createTestTable(source, 0)) {
+      org.apache.iceberg.Table loadedTable = DmlQueryTestUtils.loadTable(table);
+      loadedTable
+          .newAppend()
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath("/data/fake.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(2_033_219)
+                  .withRecordCount(1_000_000)
+                  .build())
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath(
+                      TestTools.getWorkingPath()
+                          + "/src/test/resources/iceberg/root_pointer/f1.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(929)
+                  .withRecordCount(1_000)
+                  .build())
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath(
+                      TestTools.getWorkingPath()
+                          + "/src/test/resources/iceberg/root_pointer/f2.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(929)
+                  .withRecordCount(1_000)
+                  .build())
+          .commit();
+      refreshTable(table, allocator);
+      assertFileCount(table.fqn, 3L, allocator);
+
+      runSQL(
+          String.format(
+              "ALTER TABLE %s SET TBLPROPERTIES ('%s'='%d', '%s'='%d', '%s'='%d', '%s'='%d')",
+              table.fqn,
+              WRITE_TARGET_FILE_SIZE_BYTES,
+              2097152,
+              OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY,
+              1,
+              OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY,
+              3,
+              OPTIMIZE_MINIMAL_INPUT_FILES,
+              2));
+
+      // Only two small files (f1 and f2) are considered for rewrite but not the already optimal one
+      testOptimizeCommand(allocator, String.format("OPTIMIZE TABLE %s", table.fqn), 2L, 0L, 1L);
+
+      assertFileCount(table.fqn, 2L, allocator);
+    }
+  }
+
+  public static void testOptimizeWithTablePropertiesAndQueryOptions(
+      String source, BufferAllocator allocator) throws Exception {
+    try (DmlQueryTestUtils.Table table = createTestTable(source, 0)) {
+      org.apache.iceberg.Table loadedTable = DmlQueryTestUtils.loadTable(table);
+      loadedTable
+          .newAppend()
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath("/data/fake.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(2_033_219)
+                  .withRecordCount(1_000_000)
+                  .build())
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath(
+                      TestTools.getWorkingPath()
+                          + "/src/test/resources/iceberg/root_pointer/f1.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(929)
+                  .withRecordCount(1_000)
+                  .build())
+          .appendFile(
+              DataFiles.builder(loadedTable.spec())
+                  .withPath(
+                      TestTools.getWorkingPath()
+                          + "/src/test/resources/iceberg/root_pointer/f2.parquet")
+                  .withFormat(FileFormat.PARQUET)
+                  .withFileSizeInBytes(929)
+                  .withRecordCount(1_000)
+                  .build())
+          .commit();
+      refreshTable(table, allocator);
+      assertFileCount(table.fqn, 3L, allocator);
+
+      runSQL(
+          String.format(
+              "ALTER TABLE %s SET TBLPROPERTIES ('%s'='%d', '%s'='%d', '%s'='%d', '%s'='%d')",
+              table.fqn,
+              WRITE_TARGET_FILE_SIZE_BYTES,
+              4194304,
+              OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY,
+              3,
+              OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY,
+              5,
+              OPTIMIZE_MINIMAL_INPUT_FILES,
+              4));
+
+      // Only two small files (f1 and f2) are considered for rewrite but not the already optimal one
+      // (map_float_type).
+      testOptimizeCommand(
+          allocator,
+          String.format(
+              "OPTIMIZE TABLE %s (TARGET_FILE_SIZE_MB=%d, MIN_FILE_SIZE_MB=%d, MAX_FILE_SIZE_MB=%d, MIN_INPUT_FILES=%d)",
+              table.fqn, 2L, 1L, 3L, 2L),
+          2L,
+          0L,
+          1L);
+
+      assertFileCount(table.fqn, 2L, allocator);
     }
   }
 

@@ -30,9 +30,8 @@ public final class BigDecimalArrayAggAccumulatorHolder
     vector =
         new DecimalVector(
             "array_agg BigDecimalArrayAggAccumulatorHolder",
-            allocator,
-            inputVector.getPrecision(),
-            inputVector.getScale());
+            inputVector.getField().getFieldType(),
+            allocator);
     vector.allocateNew(initialCapacity);
   }
 

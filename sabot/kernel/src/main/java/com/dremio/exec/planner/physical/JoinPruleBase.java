@@ -35,6 +35,7 @@ import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.apache.calcite.util.Pair;
 
 // abstract base class for the join physical rules
 public abstract class JoinPruleBase extends Prule {
@@ -117,11 +118,12 @@ public abstract class JoinPruleBase extends Prule {
     }
   }
 
-  protected ImmutableList<DistributionField> getDistributionField(List<Integer> keys) {
+  protected ImmutableList<DistributionField> getDistributionField(
+      List<Integer> keys, boolean outer, List<Boolean> filterNulls) {
     ImmutableList.Builder<DistributionField> distFields = ImmutableList.builder();
 
-    for (int key : keys) {
-      distFields.add(new DistributionField(key));
+    for (Pair<Integer, Boolean> pair : Pair.zip(keys, filterNulls)) {
+      distFields.add(new DistributionField(pair.left, outer && pair.right));
     }
 
     return distFields.build();
@@ -235,9 +237,11 @@ public abstract class JoinPruleBase extends Prule {
      */
 
     final ImmutableList<DistributionField> leftDistributionFields =
-        getDistributionField(join.getLeftKeys());
+        getDistributionField(
+            join.getLeftKeys(), join.getJoinType().generatesNullsOnRight(), join.filterNulls());
     final ImmutableList<DistributionField> rightDistributionFields =
-        getDistributionField(join.getRightKeys());
+        getDistributionField(
+            join.getRightKeys(), join.getJoinType().generatesNullsOnLeft(), join.filterNulls());
 
     DistributionTrait hashLeftPartition =
         new DistributionTrait(

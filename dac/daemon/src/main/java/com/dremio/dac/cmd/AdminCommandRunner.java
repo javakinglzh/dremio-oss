@@ -15,9 +15,14 @@
  */
 package com.dremio.dac.cmd;
 
+import com.dremio.common.ProcessExit;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.scanner.ClassPathScanner;
 import com.dremio.common.scanner.persistence.ScanResult;
+import com.dremio.dac.daemon.DACDaemonModule;
+import com.dremio.dac.daemon.DACModule;
+import com.dremio.dac.daemon.DremioDaemon;
+import com.dremio.dac.model.common.DeploymentConfigurationException;
 import com.dremio.dac.server.DACConfig;
 import com.dremio.hadoop.security.alias.DremioCredentialProviderFactory;
 import com.dremio.services.credentials.CredentialsService;
@@ -43,6 +48,17 @@ public final class AdminCommandRunner {
     if (args.length < 1) {
       printUsage("Missing action argument", adminCommands, System.err);
       System.exit(1);
+    }
+
+    final DACModule module =
+        sabotConfig.getInstance(
+            DremioDaemon.DAEMON_MODULE_CLASS, DACModule.class, DACDaemonModule.class);
+
+    try {
+      module.validateDeploymentConfiguration(classpathScan, dacConfig);
+    } catch (DeploymentConfigurationException e) {
+      System.err.println(e.getMessage());
+      ProcessExit.exit("", e.getExitCode());
     }
 
     final String commandName = args[0];

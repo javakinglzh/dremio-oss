@@ -16,6 +16,7 @@
 package com.dremio.service.reflection;
 
 import static com.dremio.common.utils.SqlUtils.quotedCompound;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.service.reflection.ReflectionOptions.MATERIALIZATION_CACHE_ENABLED;
 import static com.dremio.service.reflection.ReflectionOptions.MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS;
 import static com.dremio.service.reflection.ReflectionUtils.getId;
@@ -44,12 +45,11 @@ import com.dremio.service.job.UsedReflections;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.reflection.MaterializationCache.CacheViewer;
 import com.dremio.service.reflection.ReflectionStatus.AVAILABILITY_STATUS;
 import com.dremio.service.reflection.ReflectionStatus.CONFIG_STATUS;
 import com.dremio.service.reflection.ReflectionStatus.REFRESH_METHOD;
 import com.dremio.service.reflection.ReflectionStatus.REFRESH_STATUS;
-import com.dremio.service.reflection.proto.DataPartition;
+import com.dremio.service.reflection.descriptor.MaterializationCacheViewer;
 import com.dremio.service.reflection.proto.ExternalReflection;
 import com.dremio.service.reflection.proto.Failure;
 import com.dremio.service.reflection.proto.Materialization;
@@ -65,6 +65,7 @@ import com.dremio.service.reflection.proto.ReflectionPartitionField;
 import com.dremio.service.reflection.proto.Refresh;
 import com.dremio.service.reflection.store.ExternalReflectionStore;
 import com.dremio.service.reflection.store.MaterializationStore;
+import com.dremio.service.reflection.store.ReflectionChangeNotificationHandler;
 import com.dremio.service.reflection.store.ReflectionEntriesStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.dremio.service.users.SystemUser;
@@ -93,7 +94,7 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
   private final Provider<ClusterCoordinator> clusterCoordinatorProvider;
   private final Provider<CatalogService> catalogService;
   private final Provider<JobsService> jobsService;
-  private final Provider<CacheViewer> cacheViewer;
+  private final Provider<MaterializationCacheViewer> cacheViewer;
   private final Provider<OptionManager> optionManager;
 
   private final ReflectionGoalsStore goalsStore;
@@ -109,7 +110,7 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
   @VisibleForTesting
   ReflectionStatusServiceImpl(
       Provider<ClusterCoordinator> clusterCoordinatorProvider,
-      Provider<CacheViewer> cacheViewer,
+      Provider<MaterializationCacheViewer> cacheViewer,
       ReflectionGoalsStore goalsStore,
       ReflectionEntriesStore entriesStore,
       MaterializationStore materializationStore,
@@ -139,17 +140,17 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
       Provider<CatalogService> catalogService,
       Provider<JobsService> jobsService,
       Provider<LegacyKVStoreProvider> storeProvider,
-      Provider<CacheViewer> cacheViewer,
+      Provider<MaterializationCacheViewer> cacheViewer,
       Provider<OptionManager> optionManager,
       Provider<ReflectionUtils> reflectionUtils) {
     this(
         clusterCoordinatorProvider,
         cacheViewer,
-        new ReflectionGoalsStore(storeProvider),
+        new ReflectionGoalsStore(storeProvider, () -> ReflectionChangeNotificationHandler.NO_OP),
         new ReflectionEntriesStore(storeProvider),
         new MaterializationStore(storeProvider),
         new ExternalReflectionStore(storeProvider),
-        new ReflectionValidator(catalogService, optionManager),
+        reflectionUtils.get().newReflectionValidator(catalogService, optionManager),
         catalogService,
         jobsService,
         optionManager,
@@ -244,34 +245,9 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
 
     final ReflectionEntry entry = entryOptional.get();
     final CONFIG_STATUS configStatus =
-        validator.isValid(goal, dremioTable) ? CONFIG_STATUS.OK : CONFIG_STATUS.INVALID;
+        validator.isValid(goal, dremioTable, true) ? CONFIG_STATUS.OK : CONFIG_STATUS.INVALID;
 
-    REFRESH_STATUS refreshStatus;
-    switch (entry.getState()) {
-      case REFRESH_PENDING:
-        refreshStatus = REFRESH_STATUS.PENDING;
-        break;
-      case REFRESH:
-      case REFRESHING:
-      case UPDATE:
-      case METADATA_REFRESH:
-      case COMPACTING:
-        refreshStatus = REFRESH_STATUS.RUNNING;
-        break;
-      case FAILED:
-        refreshStatus = REFRESH_STATUS.GIVEN_UP;
-        break;
-      case DEPRECATE:
-        // Should never get here
-        refreshStatus = REFRESH_STATUS.MANUAL;
-        break;
-      case ACTIVE:
-        refreshStatus =
-            reflectionUtils.get().getRefreshStatusForActiveReflection(optionManager.get(), entry);
-        break;
-      default:
-        throw new IllegalStateException("Unexpected value: " + entry.getState());
-    }
+    REFRESH_STATUS refreshStatus = getRefreshStatus(goal, entry);
 
     AVAILABILITY_STATUS availabilityStatus = AVAILABILITY_STATUS.NONE;
 
@@ -328,6 +304,37 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
         expiresAt,
         refreshMethod,
         lastRefreshDuration);
+  }
+
+  public REFRESH_STATUS getRefreshStatus(ReflectionGoal goal, ReflectionEntry entry) {
+    REFRESH_STATUS refreshStatus;
+    switch (entry.getState()) {
+      case REFRESH_PENDING:
+        refreshStatus = REFRESH_STATUS.PENDING;
+        break;
+      case REFRESH:
+      case REFRESHING:
+      case UPDATE:
+      case COMPACTING:
+        refreshStatus = REFRESH_STATUS.RUNNING;
+        break;
+      case FAILED:
+        refreshStatus = REFRESH_STATUS.GIVEN_UP;
+        break;
+      case DEPRECATE:
+        // Should never get here
+        refreshStatus = REFRESH_STATUS.MANUAL;
+        break;
+      case ACTIVE:
+        refreshStatus =
+            reflectionUtils
+                .get()
+                .getRefreshStatusForActiveReflection(optionManager.get(), goal, entry);
+        break;
+      default:
+        throw new IllegalStateException("Unexpected value: " + entry.getState());
+    }
+    return refreshStatus;
   }
 
   private Set<String> getActiveHosts() {
@@ -509,8 +516,8 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
                                 .map(ReflectionField::getName)
                                 .collect(Collectors.toList())),
                         null,
-                        goal.getArrowCachingEnabled(),
                         refreshStatus,
+                        reflectionUtils.get().getReflectionMode(goal),
                         accelerationStatus,
                         recordCount,
                         currentSize,
@@ -579,8 +586,8 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
                         null,
                         null,
                         targetDatasetPath,
-                        false,
                         null,
+                        MANUAL_REFLECTION_MODE,
                         null,
                         -1,
                         -1,
@@ -674,20 +681,6 @@ public class ReflectionStatusServiceImpl implements ReflectionStatusService {
       UpdateIdWrapper wrapper = new UpdateIdWrapper(refreshInfo.getUpdateId());
       String updateId = wrapper.toStringValue();
       refreshInfoBuilder.setUpdateId(updateId);
-    }
-    if (refreshInfo.getPartitionList() != null) {
-      StringBuilder strB = new StringBuilder("[");
-      for (DataPartition partition : refreshInfo.getPartitionList()) {
-        strB.append("\"");
-        strB.append(partition.getAddress());
-        strB.append("\"");
-        strB.append(",");
-      }
-      if (!refreshInfo.getPartitionList().isEmpty()) {
-        strB.deleteCharAt(strB.length() - 1);
-      }
-      strB.append("]");
-      refreshInfoBuilder.setPartition(strB.toString());
     }
     if (refreshInfo.getSeriesOrdinal() != null) {
       refreshInfoBuilder.setSeriesOrdinal(refreshInfo.getSeriesOrdinal());

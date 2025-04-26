@@ -225,7 +225,7 @@ public final class ExpressionConverter {
           } else {
             return null;
           }
-          // fall through
+        // fall through
 
         case 2:
           RexNode op1 = operands.get(0);

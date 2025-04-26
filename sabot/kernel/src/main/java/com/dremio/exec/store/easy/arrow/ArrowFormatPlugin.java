@@ -22,9 +22,9 @@ import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.easy.EasyFormatPlugin;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -53,31 +53,22 @@ public class ArrowFormatPlugin extends EasyFormatPlugin<ArrowFormatPluginConfig>
    *
    * @param name
    * @param context
-   * @param storageConfig
    * @param formatConfig
-   * @param fsPlugin
+   * @param supportsFsCreation
    */
   public ArrowFormatPlugin(
       final String name,
       final SabotContext context,
       final ArrowFormatPluginConfig formatConfig,
-      final FileSystemPlugin fsPlugin) {
+      final SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         formatConfig,
-        true,
-        false,
         /* splittable= */ false,
         /* compressible= */ false,
         formatConfig.getDefaultExtensions(),
-        ARROW_DEFAULT_NAME,
-        fsPlugin);
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return true;
+        ARROW_DEFAULT_NAME);
   }
 
   @Override

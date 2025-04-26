@@ -20,6 +20,8 @@ import com.dremio.exec.exception.ClassTransformationException;
 import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
 import java.io.StringReader;
+import java.util.LinkedList;
+import java.util.List;
 import org.codehaus.commons.compiler.CompileException;
 import org.codehaus.janino.ClassLoaderIClassLoader;
 import org.codehaus.janino.IClassLoader;
@@ -52,15 +54,12 @@ public class JaninoClassCompiler extends AbstractClassCompiler {
     Scanner scanner = new Scanner((String) null, reader);
     Java.AbstractCompilationUnit compilationUnit =
         new Parser(scanner).parseAbstractCompilationUnit();
-    ClassFile[] classFiles =
-        new UnitCompiler(compilationUnit, compilationClassLoader).compileUnit(debug, debug, debug);
-
-    ClassBytes[] byteCodes = new ClassBytes[classFiles.length];
-    for (int i = 0; i < classFiles.length; i++) {
-      ClassFile file = classFiles[i];
-      byteCodes[i] = new ClassBytes(file.getThisClassName(), file.toByteArray());
-    }
-    return byteCodes;
+    List<ClassFile> classFiles = new LinkedList<>();
+    new UnitCompiler(compilationUnit, compilationClassLoader)
+        .compileUnit(debug, debug, debug, classFiles);
+    return classFiles.stream()
+        .map(file -> new ClassBytes(file.getThisClassName(), file.toByteArray()))
+        .toArray(ClassBytes[]::new);
   }
 
   @Override

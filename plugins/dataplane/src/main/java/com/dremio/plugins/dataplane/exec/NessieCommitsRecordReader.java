@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.dataplane.exec;
 
+import static com.dremio.common.FSConstants.MAXIMUM_CONNECTIONS;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_ACCESS_DENIED;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_NOT_FOUND;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_PARTIAL_FAILURES;
@@ -27,13 +28,17 @@ import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumL
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.logging.StructuredLogger;
+import com.dremio.common.util.S3ConnectionConstants;
 import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.store.IcebergExpiryMetric;
 import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.iceberg.NessieCommitsSubScan;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
+import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.io.file.FileSystem;
+import com.dremio.plugins.dataplane.store.DataplanePlugin;
 import com.dremio.plugins.util.ContainerNotFoundException;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
@@ -41,9 +46,12 @@ import com.dremio.sabot.op.scan.OutputMutator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.arrow.vector.BigIntVector;
@@ -62,22 +70,39 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
   private static final Logger LOGGER = LoggerFactory.getLogger(NessieCommitsRecordReader.class);
   private static final StructuredLogger vacuumLogger = getVacuumLogger();
 
+  private volatile VarCharVector datasetOutVector;
   private volatile VarCharVector metadataFilePathOutVector;
   private volatile BigIntVector snapshotIdOutVector;
   private volatile VarCharVector manifestListPathOutVector;
   private FileIO io = null;
   private final ExecutorService opExecService;
   private final String queryId;
+  private final Semaphore slots;
 
   public NessieCommitsRecordReader(
-      FragmentExecutionContext fec, OperatorContext context, NessieCommitsSubScan config) {
+      FragmentExecutionContext fec,
+      OperatorContext context,
+      NessieCommitsSubScan config,
+      SupportsIcebergMutablePlugin icebergMutablePlugin) {
     super(fec, context, config);
     opExecService = context.getExecutor();
     this.queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
+
+    DataplanePlugin plugin = (DataplanePlugin) icebergMutablePlugin;
+    // Limit the parallel expiry threads based on filesystem's limits. Take minimum of all supported
+    // filesystem implementations.
+    // Since S3 is the only supported FS, using that value.
+    int maxParallelism =
+        plugin
+            .getProperty(MAXIMUM_CONNECTIONS)
+            .map(Integer::parseInt)
+            .orElse(S3ConnectionConstants.DEFAULT_MAX_THREADS / 2);
+    this.slots = new Semaphore(maxParallelism);
   }
 
   @Override
   public void setup(OutputMutator output) throws ExecutionSetupException {
+    datasetOutVector = (VarCharVector) output.getVector(SystemSchemas.DATASET_FIELD);
     metadataFilePathOutVector = (VarCharVector) output.getVector(SystemSchemas.METADATA_FILE_PATH);
     snapshotIdOutVector = (BigIntVector) output.getVector(SystemSchemas.SNAPSHOT_ID);
     manifestListPathOutVector = (VarCharVector) output.getVector(SystemSchemas.MANIFEST_LIST_PATH);
@@ -89,18 +114,26 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
   protected CompletableFuture<Optional<SnapshotEntry>> getEntries(
       AtomicInteger idx, ContentReference contentReference) {
     return CompletableFuture.supplyAsync(
-        () ->
-            tryLoadSnapshot(contentReference)
-                .map(s -> new SnapshotEntry(contentReference.metadataLocation(), s)),
+        () -> {
+          try {
+            slots.acquire();
+            return tryLoadSnapshot(contentReference)
+                .map(s -> new SnapshotEntry(contentReference.metadataLocation(), s));
+          } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+          }
+        },
         opExecService);
   }
 
   @Override
-  protected void populateOutputVectors(AtomicInteger idx, SnapshotEntry snapshot) {
+  protected void populateOutputVectors(AtomicInteger idx, SnapshotEntry snapshot, String dataset) {
     final int idxVal = idx.getAndIncrement();
     byte[] metadataPath = toSchemeAwarePath(snapshot.getMetadataJsonPath());
     byte[] manifestListPath = toSchemeAwarePath(snapshot.getManifestListPath());
+    byte[] datasetByte = dataset.getBytes(StandardCharsets.UTF_8);
 
+    datasetOutVector.setSafe(idxVal, datasetByte);
     metadataFilePathOutVector.setSafe(idxVal, metadataPath);
     snapshotIdOutVector.setSafe(idxVal, snapshot.getSnapshotId());
     manifestListPathOutVector.setSafe(idxVal, manifestListPath);
@@ -108,6 +141,7 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
 
   @Override
   protected void setValueCount(int valueCount) {
+    datasetOutVector.setValueCount(valueCount);
     metadataFilePathOutVector.setValueCount(valueCount);
     snapshotIdOutVector.setValueCount(valueCount);
     manifestListPathOutVector.setValueCount(valueCount);
@@ -125,8 +159,13 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
             contentReference.commitId());
     Stopwatch loadTime = Stopwatch.createStarted();
     try {
+
       final Optional<Snapshot> snapshot =
-          loadSnapshot(contentReference.metadataLocation(), contentReference.snapshotId(), tableId);
+          loadSnapshot(
+              contentReference.metadataLocation(),
+              contentReference.snapshotId(),
+              getDatasetElements(contentReference),
+              tableId);
       vacuumLogger.info(
           createCommitScanLog(
               queryId,
@@ -136,7 +175,8 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
           "");
       return snapshot;
     } catch (NotFoundException nfe) {
-      String message = "Skipping table [%s] since table metadata is not found [metadata=%s]";
+      String message = "Skipping table [%s] since table metadata is not found [metadata=%s]\n";
+      LOGGER.warn(String.format(message, tableId, contentReference.metadataLocation()), nfe);
       vacuumLogger.warn(
           createCommitScanLog(
               queryId,
@@ -144,17 +184,17 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
               contentReference.metadataLocation(),
               contentReference.snapshotId().toString(),
               NOT_FOUND_EXCEPTION,
-              String.format(
-                  message + ".\n" + nfe.toString(), tableId, contentReference.metadataLocation())),
+              String.format(message, tableId, contentReference.metadataLocation())
+                  + nfe.toString()),
           "");
-      LOGGER.warn(String.format(message, tableId, contentReference.metadataLocation()), nfe);
       getContext().getStats().addLongStat(NUM_PARTIAL_FAILURES, 1L);
       getContext().getStats().addLongStat(NUM_NOT_FOUND, 1L);
       return Optional.empty();
     } catch (UserException e) {
       if (UserBitShared.DremioPBError.ErrorType.PERMISSION.equals(e.getErrorType())) {
         String message =
-            "Skipping table [%s] since access to table metadata is denied [metadata=%s]";
+            "Skipping table [%s] since access to table metadata is denied [metadata=%s].\n";
+        LOGGER.warn(String.format(message, tableId, contentReference.metadataLocation()), e);
         vacuumLogger.warn(
             createCommitScanLog(
                 queryId,
@@ -162,10 +202,9 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
                 contentReference.metadataLocation(),
                 contentReference.snapshotId().toString(),
                 PERMISSION_EXCEPTION,
-                String.format(
-                    message + ".\n" + e.toString(), tableId, contentReference.metadataLocation())),
+                String.format(message, tableId, contentReference.metadataLocation())
+                    + e.toString()),
             "");
-        LOGGER.warn(String.format(message, tableId, contentReference.metadataLocation()), e);
         getContext().getStats().addLongStat(NUM_PARTIAL_FAILURES, 1L);
         getContext().getStats().addLongStat(NUM_ACCESS_DENIED, 1L);
         return Optional.empty();
@@ -186,26 +225,33 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
           .getStats()
           .addLongStat(
               IcebergExpiryMetric.SNAPSHOT_LOAD_TIME, loadTime.elapsed(TimeUnit.MILLISECONDS));
+      slots.release();
     }
   }
 
   @VisibleForTesting
-  Optional<Snapshot> loadSnapshot(String metadataJsonPath, long snapshotId, String tableId)
+  Optional<Snapshot> loadSnapshot(
+      String metadataJsonPath, long snapshotId, List<String> datasetPath, String tableId)
       throws IOException {
-    return readTableMetadata(io(metadataJsonPath), metadataJsonPath, tableId, getContext())
+    return readTableMetadata(
+            io(metadataJsonPath, datasetPath), metadataJsonPath, tableId, getContext())
         .map(metadata -> metadata.snapshot(snapshotId));
   }
 
-  private FileIO io(String metadataLocation) throws IOException {
+  private FileIO io(String metadataLocation, List<String> datasetPath) throws IOException {
     if (io == null) {
       FileSystem fs =
           getPlugin()
-              .createFSWithAsyncOptions(
-                  metadataLocation, getConfig().getProps().getUserName(), getContext());
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .withAsyncOptions(true)
+                      .filePath(metadataLocation)
+                      .userName(getConfig().getProps().getUserName())
+                      .operatorContext(getContext()));
       io =
           getPlugin()
               .createIcebergFileIO(
-                  fs, getContext(), null, getConfig().getPluginId().getName(), null);
+                  fs, getContext(), datasetPath, getConfig().getPluginId().getName(), null);
     }
     return io;
   }
@@ -236,16 +282,16 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
         throw ue; // Not the exception we're looking for, or not allowed to catch, rethrow it as-is
       }
       // Found CNFE inside UE; log and return empty
-      String message = "Skipping table %s since its storage container was not found";
+      String message = "Skipping table %s since its storage container was not found.\n";
+      LOGGER.warn(String.format(message, tableId), ue);
       vacuumLogger.warn(
           createCommitScanLog(
               QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId()),
               tableId,
               metadataLocation,
               CONTAINER_NOT_FOUND_EXCEPTION,
-              String.format(message + ".\n" + ue.toString(), tableId)),
+              String.format(message, tableId) + ue.toString()),
           "");
-      LOGGER.warn(String.format(message, tableId), ue);
       context.getStats().addLongStat(NUM_PARTIAL_FAILURES, 1L);
       context.getStats().addLongStat(NUM_NOT_FOUND, 1L);
       return Optional.empty();

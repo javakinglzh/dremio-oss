@@ -19,7 +19,6 @@ import Immutable from "immutable";
 
 import { LOGIN_VIEW_ID, loginUser } from "@inject/actions/account";
 
-import { Link } from "react-router";
 import { Button } from "dremio-ui-lib/components";
 import { FieldWithError, TextField } from "#oss/components/Fields";
 import { getViewState } from "selectors/resources";
@@ -28,7 +27,6 @@ import {
   InnerComplexForm,
 } from "components/Forms/connectComplexForm";
 import ViewStateWrapper from "components/ViewStateWrapper";
-import Spinner from "#oss/components/Spinner";
 
 import { formLabel } from "uiTheme/radium/typography";
 import { applyValidators, isRequired } from "#oss/utils/validation";
@@ -70,7 +68,6 @@ export class LoginForm extends PureComponent {
     } = this.props;
     return (
       <ViewStateWrapper
-        className="pt-1"
         hideChildrenWhenFailed={false}
         viewState={viewState}
         showMessage={showMessage}
@@ -116,6 +113,7 @@ export class LoginForm extends PureComponent {
           <div style={styles.submitWrapper}>
             <div style={{ display: "flex", flexGrow: 1 }}>
               <Button
+                className="w-full"
                 type="submit"
                 variant="primary"
                 key="details-wizard-next"
@@ -123,15 +121,6 @@ export class LoginForm extends PureComponent {
               >
                 {intl.formatMessage({ id: "Log.In" })}
               </Button>
-            </div>
-            <div style={{ display: "flex", alignItems: "center" }}>
-              <Link
-                to="https://www.dremio.com/legal/privacy-policy"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                {laDeprecated("Privacy")}
-              </Link>
             </div>
           </div>
         </InnerComplexForm>
@@ -151,33 +140,33 @@ const styles = {
     height: 24,
   },
   label: {
+    height: "auto",
+    marginBlockEnd: "var(--dremio--spacing--05)",
     color: "var(--text--primary)",
-    marginBottom: 3,
   },
   fieldsRow: {
     display: "flex",
-    flexDirection: "row",
+    flexDirection: "column",
     justifyContent: "space-between",
   },
   field: {
-    flexBasis: "calc(50% - 5px)",
+    height: "auto",
     display: "block",
+    marginBottom: "var(--dremio--spacing--3)",
   },
   input: {
     width: "100%",
     marginRight: 0,
   },
   submitWrapper: {
-    margin: "55px 0 0 0",
+    margin: "var(--dremio--spacing--3) 0 0 0",
     display: "flex",
-    flexDirection: "row",
   },
   form: {
     display: "flex",
     flexWrap: "wrap",
     flexDirection: "column",
     justifyContent: "space-between",
-    width: 695,
   },
 };
 

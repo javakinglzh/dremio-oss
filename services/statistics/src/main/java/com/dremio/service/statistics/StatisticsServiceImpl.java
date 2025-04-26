@@ -26,7 +26,6 @@ import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.TypeInferenceUtils;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.TableMetadata;
 import com.dremio.exec.store.sys.statistics.StatisticsListManager;
 import com.dremio.exec.store.sys.statistics.StatisticsService;
@@ -85,9 +84,10 @@ public class StatisticsServiceImpl implements StatisticsService {
   private final Provider<JobsService> jobsService;
   private final Provider<SchedulerService> schedulerService;
   private final Provider<BufferAllocator> allocator;
-  private final Provider<NamespaceService> namespaceService;
+  private final Provider<NamespaceService> systemUserNamespaceServiceProvider;
   private final Provider<LegacyKVStoreProvider> storeProvider;
-  private final Provider<SabotContext> sabotContext;
+  private final Provider<OptionManager> optionManagerProvider;
+  private final Provider<DremioConfig> dremioConfigProvider;
   private StatisticStore statisticStore;
   private StatisticEntriesStore statisticEntriesStore;
   private Map<String, JobId> entries;
@@ -96,22 +96,25 @@ public class StatisticsServiceImpl implements StatisticsService {
       Provider<LegacyKVStoreProvider> storeProvider,
       Provider<SchedulerService> schedulerService,
       Provider<JobsService> jobsService,
-      Provider<NamespaceService> namespaceService,
+      Provider<NamespaceService> systemUserNamespaceServiceProvider,
       Provider<BufferAllocator> allocator,
-      Provider<SabotContext> sabotContext) {
+      Provider<OptionManager> optionManagerProvider,
+      Provider<DremioConfig> dremioConfigProvider) {
     this.schedulerService =
         Preconditions.checkNotNull(schedulerService, "scheduler service required");
     this.jobsService = Preconditions.checkNotNull(jobsService, "jobs service required");
-    this.namespaceService =
-        Preconditions.checkNotNull(namespaceService, "namespace service required");
+    this.systemUserNamespaceServiceProvider =
+        Preconditions.checkNotNull(
+            systemUserNamespaceServiceProvider, "namespace service required");
     this.allocator = Preconditions.checkNotNull(allocator, "buffer allocator required");
     this.storeProvider = Preconditions.checkNotNull(storeProvider, "store provider required");
-    this.sabotContext = Preconditions.checkNotNull(sabotContext, "sabot context required");
+    this.optionManagerProvider = optionManagerProvider;
+    this.dremioConfigProvider = dremioConfigProvider;
   }
 
   public void validateDataset(NamespaceKey key) {
     try {
-      final DatasetConfig dataset = namespaceService.get().getDataset(key);
+      final DatasetConfig dataset = systemUserNamespaceServiceProvider.get().getDataset(key);
       if (dataset == null) {
         throw UserException.validationError()
             .message("Unable to find requested dataset %s.", key)
@@ -167,7 +170,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                   List<String> pathComponents = PathUtils.parseFullPath(table);
                   BatchSchema actualSchema =
                       BatchSchema.deserialize(
-                          namespaceService
+                          systemUserNamespaceServiceProvider
                               .get()
                               .getDataset(new NamespaceKey(pathComponents))
                               .getRecordSchema()
@@ -418,7 +421,7 @@ public class StatisticsServiceImpl implements StatisticsService {
   }
 
   private OptionManager getOptionManager() {
-    return sabotContext.get().getOptionManager();
+    return optionManagerProvider.get();
   }
 
   private void populateNdvSql(StringBuilder stringBuilder, List<Field> fields) {
@@ -546,7 +549,7 @@ public class StatisticsServiceImpl implements StatisticsService {
 
   @Override
   public void start() throws Exception {
-    final DremioConfig dremioConfig = sabotContext.get().getDremioConfig();
+    final DremioConfig dremioConfig = dremioConfigProvider.get();
     this.statisticStore =
         new StatisticStore(
             storeProvider,
@@ -618,7 +621,7 @@ public class StatisticsServiceImpl implements StatisticsService {
                       statisticsInputBuilder.build();
                   statisticIdStatisticHashMap.forEach(statisticStore::save);
                 }
-                // fall through
+              // fall through
               case CANCELED:
               case FAILED:
               case CANCELLATION_REQUESTED:

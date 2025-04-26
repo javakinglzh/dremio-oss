@@ -24,6 +24,7 @@ import {
   starItem,
 } from "#oss/actions/resources/stars";
 import { loadSummaryDataset } from "actions/resources/dataset";
+import { oldLoadSummaryDataset } from "#oss/actions/resources/resourceTree";
 import { LOADING_ITEMS, LOADING_ITEMS_MODAL } from "actions/resources";
 
 import {
@@ -87,6 +88,7 @@ export type ResourceTreeContainerProps = {
   dispatchLoadResourceTree: typeof loadResourceTree;
   dispatchFetchScripts: typeof fetchScripts;
   dispatchLoadSummaryDataset: typeof loadSummaryDataset;
+  oldLoadSummaryDataset: typeof oldLoadSummaryDataset;
   dispatchSetActiveScript: typeof setActiveScript;
   dispatchLoadStarredResources: typeof loadStarredResources;
   dispatchStarItem: (id: string) => Promise<any>;
@@ -128,6 +130,7 @@ export const ResourceTreeContainer = ({
   dispatchFetchScripts,
   dispatchSetActiveScript,
   dispatchLoadSummaryDataset,
+  oldLoadSummaryDataset,
   dispatchLoadStarredResources,
   dispatchStarItem,
   dispatchUnstarItem,
@@ -231,7 +234,7 @@ export const ResourceTreeContainer = ({
         currNode,
       );
     } else if (entityType === entityTypes.dataset) {
-      return dispatchLoadSummaryDataset(
+      return oldLoadSummaryDataset(
         fullPath,
         RESOURCE_TREE_VIEW_ID,
         LOAD_RESOURCE_TREE,
@@ -401,6 +404,7 @@ const mapDispatchToProps = {
   dispatchLoadResourceTree: loadResourceTree,
   dispatchLoadStarredResources: loadStarredResources,
   dispatchLoadSummaryDataset: loadSummaryDataset,
+  oldLoadSummaryDataset,
   dispatchStarItem: starItem,
   dispatchUnstarItem: unstarItem,
 };

@@ -46,6 +46,7 @@ export class AccelerationController extends Component {
     viewState: PropTypes.instanceOf(Immutable.Map),
     resetViewState: PropTypes.func,
     updateFormDirtyState: PropTypes.func,
+    preventSaveChanges: PropTypes.bool,
   };
 
   constructor(props) {
@@ -174,6 +175,7 @@ export class AccelerationController extends Component {
       isModal = true,
       canAlter,
       canSubmit,
+      preventSaveChanges,
     } = this.props;
 
     if (!this.state.getComplete || viewState.get("isFailed")) {
@@ -193,6 +195,7 @@ export class AccelerationController extends Component {
         dataset={dataset}
         reflections={reflections}
         reloadReflections={this.reloadReflections}
+        preventSaveChanges={preventSaveChanges}
       />
     );
   }

@@ -21,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
 
 import com.dremio.BaseTestQuery;
+import com.dremio.common.util.FileUtils;
 import com.dremio.exec.ExecTest;
 import com.dremio.exec.PassthroughQueryObserver;
 import com.dremio.exec.ops.QueryContext;
@@ -37,26 +38,27 @@ import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.SessionOptionManagerImpl;
 import com.dremio.exec.store.RecordWriter;
-import com.dremio.exec.store.iceberg.IcebergTestTables;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.google.common.collect.ImmutableMap;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.core.TableModify;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.sql.SqlNode;
-import org.junit.After;
 import org.junit.AfterClass;
-import org.junit.Before;
 import org.junit.BeforeClass;
 
 public abstract class TestTableManagementBase extends BaseTestQuery {
   private static QueryContext queryContext;
-  protected static IcebergTestTables.Table table;
   protected static SqlConverter converter;
   protected static SqlHandlerConfig config;
   protected static int userColumnCount;
   protected static List<RelDataTypeField> userColumnList;
+  protected static final String PARQUET_SOURCE_FOLDER_COPY_INTO = "/store/parquet/copyintosource/";
+  protected static final String SOURCE_STORAGE_FOR_COPY = "dfs_test";
 
   // ===========================================================================
   // Test class and Test cases setUp and tearDown
@@ -96,10 +98,6 @@ public abstract class TestTableManagementBase extends BaseTestQuery {
             queryContext.getRelMetadataQuerySupplier());
 
     config = new SqlHandlerConfig(queryContext, converter, observer, null);
-    userColumnList = getOriginalFieldList();
-    userColumnCount = userColumnList.size();
-    // table has at least one column
-    assertThat(userColumnCount).isGreaterThan(0);
   }
 
   @AfterClass
@@ -117,26 +115,45 @@ public abstract class TestTableManagementBase extends BaseTestQuery {
     return findSingleNode(plan, ProjectPrel.class, attributes);
   }
 
-  @Before
-  public void init() throws Exception {
-    table = IcebergTestTables.V2_ORDERS.get();
+  protected static void createAndPopulateOrdersTable(String targetTableName) throws Exception {
+    createOrdersTable(targetTableName);
+
+    Path tempDirectoryLocation =
+        Files.createTempDirectory(Path.of(getDfsTestTmpSchemaLocation()), "orders-table-");
+
+    File newSourceFile =
+        new File(
+            getDfsTestTmpSchemaLocation() + "/" + tempDirectoryLocation.getFileName(),
+            "2020-00.parquet");
+    File oldSourceFile =
+        FileUtils.getResourceAsFile(PARQUET_SOURCE_FOLDER_COPY_INTO + "2020-00.parquet");
+    Files.copy(oldSourceFile.toPath(), newSourceFile.toPath());
+
+    String storageLoc =
+        "'@" + SOURCE_STORAGE_FOR_COPY + "/" + tempDirectoryLocation.getFileName() + "'";
+
+    runSQL(
+        String.format("COPY INTO %s FROM %s regex '2020-00.parquet'", targetTableName, storageLoc));
   }
 
-  @After
-  public void tearDown() throws Exception {
-    table.close();
+  protected static void createOrdersTable(String tableName) throws Exception {
+    runSQL(
+        String.format(
+            "CREATE TABLE IF NOT EXISTS %s "
+                + "(order_id INT, "
+                + "order_year INT, "
+                + "order_date TIMESTAMP, "
+                + "product_name VARCHAR, "
+                + "amount DOUBLE)",
+            tableName));
   }
 
-  protected static List<RelDataTypeField> getOriginalFieldList() {
-    try (IcebergTestTables.Table ordersTable = IcebergTestTables.V2_ORDERS.get()) {
-      final String select = "select * from " + ordersTable.getTableName() + " limit 1";
-      final SqlNode node = converter.parse(select);
-      final ConvertedRelNode convertedRelNode =
-          SqlToRelTransformer.validateAndConvertForDml(config, node, null);
-      return convertedRelNode.getValidatedRowType().getFieldList();
-    } catch (Exception ex) {
-      throw new RuntimeException("getOriginalFieldList failed", ex);
-    }
+  protected static List<RelDataTypeField> getOriginalFieldList(String tableLoc) throws Exception {
+    final String select = "select * from " + tableLoc + " limit 1";
+    final SqlNode node = converter.parse(select);
+    final ConvertedRelNode convertedRelNode =
+        SqlToRelTransformer.validateAndConvertForDml(config, node, null);
+    return convertedRelNode.getValidatedRowType().getFieldList();
   }
 
   protected void testResultColumnName(String query) throws Exception {

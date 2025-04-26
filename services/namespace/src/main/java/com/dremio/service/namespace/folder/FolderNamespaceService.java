@@ -17,16 +17,38 @@ package com.dremio.service.namespace.folder;
 
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceInvalidStateException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.space.proto.FolderConfig;
+import java.util.List;
+import javax.annotation.Nullable;
 
 /** Namespace operations for Folders. */
 public interface FolderNamespaceService {
+  /**
+   * @param folderPath - The path of the folder.
+   * @param folderConfig - The configuration
+   * @param attributes - Optional attributes.
+   * @throws NamespaceInvalidStateException - Throws if an invariant is invalid such as a misnamed
+   *     attribute.
+   * @throws NamespaceNotFoundException - Throws if this folder cannot be found.
+   * @throw InvalidNamespaceNameException - Throws if the folder name is invalid.
+   */
   void addOrUpdateFolder(
       NamespaceKey folderPath, FolderConfig folderConfig, NamespaceAttribute... attributes)
       throws NamespaceException;
 
   FolderConfig getFolder(NamespaceKey folderPath) throws NamespaceException;
 
-  void deleteFolder(NamespaceKey folderPath, String version) throws NamespaceException;
+  /**
+   * Get the list of folders under the given root path.
+   *
+   * @param rootPath
+   * @return
+   * @throws NamespaceException
+   */
+  List<FolderConfig> getFolders(NamespaceKey rootPath) throws NamespaceException;
+
+  void deleteFolder(NamespaceKey folderPath, @Nullable String version) throws NamespaceException;
 }

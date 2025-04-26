@@ -35,23 +35,19 @@ import java.io.IOException;
 import org.antlr.runtime.ANTLRStringStream;
 import org.antlr.runtime.CommonTokenStream;
 import org.antlr.runtime.RecognitionException;
+import org.jetbrains.annotations.Nullable;
 
 @JsonDeserialize(using = SchemaPathDeserializer.class)
 public class SchemaPath extends BasePath implements LogicalExpression, Comparable<SchemaPath> {
   // Unused but required for Kryo deserialization as it used to exist pre 4.2.
   @Deprecated private EvaluationType evaluationType;
 
-  public static SchemaPath getSimplePath(String name) {
-    return getCompoundPath(name);
+  public SchemaPath(SchemaPath path) {
+    super(path.rootSegment);
   }
 
-  public static SchemaPath getCompoundPath(String... strings) {
-    NameSegment s = null;
-    // loop through strings in reverse order
-    for (int i = strings.length - 1; i >= 0; i--) {
-      s = new NameSegment(strings[i], s);
-    }
-    return new SchemaPath(s);
+  public SchemaPath(NameSegment rootSegment) {
+    super(rootSegment);
   }
 
   @Override
@@ -71,11 +67,6 @@ public class SchemaPath extends BasePath implements LogicalExpression, Comparabl
     }
   }
 
-  public static SchemaPath create(NamePart namePart) {
-    Preconditions.checkArgument(namePart.getType() == NamePart.Type.NAME);
-    return new SchemaPath((NameSegment) getPathSegment(namePart));
-  }
-
   /**
    * A simple is a path where there are no repeated elements outside the lowest level of the path.
    *
@@ -93,14 +84,6 @@ public class SchemaPath extends BasePath implements LogicalExpression, Comparabl
       seg = seg.getChild();
     }
     return true;
-  }
-
-  public SchemaPath(SchemaPath path) {
-    super(path.rootSegment);
-  }
-
-  public SchemaPath(NameSegment rootSegment) {
-    super(rootSegment);
   }
 
   @Override
@@ -197,7 +180,11 @@ public class SchemaPath extends BasePath implements LogicalExpression, Comparabl
     @Override
     public SchemaPath deserialize(JsonParser jp, DeserializationContext ctxt) throws IOException {
       String expr = jp.getText();
+      return deserializeImpl(expr);
+    }
 
+    @Nullable
+    public static SchemaPath deserializeImpl(String expr) {
       if (expr == null || expr.isEmpty()) {
         return null;
       }
@@ -253,5 +240,23 @@ public class SchemaPath extends BasePath implements LogicalExpression, Comparabl
       seg = seg.getChild();
     }
     return pathValue.toString();
+  }
+
+  public static SchemaPath create(NamePart namePart) {
+    Preconditions.checkArgument(namePart.getType() == NamePart.Type.NAME);
+    return new SchemaPath((NameSegment) getPathSegment(namePart));
+  }
+
+  public static SchemaPath getSimplePath(String name) {
+    return getCompoundPath(name);
+  }
+
+  public static SchemaPath getCompoundPath(String... strings) {
+    NameSegment s = null;
+    // loop through strings in reverse order
+    for (int i = strings.length - 1; i >= 0; i--) {
+      s = new NameSegment(strings[i], s);
+    }
+    return new SchemaPath(s);
   }
 }

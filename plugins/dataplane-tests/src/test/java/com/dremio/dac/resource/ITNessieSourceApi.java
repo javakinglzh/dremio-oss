@@ -19,10 +19,12 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.ALTERN
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.BUCKET_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
 import static javax.ws.rs.core.Response.Status.NOT_FOUND;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.dac.server.BaseTestServerJunit5;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.Property;
@@ -65,9 +67,10 @@ import org.projectnessie.client.ext.NessieClientCustomizer;
 import org.projectnessie.client.ext.NessieClientFactory;
 import org.projectnessie.client.ext.NessieClientResolver;
 import org.projectnessie.client.ext.NessieClientUri;
-import org.projectnessie.error.NessieNotFoundException;
+import org.projectnessie.error.NessieForbiddenException;
 import org.projectnessie.jaxrs.tests.AbstractRelativeReferences;
 import org.projectnessie.jaxrs.tests.BaseTestNessieRest;
+import org.projectnessie.model.GarbageCollectorConfig;
 
 public class ITNessieSourceApi extends BaseTestServerJunit5 {
 
@@ -134,7 +137,7 @@ public class ITNessieSourceApi extends BaseTestServerJunit5 {
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
 
     catalog = getCatalogService().getSystemUserCatalog();
-    catalog.createSource(sourceConfig);
+    catalog.createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     dataplanePlugin = catalog.getSource(DATAPLANE_PLUGIN_NAME);
 
     namespaceService = getSabotContext().getNamespaceService(SystemUser.SYSTEM_USERNAME);
@@ -188,6 +191,34 @@ public class ITNessieSourceApi extends BaseTestServerJunit5 {
   @NessieApiVersions(versions = NessieApiVersion.V2)
   class NessieRestApi extends BaseTestNessieRest {
 
+    @Override
+    @Disabled
+    public void createAndUpdateRepositoryConfig() {
+      // not supported by V2ConfigResource
+    }
+
+    @Override
+    @Disabled
+    public void genericRepositoryConfigForbidden() {
+      // not supported by V2ConfigResource
+    }
+
+    @Test
+    public void repositoryConfigForbidden() {
+      //noinspection resource
+      assertThatThrownBy(
+              () ->
+                  apiV2()
+                      .updateRepositoryConfig()
+                      .repositoryConfig(
+                          GarbageCollectorConfig.builder()
+                              .defaultCutoffPolicy("P123D")
+                              .expectedFileCountPerContent(1)
+                              .build())
+                      .update())
+          .isInstanceOf(NessieForbiddenException.class); // cf. V2ConfigResource
+    }
+
     /** Workaround to obtain proper test display names in surefire reports. */
     @Nested
     @NessieApiVersions(versions = NessieApiVersion.V2)
@@ -199,28 +230,6 @@ public class ITNessieSourceApi extends BaseTestServerJunit5 {
 
     @RegisterExtension
     private final NessieClientResolverImpl proxyResolver = new NessieClientResolverImpl();
-
-    @Override
-    @Disabled
-    // Disabled because NaaS proxy only proxies /trees endpoints, so /config is not available
-    public void config() throws NessieNotFoundException {}
-
-    @Override
-    @Disabled
-    // Disabled because NaaS proxy only proxies /trees endpoints, so /config is not available
-    public void specVersion() {}
-
-    @Disabled // Disabled because NaaS proxy only proxies /trees endpoints, so /config is not
-    // available
-    void invalidCreateRepositoryConfig() {}
-
-    @Disabled // Disabled because NaaS proxy only proxies /trees endpoints, so /config is not
-    // available
-    void createAndUpdateRepositoryConfig() {}
-
-    @Disabled // Disabled because NaaS proxy only proxies /trees endpoints, so /config is not
-    // available
-    void genericRepositoryConfigForbidden() {}
   }
 
   private static final class NessieClientResolverImpl extends NessieClientResolver

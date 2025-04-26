@@ -17,5 +17,5 @@
 export const getFilteredRolesAndUsers = (
   state: any,
   allowPublicRole?: boolean,
-  allowGrants?: boolean,
+  singleUserOrRole?: [],
 ) => {};

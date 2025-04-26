@@ -923,10 +923,13 @@ public abstract class BaseDecimalFunctionTests extends BaseTestFunction {
                     .isInstanceOf(NumberFormatException.class),
             t ->
                 assertThat(t)
+                    .isInstanceOf(UserException.class)
+                    .extracting(Throwable::getCause)
                     .isInstanceOf(GandivaException.class)
                     .extracting(Throwable::getMessage)
                     .asString()
-                    .contains("not a valid decimal128 number"));
+                    .containsAnyOf(
+                        "is neither a decimal digit number", "is not a valid decimal128 number"));
 
     // Throwable root = ex.getCause().getCause();
     // Assert.assertTrue(root.getClass().getName() + " / " + root.getMessage(),

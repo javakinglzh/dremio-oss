@@ -35,4 +35,15 @@ public interface MessagePublisher<M extends Message> extends Closeable {
    *     success.
    */
   CompletableFuture<String> publish(M message);
+
+  MessagePublisher<? extends Message> NO_OP =
+      new MessagePublisher<>() {
+        @Override
+        public CompletableFuture<String> publish(Message message) {
+          return CompletableFuture.completedFuture(null);
+        }
+
+        @Override
+        public void close() {}
+      };
 }

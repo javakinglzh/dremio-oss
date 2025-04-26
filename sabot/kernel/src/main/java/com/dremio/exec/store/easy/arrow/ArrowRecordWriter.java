@@ -31,6 +31,7 @@ import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.easy.arrow.ArrowFileFormat.ArrowFileFooter;
 import com.dremio.exec.store.easy.arrow.ArrowFileFormat.ArrowFileMetadata;
 import com.dremio.exec.store.easy.arrow.ArrowFileFormat.ArrowRecordBatchSummary;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -111,9 +112,11 @@ public class ArrowRecordWriter implements RecordWriter {
     if (this.fs == null) {
       this.fs =
           writerConfig
-              .getFormatPlugin()
-              .getFsPlugin()
-              .createFS(writerConfig.getProps().getUserName(), context);
+              .getFileSystemCreator()
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .userName(writerConfig.getProps().getUserName())
+                      .operatorContext(context));
     }
     if (this.currentFile == null) {
       this.currentFile =

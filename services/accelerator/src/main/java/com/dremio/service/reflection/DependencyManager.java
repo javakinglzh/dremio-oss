@@ -15,6 +15,7 @@
  */
 package com.dremio.service.reflection;
 
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.service.reflection.DependencyUtils.filterDatasetDependencies;
 import static com.dremio.service.reflection.DependencyUtils.filterReflectionDependencies;
 import static com.dremio.service.reflection.DependencyUtils.filterTableFunctionDependencies;
@@ -127,7 +128,9 @@ public class DependencyManager {
 
   void start() {
     graph.loadFromStore();
-    entriesStore.find().forEach(this::createMaterializationInfo);
+    for (ReflectionEntry reflectionEntry : entriesStore.find()) {
+      createMaterializationInfo(reflectionEntry, MANUAL_REFLECTION_MODE);
+    }
   }
 
   ExcludedReflectionsProvider getExcludedReflectionsProvider() {
@@ -393,6 +396,8 @@ public class DependencyManager {
     final MaterializationInfo materializationInfo = getMaterializationInfo(reflectionId);
     final int numFailures = Optional.ofNullable(materializationInfo.getNumFailures()).orElse(0);
     final long lastSubmitted = materializationInfo.getLastSubmittedRefresh();
+    final long lastRefreshDurationMillis =
+        Optional.ofNullable(materializationInfo.getLastRefreshDuration()).orElse(0L);
     final String reflectionName = materializationInfo.getReflectionName();
 
     final StringBuilder traceMsg = new StringBuilder();
@@ -400,7 +405,12 @@ public class DependencyManager {
     // all the entries with failures will enter this block and terminate here
     if (optionManager.getOption(ReflectionOptions.BACKOFF_RETRY_POLICY) && numFailures > 0) {
       return shouldRetryAfterFailure(
-          reflectionId, numFailures, lastSubmitted, currentTime, dependencyResolutionContext);
+          reflectionId,
+          numFailures,
+          lastSubmitted,
+          currentTime,
+          lastRefreshDurationMillis,
+          dependencyResolutionContext);
     }
 
     final List<DependencyEntry> dependencies = graph.getPredecessors(reflectionId);
@@ -454,28 +464,26 @@ public class DependencyManager {
 
     // Go through dataset and table function dependencies with schedule policies
     // returning true if any of the schedules dictate there should be a refresh
-    if (optionManager.getOption(ReflectionOptions.REFLECTION_SCHEDULE_POLICY_ENABLED)) {
-      boolean shouldRefreshFromSchedule =
-          dependencies.stream()
-              .filter(
-                  (Predicate<DependencyEntry>)
-                      entry ->
-                          ((entry.getType() == DependencyType.DATASET)
-                              || entry.getType() == DependencyType.TABLEFUNCTION))
-              .anyMatch(
-                  dependency -> {
-                    AccelerationSettings settings =
-                        getSettingsForDependency(dependencyResolutionContext, dependency);
-                    return (settings.getRefreshPolicyType().equals(RefreshPolicyType.SCHEDULE)
-                        && materializationInfo.getLastSuccessfulRefresh() != null
-                        && isRefreshFromScheduleDue(
-                            settings.getRefreshSchedule(),
-                            materializationInfo.getLastSuccessfulRefresh(),
-                            currentTime));
-                  });
-      if (shouldRefreshFromSchedule) {
-        return true;
-      }
+    boolean shouldRefreshFromSchedule =
+        dependencies.stream()
+            .filter(
+                (Predicate<DependencyEntry>)
+                    entry ->
+                        ((entry.getType() == DependencyType.DATASET)
+                            || entry.getType() == DependencyType.TABLEFUNCTION))
+            .anyMatch(
+                dependency -> {
+                  AccelerationSettings settings =
+                      getSettingsForDependency(dependencyResolutionContext, dependency);
+                  return (settings.getRefreshPolicyType().equals(RefreshPolicyType.SCHEDULE)
+                      && materializationInfo.getLastSuccessfulRefresh() != null
+                      && isRefreshFromScheduleDue(
+                          settings.getRefreshSchedule(),
+                          materializationInfo.getLastSuccessfulRefresh(),
+                          currentTime));
+                });
+    if (shouldRefreshFromSchedule) {
+      return true;
     }
 
     // go through dataset dependencies and table function depedencies to compute last start refresh
@@ -775,7 +783,8 @@ public class DependencyManager {
   }
 
   /** Creates MaterializationInfo cache entry with the info from given ReflectionEntry. */
-  void createMaterializationInfo(ReflectionEntry reflectionEntry) {
+  void createMaterializationInfo(ReflectionEntry reflectionEntry, String reflectionMode) {
+    // create a materialization info entry for the reflection entry
     ReflectionId reflectionId = reflectionEntry.getId();
     ImmutableMaterializationInfo.Builder builder = MaterializationInfo.builder();
     builder
@@ -783,7 +792,17 @@ public class DependencyManager {
         .setReflectionState(reflectionEntry.getState())
         .setLastSubmittedRefresh(reflectionEntry.getLastSubmittedRefresh())
         .setLastSuccessfulRefresh(reflectionEntry.getLastSuccessfulRefresh())
-        .setNumFailures(reflectionEntry.getNumFailures());
+        .setNumFailures(reflectionEntry.getNumFailures())
+        .setReflectionMode(reflectionMode);
+
+    // update last refresh duration of that materialization info entry if available
+    Materialization lastMaterializationFinished =
+        materializationStore.getLastMaterializationFinished(reflectionEntry.getId());
+    if (lastMaterializationFinished != null
+        && lastMaterializationFinished.getLastRefreshDurationMillis() != null) {
+      builder.setLastRefreshDuration(lastMaterializationFinished.getLastRefreshDurationMillis());
+    }
+
     materializationInfoCache.put(reflectionId, builder.build());
   }
 
@@ -818,6 +837,14 @@ public class DependencyManager {
         .setMaterializationId(materializationId)
         .setSnapshotId(snapshotId)
         .setIsVacuumed(isVacuumed);
+    materializationInfoCache.put(reflectionId, builder.build());
+  }
+
+  void updateLastRefreshDuration(ReflectionId reflectionId, long lastRefreshDurationMillis) {
+    ImmutableMaterializationInfo.Builder builder = MaterializationInfo.builder();
+    MaterializationInfo previous = getMaterializationInfo(reflectionId);
+    builder.from(previous);
+    builder.setLastRefreshDuration(lastRefreshDurationMillis);
     materializationInfoCache.put(reflectionId, builder.build());
   }
 
@@ -950,6 +977,10 @@ public class DependencyManager {
         String.format("Invalid value specified in days of week for refreshSchedule: %s", day));
   }
 
+  ReflectionEntriesStore getEntriesStore() {
+    return entriesStore;
+  }
+
   DependencyGraph getGraph() {
     return graph;
   }
@@ -958,14 +989,39 @@ public class DependencyManager {
     return optionManager;
   }
 
-  /** Get backoff time interval in minute for refresh retry */
-  private long getBackoffMinutes(final Integer numFailures) {
+  /** Get dynamic backoff time interval in minute for refresh retry. */
+  private long getBackoffMinutes(final Integer numFailures, final long lastRefreshDurationMillis) {
     long[] backoffs = {1, 2, 5, 15, 30, 60, 120, 240};
-    if (numFailures < backoffs.length) {
-      return backoffs[numFailures - 1];
-    } else {
-      return backoffs[backoffs.length - 1];
+    double lastRefreshDurationMinutes = lastRefreshDurationMillis / 60000D;
+
+    int index = numFailures - 1;
+    // If MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS is set to a small value, we need to adjust the index
+    // with the difference between the backoff array length and the
+    // MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS so that the most coverage is guaranteed. For example,
+    // if MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS is set to 3, for the first failure i.e. numFailures
+    // = 1, the adjusted index would be 1 + (8 - 3) + 1 = 7 and the backoff interval would be
+    // backoffs[7 - 1] = backoffs[6] = 120 minutes. For the second failure, the backoff interval
+    // would be 240 minutes. For the third failure, the reflection would be marked as FAILED.
+    if (optionManager.getOption(ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)
+        <= backoffs.length) {
+      index +=
+          backoffs.length
+              - optionManager.getOption(ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)
+              + 1;
     }
+
+    // If current backoff interval is smaller than last refresh duration, we skip this interval
+    // until we find one that is larger than last refresh duration or reach the end of the backoff
+    // array.
+    while (index < backoffs.length) {
+      if (lastRefreshDurationMinutes <= backoffs[index]) {
+        return backoffs[index];
+      }
+
+      index++;
+    }
+
+    return backoffs[backoffs.length - 1];
   }
 
   /**
@@ -977,9 +1033,10 @@ public class DependencyManager {
       final int numFailures,
       final long lastSubmitted,
       final long currentTime,
+      final long lastRefreshDurationMillis,
       final DependencyResolutionContext dependencyResolutionContext) {
     assert numFailures > 0;
-    final long backoffMinutes = getBackoffMinutes(numFailures);
+    final long backoffMinutes = getBackoffMinutes(numFailures, lastRefreshDurationMillis);
     // Either immediate backoff is enabled or the backoff time interval is met, we return true
     if (!optionManager.getOption(ReflectionOptions.ENABLE_EXPONENTIAL_BACKOFF_FOR_RETRY_POLICY)
         || lastSubmitted + MINUTES.toMillis(backoffMinutes) <= currentTime) {

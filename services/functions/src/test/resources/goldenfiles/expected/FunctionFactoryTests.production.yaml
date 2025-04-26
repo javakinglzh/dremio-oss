@@ -710,7 +710,8 @@
   input: "ARRAY_SORT"
   output:
     name: "ARRAY_SORT"
-    signatures: []
+    signatures:
+     - "(ANY) -> ANY"
  -
   description: "ARRAY_SUM"
   input: "ARRAY_SUM"
@@ -5497,6 +5498,12 @@
      - "(INT, BIGINT?) -> INT"
      - "(BIGINT, INT?) -> BIGINT"
      - "(BIGINT, BIGINT?) -> BIGINT"
+ -
+  description: "TRY_CONVERT_FROM"
+  input: "TRY_CONVERT_FROM"
+  output:
+    name: "TRY_CONVERT_FROM"
+    signatures: []
  -
   description: "TUMBLE"
   input: "TUMBLE"

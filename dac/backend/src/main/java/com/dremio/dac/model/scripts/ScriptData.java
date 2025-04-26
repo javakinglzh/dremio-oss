@@ -18,8 +18,8 @@ package com.dremio.dac.model.scripts;
 
 import com.dremio.dac.api.User;
 import com.dremio.dac.proto.model.dataset.SourceVersionReference;
-import com.dremio.service.script.SourceVersionReferenceUtils;
-import com.dremio.service.script.proto.ScriptProto;
+import com.dremio.service.scripts.SourceVersionReferenceUtils;
+import com.dremio.service.scripts.proto.ScriptProto;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;

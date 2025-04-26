@@ -15,7 +15,7 @@
  */
 import type { FC } from "react";
 
-const supportedFormats = {
+export const supportedFormats = {
   /**
    * Used when tabular alignment / consistent line length is desired,
    * for example when used in a table column.

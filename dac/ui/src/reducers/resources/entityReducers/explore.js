@@ -13,20 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import {
-  LOAD_DEPENDENT_DATASETS_SUCCESS,
-  LOAD_PARENTS_SUCCESS,
-  LOAD_PARENTS_FAILURE,
-} from "actions/resources/spaceDetails";
+import { LOAD_DEPENDENT_DATASETS_SUCCESS } from "actions/resources/spaceDetails";
 
 export default function data(state, action) {
   switch (action.type) {
-    case LOAD_PARENTS_SUCCESS:
-      return state.setIn(["datasetUI", "parentList"], action.payload);
     case LOAD_DEPENDENT_DATASETS_SUCCESS:
       return state.setIn(["datasetUI", "descendantsList"], action.payload);
-    case LOAD_PARENTS_FAILURE:
-      return state.setIn(["datasetUI", "parentList"], []);
     default:
       return state;
   }

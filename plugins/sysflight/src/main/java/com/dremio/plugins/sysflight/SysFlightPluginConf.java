@@ -15,10 +15,10 @@
  */
 package com.dremio.plugins.sysflight;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.sys.SystemTable;
 import java.util.Collections;
 import javax.inject.Provider;
@@ -37,9 +37,15 @@ public class SysFlightPluginConf
    */
   @Override
   public SysFlightStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     return new SysFlightStoragePlugin(
-        context, name, pluginIdProvider, true, Collections.singletonList(SystemTable.DEPENDENCIES));
+        pluginSabotContext,
+        name,
+        pluginIdProvider,
+        true,
+        Collections.singletonList(SystemTable.DEPENDENCIES));
   }
 
   @Override

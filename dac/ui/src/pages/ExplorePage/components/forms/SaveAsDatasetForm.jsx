@@ -33,7 +33,11 @@ import {
 import { withFilterTreeArs } from "#oss/utils/datasetTreeUtils";
 import { getHomeSource, getSortedSources } from "#oss/selectors/home";
 import { withCatalogARSFlag } from "@inject/utils/arsUtils";
-import { getSourceByName as getNessieSourceByName } from "#oss/utils/nessieUtils";
+import {
+  getSourceByName as getNessieSourceByName,
+  getRawSourceByName,
+} from "#oss/utils/nessieUtils";
+import { SNOWFLAKEOPENCATALOG } from "#oss/constants/sourceTypes";
 import { getRefQueryParams } from "#oss/utils/nessieUtils";
 import { Button } from "dremio-ui-lib/components";
 import * as classes from "./SaveAsDatasetForm.module.less";
@@ -233,7 +237,10 @@ export class SaveAsDatasetForm extends Component {
                       tree.filter(
                         (node) =>
                           node.get("type") !== "SOURCE" ||
-                          !!getNessieSourceByName(node.get("name"), sources),
+                          !!getNessieSourceByName(node.get("name"), sources) ||
+                          getRawSourceByName(node.get("name"), sources)?.get(
+                            "type",
+                          ) === SNOWFLAKEOPENCATALOG,
                       ),
                     ),
                 }}

@@ -59,7 +59,8 @@
   &-enter-active,
   &-appear-active,
   &-appear-done,
-  &-enter-done {
+  &-enter-done,
+  &--open {
     @include dremio-tooltip-shown;
   }
 

@@ -104,7 +104,7 @@ public final class ProfilesExporter {
             SearchQueryUtils.newTermQuery(jobStatusKey, JobState.CANCELED.toString()),
             SearchQueryUtils.newTermQuery(jobStatusKey, JobState.COMPLETED.toString()));
 
-    jobsFilter.setCondition(SearchQueryUtils.and(dateQuery, jobStateQuery)).setPageSize(100);
+    jobsFilter.setCondition(SearchQueryUtils.and(dateQuery, jobStateQuery)).setPageSize(50);
 
     return jobsFilter;
   }

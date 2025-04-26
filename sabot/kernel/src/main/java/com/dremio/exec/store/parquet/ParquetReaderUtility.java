@@ -18,6 +18,7 @@ package com.dremio.exec.store.parquet;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.common.util.DateTimes;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.store.parquet2.LogicalListL1Converter;
 import com.dremio.exec.util.ColumnUtils;
@@ -38,8 +39,8 @@ import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.statistics.Statistics;
 import org.apache.parquet.example.data.simple.NanoTime;
-import org.apache.parquet.format.ConvertedType;
 import org.apache.parquet.format.FileMetaData;
+import org.apache.parquet.format.LogicalType;
 import org.apache.parquet.format.SchemaElement;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.ParquetFileWriter;
@@ -48,11 +49,10 @@ import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnPath;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.io.api.Binary;
+import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.Type;
 import org.joda.time.Chronology;
-import org.joda.time.DateTimeConstants;
 
 /** Utility class where we can capture common logic between the two parquet readers */
 public final class ParquetReaderUtility {
@@ -82,7 +82,7 @@ public final class ParquetReaderUtility {
   // something like 10,000 years in the past.
   private static final Chronology UTC = org.joda.time.chrono.ISOChronology.getInstanceUTC();
   public static final int DATE_CORRUPTION_THRESHOLD =
-      (int) (UTC.getDateTimeMillis(5000, 1, 1, 0) / DateTimeConstants.MILLIS_PER_DAY);
+      (int) (UTC.getDateTimeMillis(5000, 1, 1, 0) / DateTimes.MILLIS_PER_DAY);
 
   /**
    * For most recently created parquet files, we can determine if we have corrupted dates (see
@@ -285,8 +285,8 @@ public final class ParquetReaderUtility {
             || new PathSegment.NameSegment(column.getPath()[0])
                 .equals(schemaPath.getRootSegment())) {
           ColumnChunkMetaData columnChunkMetaData = null;
-          ConvertedType convertedType = schemaElements.get(column.getPath()[0]).getConverted_type();
-          if (convertedType != null && convertedType.equals(ConvertedType.DATE)) {
+          LogicalType logicalType = schemaElements.get(column.getPath()[0]).getLogicalType();
+          if (logicalType != null && logicalType.isSetDATE()) {
             List<ColumnChunkMetaData> colChunkList = blockMetaData.getColumns();
             for (int j = 0; j < colChunkList.size(); j++) {
               if (colChunkList.get(j).getPath().equals(ColumnPath.get(column.getPath()))) {
@@ -331,7 +331,7 @@ public final class ParquetReaderUtility {
         .isPrimitive()) { // don't bother checking the last element in the path as it is a primitive
       // type
       type = type.asGroupType().getType(path.get(index));
-      if (type.getOriginalType() == OriginalType.LIST
+      if (type.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation
           && LogicalListL1Converter.isSupportedSchema(type.asGroupType())) {
         // remove 'list'
         type = type.asGroupType().getType(path.get(index + 1));
@@ -341,7 +341,7 @@ public final class ParquetReaderUtility {
         type = type.asGroupType().getType(path.get(index + 1));
 
         // handle nested list case
-        while (type.getOriginalType() == OriginalType.LIST
+        while (type.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation
             && LogicalListL1Converter.isSupportedSchema(type.asGroupType())) {
           // current 'list'.'element' entry
           path.remove(index + 1);
@@ -366,9 +366,6 @@ public final class ParquetReaderUtility {
    * This utilizes the Joda library.
    */
   public static class NanoTimeUtils {
-
-    public static final long NANOS_PER_MILLISECOND = 1000000;
-
     /**
      * @param binaryTimeStampValue hive, impala timestamp values with nanoseconds precision are
      *     stored in parquet Binary as INT96 (12 constant bytes)
@@ -382,8 +379,8 @@ public final class ParquetReaderUtility {
       NanoTime nt = NanoTime.fromBinary(binaryTimeStampValue);
       int julianDay = nt.getJulianDay();
       long nanosOfDay = nt.getTimeOfDayNanos();
-      return (julianDay - JULIAN_DAY_NUMBER_FOR_UNIX_EPOCH) * DateTimeConstants.MILLIS_PER_DAY
-          + nanosOfDay / NANOS_PER_MILLISECOND;
+      return (julianDay - JULIAN_DAY_NUMBER_FOR_UNIX_EPOCH) * DateTimes.MILLIS_PER_DAY
+          + nanosOfDay / DateTimes.NANOS_PER_MILLISECOND;
     }
   }
 

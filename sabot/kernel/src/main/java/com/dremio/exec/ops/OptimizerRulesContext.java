@@ -15,11 +15,23 @@
  */
 package com.dremio.exec.ops;
 
+import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.expr.fn.FunctionImplementationRegistry;
+import com.dremio.exec.planner.OptimizePlanGenerator;
+import com.dremio.exec.planner.OptimizePlanGeneratorBase;
+import com.dremio.exec.planner.logical.CreateTableEntry;
+import com.dremio.exec.planner.logical.partition.PruneFilterCondition;
 import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.planner.sql.handlers.query.OptimizeOptions;
 import com.dremio.exec.store.CatalogService;
+import com.dremio.exec.store.TableMetadata;
+import com.dremio.exec.tablefunctions.clusteringinfo.ClusteringInfoCatalogMetadata;
 import com.dremio.sabot.exec.context.FunctionContext;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.calcite.plan.RelOptCluster;
+import org.apache.calcite.plan.RelOptTable;
+import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.RelNode;
 
 public interface OptimizerRulesContext extends FunctionContext {
   /**
@@ -27,22 +39,55 @@ public interface OptimizerRulesContext extends FunctionContext {
    *
    * @return FunctionImplementationRegistry
    */
-  public FunctionImplementationRegistry getFunctionRegistry();
+  FunctionImplementationRegistry getFunctionRegistry();
 
   /**
    * Method returns the allocator
    *
    * @return BufferAllocator
    */
-  public BufferAllocator getAllocator();
+  BufferAllocator getAllocator();
 
   /**
    * Method returns the planner options
    *
    * @return PlannerSettings
    */
-  public PlannerSettings getPlannerSettings();
+  PlannerSettings getPlannerSettings();
 
   // TODO(DX-43968): Rework to not expose catalog service; optimization is contextualized to Catalog
-  public CatalogService getCatalogService();
+  CatalogService getCatalogService();
+
+  default OptimizePlanGeneratorBase getOptimizePlanGenerator(
+      RelOptTable table,
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      RelNode input,
+      TableMetadata tableMetadata,
+      CreateTableEntry createTableEntry,
+      OptimizerRulesContext context,
+      OptimizeOptions optimizeOptions,
+      PruneFilterCondition partitionFilter) {
+    return new OptimizePlanGenerator(
+        table,
+        cluster,
+        traitSet,
+        input,
+        tableMetadata,
+        createTableEntry,
+        context,
+        optimizeOptions,
+        partitionFilter);
+  }
+
+  default OptimizePlanGeneratorBase getClusteringInfoPlanGenerator(
+      RelOptTable table,
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      Catalog catalog,
+      TableMetadata tableMetadata,
+      OptimizerRulesContext context,
+      ClusteringInfoCatalogMetadata clusteringInfoMetadata) {
+    throw new UnsupportedOperationException("not supported");
+  }
 }

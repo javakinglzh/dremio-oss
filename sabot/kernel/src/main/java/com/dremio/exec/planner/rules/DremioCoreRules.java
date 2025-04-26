@@ -23,12 +23,13 @@ import static org.apache.calcite.plan.RelOptRule.some;
 import com.dremio.exec.planner.DremioJoinToMuliJoinRule;
 import com.dremio.exec.planner.logical.AggregateRel;
 import com.dremio.exec.planner.logical.Conditions;
+import com.dremio.exec.planner.logical.CorrelatedFilterSplitRule;
 import com.dremio.exec.planner.logical.DremioAggregateProjectPullUpConstantsRule;
 import com.dremio.exec.planner.logical.DremioAggregateReduceFunctionsRule;
+import com.dremio.exec.planner.logical.DremioFilterMergeRule;
 import com.dremio.exec.planner.logical.DremioProjectJoinTransposeRule;
 import com.dremio.exec.planner.logical.DremioRelFactories;
 import com.dremio.exec.planner.logical.FilterJoinRulesUtil;
-import com.dremio.exec.planner.logical.FilterMergeCrule;
 import com.dremio.exec.planner.logical.FilterRel;
 import com.dremio.exec.planner.logical.JoinRel;
 import com.dremio.exec.planner.logical.ProjectInputRefPastFilterRule;
@@ -40,11 +41,17 @@ import com.dremio.exec.planner.logical.rule.DremioReduceExpressionsRule.FilterRe
 import com.dremio.exec.planner.logical.rule.DremioReduceExpressionsRule.JoinReduceExpressionsRule.JoinReduceExpressionsRuleConfig;
 import com.dremio.exec.planner.logical.rule.DremioReduceExpressionsRule.ProjectReduceExpressionsRule.ProjectReduceExpressionsRuleConfig;
 import com.dremio.exec.planner.logical.rule.GroupSetToCrossJoinCaseStatement;
-import com.dremio.exec.planner.normalizer.DremioArraySubQueryRemoveRule;
+import com.dremio.exec.planner.normalizer.ArraySubQueryRemoveRule;
+import com.dremio.exec.planner.normalizer.CalciteSubQueryRemoveRule;
+import com.dremio.exec.planner.normalizer.LegacyArraySubQueryRemoveRule;
+import com.dremio.exec.planner.normalizer.LegacyCalciteSubQueryRemoveRule;
+import com.dremio.exec.planner.transpose.FilterFilterTransposeRule;
+import com.dremio.exec.planner.transpose.FilterSortTransposeRule;
 import java.util.EnumSet;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Correlate;
 import org.apache.calcite.rel.core.Filter;
 import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.Project;
@@ -75,8 +82,8 @@ import org.apache.calcite.rel.rules.ProjectMultiJoinMergeRule;
 import org.apache.calcite.rel.rules.ProjectRemoveRule;
 import org.apache.calcite.rel.rules.PushProjector;
 import org.apache.calcite.rel.rules.ReduceExpressionsRule;
-import org.apache.calcite.rel.rules.SubQueryRemoveRule;
 import org.apache.calcite.rel.rules.UnionMergeRule;
+import org.apache.calcite.rex.RexUtil;
 
 public interface DremioCoreRules {
 
@@ -87,6 +94,12 @@ public interface DremioCoreRules {
   DremioAggregateProjectPullUpConstantsRule AGGREGATE_PROJECT_PULL_UP_CONSTANTS =
       DremioAggregateProjectPullUpConstantsRule.Config.DEFAULT.toRule();
 
+  DremioAggregateMergeRule AGGREGATE_MERGE_DRULE =
+      DremioAggregateMergeRule.Config.DEFAULT
+          .withRelBuilderFactory(DremioRelFactories.LOGICAL_BUILDER)
+          .as(DremioAggregateMergeRule.Config.class)
+          .toRule();
+
   AggregateReduceFunctionsRule CALCITE_AGG_REDUCE_FUNCTIONS_NO_REDUCE_SUM =
       AggregateReduceFunctionsRule.Config.DEFAULT
           .withRelBuilderFactory(RelFactories.LOGICAL_BUILDER)
@@ -96,16 +109,27 @@ public interface DremioCoreRules {
           .withFunctionsToReduce(EnumSet.copyOf(DEFAULT_FUNCTIONS_TO_REDUCE_NO_SUM))
           .toRule();
 
-  RelOptRule CONVERT_JOIN_SUB_QUERY_TO_CORRELATE =
+  RelOptRule LEGACY_SUBQUERY_REMOVE_RULE_JOIN =
+      LegacyDremioJoinSubQueryRemoveRule.Config.DEFAULT
+          .withRelBuilderFactory(DremioRelFactories.CALCITE_LOGICAL_BUILDER)
+          .toRule();
+
+  RelOptRule SUBQUERY_REMOVE_RULE_JOIN =
       DremioJoinSubQueryRemoveRule.Config.DEFAULT
           .withRelBuilderFactory(DremioRelFactories.CALCITE_LOGICAL_BUILDER)
           .toRule();
 
-  RelOptRule CONVERT_FILTER_SUB_QUERY_TO_CORRELATE =
-      new DremioArraySubQueryRemoveRule(SubQueryRemoveRule.Config.FILTER);
+  RelOptRule LEGACY_SUBQUERY_REMOVE_RULE_FILTER =
+      new LegacyArraySubQueryRemoveRule(LegacyCalciteSubQueryRemoveRule.Config.FILTER);
 
-  RelOptRule CONVERT_PROJECT_SUB_QUERY_TO_CORRELATE =
-      new DremioArraySubQueryRemoveRule(SubQueryRemoveRule.Config.PROJECT);
+  RelOptRule SUBQUERY_REMOVE_RULE_FILTER =
+      new ArraySubQueryRemoveRule(CalciteSubQueryRemoveRule.Config.FILTER);
+
+  RelOptRule LEGACY_SUBQUERY_REMOVE_RULE_PROJECT =
+      new LegacyArraySubQueryRemoveRule(LegacyCalciteSubQueryRemoveRule.Config.PROJECT);
+
+  RelOptRule SUBQUERY_REMOVE_RULE_PROJECT =
+      new ArraySubQueryRemoveRule(CalciteSubQueryRemoveRule.Config.PROJECT);
 
   GroupSetToCrossJoinCaseStatement.Rule GROUP_SET_TO_CROSS_JOIN_RULE_ROLLUP =
       GroupSetToCrossJoinCaseStatement.Rule.Config.DEFAULT.withRollup(true).toRule();
@@ -347,11 +371,29 @@ public interface DremioCoreRules {
           .toRule();
 
   /** Planner rule that combines two {@link Filter}s. */
-  FilterMergeCrule FILTER_MERGE_CALCITE_RULE =
-      new FilterMergeCrule(LogicalFilter.class, DremioRelFactories.CALCITE_LOGICAL_BUILDER);
+  RelOptRule FILTER_MERGE_CRULE_ALLOW_CORRELATIONS =
+      DremioFilterMergeRule.Config.DEFAULT
+          .withRelBuilderFactory(DremioRelFactories.CALCITE_LOGICAL_BUILDER)
+          .toRule();
 
-  FilterMergeCrule FILTER_MERGE_DRULE =
-      new FilterMergeCrule(FilterRel.class, DremioRelFactories.LOGICAL_BUILDER);
+  RelOptRule FILTER_MERGE_DRULE_ALLOW_CORRELATIONS =
+      DremioFilterMergeRule.Config.DEFAULT
+          .withRelBuilderFactory(DremioRelFactories.LOGICAL_BUILDER)
+          .toRule();
+
+  RelOptRule FILTER_MERGE_RULE_DISALLOW_CORRELATIONS =
+      DremioFilterMergeRule.Config.DEFAULT
+          .withOperandSupplier(
+              b1 ->
+                  b1.operand(Filter.class)
+                      .predicate(f1 -> !RexUtil.containsCorrelation(f1.getCondition()))
+                      .oneInput(
+                          b2 ->
+                              b2.operand(Filter.class)
+                                  .predicate(f2 -> !RexUtil.containsCorrelation(f2.getCondition()))
+                                  .anyInputs()))
+          .toRule();
+
   ProjectRemoveRule PROJECT_REMOVE_DRULE =
       new ProjectRemoveRule(DremioRelFactories.LOGICAL_BUILDER);
 
@@ -403,8 +445,32 @@ public interface DremioCoreRules {
 
   RelOptRule PUSH_PROJECT_PAST_JOIN_CALCITE_RULE = DremioProjectJoinTransposeRule.INSTANCE;
 
-  RelOptRule LOGICAL_FILTER_CORRELATE_RULE =
-      new FilterCorrelateRule(DremioRelFactories.CALCITE_LOGICAL_BUILDER);
+  RelOptRule FILTER_CORRELATE_RULE_DISALLOW_CORRELATION =
+      FilterCorrelateRule.Config.DEFAULT
+          .withOperandSupplier(
+              b0 ->
+                  b0.operand(Filter.class)
+                      .predicate(filter -> !RexUtil.containsCorrelation(filter.getCondition()))
+                      .oneInput(b1 -> b1.operand(Correlate.class).anyInputs()))
+          .toRule();
+
+  RelOptRule FILTER_CORRELATE_RULE_ALLOW_CORRELATION = FilterCorrelateRule.Config.DEFAULT.toRule();
+
+  RelOptRule CORRELATED_FILTER_SPLIT_RULE = CorrelatedFilterSplitRule.Config.DEFAULT.toRule();
+  RelOptRule FILTER_CORRELATED_FILTER_TRANSPOSE_RULE =
+      FilterFilterTransposeRule.Config.DEFAULT
+          .withDescription("FilterCorrelatedFilterTransposeRule")
+          .withOperandSupplier(
+              op1 ->
+                  op1.operand(Filter.class)
+                      .predicate(filter -> !RexUtil.containsCorrelation(filter.getCondition()))
+                      .oneInput(
+                          op2 ->
+                              op2.operand(Filter.class)
+                                  .predicate(
+                                      filter -> RexUtil.containsCorrelation(filter.getCondition()))
+                                  .anyInputs()))
+          .toRule();
 
   RelOptRule FILTER_SORT_TRANSPOSE_RULE = FilterSortTransposeRule.Config.DEFAULT.toRule();
 

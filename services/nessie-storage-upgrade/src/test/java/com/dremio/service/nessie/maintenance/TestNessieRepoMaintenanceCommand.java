@@ -19,7 +19,6 @@ import static com.dremio.test.DremioTest.CLASSPATH_SCAN_RESULT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.dremio.common.SuppressForbidden;
 import com.dremio.datastore.LocalKVStoreProvider;
 import com.dremio.service.embedded.catalog.EmbeddedUnversionedStore;
 import com.dremio.service.namespace.NamespaceStore;
@@ -30,18 +29,15 @@ import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.nessie.maintenance.NessieRepoMaintenanceCommand.Options;
+import com.dremio.services.nessie.grpc.api.CommitOperation;
+import com.dremio.services.nessie.grpc.api.Content;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.versioned.BranchName;
-import org.projectnessie.versioned.Put;
 import org.slf4j.helpers.MessageFormatter;
 
 class TestNessieRepoMaintenanceCommand {
@@ -71,24 +67,34 @@ class TestNessieRepoMaintenanceCommand {
         storeProvider, Options.parse(new String[] {"--list-keys"}));
   }
 
+  private CommitOperation putTable(ContentKey key, String loc) {
+    return CommitOperation.newBuilder()
+        .setPut(
+            com.dremio.services.nessie.grpc.api.Put.newBuilder()
+                .setKey(
+                    com.dremio.services.nessie.grpc.api.ContentKey.newBuilder()
+                        .addAllElements(key.getElements())
+                        .build())
+                .setContent(
+                    Content.newBuilder()
+                        .setIceberg(
+                            com.dremio.services.nessie.grpc.api.IcebergTable.newBuilder()
+                                .setMetadataLocation(loc)
+                                .build())
+                        .build())
+                .build())
+        .build();
+  }
+
   @Test
-  @SuppressForbidden // Nessie's relocated ByteString is required to interface with Nessie Database
-  // Adapters.
   void testListObsoleteInternalKeys() throws Exception {
     String tableId2 = "8ec5373f-d2a6-4b1a-a870-e18046bbd6ae";
     String tableId3 = "34dadc3a-ae44-4e61-b78e-0295c089df70";
     store.commit(
-        BranchName.of("main"),
-        Optional.empty(),
-        CommitMeta.fromMessage("test-meta"),
         ImmutableList.of(
-            Put.of(ContentKey.of("test1"), IcebergTable.of("t1", 0, 0, 0, 0)),
-            Put.of(
-                ContentKey.of("dremio.internal", "test2/" + tableId2),
-                IcebergTable.of("t2", 0, 0, 0, 0)),
-            Put.of(
-                ContentKey.of("dremio.internal", "test3/" + tableId3),
-                IcebergTable.of("t3", 0, 0, 0, 0))));
+            putTable(ContentKey.of("test1"), "t1"),
+            putTable(ContentKey.of("dremio.internal", "test2/" + tableId2), "t2"),
+            putTable(ContentKey.of("dremio.internal", "test3/" + tableId3), "t3")));
 
     NamespaceStore namespace = new NamespaceStore(() -> storeProvider);
     IcebergMetadata metadata = new IcebergMetadata();

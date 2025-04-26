@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.store.dfs;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.Writer;
@@ -44,12 +44,11 @@ public class CreateParquetTableEntry
     implements CreateTableEntry, SystemIcebergTablePluginAwareCreateTableEntry {
   private final String userName;
   private final String userId;
-  private final MutablePlugin plugin;
+  private final SupportsFsMutablePlugin plugin;
   private final String location;
   private final WriterOptions options;
   private final IcebergTableProps icebergTableProps;
   private final NamespaceKey datasetPath;
-  private final StoragePluginId sourceTablePluginId;
   private StoragePluginId systemIcebergTablesPluginId;
   private SystemIcebergTablesStoragePlugin systemIcebergTablesPlugin;
   private StoragePluginResolver storagePluginResolver;
@@ -63,7 +62,6 @@ public class CreateParquetTableEntry
       @JsonProperty("icebergTableProps") IcebergTableProps icebergTableProps,
       @JsonProperty("options") WriterOptions options,
       @JsonProperty("datasetPath") NamespaceKey datasetPath,
-      @JsonProperty("sourceTablePluginId") StoragePluginId sourceTablePluginId,
       @JacksonInject StoragePluginResolver storagePluginResolver) {
     this.userName = userName;
     this.userId = userId;
@@ -72,7 +70,6 @@ public class CreateParquetTableEntry
     this.options = options;
     this.icebergTableProps = icebergTableProps;
     this.datasetPath = datasetPath;
-    this.sourceTablePluginId = sourceTablePluginId;
     this.storagePluginResolver = storagePluginResolver;
   }
 
@@ -80,31 +77,21 @@ public class CreateParquetTableEntry
    * Create an instance.
    *
    * @param userName Name of the user whom to impersonate while creating the table
-   * @param plugin {@link FileSystemPlugin} instance
+   * @param userId userId from request context
+   * @param plugin {@link SupportsFsMutablePlugin} instance
    * @param location Output path
    * @param icebergTableProps {@link IcebergTableProps} instance
    * @param options {@link WriterOptions} instance
-   * @param options {@link NamespaceKey} instance
+   * @param datasetPath {@link NamespaceKey} instance
    */
   public CreateParquetTableEntry(
       String userName,
-      MutablePlugin plugin,
+      final String userId,
+      SupportsFsMutablePlugin plugin,
       String location,
       IcebergTableProps icebergTableProps,
       WriterOptions options,
       NamespaceKey datasetPath) {
-    this(userName, null, plugin, location, icebergTableProps, options, datasetPath, null);
-  }
-
-  public CreateParquetTableEntry(
-      String userName,
-      final String userId,
-      MutablePlugin plugin,
-      String location,
-      IcebergTableProps icebergTableProps,
-      WriterOptions options,
-      NamespaceKey datasetPath,
-      StoragePluginId sourceTablePluginId) {
     this.userName = userName;
     this.userId = userId;
     this.plugin = plugin;
@@ -112,16 +99,11 @@ public class CreateParquetTableEntry
     this.options = options;
     this.icebergTableProps = icebergTableProps;
     this.datasetPath = datasetPath;
-    this.sourceTablePluginId = sourceTablePluginId;
   }
 
   @JsonProperty("pluginId")
   public StoragePluginId getId() {
     return plugin.getId();
-  }
-
-  public StoragePluginId getSourceTablePluginId() {
-    return sourceTablePluginId;
   }
 
   @JsonProperty("location")
@@ -132,20 +114,20 @@ public class CreateParquetTableEntry
 
   @JsonIgnore
   @Override
-  public MutablePlugin getPlugin() {
+  public SupportsFsMutablePlugin getPlugin() {
     return plugin;
   }
 
   @Override
   public CreateParquetTableEntry cloneWithNewLocation(String newLocation) {
     return new CreateParquetTableEntry(
-        userName, plugin, newLocation, icebergTableProps, options, datasetPath);
+        userName, userId, plugin, newLocation, icebergTableProps, options, datasetPath);
   }
 
   @Override
   public CreateParquetTableEntry cloneWithFields(WriterOptions writerOptions) {
     return new CreateParquetTableEntry(
-        userName, plugin, location, icebergTableProps, writerOptions, datasetPath);
+        userName, userId, plugin, location, icebergTableProps, writerOptions, datasetPath);
   }
 
   @Override
@@ -172,7 +154,8 @@ public class CreateParquetTableEntry
       writerSchema = IcebergUtils.getWriterSchema(writerSchema, options);
       icebergTableProps.setFullSchema(writerSchema);
     }
-    return new ParquetWriter(props, child, location, options, plugin);
+    return new ParquetWriter(
+        props, child, location, options, plugin, datasetPath.getPathComponents());
   }
 
   @Override

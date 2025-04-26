@@ -121,7 +121,7 @@
           <skip>${skipTests}</skip>
           <!-- Preferred way, specify the GAV of the Nessie Quarkus server runnable (uber-jar) -->
           <appArtifactId>org.projectnessie.nessie:nessie-quarkus:jar:runner:${nessie.version}</appArtifactId>
-          <javaVersion>17</javaVersion>
+          <javaVersion>21</javaVersion>
           <systemProperties>
             <nessie.version.store.type>IN_MEMORY</nessie.version.store.type>
             <nessie.version.store.persist.cache-capacity-mb>1</nessie.version.store.persist.cache-capacity-mb>

@@ -42,6 +42,8 @@ public class IcebergSnapshotsGroupScan extends AbstractBase implements GroupScan
   private final Iterator<PartitionChunkMetadata> splits;
   private final int maxParallelizationWidth;
   private final String schemeVariate;
+  private final String userId;
+  private final List<String> tableQualifiedName;
 
   public IcebergSnapshotsGroupScan(
       OpProps props,
@@ -50,7 +52,9 @@ public class IcebergSnapshotsGroupScan extends AbstractBase implements GroupScan
       SnapshotsScanOptions snapshotsScanOptions,
       Iterator<PartitionChunkMetadata> splits,
       int maxParallelizationWidth,
-      String schemeVariate) {
+      String schemeVariate,
+      String userId,
+      List<String> tableQualifiedName) {
     super(props);
     this.snapshotsScanOptions = snapshotsScanOptions;
     this.columns = columns;
@@ -58,6 +62,8 @@ public class IcebergSnapshotsGroupScan extends AbstractBase implements GroupScan
     this.splits = splits;
     this.maxParallelizationWidth = maxParallelizationWidth;
     this.schemeVariate = schemeVariate;
+    this.userId = userId;
+    this.tableQualifiedName = tableQualifiedName;
   }
 
   @Override
@@ -110,7 +116,9 @@ public class IcebergSnapshotsGroupScan extends AbstractBase implements GroupScan
         columns,
         snapshotsScanOptions,
         works,
-        schemeVariate);
+        schemeVariate,
+        userId,
+        tableQualifiedName);
   }
 
   @Override

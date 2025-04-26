@@ -127,7 +127,7 @@ public class IncrementalUpdateUtils {
 
       Iterable<RexNode> projects =
           Stream.concat(
-                  scan.getRowType().getFieldNames().stream().map(relBuilder::field),
+                  newScan.getRowType().getFieldNames().stream().map(relBuilder::field),
                   Stream.of(refreshRex(relBuilder)))
               .collect(Collectors.toList());
       relBuilder.project(projects, newFieldNames);

@@ -15,6 +15,8 @@
  */
 package com.dremio.services.nodemetrics;
 
+import com.dremio.exec.enginemanagement.proto.EngineManagementProtos.EngineId;
+import com.dremio.exec.enginemanagement.proto.EngineManagementProtos.SubEngineId;
 import org.immutables.value.Value;
 
 /** Metrics about a coordinator or executor */
@@ -65,4 +67,10 @@ public interface NodeMetrics {
 
   /** String representation of NodeState enum */
   String getDetails();
+
+  /** Engine id if it exists */
+  EngineId getEngineId();
+
+  /** Sub Engine id if it exists */
+  SubEngineId getSubEngineId();
 }

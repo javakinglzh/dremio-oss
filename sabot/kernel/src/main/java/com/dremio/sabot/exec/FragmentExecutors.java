@@ -49,7 +49,6 @@ import com.dremio.exec.proto.UserBitShared.QueryId;
 import com.dremio.exec.rpc.Acks;
 import com.dremio.exec.rpc.Response;
 import com.dremio.exec.rpc.UserRpcException;
-import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.server.NodeDebugContextProvider;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.FragmentWorkManager.ExitCallback;
@@ -118,14 +117,13 @@ public class FragmentExecutors
   private final OptionManager options;
   private final MemoryArbiter memoryArbiter;
 
-  private final BufferAllocator allocator;
   // pre-allocate a 1MB log buffer to log during low mem
   private final StringBuilder logBuffer;
   private final NodeDebugContextProvider nodeDebugContext;
   private final QueriesClerk clerk;
 
   public FragmentExecutors(
-      final BootStrapContext context,
+      final BufferAllocator rootAllocator,
       final NodeDebugContextProvider nodeDebugContext,
       final SabotConfig sabotConfig,
       final QueriesClerk clerk,
@@ -161,10 +159,9 @@ public class FragmentExecutors
 
     this.warnMaxTime = (int) options.getOption(ExecConstants.SLICING_WARN_MAX_RUNTIME_MS);
     this.options = options;
-    this.allocator = context.getAllocator();
     this.memoryArbiter =
         MemoryArbiter.newInstance(
-            sabotConfig, (DremioRootAllocator) this.allocator, this, clerk, options);
+            sabotConfig, (DremioRootAllocator) rootAllocator, this, clerk, options);
     this.pool.getTaskMonitor().addObserver(this);
     this.logBuffer = new StringBuilder(LOG_BUFFER_SIZE);
     ExecutionMetrics.registerActiveFragmentsCurrentCount(this);
@@ -312,7 +309,8 @@ public class FragmentExecutors
         fragments.hasSchedulingInfo() ? fragments.getSchedulingInfo() : null;
     QueryStarterImpl queryStarter =
         new QueryStarterImpl(fragments, builder, sender, identity, schedulingInfo);
-    builder.buildAndStartQuery(queryStarter.getFirstFragment(), schedulingInfo, queryStarter);
+
+    clerk.buildAndStartQuery(queryStarter.getFirstFragment(), schedulingInfo, queryStarter);
   }
 
   public EventProvider getEventProvider(FragmentHandle handle) {
@@ -432,6 +430,10 @@ public class FragmentExecutors
     EndpointsIndex e = clerk.getEndpointsIndex(queryId);
     TunnelProvider tunnelProvider = clerk.getTunnelProvider(queryId);
 
+    if (e == null || tunnelProvider == null) {
+      return;
+    }
+
     try {
       sendMessageToAllNodes(
           queryId, tunnelProvider, e.getEndpoints(), DlrMessageType.RESERVE_RESOURCE);
@@ -457,7 +459,12 @@ public class FragmentExecutors
   public void activateFragments(QueryId queryId, QueriesClerk clerk) {
     logger.debug("received activation for query {}", QueryIdHelper.getQueryId(queryId));
     if (options.getOption(ExecConstants.ENABLE_DYNAMIC_LOAD_ROUTING)) {
+      long startTime = System.nanoTime();
       activateFragmentsDLR(queryId, clerk);
+      logger.info(
+          "DLL: finished activation for query={} timetaken={} ns",
+          QueryIdHelper.getQueryId(queryId),
+          (System.nanoTime() - startTime));
       return;
     }
     for (FragmentTicket fragmentTicket : clerk.getFragmentTickets(queryId)) {
@@ -468,10 +475,6 @@ public class FragmentExecutors
   @VisibleForTesting
   void activateFragment(FragmentHandle handle) {
     handlers.getUnchecked(handle).activate();
-  }
-
-  TunnelProvider getTunnelProvider(FragmentHandle handle) {
-    return handlers.getUnchecked(handle).getTunnelProvider();
   }
 
   /*
@@ -587,8 +590,8 @@ public class FragmentExecutors
     }
   }
 
-  public void handle(DynamicLoadRoutingMessage message) {
-    logger.error(
+  public void handle(DynamicLoadRoutingMessage message) throws Exception {
+    logger.debug(
         "queryid {} command {}",
         QueryIdHelper.getQueryId(message.getQueryId()),
         message.getCommand());
@@ -600,10 +603,14 @@ public class FragmentExecutors
         }
         break;
       case RESERVE_RESOURCE:
+        clerk.reserveResources(message.getQueryId());
         break;
       case RELEASE_RESOURCE:
+        // TODO when should this ever be done separate from cancel?
+        clerk.releaseResources(message.getQueryId());
         break;
       case CANCEL_FRAGMENTS:
+        cancelFragments(message.getQueryId(), clerk);
         break;
       default:
         break;
@@ -820,7 +827,7 @@ public class FragmentExecutors
       Set<FragmentHandle> fragmentHandlesForQuery = Sets.newHashSet();
       try {
         if (!maestroProxy.tryStartQuery(
-            queryId, queryTicket, initializeFragments.getQuerySentTime())) {
+            queryId, queryTicket, initializeFragments.getQuerySentTime(), sender)) {
           boolean isDuplicateStart = maestroProxy.isQueryStarted(queryId);
           if (isDuplicateStart) {
             // duplicate op, do nothing.
@@ -842,6 +849,10 @@ public class FragmentExecutors
           fragmentHandlesForQuery.add(fe.getHandle());
           fragmentExecutors.add(fe);
         }
+
+        if (options.getOption(ExecConstants.ENABLE_DYNAMIC_LOAD_ROUTING)) {
+          queryTicket.getQueriesClerk().recordResourceEstimates(queryTicket, this.fullFragments);
+        }
       } catch (UserRpcException e) {
         userRpcException = e;
       } catch (Exception e) {
@@ -858,12 +869,7 @@ public class FragmentExecutors
         }
         queryTicket.release();
 
-        if (userRpcException == null) {
-          sender.onNext(Empty.getDefaultInstance());
-          sender.onCompleted();
-        } else {
-          sender.onError(userRpcException);
-        }
+        maestroProxy.markStartFragmentDone(queryId, sender, userRpcException);
       }
 
       // if there was a cancel while the start was in-progress, clean up.

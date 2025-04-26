@@ -15,10 +15,11 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.model.dataset.TableVersionContext;
+import com.dremio.common.utils.ProtostuffUtil;
 import com.dremio.datastore.SearchTypes.SearchQuery;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.store.SplitsKey;
 import com.dremio.exec.store.SplitsPointer;
 import com.dremio.exec.store.TableMetadata;
 import com.dremio.service.namespace.NamespaceException;
@@ -41,6 +42,7 @@ public class TableMetadataImpl implements TableMetadata {
   private final SplitsPointer splits;
   private final String user;
   private final List<String> primaryKey;
+  private final TableVersionContext tableVersionContext;
 
   private BatchSchema schema;
 
@@ -50,11 +52,22 @@ public class TableMetadataImpl implements TableMetadata {
       String user,
       SplitsPointer splits,
       List<String> primaryKey) {
-    this.pluginId = Preconditions.checkNotNull(pluginId);
+    this(pluginId, config, user, splits, primaryKey, null);
+  }
+
+  public TableMetadataImpl(
+      StoragePluginId pluginId,
+      DatasetConfig config,
+      String user,
+      SplitsPointer splits,
+      List<String> primaryKey,
+      TableVersionContext tableVersionContext) {
     this.config = config;
+    this.pluginId = Preconditions.checkNotNull(pluginId);
     this.splits = splits;
     this.user = user;
     this.primaryKey = primaryKey;
+    this.tableVersionContext = tableVersionContext;
   }
 
   @Override
@@ -77,7 +90,7 @@ public class TableMetadataImpl implements TableMetadata {
   }
 
   @Override
-  public SplitsKey getSplitsKey() {
+  public SplitsPointer getSplitsKey() {
     return splits;
   }
 
@@ -192,5 +205,32 @@ public class TableMetadataImpl implements TableMetadata {
   @Override
   public List<String> getPrimaryKey() {
     return primaryKey;
+  }
+
+  @Override
+  public TableVersionContext getVersionContext() {
+    return tableVersionContext;
+  }
+
+  @Override
+  public String toString() {
+    String prettyConfig = ProtostuffUtil.toJSON(config, config, false);
+    return "TableMetadataImpl{"
+        + "\nconfig="
+        + prettyConfig
+        + ",\n pluginId="
+        + pluginId
+        + ",\n splits="
+        + splits
+        + ",\n user='"
+        + user
+        + '\''
+        + ",\n primaryKey="
+        + primaryKey
+        + ",\n tableVersionContext="
+        + tableVersionContext
+        + ",\n schema="
+        + schema
+        + "\n}";
   }
 }

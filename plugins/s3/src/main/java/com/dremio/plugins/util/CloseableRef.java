@@ -16,7 +16,6 @@
 package com.dremio.plugins.util;
 
 import com.google.common.base.Preconditions;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -28,46 +27,51 @@ import org.slf4j.LoggerFactory;
  */
 public class CloseableRef<T extends AutoCloseable> implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(CloseableRef.class);
-  private AtomicInteger refCnt;
+  private int refCnt;
   private T obj;
 
   public CloseableRef(T obj) {
-    if (logger.isDebugEnabled()) {
-      logger.debug(
-          "Class {} acquired a new ref for {}:{}",
-          getCallingClass(),
-          obj.getClass().getSimpleName(),
-          System.identityHashCode(obj));
-    }
+    logger.debug(
+        "Class {} acquired a new ref for {}:{}",
+        getCallingClass(),
+        obj.getClass().getSimpleName(),
+        System.identityHashCode(obj));
+
     this.obj = obj;
-    refCnt = new AtomicInteger(1);
+    refCnt = 1;
   }
 
-  public T acquireRef() {
-    if (logger.isDebugEnabled()) {
-      logger.debug(
-          "Class {} acquired the ref for {}:{}",
-          getCallingClass(),
-          obj.getClass().getSimpleName(),
-          System.identityHashCode(obj));
-    }
-    Preconditions.checkNotNull(this.obj);
-    refCnt.incrementAndGet();
-    return this.obj;
+  public synchronized T acquireRef() {
+    Preconditions.checkNotNull(obj);
+    logger.debug(
+        "Class {} acquired the ref for {}:{}",
+        getCallingClass(),
+        obj.getClass().getSimpleName(),
+        System.identityHashCode(obj));
+
+    ++refCnt;
+    return obj;
   }
 
   @Override
-  public void close() throws Exception {
-    if (logger.isDebugEnabled()) {
-      logger.debug(
-          "Class {} released the ref for {}:{}",
-          getCallingClass(),
-          obj.getClass().getSimpleName(),
-          System.identityHashCode(obj));
+  public synchronized void close() throws Exception {
+    if (refCnt == 0) {
+      return;
     }
-    if (refCnt.decrementAndGet() == 0 && obj != null) {
+
+    if (--refCnt == 0 && obj != null) {
+      logger.debug("Closing ref {}", obj.getClass().getSimpleName());
       obj.close();
       obj = null;
+    }
+
+    if (obj != null) {
+      logger.debug(
+          "Class {} released the ref for {}:{}, Current ref count:{}",
+          getCallingClass(),
+          obj.getClass().getSimpleName(),
+          System.identityHashCode(obj),
+          refCnt);
     }
   }
 

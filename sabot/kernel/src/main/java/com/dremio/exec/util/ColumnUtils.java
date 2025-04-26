@@ -53,17 +53,15 @@ public final class ColumnUtils {
 
   public static final String FILE_PATH_COLUMN = MetadataColumns.DELETE_FILE_PATH.name();
   public static final String POS_COLUMN = MetadataColumns.DELETE_FILE_POS.name();
+  public static final Field DREMIO_INTERNAL_FILE_PATH_FIELD =
+      Field.notNullable(FILE_PATH_COLUMN_NAME, new ArrowType.Utf8());
+  public static final Field DREMIO_INTERNAL_ROW_INDEX_FIELD =
+      Field.notNullable(ROW_INDEX_COLUMN_NAME, new ArrowType.Int(64, true));
   public static final BatchSchema DELETE_FILE_SCHEMA =
       new BatchSchema(
           ImmutableList.of(
               Field.notNullable(FILE_PATH_COLUMN, new ArrowType.Utf8()),
               Field.notNullable(POS_COLUMN, new ArrowType.Int(64, true))));
-
-  public static final BatchSchema DELETE_FILE_SCHEMA_INTERNAL =
-      new BatchSchema(
-          ImmutableList.of(
-              Field.notNullable(FILE_PATH_COLUMN_NAME, new ArrowType.Utf8()),
-              Field.notNullable(ROW_INDEX_COLUMN_NAME, new ArrowType.Int(64, true))));
 
   private static final Set<String> SYSTEM_COLUMNS =
       new HashSet<String>() {
@@ -98,12 +96,12 @@ public final class ColumnUtils {
         new Field(
             FILE_PATH_COLUMN_NAME,
             FieldType.nullable(new ArrowType.Utf8()),
-            Collections.unmodifiableList(Collections.EMPTY_LIST)));
+            Collections.unmodifiableList(Collections.emptyList())));
     deleteFileSchemaFields.add(
         new Field(
             ROW_INDEX_COLUMN_NAME,
             FieldType.nullable(new ArrowType.Int(64, true)),
-            Collections.unmodifiableList(Collections.EMPTY_LIST)));
+            Collections.unmodifiableList(Collections.emptyList())));
 
     return Collections.unmodifiableList(deleteFileSchemaFields);
   }

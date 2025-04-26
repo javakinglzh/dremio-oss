@@ -18,7 +18,6 @@ package com.dremio.exec.store.iceberg.nessie;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.utils.protos.QueryIdHelper;
-import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergBaseModel;
 import com.dremio.exec.store.iceberg.model.IcebergCommand;
 import com.dremio.exec.store.iceberg.model.IcebergCommitOrigin;
@@ -47,11 +46,10 @@ public class IcebergNessieVersionedModel extends IcebergBaseModel {
       OperatorContext
           operatorContext, // Used to create DremioInputFile (valid only for insert/ctas)
       ResolvedVersionContext version,
-      SupportsIcebergMutablePlugin plugin,
       String userName,
       @Nullable String nessieCommitUserId,
       IcebergNessieFilePathSanitizer pathSanitizer) {
-    super(null, fsConf, fileIO, operatorContext, null, plugin);
+    super(null, fsConf, fileIO, operatorContext, null);
 
     this.tableKey = tableKey;
     this.nessieClient = nessieClient;
@@ -126,7 +124,7 @@ public class IcebergNessieVersionedModel extends IcebergBaseModel {
 
     // context is only available for executors
     if (operatorContext != null) {
-      jobId = QueryIdHelper.getQueryId(operatorContext.getFragmentHandle().getQueryId());
+      jobId = QueryIdHelper.getJobId(operatorContext.getFragmentHandle().getQueryId());
     }
     return jobId;
   }

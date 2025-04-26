@@ -32,7 +32,7 @@ import com.dremio.common.util.FileUtils;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.FileFormatUI;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.job.JobDataFragment;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.sources.FormatTools;
@@ -46,6 +46,7 @@ import com.dremio.dac.server.UserExceptionMapper;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.datastore.api.ImmutableFindByCondition;
 import com.dremio.exec.catalog.CatalogOptions;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.io.file.Path;
@@ -115,7 +116,8 @@ public class TestPhysicalDatasets extends BaseTestServer {
       source.setConfig(nas);
       source.setMetadataPolicy(
           UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
-      sourceService.registerSourceWithRuntime(source);
+      sourceService.registerSourceWithRuntime(
+          source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
     allocator = getRootAllocator().newChildAllocator(getClass().getName(), 0, Long.MAX_VALUE);
   }
@@ -153,11 +155,11 @@ public class TestPhysicalDatasets extends BaseTestServer {
       int descendants,
       int datasetCount)
       throws Exception {
-    Folder parent =
+    FolderModel parent =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("/source/dacfs_test/folder/" + parentPath))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     for (com.dremio.file.File file : parent.getContents().getFiles()) {
       if (name.equals(file.getName())) {
         assertEquals(
@@ -176,7 +178,7 @@ public class TestPhysicalDatasets extends BaseTestServer {
         return;
       }
     }
-    for (Folder folder : parent.getContents().getFolders()) {
+    for (FolderModel folder : parent.getContents().getFolders()) {
       if (name.equals(folder.getName())) {
         assertEquals(
             "isQueryable for folder " + parentPath + "/" + name, isQueryable, folder.isQueryable());
@@ -704,11 +706,11 @@ public class TestPhysicalDatasets extends BaseTestServer {
   public void listFolder() throws Exception {
     doc("list source folder");
     String filePath = getUrlPath("/datasets/text");
-    Folder folder =
+    FolderModel folder =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("/source/dacfs_test/folder/" + filePath))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     NamespaceTree ns = folder.getContents();
     assertEquals(0, ns.getFolders().size());
     assertEquals(3, ns.getFiles().size());
@@ -741,7 +743,7 @@ public class TestPhysicalDatasets extends BaseTestServer {
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("/source/dacfs_test/folder/" + filePath))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     ns = folder.getContents();
     assertEquals(0, ns.getFolders().size());
     assertEquals(3, ns.getFiles().size());
@@ -876,17 +878,17 @@ public class TestPhysicalDatasets extends BaseTestServer {
     }
 
     doc("list source folder and see if folder1 and folder2 are marked as physical dataset");
-    Folder folder =
+    FolderModel folder =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("/source/LocalFS1/folder/tmp/_dac"))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     NamespaceTree ns = folder.getContents();
     assertEquals(3, ns.getFolders().size());
     assertEquals(0, ns.getFiles().size());
     assertEquals(0, ns.getPhysicalDatasets().size());
 
-    for (Folder f : ns.getFolders()) {
+    for (FolderModel f : ns.getFolders()) {
       if ("folder1".equals(f.getName())) {
         assertTrue(f.isQueryable());
       } else if ("folder2".equals(f.getName())) {
@@ -940,13 +942,13 @@ public class TestPhysicalDatasets extends BaseTestServer {
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("/source/LocalFS1/folder/tmp/_dac"))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     ns = folder.getContents();
     assertEquals(3, ns.getFolders().size());
     assertEquals(0, ns.getFiles().size());
     assertEquals(0, ns.getPhysicalDatasets().size());
 
-    for (Folder f : ns.getFolders()) {
+    for (FolderModel f : ns.getFolders()) {
       if ("folder1".equals(f.getName())) {
         assertFalse(f.isQueryable());
       } else if ("folder2".equals(f.getName())) {
@@ -1067,9 +1069,9 @@ public class TestPhysicalDatasets extends BaseTestServer {
     try (final JobDataFragment jobData =
         submitJobAndGetData(
             l(JobsService.class), sqlQueryRequestFromFile("/nation_ctas"), 0, 500, allocator)) {
-      assertEquals(50, jobData.getReturnedRowCount());
+      assertEquals(51, jobData.getReturnedRowCount());
       // extra column for "dir" (t1 and t2 are directories under nation_ctas)
-      assertEquals(5, jobData.getColumns().size());
+      assertEquals(9, jobData.getColumns().size());
     }
   }
 

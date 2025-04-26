@@ -28,6 +28,7 @@ import com.dremio.service.namespace.DatasetMetadataSaver;
 import com.dremio.service.namespace.EntityNamespaceFindOption;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceFindByRange;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
@@ -52,6 +53,7 @@ import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import javax.annotation.Nullable;
 
 /**
  * A decorator for namespace service that only does operations underneath a safe runner to avoid
@@ -117,12 +119,37 @@ class SafeNamespaceService implements NamespaceService {
   }
 
   @Override
+  public int getDownstreamsCount(NamespaceKey path) {
+    return runner.doSafe(() -> delegate.getDownstreamsCount(path));
+  }
+
+  @Override
+  public List<DatasetConfig> getAllDownstreams(NamespaceKey path) throws NamespaceException {
+    return runner.doSafe(() -> delegate.getAllDownstreams(path));
+  }
+
+  @Override
+  public List<NamespaceKey> getUpstreamPhysicalDatasets(NamespaceKey path) {
+    return runner.doSafe(() -> delegate.getUpstreamPhysicalDatasets(path));
+  }
+
+  @Override
+  public List<String> getUpstreamSources(NamespaceKey path) {
+    return runner.doSafe(() -> delegate.getUpstreamSources(path));
+  }
+
+  @Override
   public void deleteEntity(NamespaceKey arg0) throws NamespaceException {
     runner.doSafe(() -> delegate.deleteEntity(arg0));
   }
 
   @Override
-  public void deleteFolder(NamespaceKey arg0, String arg1) throws NamespaceException {
+  public List<FolderConfig> getFolders(NamespaceKey arg0) throws NamespaceException {
+    return runner.doSafe(() -> delegate.getFolders(arg0));
+  }
+
+  @Override
+  public void deleteFolder(NamespaceKey arg0, @Nullable String arg1) throws NamespaceException {
     runner.doSafe(() -> delegate.deleteFolder(arg0, arg1));
   }
 
@@ -146,6 +173,18 @@ class SafeNamespaceService implements NamespaceService {
   public void deleteSourceChildren(NamespaceKey arg0, String arg1, DeleteCallback arg2)
       throws NamespaceException {
     runner.doSafe(() -> delegate.deleteSourceChildren(arg0, arg1, arg2));
+  }
+
+  @Override
+  public void deleteSourceChild(NamespaceKey arg0, String arg1, boolean arg2, DeleteCallback arg3)
+      throws NamespaceNotFoundException {
+    runner.doSafe(() -> delegate.deleteSourceChild(arg0, arg1, arg2, arg3));
+  }
+
+  @Override
+  public void deleteSourceChildIfExists(
+      final NamespaceKey arg0, String arg1, boolean arg2, DeleteCallback arg3) {
+    runner.doSafe(() -> delegate.deleteSourceChildIfExists(arg0, arg1, arg2, arg3));
   }
 
   @Override
@@ -190,6 +229,12 @@ class SafeNamespaceService implements NamespaceService {
   }
 
   @Override
+  public Iterable<Document<NamespaceKey, NameSpaceContainer>> findByRange(
+      NamespaceFindByRange arg0) {
+    return runner.doSafeIterable(() -> delegate.findByRange(arg0));
+  }
+
+  @Override
   public Optional<DatasetConfig> getDatasetById(EntityId arg0) {
     return runner.doSafe(() -> delegate.getDatasetById(arg0));
   }
@@ -210,7 +255,7 @@ class SafeNamespaceService implements NamespaceService {
   }
 
   @Override
-  public Iterable<NamespaceKey> getAllDatasets(NamespaceKey arg0) throws NamespaceException {
+  public Iterable<NamespaceKey> getAllDatasets(NamespaceKey arg0) {
     return runner.doSafeIterable(() -> delegate.getAllDatasets(arg0));
   }
 
@@ -231,7 +276,7 @@ class SafeNamespaceService implements NamespaceService {
 
   @Override
   @WithSpan
-  public DatasetConfig getDataset(NamespaceKey arg0) throws NamespaceException {
+  public DatasetConfig getDataset(NamespaceKey arg0) throws NamespaceNotFoundException {
     return runner.doSafe(() -> delegate.getDataset(arg0));
   }
 

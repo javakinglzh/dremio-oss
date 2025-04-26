@@ -18,14 +18,14 @@ package com.dremio.connector.metadata;
 import java.util.List;
 
 /** Default implementation. */
-final class PartitionChunkImpl implements PartitionChunk {
+public final class PartitionChunkImpl implements PartitionChunk {
 
   private final List<PartitionValue> partitionValues;
   private final long splitCount;
   private final List<DatasetSplit> datasetSplits;
   private final BytesOutput extraInfo;
 
-  PartitionChunkImpl(
+  public PartitionChunkImpl(
       List<PartitionValue> partitionValues,
       long splitCount,
       List<DatasetSplit> datasetSplits,
@@ -47,8 +47,8 @@ final class PartitionChunkImpl implements PartitionChunk {
   }
 
   @Override
-  public DatasetSplitListing getSplits() {
-    return datasetSplits::iterator;
+  public List<DatasetSplit> getSplits() {
+    return datasetSplits;
   }
 
   @Override

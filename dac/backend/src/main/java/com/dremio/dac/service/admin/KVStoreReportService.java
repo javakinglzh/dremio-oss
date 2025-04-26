@@ -30,6 +30,7 @@ import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.PartitionChu
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.dremio.service.reflection.store.MaterializationStore;
+import com.dremio.service.reflection.store.ReflectionChangeNotificationHandler;
 import com.dremio.service.reflection.store.ReflectionEntriesStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.fasterxml.jackson.annotation.JsonInclude;
@@ -87,16 +88,16 @@ public class KVStoreReportService implements Service {
 
   private final Provider<LegacyKVStoreProvider> legacyStoreProviderProvider;
   private final Provider<KVStoreProvider> storeProviderProvider;
-  private final Provider<NamespaceService> namespaceServiceProvider;
+  private final Provider<NamespaceService> systemUserNamespaceServiceProvider;
 
   public KVStoreReportService(
       Provider<LegacyKVStoreProvider> legacyStoreProviderProvider,
       Provider<KVStoreProvider> storeProviderProvider,
-      Provider<NamespaceService> namespaceServiceProvider,
+      Provider<NamespaceService> systemUserNamespaceServiceProvider,
       Provider<ExecutorService> executorServiceProvider) {
     this.legacyStoreProviderProvider = legacyStoreProviderProvider;
     this.storeProviderProvider = storeProviderProvider;
-    this.namespaceServiceProvider = namespaceServiceProvider;
+    this.systemUserNamespaceServiceProvider = systemUserNamespaceServiceProvider;
     this.executorServiceProvider = executorServiceProvider;
   }
 
@@ -315,7 +316,7 @@ public class KVStoreReportService implements Service {
       zip.putNextEntry(new ZipEntry(MATERIALIZATION + ".csv"));
 
       zip.write(
-          "materialization_id,reflection_id,state,base_path,reflection_goal_version,created_at,modified_at,expiration,last_refresh_from_pds,num_partitions\n"
+          "materialization_id,reflection_id,state,base_path,reflection_goal_version,created_at,modified_at,expiration,last_refresh_from_pds\n"
               .getBytes());
       new MaterializationStore(legacyStoreProviderProvider)
           .getAllMaterializations()
@@ -324,7 +325,7 @@ public class KVStoreReportService implements Service {
                 try {
                   zip.write(
                       String.format(
-                              "%s,%s,%s,%s,%s,%d,%d,%d,%d,%d\n",
+                              "%s,%s,%s,%s,%s,%d,%d,%d,%d\n",
                               e.getId().getId(),
                               (e.getReflectionId() != null) ? e.getReflectionId().getId() : "null",
                               e.getState(),
@@ -333,8 +334,7 @@ public class KVStoreReportService implements Service {
                               e.getCreatedAt(),
                               e.getModifiedAt(),
                               e.getExpiration(),
-                              e.getLastRefreshFromPds(),
-                              (e.getPartitionList() != null) ? e.getPartitionList().size() : 0)
+                              e.getLastRefreshFromPds())
                           .getBytes());
                 } catch (Exception ex) {
                   exceptionsCollector.addException(ex);
@@ -353,7 +353,8 @@ public class KVStoreReportService implements Service {
 
       zip.write(
           "reflection_id,dataset_id,name,state,type,created_at,modified_at,version\n".getBytes());
-      new ReflectionGoalsStore(legacyStoreProviderProvider)
+      new ReflectionGoalsStore(
+              legacyStoreProviderProvider, () -> ReflectionChangeNotificationHandler.NO_OP)
           .getAll()
           .forEach(
               e -> {
@@ -422,7 +423,7 @@ public class KVStoreReportService implements Service {
 
       MAPPER.writeValue(
           zip,
-          namespaceServiceProvider.get().getSources().stream()
+          systemUserNamespaceServiceProvider.get().getSources().stream()
               .flatMap(
                   sourceConfig -> {
                     Map<String, Object> map = new HashMap<>();

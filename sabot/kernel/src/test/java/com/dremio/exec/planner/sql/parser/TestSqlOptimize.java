@@ -41,7 +41,7 @@ public class TestSqlOptimize {
     assertTrue(parsed instanceof SqlOptimize);
     SqlOptimize optimizeParsed = (SqlOptimize) parsed;
 
-    optimizeParsed.setOperand(0, optimizeParsed.getTable().setName(0, "d"));
+    optimizeParsed.setOperand(0, ((SqlIdentifier) optimizeParsed.getTable()).setName(0, "d"));
     optimizeParsed.setOperand(3, SqlLiteral.createSymbol(CompactionType.SORT, SqlParserPos.ZERO));
     optimizeParsed.setOperand(4, new SqlIdentifier("e", SqlParserPos.ZERO));
     optimizeParsed.setOperand(5, SqlNodeList.of(new SqlIdentifier("f", SqlParserPos.ZERO)));
@@ -60,7 +60,7 @@ public class TestSqlOptimize {
     assertTrue(parsed instanceof SqlOptimize);
     SqlOptimize optimizeParsed = (SqlOptimize) parsed;
 
-    optimizeParsed.setOperand(0, optimizeParsed.getTable().setName(0, "d"));
+    optimizeParsed.setOperand(0, ((SqlIdentifier) optimizeParsed.getTable()).setName(0, "d"));
     optimizeParsed.setOperand(1, SqlLiteral.createBoolean(true, SqlParserPos.ZERO));
     optimizeParsed.setOperand(2, SqlLiteral.createBoolean(false, SqlParserPos.ZERO));
 
@@ -76,7 +76,7 @@ public class TestSqlOptimize {
     assertTrue(parsed instanceof SqlOptimize);
     SqlOptimize optimizeParsed = (SqlOptimize) parsed;
 
-    optimizeParsed.setOperand(0, optimizeParsed.getTable().setName(0, "d"));
+    optimizeParsed.setOperand(0, ((SqlIdentifier) optimizeParsed.getTable()).setName(0, "d"));
     optimizeParsed.setOperand(1, SqlLiteral.createBoolean(false, SqlParserPos.ZERO));
     optimizeParsed.setOperand(2, SqlLiteral.createBoolean(true, SqlParserPos.ZERO));
 

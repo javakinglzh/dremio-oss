@@ -15,13 +15,11 @@
  */
 package com.dremio.exec.planner.sql.handlers.query;
 
-import static com.dremio.exec.planner.physical.PlannerSettings.STORE_QUERY_RESULTS;
 import static org.slf4j.LoggerFactory.getLogger;
 
 import com.dremio.common.logical.PlanProperties.Generator.ResultMode;
 import com.dremio.common.util.Closeable;
 import com.dremio.exec.catalog.CatalogOptions;
-import com.dremio.exec.ops.PlannerCatalog;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.planner.events.FunctionDetectedEvent;
@@ -30,12 +28,11 @@ import com.dremio.exec.planner.events.PlannerEventHandler;
 import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
-import com.dremio.exec.planner.physical.explain.PrelSequencer;
-import com.dremio.exec.planner.physical.visitor.WriterPathUpdater;
-import com.dremio.exec.planner.plancache.CachedPlan;
 import com.dremio.exec.planner.plancache.PlanCache;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.planner.plancache.PlanCacheKey;
 import com.dremio.exec.planner.plancache.PlanCacheUtils;
+import com.dremio.exec.planner.plancache.PlanCacheUtils.PrelAndTextPlan;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
 import com.dremio.exec.planner.sql.UncacheableFunctionDetector;
 import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
@@ -44,32 +41,33 @@ import com.dremio.exec.planner.sql.handlers.PlanLogUtil;
 import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
-import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
-import com.dremio.options.OptionManager;
+import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.Optional;
+import java.util.function.Function;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.tools.RelConversionException;
+import org.apache.calcite.tools.ValidationException;
 import org.apache.calcite.util.Pair;
+import org.immutables.value.Value;
 import org.slf4j.Logger;
 
 /** The default handler for queries. */
 public class NormalHandler implements SqlToPlanHandler {
+
   private static final Logger LOGGER = getLogger(NormalHandler.class);
 
   private String textPlan;
   private Rel drel;
   private Prel prel;
   private ConvertedRelNode convertedRelNode;
+  private RelNode relPlanExplain;
 
   private UncacheableFunctionDetectedEventHandler uncacheableFunctionDetectedEventHandler =
       new UncacheableFunctionDetectedEventHandler();
@@ -87,99 +85,48 @@ public class NormalHandler implements SqlToPlanHandler {
           .setAttribute(
               "dremio.planner.current_default_schema",
               config.getContext().getContextInformation().getCurrentDefaultSchema());
-      final PlannerSettings plannerSettings = config.getContext().getPlannerSettings();
-      final PlanCache planCache = Preconditions.checkNotNull(config.getContext().getPlanCache());
+      final PlanCache planCache = config.getPlanCache();
 
       prePlan(config, sql, sqlNode);
 
       convertedRelNode = SqlToRelTransformer.validateAndConvert(config, sqlNode);
+      if (config.getResultMode() == ResultMode.CONVERT_ONLY) {
+        relPlanExplain = convertedRelNode.getConvertedNode();
+        return null;
+      }
       convertedRelNode = postConvertToRel(convertedRelNode);
 
-      final RelDataType validatedRowType = convertedRelNode.getValidatedRowType();
-      final RelNode queryRelNode = convertedRelNode.getConvertedNode();
-      final PlannerCatalog catalog = config.getConverter().getPlannerCatalog();
+      final PlanCacheKey cachedKey;
+      PlanCacheEntry planCacheEntry;
 
-      final PlanCacheKey cachedKey =
-          PlanCacheUtils.generateCacheKey(sqlNode, queryRelNode, config.getContext());
-      CachedPlan cachedPlan = planCache.getIfPresentAndValid(config, cachedKey);
-
-      Span.current()
-          .setAttribute("dremio.planner.cache.enabled", plannerSettings.isPlanCacheEnabled());
-      Span.current()
-          .setAttribute("dremio.planner.cache.plan_cache_present_and_valid", (cachedPlan != null));
+      cachedKey =
+          PlanCacheUtils.generateCacheKey(config, sqlNode, convertedRelNode.getConvertedNode());
+      planCacheEntry = planCache.getIfPresentAndValid(config, cachedKey);
 
       Prel prel;
-      if (!plannerSettings.isPlanCacheEnabled() || cachedPlan == null) {
-        drel = DrelTransformer.convertToDrel(config, queryRelNode, validatedRowType);
-        drel = postConvertToDrel(drel);
-        if (config.getResultMode().equals(ResultMode.LOGICAL)) {
-          // we only want to do logical planning, there is no point going further in the plan
-          // generation
+      if (planCacheEntry == null) {
+        DrelPrelAndTextPlan drelPrelAndTextPlan =
+            planLogicalAndPhysical(config, convertedRelNode, this::postConvertToDrel);
+        // These probably should be emmited as events instead mutating the properties.
+        drel = drelPrelAndTextPlan.drel();
+        relPlanExplain = drel;
+        prel = drelPrelAndTextPlan.prel();
+        textPlan = drelPrelAndTextPlan.textPlan();
+        if (drelPrelAndTextPlan.exitEarly()) {
           return null;
         }
-        if (!plannerSettings.ignoreScannedColumnsLimit()) {
-          long maxScannedColumns =
-              config
-                  .getContext()
-                  .getOptions()
-                  .getOption(CatalogOptions.METADATA_LEAF_COLUMN_SCANNED_MAX);
-          ScanLimitValidator.ensureLimit(drel, maxScannedColumns);
-        }
-
-        final Pair<Prel, String> convertToPrel = PrelTransformer.convertToPrel(config, drel);
-        prel = convertToPrel.getKey();
-        textPlan = convertToPrel.getValue();
-
-        // after we generate a physical plan, save it in the plan cache if plan cache is present
-        if (PlanCacheUtils.supportPlanCache(
+        PlanCacheUtils.putIntoPlanCache(
             config,
             sqlNode,
-            catalog,
-            uncacheableFunctionDetectedEventHandler.getUncacheableFunctions())) {
-          planCache.putCachedPlan(config, cachedKey, prel);
-        }
+            planCache,
+            cachedKey,
+            drel,
+            prel,
+            uncacheableFunctionDetectedEventHandler.getUncacheableFunctions());
       } else {
-        prel = cachedPlan.getPrel();
-
-        // After the plan has been cached during planning, the job could be canceled during
-        // execution.
-        // Reset the cancel flag in cached plan, otherwise the job will always be canceled.
-        prel.getCluster()
-            .getPlanner()
-            .getContext()
-            .unwrap(org.apache.calcite.util.CancelFlag.class)
-            .clearCancel();
-
-        AccelerationProfile accelerationProfile = cachedPlan.getAccelerationProfile();
-        config.getObserver().restoreAccelerationProfileFromCachedPlan(accelerationProfile);
-        config.getObserver().planCacheUsed(cachedPlan.updateUseCount());
-        Span.current()
-            .setAttribute("dremio.planner.cache.plan_used_count", cachedPlan.getUseCount());
-        // update writer if needed
-        final OptionManager options = config.getContext().getOptions();
-        final PlannerSettings.StoreQueryResultsPolicy storeQueryResultsPolicy =
-            Optional.ofNullable(options.getOption(STORE_QUERY_RESULTS.getOptionName()))
-                .map(
-                    o ->
-                        PlannerSettings.StoreQueryResultsPolicy.valueOf(
-                            o.getStringVal().toUpperCase(Locale.ROOT)))
-                .orElse(PlannerSettings.StoreQueryResultsPolicy.NO);
-        Span.current()
-            .setAttribute(
-                "dremio.planner.store_query_results_policy", storeQueryResultsPolicy.name());
-        if (storeQueryResultsPolicy
-            == PlannerSettings.StoreQueryResultsPolicy.PATH_AND_ATTEMPT_ID) {
-          // update writing path for this case only
-          prel = WriterPathUpdater.update(prel, config);
-        }
-
-        textPlan = PrelSequencer.getPlanText(prel, SqlExplainLevel.ALL_ATTRIBUTES);
-        final String jsonPlan = PrelSequencer.getPlanJson(prel, SqlExplainLevel.ALL_ATTRIBUTES);
-        if (LOGGER.isDebugEnabled()) {
-          LOGGER.debug(String.format("%s:\n%s", "Final Physical Transformation", textPlan));
-        }
-        config.getObserver().planText(textPlan, 0);
-        config.getObserver().planJsonPlan(jsonPlan);
+        PrelAndTextPlan prelAndTextPlan = PlanCacheUtils.extractPrel(config, planCacheEntry);
+        prel = prelAndTextPlan.getPrel();
+        textPlan = prelAndTextPlan.getTextPlan();
       }
 
       prel = postConvertToPrel(prel);
@@ -192,6 +139,7 @@ public class NormalHandler implements SqlToPlanHandler {
 
       PlanLogUtil.log(config, "Dremio Plan", plan, LOGGER);
       this.prel = prel;
+      relPlanExplain = prel;
       return plan;
     } catch (Error ex) {
       throw SqlExceptionHelper.coerceError(sql, ex);
@@ -213,6 +161,11 @@ public class NormalHandler implements SqlToPlanHandler {
   @Override
   public Rel getLogicalPlan() {
     return drel;
+  }
+
+  @Override
+  public RelNode getPlanForExplain() {
+    return relPlanExplain;
   }
 
   protected void prePlan(SqlHandlerConfig config, String sql, SqlNode sqlNode) {}
@@ -237,8 +190,43 @@ public class NormalHandler implements SqlToPlanHandler {
     return plan;
   }
 
+  private static DrelPrelAndTextPlan planLogicalAndPhysical(
+      SqlHandlerConfig sqlHandlerConfig,
+      ConvertedRelNode convertedRelNode,
+      Function<Rel, Rel> postConvertToDrel)
+      throws SqlUnsupportedException, RelConversionException, ValidationException {
+    PlannerSettings plannerSettings = sqlHandlerConfig.getContext().getPlannerSettings();
+    final RelDataType validatedRowType = convertedRelNode.getValidatedRowType();
+    final RelNode queryRelNode = convertedRelNode.getConvertedNode();
+    Rel drel = DrelTransformer.convertToDrel(sqlHandlerConfig, queryRelNode, validatedRowType);
+    drel = postConvertToDrel.apply(drel);
+    if (sqlHandlerConfig.getResultMode().equals(ResultMode.LOGICAL)) {
+      // we only want to do logical planning, there is no point going further in the plan
+      // generation
+      return new ImmutableDrelPrelAndTextPlan.Builder().setDrel(drel).setExitEarly(true).build();
+    }
+    if (!plannerSettings.ignoreScannedColumnsLimit()) {
+      long maxScannedColumns =
+          sqlHandlerConfig
+              .getContext()
+              .getOptions()
+              .getOption(CatalogOptions.METADATA_LEAF_COLUMN_SCANNED_MAX);
+      ScanLimitValidator.ensureLimit(drel, maxScannedColumns);
+    }
+
+    final Pair<Prel, String> prel = PrelTransformer.convertToPrel(sqlHandlerConfig, drel);
+
+    return new ImmutableDrelPrelAndTextPlan.Builder()
+        .setDrel(drel)
+        .setPrel(prel.left)
+        .setTextPlan(prel.right)
+        .setExitEarly(false)
+        .build();
+  }
+
   protected static final class UncacheableFunctionDetectedEventHandler
       implements PlannerEventHandler<FunctionDetectedEvent> {
+
     private final List<SqlOperator> uncacheableFunctions;
 
     public UncacheableFunctionDetectedEventHandler() {
@@ -268,5 +256,17 @@ public class NormalHandler implements SqlToPlanHandler {
 
   public UncacheableFunctionDetectedEventHandler getUncacheableFunctionDetectedEventHandler() {
     return uncacheableFunctionDetectedEventHandler;
+  }
+
+  @Value.Immutable
+  public interface DrelPrelAndTextPlan {
+
+    Rel drel();
+
+    Prel prel();
+
+    String textPlan();
+
+    boolean exitEarly();
   }
 }

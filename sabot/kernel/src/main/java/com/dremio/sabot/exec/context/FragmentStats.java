@@ -78,6 +78,7 @@ public class FragmentStats {
   private long setupAllocatedHeap;
   private long totalAllocatedHeap;
   private long startHeapAllocation = -1;
+  private long lastRecordedSleepDuration = 0;
   private final Stopwatch runWatch = Stopwatch.createUnstarted();
   private final Stopwatch setupWatch = Stopwatch.createUnstarted();
   private final Stopwatch finishWatch = Stopwatch.createUnstarted();
@@ -278,6 +279,12 @@ public class FragmentStats {
 
   public void setSleepingDuration(long sleepingDuration) {
     this.sleepingDuration = sleepingDuration;
+    // record everytime sleep time exceeds 1 second
+    var delta = sleepingDuration - lastRecordedSleepDuration;
+    if (delta > 1000) {
+      lastRecordedSleepDuration = sleepingDuration;
+      ExecutionMetrics.getFragmentSleepTimeDistribution().record(delta);
+    }
   }
 
   public void setBlockedOnUpstreamDuration(long blockedDuration) {

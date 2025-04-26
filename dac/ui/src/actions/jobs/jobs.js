@@ -14,16 +14,12 @@
  * limitations under the License.
  */
 import { RSAA } from "redux-api-middleware";
-import { push, replace } from "react-router-redux";
+import { push } from "react-router-redux";
 import Immutable from "immutable";
 import { normalize } from "normalizr";
 
 import schemaUtils from "utils/apiUtils/schemaUtils";
 import jobDetailsSchema from "schemas/jobDetails";
-import {
-  renderQueryState,
-  renderQueryStateForServer,
-} from "utils/jobsQueryState";
 import { addNotification } from "actions/notification";
 import tokenUtils from "@inject/utils/tokenUtils";
 import { APIV2Call } from "#oss/core/APICall";
@@ -50,101 +46,6 @@ export const updateQVJobState = (jobId, payload) => ({
   payload,
 });
 
-export const updateQueryState = (queryState) => {
-  return (dispatch, getStore) => {
-    const location = getStore().routing.locationBeforeTransitions;
-    return dispatch(
-      replace({ ...location, query: renderQueryState(queryState) }),
-    );
-  };
-};
-
-export const FILTER_JOBS_REQUEST = "FILTER_JOBS_REQUEST";
-export const FILTER_JOBS_SUCCESS = "FILTER_JOBS_SUCCESS";
-export const FILTER_JOBS_FAILURE = "FILTER_JOBS_FAILURE";
-
-function filterJobsAction(queryState, viewId) {
-  const meta = { viewId };
-  const query = renderQueryStateForServer(queryState);
-
-  const apiCall = new APIV2Call().fullpath(`jobs/?${query}`);
-
-  return {
-    [RSAA]: {
-      types: [
-        { type: FILTER_JOBS_REQUEST, meta },
-        { type: FILTER_JOBS_SUCCESS, meta },
-        { type: FILTER_JOBS_FAILURE, meta },
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
-}
-
-export function filterJobsData(queryState, viewId) {
-  return (dispatch) => {
-    return dispatch(filterJobsAction(queryState, viewId));
-  };
-}
-
-export const LOAD_NEXT_JOBS_REQUEST = "LOAD_NEXT_JOBS_REQUEST";
-export const LOAD_NEXT_JOBS_SUCCESS = "LOAD_NEXT_JOBS_SUCCESS";
-export const LOAD_NEXT_JOBS_FAILURE = "LOAD_NEXT_JOBS_FAILURE";
-
-function fetchNextJobs(href) {
-  const apiCall = new APIV2Call().fullpath(href);
-
-  return {
-    [RSAA]: {
-      types: [
-        LOAD_NEXT_JOBS_REQUEST,
-        LOAD_NEXT_JOBS_SUCCESS,
-        LOAD_NEXT_JOBS_FAILURE,
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
-}
-
-export function loadNextJobs(href) {
-  return (dispatch) => {
-    return dispatch(fetchNextJobs(href));
-  };
-}
-
-export const ITEMS_FOR_FILTER_JOBS_REQUEST = "ITEMS_FOR_FILTER_JOBS_REQUEST";
-export const ITEMS_FOR_FILTER_JOBS_SUCCESS = "ITEMS_FOR_FILTER_JOBS_SUCCESS";
-export const ITEMS_FOR_FILTER_JOBS_FAILURE = "ITEMS_FOR_FILTER_JOBS_FAILURE";
-
-function fetchItemsForFilter(tag, filter = "", limit = "") {
-  const apiCall = new APIV2Call()
-    .paths(`jobs/filters/${tag}`)
-    .params({ filter, limit });
-
-  return {
-    [RSAA]: {
-      types: [
-        ITEMS_FOR_FILTER_JOBS_REQUEST,
-        {
-          type: ITEMS_FOR_FILTER_JOBS_SUCCESS,
-          meta: { tag },
-        },
-        ITEMS_FOR_FILTER_JOBS_FAILURE,
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
-}
-
-export function loadItemsForFilter(tag, item, limit) {
-  return (dispatch) => {
-    return dispatch(fetchItemsForFilter(tag, item, limit));
-  };
-}
-
 export const JOB_DETAILS_REQUEST = "JOB_DETAILS_REQUEST";
 export const JOB_DETAILS_SUCCESS = "JOB_DETAILS_SUCCESS";
 export const JOB_DETAILS_FAILURE = "JOB_DETAILS_FAILURE";
@@ -164,31 +65,6 @@ export function loadJobDetails(jobId, viewId) {
           meta,
         ),
         { type: JOB_DETAILS_FAILURE, meta },
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
-}
-
-export const REFLECTION_JOBS_REQUEST = "REFLECTION_JOBS_REQUEST";
-export const REFLECTION_JOBS_SUCCESS = "REFLECTION_JOBS_SUCCESS";
-export const REFLECTION_JOBS_FAILURE = "REFLECTION_JOBS_FAILURE";
-
-export function loadReflectionJobs(reflectionId, viewId) {
-  const meta = { reflectionId, viewId };
-
-  const apiCall = new APIV2Call()
-    .path("jobs")
-    .path("reflection")
-    .path(reflectionId);
-
-  return {
-    [RSAA]: {
-      types: [
-        { type: REFLECTION_JOBS_REQUEST, meta },
-        { type: REFLECTION_JOBS_SUCCESS, meta },
-        { type: REFLECTION_JOBS_FAILURE, meta },
       ],
       method: "GET",
       endpoint: apiCall,
@@ -255,38 +131,6 @@ export const cancelJobAndShowNotification = (jobId) => (dispatch) => {
   });
 };
 
-export const CANCEL_REFLECTION_JOB_REQUEST = "CANCEL_REFLECTION_JOB_REQUEST";
-export const CANCEL_REFLECTION_JOB_SUCCESS = "CANCEL_REFLECTION_JOB_SUCCESS";
-export const CANCEL_REFLECTION_JOB_FAILURE = "CANCEL_REFLECTION_JOB_FAILURE";
-
-const cancelReflectionJob = (jobId, reflectionId) => {
-  const apiCall = new APIV2Call()
-    .path("job")
-    .path(jobId)
-    .path("reflection")
-    .path(reflectionId)
-    .path("cancel");
-
-  return {
-    [RSAA]: {
-      types: [
-        CANCEL_REFLECTION_JOB_REQUEST,
-        CANCEL_REFLECTION_JOB_SUCCESS,
-        CANCEL_REFLECTION_JOB_FAILURE,
-      ],
-      method: "POST",
-      endpoint: apiCall,
-    },
-  };
-};
-
-export const cancelReflectionJobAndShowNotification =
-  (jobId, reflectionId) => (dispatch) => {
-    return dispatch(cancelReflectionJob(jobId, reflectionId)).then((action) =>
-      dispatch(addNotification(action.payload.message, "success")),
-    );
-  };
-
 export const ASK_GNARLY_STARTED = "ASK_GNARLY_STARTED";
 export const ASK_GNARLY_SUCCESS = "ASK_GNARLY_SUCCESS";
 export const ASK_GNARLY_FAILURE = "ASK_GNARLY_FAILURE";
@@ -350,7 +194,7 @@ export function askGnarly(jobId) {
   };
 }
 
-export function showJobProfile(profileUrl) {
+export function showJobProfile(profileUrl, jobDetails) {
   return (dispatch, getState) => {
     tokenUtils
       .getTempToken({
@@ -372,6 +216,7 @@ export function showJobProfile(profileUrl) {
               ...location.state,
               modal: "JobProfileModal",
               profileUrl: apiCall.toString(),
+              jobDetails,
             },
           }),
         );

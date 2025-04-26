@@ -23,6 +23,7 @@ import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -35,6 +36,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Interval;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeBinary;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeList;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeUtf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.ListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Map;
 import org.apache.arrow.vector.types.pojo.ArrowType.Null;
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct;
@@ -42,6 +44,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.iceberg.PartitionField;
 import org.apache.iceberg.Schema;
@@ -310,6 +313,21 @@ public final class SchemaConverter {
             }
 
             @Override
+            public Type visit(ArrowType.ListView list) {
+                throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+            }
+
+            @Override
+            public Type visit(ArrowType.LargeListView list) {
+                throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+            }
+
+            @Override
+            public Type visit(ArrowType.RunEndEncoded param) {
+                throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+            }
+
+            @Override
             public Type visit(FixedSizeList fixedSizeList) {
                 throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
             }
@@ -352,8 +370,18 @@ public final class SchemaConverter {
             }
 
             @Override
+            public Type visit(Utf8View utf8) {
+                throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+            }
+
+            @Override
             public Type visit(Binary binary) {
                 return BinaryType.get();
+            }
+
+            @Override
+            public Type visit(BinaryView binary) {
+                throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
             }
 
             @Override

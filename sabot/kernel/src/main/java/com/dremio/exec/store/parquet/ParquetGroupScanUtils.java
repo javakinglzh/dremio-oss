@@ -36,6 +36,7 @@ import com.dremio.exec.record.SearchableBatchSchema;
 import com.dremio.exec.store.dfs.CompleteFileWork.FileWorkImpl;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.Metadata.ColumnMetadata;
 import com.dremio.exec.store.parquet.Metadata.ParquetFileMetadata;
 import com.dremio.exec.store.parquet.Metadata.ParquetTableMetadata;
@@ -66,7 +67,13 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import org.apache.arrow.vector.types.pojo.Field;
-import org.apache.parquet.schema.OriginalType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DateLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.IntLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.StringLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 
 public class ParquetGroupScanUtils {
@@ -114,7 +121,8 @@ public class ParquetGroupScanUtils {
     this.conditions = conditions;
     this.columns = columns;
     this.plugin = plugin;
-    this.fs = plugin.createFS(userName, null, true);
+    this.fs =
+        plugin.createFS(SupportsFsCreation.builder().userName(userName).isForMetadataRefresh(true));
     this.selectionRoot = selectionRoot;
     this.entries = selection.getFileAttributesList();
 
@@ -174,7 +182,8 @@ public class ParquetGroupScanUtils {
     }
 
     final PrimitiveTypeName primitiveType = fileMetadata.getPrimitiveType(columnMetadata.getName());
-    final OriginalType originalType = fileMetadata.getOriginalType(columnMetadata.getName());
+    final LogicalTypeAnnotation logicalTypeAnnotation =
+        fileMetadata.getLogicalTypeAnnotation(columnMetadata.getName());
 
     if (first) {
       if (hasSingleValue(columnMetadata, rowCount) && !isFieldTypeUnion(schemaPath)) {
@@ -184,7 +193,7 @@ public class ParquetGroupScanUtils {
             selectionRoot,
             fileMetadata.getPathString(),
             rowGroupIdx);
-        columnTypeMap.put(schemaPath, getType(primitiveType, originalType));
+        columnTypeMap.put(schemaPath, getType(primitiveType, logicalTypeAnnotation));
         return true;
       } else {
         logger.debug(
@@ -210,7 +219,7 @@ public class ParquetGroupScanUtils {
           columnTypeMap.remove(schemaPath);
           return false;
         }
-        final MajorType newType = getType(primitiveType, originalType);
+        final MajorType newType = getType(primitiveType, logicalTypeAnnotation);
         final MajorType existingType = columnTypeMap.get(schemaPath);
         if (!newType.equals(existingType)) {
           logger.debug(
@@ -230,36 +239,33 @@ public class ParquetGroupScanUtils {
     return true;
   }
 
-  private MajorType getType(PrimitiveTypeName type, OriginalType originalType) {
-    if (originalType != null) {
-      switch (originalType) {
-        case DECIMAL:
-          return Types.optional(MinorType.DECIMAL);
-        case DATE:
-          return Types.optional(MinorType.DATE);
-        case TIME_MILLIS:
-        case TIME_MICROS:
-          return Types.optional(MinorType.TIME);
-        case TIMESTAMP_MILLIS:
-        case TIMESTAMP_MICROS:
-          return Types.optional(MinorType.TIMESTAMP);
-        case UTF8:
-          return Types.optional(MinorType.VARCHAR);
-        case UINT_8:
-          return Types.optional(MinorType.INT);
-        case UINT_16:
-          return Types.optional(MinorType.INT);
-        case UINT_32:
-          return Types.optional(MinorType.BIGINT);
-        case UINT_64:
-          return Types.optional(MinorType.BIGINT);
-        case INT_8:
-          return Types.optional(MinorType.INT);
-        case INT_16:
-          return Types.optional(MinorType.INT);
+  private MajorType getType(PrimitiveTypeName type, LogicalTypeAnnotation logicalTypeAnnotation) {
+    if (logicalTypeAnnotation != null) {
+      if (logicalTypeAnnotation instanceof DecimalLogicalTypeAnnotation) {
+        return Types.optional(MinorType.DECIMAL);
+      } else if (logicalTypeAnnotation instanceof DateLogicalTypeAnnotation) {
+        return Types.optional(MinorType.DATE);
+      } else if (logicalTypeAnnotation instanceof TimeLogicalTypeAnnotation) {
+        return Types.optional(MinorType.TIME);
+      } else if (logicalTypeAnnotation instanceof TimestampLogicalTypeAnnotation) {
+        return Types.optional(MinorType.TIMESTAMPMILLI);
+      } else if (logicalTypeAnnotation instanceof StringLogicalTypeAnnotation) {
+        return Types.optional(MinorType.VARCHAR);
+      } else if (logicalTypeAnnotation instanceof IntLogicalTypeAnnotation) {
+        IntLogicalTypeAnnotation intLogicalTypeAnnotation =
+            (IntLogicalTypeAnnotation) logicalTypeAnnotation;
+        switch (intLogicalTypeAnnotation.getBitWidth()) {
+          case 8:
+          case 16:
+            return Types.optional(MinorType.INT);
+          case 32:
+          case 64:
+            return Types.optional(MinorType.BIGINT);
+          default:
+            throw new UnsupportedOperationException("Unsupported type:" + type);
+        }
       }
     }
-
     switch (type) {
       case BOOLEAN:
         return Types.optional(MinorType.BIT);
@@ -275,7 +281,7 @@ public class ParquetGroupScanUtils {
       case FIXED_LEN_BYTE_ARRAY:
         return Types.optional(MinorType.VARBINARY);
       case INT96:
-        return Types.optional(MinorType.TIMESTAMP);
+        return Types.optional(MinorType.TIMESTAMPMILLI);
       default:
         // Should never hit this
         throw new UnsupportedOperationException("Unsupported type:" + type);

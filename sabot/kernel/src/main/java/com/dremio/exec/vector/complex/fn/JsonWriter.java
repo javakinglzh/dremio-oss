@@ -98,7 +98,7 @@ public class JsonWriter {
           case TIME:
             gen.writeTime(reader);
             break;
-          case TIMESTAMP:
+          case TIMESTAMPMILLI:
             gen.writeTimestamp(reader);
             break;
           case INTERVALYEAR:
@@ -186,7 +186,7 @@ public class JsonWriter {
         return keyReader.readLocalDateTime().toLocalDate().toString();
       case TIME:
         return keyReader.readLocalDateTime().toLocalTime().toString();
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return keyReader.readLocalDateTime().toString();
       case DECIMAL:
         return keyReader.readBigDecimal().toPlainString();

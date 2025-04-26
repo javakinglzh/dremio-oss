@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.exec.planner.sql.DmlQueryTestUtils.DmlRowwiseOperationWriteMode;
+import com.dremio.exec.planner.sql.PartitionTransform.Type;
 import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import com.google.common.collect.Iterables;
 import java.io.File;
@@ -1047,7 +1048,7 @@ public class UpdateTests {
     }
   }
 
-  private static void testUpdateWithPartitionTransformation(
+  private static void testUpdateWithPartitionTransformationTruncateBucket(
       BufferAllocator allocator,
       Table table,
       String droppedPartitionTransformField,
@@ -1080,23 +1081,25 @@ public class UpdateTests {
     Assert.assertEquals(expectedDataFileCount, Iterables.size(dataFiles));
   }
 
-  public static void testUpdateWithPartitionTransformation(
-      BufferAllocator allocator, String source, DmlRowwiseOperationWriteMode dmlWriteMode)
+  public static void testUpdateWithPartitionTransformationTruncateBucket(
+      BufferAllocator allocator,
+      String source,
+      DmlRowwiseOperationWriteMode dmlWriteMode,
+      IcebergCatalogType catalogType)
       throws Exception {
     String tableName = "updateWithPartitionTransformation";
     try (Table table = createBasicTable(0, source, 2, 10000, tableName)) {
       configureDmlWriteModeProperties(table, dmlWriteMode);
       File tableFolder = new File(getDfsTestTmpSchemaLocation(), tableName);
-      org.apache.iceberg.Table icebergTable =
-          getIcebergTable(tableFolder, IcebergCatalogType.HADOOP);
+      org.apache.iceberg.Table icebergTable = getIcebergTable(tableFolder, catalogType);
 
       // transformation function: "bucket(3, id)", 3 data files are expected to generate
-      testUpdateWithPartitionTransformation(
+      testUpdateWithPartitionTransformationTruncateBucket(
           allocator, table, null, "bucket(3, id)", icebergTable, 3);
 
       // transformation function: "truncate(1, column_0)", 10 data files are expected to generate
       // for truncated values (0..9)
-      testUpdateWithPartitionTransformation(
+      testUpdateWithPartitionTransformationTruncateBucket(
           allocator, table, "bucket(3, id)", "truncate(1, column_0)", icebergTable, 10);
     }
   }
@@ -1152,6 +1155,29 @@ public class UpdateTests {
           table,
           0,
           null);
+    }
+  }
+
+  public static void testUpdateWithPartitionTransformsOnDateCol(
+      BufferAllocator allocator, String source, DmlRowwiseOperationWriteMode dmlWriteMode)
+      throws Exception {
+    try (Table table =
+        DmlQueryTestUtils.createBasicTableWithWithDatesPartitionTransform(
+            source, 2, 10, 0, "2000-01-01", "YYYY-MM-DD", Type.DAY)) {
+      configureDmlWriteModeProperties(table, dmlWriteMode);
+      testDmlQuery(
+          allocator,
+          "UPDATE %s SET id = %s WHERE id = %s",
+          new Object[] {table.fqn, (int) table.originalData[5][0] * 10, table.originalData[5][0]},
+          table,
+          1,
+          ArrayUtils.addAll(
+              ArrayUtils.subarray(table.originalData, 0, 5),
+              new Object[] {50, table.originalData[5][1]},
+              table.originalData[6],
+              table.originalData[7],
+              table.originalData[8],
+              table.originalData[9]));
     }
   }
   // END: Contexts + Paths

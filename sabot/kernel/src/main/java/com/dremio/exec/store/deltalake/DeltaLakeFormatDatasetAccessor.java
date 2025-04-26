@@ -32,13 +32,14 @@ import com.dremio.datastore.LegacyProtobufSerializer;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.FileConfigMetadata;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.planner.cost.ScanCostFactor;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.PartitionChunkListingImpl;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.options.Options;
 import com.dremio.sabot.exec.context.OperatorContextImpl;
@@ -98,7 +99,7 @@ public class DeltaLakeFormatDatasetAccessor implements FileDatasetHandle {
     if (deltaTable == null) {
       synchronized (this) {
         if (deltaTable == null) {
-          final SabotContext context = formatPlugin.getContext();
+          final PluginSabotContext context = formatPlugin.getContext();
           try (BufferAllocator sampleAllocator =
                   context
                       .getAllocator()
@@ -112,7 +113,10 @@ public class DeltaLakeFormatDatasetAccessor implements FileDatasetHandle {
                       1000,
                       context.getExpressionSplitCache()); ) {
             final FileSystem tableFileSystem =
-                fsPlugin.createFS(SYSTEM_USERNAME, operatorContext, false);
+                fsPlugin.createFS(
+                    SupportsFsCreation.builder()
+                        .userName(SYSTEM_USERNAME)
+                        .operatorContext(operatorContext));
             this.deltaTable =
                 new DeltaLakeTable(context, tableFileSystem, fileSelection, travelRequest);
           }
@@ -238,7 +242,7 @@ public class DeltaLakeFormatDatasetAccessor implements FileDatasetHandle {
     try {
       final DeltaLakeProtobuf.DeltaLakeReadSignature deltaLakeReadSignature =
           LegacyProtobufSerializer.parseFrom(
-              DeltaLakeProtobuf.DeltaLakeReadSignature.PARSER,
+              DeltaLakeProtobuf.DeltaLakeReadSignature.parser(),
               MetadataProtoUtils.toProtobuf(readSignature));
       initializeDeltaTableWrapper();
       return !deltaTable.checkMetadataStale(deltaLakeReadSignature);

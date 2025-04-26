@@ -503,6 +503,12 @@ class Message extends PureComponent {
                   alt="Dismiss"
                   onClick={this.onDismiss}
                   class="dismiss-btn"
+                  tabIndex={0}
+                  onKeyPress={(e) => {
+                    if (e.code === "Enter" || e.code === "Space") {
+                      this.onDismiss();
+                    }
+                  }}
                 />
               </div>
             )}

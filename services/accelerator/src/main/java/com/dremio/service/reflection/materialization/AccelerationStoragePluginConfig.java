@@ -15,13 +15,14 @@
  */
 package com.dremio.service.reflection.materialization;
 
+import static com.dremio.exec.store.dfs.CloudFsConstants.S3_REGION_OVERRIDE;
 import static com.dremio.service.reflection.ReflectionOptions.CLOUD_CACHING_ENABLED;
 import static com.google.common.base.Strings.isNullOrEmpty;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.CacheProperties;
 import com.dremio.exec.store.dfs.FileSystemConf;
@@ -32,11 +33,11 @@ import com.dremio.options.OptionManager;
 import com.dremio.service.coordinator.proto.DataCredentials;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.reflection.ReflectionServiceImpl;
-import com.google.common.collect.ImmutableList;
 import io.protostuff.Tag;
 import java.net.URI;
 import java.util.List;
 import javax.inject.Provider;
+import org.apache.commons.lang3.StringUtils;
 
 /** Configuration for the MaterializationStoragePluginConfigOTAS plugin */
 @SourceType(value = "ACCELERATION", configurable = false)
@@ -91,9 +92,10 @@ public class AccelerationStoragePluginConfig
   public String accountKind = null;
 
   @Tag(16)
-  public String sharedAccessKey = null;
+  public String sharedAccessKey = null; // This tag has been deprecated. Please do not use.
 
-  // Tag has been deprecated please do not use.
+  @Tag(17)
+  public String awsRegion = null;
 
   public AccelerationStoragePluginConfig() {}
 
@@ -124,6 +126,7 @@ public class AccelerationStoragePluginConfig
       } else if (dataCredentials.hasDataRole()) {
         this.iamRole = dataCredentials.getDataRole().getIamRole();
         this.externalId = dataCredentials.getDataRole().getExternalId();
+        this.awsRegion = dataCredentials.getDataRole().getRegion();
       } else if (dataCredentials.hasClientAccess()) {
         this.tokenEndpoint = dataCredentials.getClientAccess().getTokenEndpoint();
         this.clientId = dataCredentials.getClientAccess().getClientId();
@@ -136,8 +139,10 @@ public class AccelerationStoragePluginConfig
 
   @Override
   public AccelerationStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new AccelerationStoragePlugin(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new AccelerationStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   @Override
@@ -157,7 +162,9 @@ public class AccelerationStoragePluginConfig
 
   @Override
   public List<Property> getProperties() {
-    return ImmutableList.of();
+    return StringUtils.isNotEmpty(awsRegion)
+        ? List.of(new Property(S3_REGION_OVERRIDE, awsRegion))
+        : List.of();
   }
 
   @Override

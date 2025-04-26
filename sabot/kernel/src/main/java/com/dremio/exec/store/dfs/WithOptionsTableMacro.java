@@ -114,13 +114,7 @@ public final class WithOptionsTableMacro implements TableMacro {
       }
 
       return new MaterializedDatasetTableProvider(
-              null,
-              handle,
-              plugin,
-              plugin.getId(),
-              schemaConfig,
-              options,
-              schemaConfig.getOptions())
+              null, handle, plugin, plugin.getId(), schemaConfig, options)
           .get();
     } catch (InterruptedIOException e) {
       throw UserException.validationError(e)

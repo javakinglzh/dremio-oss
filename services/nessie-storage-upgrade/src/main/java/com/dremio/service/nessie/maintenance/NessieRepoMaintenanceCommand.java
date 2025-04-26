@@ -26,6 +26,7 @@ import com.dremio.dac.server.DACConfig;
 import com.dremio.datastore.LocalKVStoreProvider;
 import com.dremio.datastore.api.Document;
 import com.dremio.io.file.Path;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedPointerStore;
 import com.dremio.service.namespace.NamespaceStore;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -37,7 +38,6 @@ import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import org.projectnessie.model.ContentKey;
 
 /**
  * Admin CLI tool to invoking Embedded Nessie maintenance operations and performing basic repository
@@ -172,7 +172,7 @@ public class NessieRepoMaintenanceCommand {
         .findAll()
         .forEach(
             doc -> {
-              ContentKey key = doc.getKey();
+              EmbeddedContentKey key = doc.getKey();
               if (key.getElements().size() == 2
                   && "dremio.internal".equals(key.getElements().get(0))) {
                 String pathName = key.getElements().get(1);

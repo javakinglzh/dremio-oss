@@ -19,12 +19,12 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.AlterTableOption;
 import com.dremio.exec.catalog.PartitionSpecAlterOption;
 import com.dremio.exec.catalog.RollbackOption;
+import com.dremio.exec.physical.base.ClusteringOptions;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.dfs.ColumnOperations;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
-import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -50,28 +50,23 @@ import org.apache.iceberg.types.Types;
 
 /** Base class for common Iceberg model operations */
 public abstract class IcebergBaseModel implements IcebergModel {
-
-  protected static final String EMPTY_NAMESPACE = "";
   protected final String namespace;
   protected final Configuration configuration;
   protected final FileIO fileIO;
   protected final OperatorContext operatorContext;
   private final DatasetCatalogGrpcClient client;
-  protected final SupportsIcebergMutablePlugin plugin;
 
   protected IcebergBaseModel(
       String namespace,
       Configuration configuration,
       FileIO fileIO,
       OperatorContext operatorContext,
-      DatasetCatalogGrpcClient datasetCatalogGrpcClient,
-      SupportsIcebergMutablePlugin plugin) {
+      DatasetCatalogGrpcClient datasetCatalogGrpcClient) {
     this.namespace = namespace;
     this.configuration = configuration;
     this.fileIO = Preconditions.checkNotNull(fileIO);
     this.operatorContext = operatorContext;
     this.client = datasetCatalogGrpcClient;
-    this.plugin = plugin;
   }
 
   protected abstract IcebergCommand getIcebergCommand(
@@ -170,14 +165,12 @@ public abstract class IcebergBaseModel implements IcebergModel {
         tableLocation,
         tableUuid,
         batchSchema,
-        configuration,
         partitionColumnNames,
         icebergCommand,
         client,
         datasetConfig,
         operatorStats,
         partitionSpec,
-        plugin,
         fileType);
   }
 
@@ -272,7 +265,8 @@ public abstract class IcebergBaseModel implements IcebergModel {
       Long minInputFilesBeforeOptimize,
       Long snapshotId,
       IcebergTableProps icebergTableProps,
-      FileSystem fs) {
+      FileSystem fs,
+      ClusteringOptions clusteringOptions) {
     IcebergCommand icebergCommand =
         getIcebergCommandWithMetricStat(
             tableIdentifier, IcebergCommitOrigin.OPTIMIZE_REWRITE_DATA_TABLE);
@@ -283,7 +277,8 @@ public abstract class IcebergBaseModel implements IcebergModel {
         minInputFilesBeforeOptimize,
         snapshotId,
         icebergTableProps,
-        fs);
+        fs,
+        clusteringOptions);
   }
 
   /** Utility to register an existing table to the catalog */

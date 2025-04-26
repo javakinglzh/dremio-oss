@@ -96,7 +96,7 @@ public final class MockDremioQueryParser {
     cluster =
         RelOptCluster.create(
             new HepPlanner(new HepProgramBuilder().build()), new DremioRexBuilder(typeFactory));
-    cluster.setMetadataQuery(DremioRelMetadataQuery.QUERY_SUPPLIER);
+    cluster.setMetadataQuerySupplier(DremioRelMetadataQuery.QUERY_SUPPLIER);
     this.sqlToRelConverter =
         new SqlToRelConverter(
             viewExpander,

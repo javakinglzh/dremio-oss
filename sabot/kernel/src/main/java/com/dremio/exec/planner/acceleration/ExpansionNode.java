@@ -39,6 +39,7 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql2rel.RelStructuredTypeFlattener;
 import org.apache.calcite.sql2rel.RelStructuredTypeFlattener.SelfFlatteningRel;
 
@@ -47,6 +48,8 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
   private final NamespaceKey path;
   private final TableVersionContext versionContext;
   private final ViewTable viewTable;
+  private final List<RexNode> pushedDownFilters;
+  private final boolean considerForPullUpPredicate;
 
   protected ExpansionNode(
       NamespaceKey path,
@@ -61,6 +64,31 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
     this.rowType = rowType;
     this.versionContext = versionContext;
     this.viewTable = viewTable;
+    this.pushedDownFilters = new ArrayList<>();
+    this.considerForPullUpPredicate = false;
+  }
+
+  protected ExpansionNode(
+      NamespaceKey path,
+      RelDataType rowType,
+      RelOptCluster cluster,
+      RelTraitSet traits,
+      RelNode input,
+      TableVersionContext versionContext,
+      ViewTable viewTable,
+      List<RexNode> pushedFilters,
+      boolean considerForPullUpPredicate) {
+    super(cluster, traits, input);
+    this.path = path;
+    this.rowType = rowType;
+    this.versionContext = versionContext;
+    this.viewTable = viewTable;
+    this.pushedDownFilters = pushedFilters;
+    this.considerForPullUpPredicate = considerForPullUpPredicate;
+  }
+
+  public boolean considerForPullUpPredicate() {
+    return this.considerForPullUpPredicate;
   }
 
   public static RelNode wrap(
@@ -79,6 +107,14 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
     }
   }
 
+  public List<RexNode> getPushedDownFilters() {
+    return this.pushedDownFilters;
+  }
+
+  public void addFilter(RexNode expr) {
+    this.pushedDownFilters.add(expr);
+  }
+
   @Override
   public RelNode copyWith(CopyWithCluster copier) {
     return new ExpansionNode(
@@ -88,7 +124,9 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
         copier.copyOf(getTraitSet()),
         getInput().accept(copier),
         versionContext,
-        viewTable);
+        viewTable,
+        pushedDownFilters,
+        considerForPullUpPredicate);
   }
 
   @Override
@@ -100,7 +138,8 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
   public RelWriter explainTerms(RelWriter pw) {
     return super.explainTerms(pw)
         .item("path", path.toUnescapedString())
-        .itemIf("version", versionContext, versionContext != null);
+        .itemIf("version", versionContext, versionContext != null)
+        .itemIf("filters", pushedDownFilters.toString(), !pushedDownFilters.isEmpty());
   }
 
   public boolean isDefault() {
@@ -110,7 +149,41 @@ public class ExpansionNode extends SingleRel implements CopyToCluster, SelfFlatt
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
     return new ExpansionNode(
-        path, rowType, this.getCluster(), traitSet, inputs.get(0), versionContext, viewTable);
+        path,
+        rowType,
+        this.getCluster(),
+        traitSet,
+        inputs.get(0),
+        versionContext,
+        viewTable,
+        pushedDownFilters,
+        considerForPullUpPredicate);
+  }
+
+  public ExpansionNode copy(RelTraitSet traitSet, RelNode input, List<RexNode> pushedDownFilters) {
+    return new ExpansionNode(
+        path,
+        rowType,
+        this.getCluster(),
+        traitSet,
+        input,
+        versionContext,
+        viewTable,
+        pushedDownFilters,
+        considerForPullUpPredicate);
+  }
+
+  public ExpansionNode considerForPullUpPredicate(boolean considerForPullUpPredicate) {
+    return new ExpansionNode(
+        path,
+        rowType,
+        this.getCluster(),
+        traitSet,
+        input,
+        versionContext,
+        viewTable,
+        pushedDownFilters,
+        considerForPullUpPredicate);
   }
 
   @Override

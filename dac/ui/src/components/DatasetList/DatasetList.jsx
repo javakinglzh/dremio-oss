@@ -43,6 +43,8 @@ class DatasetList extends PureComponent {
     isStarredLimitReached: PropTypes.bool,
     starredItems: PropTypes.array,
     isExpandable: PropTypes.bool,
+    openDetailsPanel: PropTypes.func,
+    showSummaryOverlay: PropTypes.bool,
   };
 
   constructor(props) {
@@ -74,6 +76,7 @@ class DatasetList extends PureComponent {
       isStarredLimitReached,
       starredItems,
       isExpandable,
+      showSummaryOverlay,
     } = this.props;
     return (
       data &&
@@ -116,6 +119,8 @@ class DatasetList extends PureComponent {
                 nodeId={nodeId}
                 isStarredLimitReached={isStarredLimitReached}
                 isStarred={starredItems}
+                openDetailsPanel={this.props.openDetailsPanel}
+                showSummaryOverlay={showSummaryOverlay}
               />
             </div>
           </DragSource>

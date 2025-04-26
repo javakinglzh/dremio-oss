@@ -72,6 +72,12 @@ const SQLFunctionItem = ({
         isActiveRow ? classes["--isActive"] : ""
       }`}
       onClick={() => onRowClick(key)}
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.code === "Space" || e.code === "Enter") {
+          onRowClick(key);
+        }
+      }}
     >
       <>
         <DragSource

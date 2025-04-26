@@ -15,72 +15,25 @@
  */
 package com.dremio.exec.planner.sql;
 
-import com.google.common.collect.ImmutableSet;
-import java.util.Collection;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Represents an operand in a calcite SqlFunction. This gets used for SqlOperatorFactory. */
-public final class SqlOperand {
-  public final String name;
-  public final ImmutableSet<SqlTypeName> typeRange;
+public abstract class SqlOperand {
   public final Type type;
 
-  private SqlOperand(String name, ImmutableSet<SqlTypeName> typeRange, Type type) {
-    this.name = name;
-    this.typeRange = typeRange;
+  protected SqlOperand(Type type) {
     this.type = type;
   }
 
-  public static SqlOperand regular(SqlTypeName sqlTypeName) {
-    return new SqlOperand(null, ImmutableSet.of(sqlTypeName), Type.REGULAR);
-  }
+  public abstract boolean accepts(RelDataType relDataType, SqlCallBinding sqlCallBinding);
 
-  public static SqlOperand regular(Collection<SqlTypeName> sqlTypeNames) {
-    return new SqlOperand(null, ImmutableSet.copyOf(sqlTypeNames), Type.REGULAR);
-  }
-
-  public static SqlOperand optional(SqlOperand sqlOperand) {
-    return optional(sqlOperand.typeRange);
-  }
-
-  public static SqlOperand optional(SqlTypeName sqlTypeName) {
-    return new SqlOperand(null, ImmutableSet.of(sqlTypeName), Type.OPTIONAL);
-  }
-
-  public static SqlOperand optional(Collection<SqlTypeName> sqlTypeNames) {
-    return new SqlOperand(null, ImmutableSet.copyOf(sqlTypeNames), Type.OPTIONAL);
-  }
-
-  public static SqlOperand variadic(SqlOperand sqlOperand) {
-    return variadic(sqlOperand.typeRange);
-  }
-
-  public static SqlOperand variadic(SqlTypeName sqlTypeName) {
-    return new SqlOperand(null, ImmutableSet.of(sqlTypeName), Type.VARIADIC);
-  }
-
-  public static SqlOperand variadic(Collection<SqlTypeName> sqlTypeNames) {
-    return new SqlOperand(null, ImmutableSet.copyOf(sqlTypeNames), Type.VARIADIC);
-  }
-
-  public static SqlOperand union(SqlOperand sqlOperand1, SqlOperand sqlOperand2) {
-    if (sqlOperand1.type != sqlOperand2.type) {
-      throw new UnsupportedOperationException("SqlOperand types must match up.");
-    }
-
-    if ((sqlOperand1.name != null)
-        && (sqlOperand2.name != null)
-        && (sqlOperand1.name != sqlOperand2.name)) {
-      throw new UnsupportedOperationException("SqlOperand names must match up.");
-    }
-
-    ImmutableSet<SqlTypeName> unionTypeRange =
-        new ImmutableSet.Builder<SqlTypeName>()
-            .addAll(sqlOperand1.typeRange)
-            .addAll(sqlOperand2.typeRange)
-            .build();
-
-    return new SqlOperand(sqlOperand1.name, unionTypeRange, sqlOperand1.type);
+  public boolean accepts(SqlTypeName sqlTypeName, SqlCallBinding sqlCallBinding) {
+    RelDataTypeFactory relDataTypeFactory = sqlCallBinding.getValidator().getTypeFactory();
+    RelDataType relDataType = relDataTypeFactory.createSqlType(sqlTypeName);
+    return accepts(relDataType, sqlCallBinding);
   }
 
   public enum Type {

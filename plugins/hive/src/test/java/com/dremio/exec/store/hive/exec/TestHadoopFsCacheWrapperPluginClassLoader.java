@@ -18,6 +18,9 @@ package com.dremio.exec.store.hive.exec;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 import java.net.URI;
 
@@ -113,6 +116,17 @@ public class TestHadoopFsCacheWrapperPluginClassLoader {
     LoadingCache<HadoopFsCacheKeyPluginClassLoader, FileSystem> cache = cacheWrapper.getCache();
     cacheWrapper.close();
     assertEquals("Cache must be empty", 0, cache.size());
+  }
+
+  @Test
+  public void testCacheOnRemovalCallsClose() throws Exception {
+    LoadingCache<HadoopFsCacheKeyPluginClassLoader, FileSystem> cache = cacheWrapper.getCache();
+    FileSystem mockFileSystem = mock(FileSystem.class);
+    URI uri = URI.create(String.format("%s://%s%s_%s", UriSchemes.HDFS_SCHEME, HOST, PATH, "testCacheOnRemoval"));
+    HadoopFsCacheKeyPluginClassLoader keyClassLoader = new HadoopFsCacheKeyPluginClassLoader(uri, new JobConf(), "dremio", true);
+    cache.put(keyClassLoader, mockFileSystem);
+    cache.invalidate(keyClassLoader);
+    verify(mockFileSystem, times(1)).close();
   }
 
 }

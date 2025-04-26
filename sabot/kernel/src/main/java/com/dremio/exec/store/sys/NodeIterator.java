@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.service.executor.ExecutorServiceImpl;
 import com.dremio.sabot.exec.context.OperatorContext;
 import java.util.Iterator;
@@ -25,9 +25,9 @@ public class NodeIterator implements Iterator<Object> {
 
   private boolean beforeFirst = true;
   private final OperatorContext context;
-  private final SabotContext dbContext;
+  private final PluginSabotContext dbContext;
 
-  public NodeIterator(final SabotContext dbContext, OperatorContext c) {
+  public NodeIterator(final PluginSabotContext dbContext, OperatorContext c) {
     this.dbContext = dbContext;
     this.context = c;
   }

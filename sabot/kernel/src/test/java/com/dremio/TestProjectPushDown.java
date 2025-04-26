@@ -139,7 +139,8 @@ public class TestProjectPushDown extends PlanTestBase {
   public void testProjectPushDown() throws Exception {
     final String pushDownSqlPattern = "select %s from cp.\"%s\" t";
     final String projection = "t.trans_id, t.user_info.cust_id, t.marketing_info.keywords[0]";
-    final String expected = "columns=[`trans_id`, `user_info`, `marketing_info`]";
+    final String expected =
+        "columns=[`trans_id`, `user_info`.`cust_id`, `marketing_info`.`keywords`[0]]";
 
     for (String table : MORE_TABLES) {
       testPushDown(new PushDownTestInstance(pushDownSqlPattern, expected, projection, table));
@@ -150,7 +151,8 @@ public class TestProjectPushDown extends PlanTestBase {
   public void testProjectPushDownPreserveColumnOrdering() throws Exception {
     final String pushDownSqlPattern = "select %s from cp.\"%s\" t";
     final String projection = "t.user_info.cust_id, t.trans_id, t.marketing_info.keywords[0]";
-    final String expected = "columns=[`trans_id`, `user_info`, `marketing_info`]";
+    final String expected =
+        "columns=[`trans_id`, `user_info`.`cust_id`, `marketing_info`.`keywords`[0]]";
 
     for (String table : MORE_TABLES) {
       testPushDown(new PushDownTestInstance(pushDownSqlPattern, expected, projection, table));
@@ -178,7 +180,7 @@ public class TestProjectPushDown extends PlanTestBase {
     final String pushDownSqlPattern = "select %s from cp.\"%s\" t where %s";
     final String projection = "t.id, t.address.area, t.name";
     final String filter = "t.name LIKE 'basu3'  and t.address['country'] = 'IN2'";
-    final String expected = "columns=[`id`, `name`, `address`]";
+    final String expected = "columns=[`id`, `name`, `address`.`area`, `address`.`country`]";
     for (String table : PARQUET_TABLES) {
       testPushDown(
           new PushDownTestInstance(pushDownSqlPattern, expected, projection, table, filter));
@@ -191,7 +193,7 @@ public class TestProjectPushDown extends PlanTestBase {
     final String projection =
         "t.trans_id trans_id, t.user_info.cust_id cust_id, t.another_field another_field";
     final String filter = "another_field = 10";
-    final String expected = "columns=[`trans_id`, `user_info`, `another_field`]";
+    final String expected = "columns=[`trans_id`, `user_info`.`cust_id`, `another_field`]";
 
     for (String table : MORE_TABLES) {
       testPushDown(
@@ -351,8 +353,9 @@ public class TestProjectPushDown extends PlanTestBase {
     final String projection = "t0.name, t0.address.area, t0.address.comments, t1.address.pincode";
     final String filter =
         "t0.name = t1.name and t0.address.state LIKE ('TS2') and t1.address.state LIKE ('TS3')";
-    final String firstExpected = "columns=[`name`, `address`]";
-    final String secondExpected = "columns=[`name`, `address`]";
+    final String firstExpected =
+        "columns=[`name`, `address`.`State`, `address`.`area`, `address`.`comments`]";
+    final String secondExpected = "columns=[`name`, `address`.`State`, `address`.`pincode`]";
 
     for (String table : PARQUET_TABLES) {
       testPushDown(
@@ -435,9 +438,9 @@ public class TestProjectPushDown extends PlanTestBase {
   public void testSimpleProjectPastJoinPastFilterPastJoinPushDownForParquetDataSet()
       throws Exception {
 
-    final String firstExpected = "columns=[`id`, `name`, `address`]";
+    final String firstExpected = "columns=[`id`, `name`, `address`.`State`]";
     final String secondExpected = "columns=[`name`]";
-    final String thirdExpected = "columns=[`id`, `address`]";
+    final String thirdExpected = "columns=[`id`, `address`.`pincode`]";
 
     String sql =
         "select t0.name, t1.address.state, t2.address.pincode "

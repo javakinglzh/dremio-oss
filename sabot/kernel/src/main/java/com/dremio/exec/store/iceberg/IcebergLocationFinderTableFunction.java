@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import static com.dremio.exec.store.SystemSchemas.DATASET_FIELD;
 import static com.dremio.exec.util.VectorUtil.getVectorFromSchemaPath;
 
 import com.dremio.common.exceptions.UserException;
@@ -29,6 +30,8 @@ import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.iceberg.TableMetadata;
@@ -41,15 +44,16 @@ public class IcebergLocationFinderTableFunction extends AbstractTableFunction {
 
   private static final org.slf4j.Logger LOGGER =
       org.slf4j.LoggerFactory.getLogger(IcebergLocationFinderTableFunction.class);
+  private VarCharVector datasetVector;
   private VarCharVector metadataLocationVector;
   private VarCharVector tableLocationVector;
   private int inputIndex;
   private boolean hasMoreToConsume;
   private final FragmentExecutionContext fragmentExecutionContext;
   private final OpProps props;
-  private FileIO fileIO;
   private final Map<String, String> tablePropertiesSkipCriteria;
   private final boolean continueOnError;
+  private SupportsIcebergMutablePlugin storagePlugin;
 
   public IcebergLocationFinderTableFunction(
       FragmentExecutionContext fec,
@@ -70,12 +74,11 @@ public class IcebergLocationFinderTableFunction extends AbstractTableFunction {
   @Override
   public VectorAccessible setup(VectorAccessible incoming) throws Exception {
     VectorContainer outgoing = (VectorContainer) super.setup(incoming);
-    SupportsIcebergMutablePlugin storagePlugin =
+    storagePlugin =
         fragmentExecutionContext.getStoragePlugin(
             functionConfig.getFunctionContext().getPluginId());
-    FileSystem fs = storagePlugin.createFS(null, props.getUserName(), context);
-    this.fileIO = storagePlugin.createIcebergFileIO(fs, null, null, null, null);
 
+    this.datasetVector = (VarCharVector) getVectorFromSchemaPath(incoming, DATASET_FIELD);
     this.metadataLocationVector =
         (VarCharVector) getVectorFromSchemaPath(incoming, SystemSchemas.METADATA_FILE_PATH);
     this.tableLocationVector =
@@ -95,11 +98,29 @@ public class IcebergLocationFinderTableFunction extends AbstractTableFunction {
     if (!this.hasMoreToConsume) {
       return 0;
     }
+    byte[] datasetBytes = datasetVector.get(inputIndex);
+    List<String> dataset =
+        Arrays.asList(new String(datasetBytes, StandardCharsets.UTF_8).split("\\."));
     byte[] metadataLocationBytes = metadataLocationVector.get(inputIndex);
     String metadataLocation = new String(metadataLocationBytes, StandardCharsets.UTF_8);
 
     try {
-      TableMetadata tableMetadata = TableMetadataParser.read(fileIO, metadataLocation);
+      // IO objects are being created based on the dataset value recieved through datasetVector as
+      // this can vary between input rows and cannot be supplied through function context alone.
+      FileSystem fs =
+          storagePlugin.createFS(
+              SupportsFsCreation.builder()
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .dataset(dataset));
+      FileIO io =
+          storagePlugin.createIcebergFileIO(
+              fs,
+              context,
+              dataset,
+              functionConfig.getFunctionContext().getPluginId().getName(),
+              null);
+      TableMetadata tableMetadata = TableMetadataParser.read(io, metadataLocation);
       if (tablePropertiesSkipCriteria.entrySet().stream()
           .anyMatch(
               e ->

@@ -19,6 +19,7 @@ import com.dremio.common.server.WebServerInfoProvider;
 import com.dremio.config.DremioConfig;
 import com.dremio.options.OptionManager;
 import com.dremio.options.Options;
+import com.dremio.options.TypeValidators.RangeLongValidator;
 import com.dremio.security.SecurityFolder;
 import com.dremio.security.SecurityFolder.OpenOption;
 import com.dremio.service.scheduler.Cancellable;
@@ -38,6 +39,7 @@ import com.dremio.services.credentials.CredentialsException;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.CredentialsServiceUtils;
 import com.dremio.services.credentials.SecretsCreator;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JOSEObjectType;
@@ -48,6 +50,7 @@ import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.ECKey;
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
+import com.nimbusds.jose.jwk.KeyOperation;
 import com.nimbusds.jose.jwk.KeyUse;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
@@ -102,7 +105,6 @@ import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.OperatorCreationException;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 import org.immutables.value.Value.Immutable;
-import org.joda.time.DateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -114,7 +116,8 @@ import org.slf4j.LoggerFactory;
  */
 @Options
 public class SystemJWKSetManager implements JWKSetManager {
-  public static final int KEY_ROTATION_PERIOD_DAYS = 15;
+  public static final RangeLongValidator KEY_ROTATION_PERIOD_DAYS =
+      new RangeLongValidator("token.jwks-key-rotation-period.days", 2, 15, 15);
 
   // Use 99999 as a fake PEN (Private Enterprise Number) for now that's far enough out of range of
   // existing ASN.1 OIDs under the standard 1.3.6.1.4.1 prefix that we shouldn't run into conflicts.
@@ -140,6 +143,7 @@ public class SystemJWKSetManager implements JWKSetManager {
   private final Provider<SecretsCreator> secretsCreatorProvider;
   private final Provider<CredentialsService> credentialsServiceProvider;
   private final DremioConfig dremioConfig;
+  private final ObjectMapper objectMapper;
 
   private Cancellable jwksConsistencyTask;
   private AtomicLong currentKeySequence;
@@ -167,6 +171,7 @@ public class SystemJWKSetManager implements JWKSetManager {
     this.secretsCreatorProvider = secretsCreatorProvider;
     this.credentialsServiceProvider = credentialsServiceProvider;
     this.dremioConfig = dremioConfig;
+    this.objectMapper = new ObjectMapper();
   }
 
   @Override
@@ -236,8 +241,13 @@ public class SystemJWKSetManager implements JWKSetManager {
       keyStore.load(null, getKeystorePassword());
 
       this.currentKeySequence = new AtomicLong(1);
-      final ECKey jwk = generateNewKey();
-      final X509Certificate certificate = generateCertificate(jwk);
+
+      final Instant now = clock.instant();
+      final Date notBefore = new Date(now.minus(Duration.ofDays(1)).toEpochMilli());
+      final Date notAfter = new Date(now.plus(Duration.ofDays(365)).toEpochMilli());
+
+      final ECKey jwk = generateNewKey(notBefore, notAfter);
+      final X509Certificate certificate = generateCertificate(jwk, notBefore, notAfter);
       final long keySequence = this.currentKeySequence.getAndIncrement();
       final Date keyCreationDate = new Date(clock.millis());
       final PrivateKeyEntry privateKeyEntry =
@@ -257,12 +267,16 @@ public class SystemJWKSetManager implements JWKSetManager {
         logger.info("Wrote initial JWKS keystore to {}", securityFolder.resolve(KEYSTORE_FILENAME));
       }
 
+      // Nimbus only seems to include the signing cert info when loading the key from the
+      // keystore, so we need to load it from the keystore to include that info in the JWKS that's
+      // published on our OAuth API endpoint.
+      final ECKey loadedKey = loadECKeyFromKeyStore(keyStore, jwk.getKeyID());
       return new ImmutableRotatingPersistedKey.Builder()
           .setCurrentKey(
               new ImmutablePersistedKey.Builder()
                   .setKeySequence(keySequence)
-                  .setAlias(jwk.getKeyID())
-                  .setJwk(jwk)
+                  .setAlias(loadedKey.getKeyID())
+                  .setJwk(loadedKey)
                   .setDateCreated(keyCreationDate)
                   .build())
           .build();
@@ -309,8 +323,11 @@ public class SystemJWKSetManager implements JWKSetManager {
 
                   final JWK key;
                   try {
-                    // The keystore alias is the key ID
-                    key = ECKey.load(keyStore, alias, getPrivateKeyPassword(alias));
+                    // Note: The keystore alias is the key ID.
+                    // Nimbus only seems to include the signing cert info when loading the key from
+                    // the keystore, so we need to load it from the keystore to include that info in
+                    // the JWKS that's published on our OAuth API endpoint.
+                    key = loadECKeyFromKeyStore(keyStore, alias);
                   } catch (KeyStoreException | JOSEException e) {
                     throw new RuntimeException(
                         String.format("Failed to load key with alias '%s' from keystore", alias),
@@ -417,23 +434,27 @@ public class SystemJWKSetManager implements JWKSetManager {
     return attributesBuilder.build();
   }
 
-  private ECKey generateNewKey() throws GeneralSecurityException, IOException, JOSEException {
+  private ECKey generateNewKey(Date notBefore, Date notAfter)
+      throws GeneralSecurityException, IOException, JOSEException {
     try {
       return new ECKeyGenerator(Curve.P_256)
           .keyUse(KeyUse.SIGNATURE)
+          .keyOperations(Set.of(KeyOperation.SIGN, KeyOperation.VERIFY))
           .keyID(UUID.randomUUID().toString())
           .algorithm(JWSAlgorithm.ES256)
+          .notBeforeTime(notBefore)
+          .expirationTime(notAfter)
           .generate();
     } catch (JOSEException e) {
       throw new RuntimeException("Failed to generate private key", e);
     }
   }
 
-  private X509Certificate generateCertificate(final AsymmetricJWK key)
+  private X509Certificate generateCertificate(
+      final AsymmetricJWK key, final Date notBefore, final Date notAfter)
       throws JOSEException, GeneralSecurityException {
     // TODO: move cert generate logic between here and
     //  SSLConfigurator.generateCertificatesAndConfigure to a common location
-    final DateTime now = DateTime.now();
 
     final X500NameBuilder nameBuilder =
         new X500NameBuilder(BCStyle.INSTANCE)
@@ -442,10 +463,6 @@ public class SystemJWKSetManager implements JWKSetManager {
             .addRDN(BCStyle.L, "Mountain View")
             .addRDN(BCStyle.ST, "California")
             .addRDN(BCStyle.C, "US");
-    final Date notBefore = now.minusDays(1).toDate();
-
-    // TODO: determine what the expiration should be based on configured key rotation period.
-    final Date notAfter = now.plusYears(1).toDate();
     final BigInteger serialNumber = new BigInteger(128, secureRandom);
 
     final X509v3CertificateBuilder certificateBuilder =
@@ -468,7 +485,7 @@ public class SystemJWKSetManager implements JWKSetManager {
         new JcaX509CertificateConverter().getCertificate(certificateBuilder.build(contentSigner));
 
     // check the validity
-    certificate.checkValidity(now.toDate());
+    certificate.checkValidity(new Date(clock.instant().toEpochMilli()));
 
     // make sure the certificate is self-signed
     certificate.verify(certificate.getPublicKey());
@@ -543,6 +560,20 @@ public class SystemJWKSetManager implements JWKSetManager {
     return new PrivateKeyEntry(key, new java.security.cert.Certificate[] {certificate}, attributes);
   }
 
+  private ECKey loadECKeyFromKeyStore(KeyStore keyStore, String keyId)
+      throws KeyStoreException, JOSEException {
+    // Nimbus includes the signing cert info when loading the key from the keystore.
+    final ECKey incompleteLoadedNewKey = ECKey.load(keyStore, keyId, getPrivateKeyPassword(keyId));
+
+    // Nimbus doesn't include the algorithm, key use or key ops when loading from the keystore, so
+    // we seem to need to reconstruct the key with those properties ourselves
+    return new ECKey.Builder(incompleteLoadedNewKey)
+        .algorithm(JWSAlgorithm.ES256)
+        .keyUse(KeyUse.SIGNATURE)
+        .keyOperations(Set.of(KeyOperation.VERIFY))
+        .build();
+  }
+
   /**
    * Enforce the consistency of our JWKS keys in the persisted keystore as well as the cached keys
    * used for signing and validating JWTs. Calling this method:
@@ -559,6 +590,8 @@ public class SystemJWKSetManager implements JWKSetManager {
   @VisibleForTesting
   void enforceConsistentJwksState() {
     final RotatingPersistedKey rotatingKey = getRotatingKey();
+    final long keyRotationPeriodDays =
+        optionManagerProvider.get().getOption(KEY_ROTATION_PERIOD_DAYS);
 
     if (rotatingKey.getOldKey().isEmpty()) {
       final PersistedKey currentKey = rotatingKey.getCurrentKey();
@@ -566,7 +599,7 @@ public class SystemJWKSetManager implements JWKSetManager {
       this.currentJwks = new JWKSet(currentKey.getJwk());
 
       final Instant keyRotationDate =
-          currentKey.getDateCreated().toInstant().plus(Duration.ofDays(KEY_ROTATION_PERIOD_DAYS));
+          currentKey.getDateCreated().toInstant().plus(Duration.ofDays(keyRotationPeriodDays));
       final Instant now = clock.instant();
 
       if (now.isAfter(keyRotationDate)) {
@@ -583,7 +616,7 @@ public class SystemJWKSetManager implements JWKSetManager {
           oldKey
               .getDateCreated()
               .toInstant()
-              .plus(Duration.ofDays(KEY_ROTATION_PERIOD_DAYS).plusMinutes(jwtExpirationMinutes));
+              .plus(Duration.ofDays(keyRotationPeriodDays).plusMinutes(jwtExpirationMinutes));
       final Instant now = clock.instant();
 
       if (now.isAfter(oldKeyRevocationDate)) {
@@ -595,7 +628,7 @@ public class SystemJWKSetManager implements JWKSetManager {
           currentKey
               .getDateCreated()
               .toInstant()
-              .plus(Duration.ofDays(KEY_ROTATION_PERIOD_DAYS).plusMinutes(jwtExpirationMinutes));
+              .plus(Duration.ofDays(keyRotationPeriodDays).plusMinutes(jwtExpirationMinutes));
       // Ensure we rotate the current key if we've missed a rotation period either due to previous
       // rotations failing or because Dremio was offline for an extended period.
       if (now.isAfter(currentKeyRevocationDate)) {
@@ -623,7 +656,7 @@ public class SystemJWKSetManager implements JWKSetManager {
     final WebServerInfoProvider serverInfo = webServerInfoProvider.get();
     final JWTClaimsSet exactMatchClaims =
         new JWTClaimsSet.Builder()
-            .issuer(serverInfo.getBaseURL().toString())
+            .issuer(serverInfo.getIssuer().toString())
             .audience(serverInfo.getClusterId())
             .build();
     final Set<String> requiredClaims = new HashSet<>(JWTClaimsSet.getRegisteredNames());
@@ -665,8 +698,11 @@ public class SystemJWKSetManager implements JWKSetManager {
       // Generate new key pair and persist it in the keystore before we begin signing new JWTs with
       // the new private key to prevent error scenarios from preventing us from persisting the new
       // key pair after we've already signed JWTs with the new private key.
-      final ECKey newKey = generateNewKey();
-      final X509Certificate certificate = generateCertificate(newKey);
+      final Instant now = clock.instant();
+      final Date notBefore = new Date(now.minus(Duration.ofDays(1)).toEpochMilli());
+      final Date notAfter = new Date(now.plus(Duration.ofDays(365)).toEpochMilli());
+      final ECKey newKey = generateNewKey(notBefore, notAfter);
+      final X509Certificate certificate = generateCertificate(newKey, notBefore, notAfter);
       final PrivateKeyEntry privateKeyEntry =
           createPrivateKeyEntry(
               newKey.toPrivateKey(),
@@ -688,7 +724,11 @@ public class SystemJWKSetManager implements JWKSetManager {
         throw new RuntimeException("Failed to write new private key to keystore", e);
       }
 
-      this.currentJwks = new JWKSet(List.of(newKey, oldKey));
+      // Nimbus only seems to include the signing cert info when loading the key from the
+      // keystore, so we need to load it from the keystore to include that info in the JWKS that's
+      // published on our OAuth API endpoint.
+      final ECKey loadedNewKey = loadECKeyFromKeyStore(keyStore, newKey.getKeyID());
+      this.currentJwks = new JWKSet(List.of(loadedNewKey, oldKey));
       this.currentJwk = newKey;
     } catch (GeneralSecurityException | IOException | JOSEException e) {
       throw new RuntimeException("Failed to generate new key", e);
@@ -766,12 +806,12 @@ public class SystemJWKSetManager implements JWKSetManager {
   }
 
   @Override
-  public Map<String, Object> getPublicJWKS() {
+  public JWKS getPublicJWKS() {
     if (currentJwks == null) {
       throw new IllegalStateException("Cannot retrieve public JWKS: current JWKS is null");
     }
 
-    return currentJwks.toPublicJWKSet().toJSONObject();
+    return objectMapper.convertValue(currentJwks.toPublicJWKSet().toJSONObject(), JWKS.class);
   }
 
   @Immutable

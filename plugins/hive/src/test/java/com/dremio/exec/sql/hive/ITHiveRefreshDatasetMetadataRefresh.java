@@ -63,7 +63,6 @@ public class ITHiveRefreshDatasetMetadataRefresh extends LazyDataGeneratingHiveT
 
   @BeforeClass
   public static void generateHiveWithoutData() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
     LazyDataGeneratingHiveTestBase.generateHiveWithoutData();
 
     dataGenerator.executeDDL("CREATE TABLE IF NOT EXISTS refresh_test_mapColumn_" + formatType + "(col1 INT, col2 MAP<STRING,STRING>) STORED AS " + formatType);

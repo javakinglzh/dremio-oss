@@ -412,4 +412,8 @@ public class ValueListFilter implements AutoCloseable {
   public boolean mightBePresent(long val) {
     return true;
   }
+
+  public boolean mightBePresent(ArrowBuf buf, int start, int length) {
+    return true;
+  }
 }

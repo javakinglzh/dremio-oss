@@ -22,7 +22,6 @@ import com.dremio.exec.proto.ExecRPC.FragmentStreamComplete;
 import com.dremio.sabot.exec.fragment.FragmentExecutor;
 import com.dremio.sabot.exec.fragment.OutOfBandMessage;
 import com.dremio.sabot.exec.rpc.IncomingDataBatch;
-import com.dremio.sabot.exec.rpc.TunnelProvider;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.Optional;
@@ -92,14 +91,6 @@ public class FragmentHandler implements EventProvider, MayExpire {
     if (executor != null) {
       executor.getListener().activate();
     }
-  }
-
-  public TunnelProvider getTunnelProvider() {
-    final FragmentExecutor executor = execReference.getReference();
-    if (executor != null) {
-      return executor.getListener().getTunnelProvider();
-    }
-    return null;
   }
 
   public void cancel() {

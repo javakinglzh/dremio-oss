@@ -106,7 +106,7 @@ public class TestUpdatePartitionChunkIdTask extends DremioTest {
 
       // Perform upgrade
       final UpgradeContext context =
-          new UpgradeContext(kvStoreProvider, legacyKVStoreProvider, null, null, null);
+          new UpgradeContext(kvStoreProvider, legacyKVStoreProvider, null, null, null, null);
       final UpdateDatasetSplitIdTask task = new UpdateDatasetSplitIdTask();
       task.upgrade(context);
 

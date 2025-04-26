@@ -71,7 +71,7 @@ import org.apache.iceberg.Table;
 import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.GroupType;
-import org.apache.parquet.schema.OriginalType;
+import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
 import org.apache.parquet.schema.Type;
 import org.joda.time.DateTime;
 import org.joda.time.LocalDateTime;
@@ -479,7 +479,7 @@ public class TestCTAS extends PlanTestBase {
     assertTrue("Field " + field.getName() + " does not have column id", field.getId() != null);
     if (field instanceof GroupType) {
       GroupType groupType = (GroupType) field;
-      if (groupType.getOriginalType() == OriginalType.LIST) {
+      if (groupType.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation) {
         groupType = groupType.getFields().get(0).asGroupType();
       }
       for (Type child : groupType.getFields()) {
@@ -821,7 +821,14 @@ public class TestCTAS extends PlanTestBase {
 
       FileSystemPlugin fileSystemPlugin = BaseTestQuery.getMockedFileSystemPlugin();
 
-      IcebergHadoopModel icebergHadoopModel = new IcebergHadoopModel(fileSystemPlugin);
+      IcebergHadoopModel icebergHadoopModel =
+          new IcebergHadoopModel(
+              "",
+              fileSystemPlugin.getFsConfCopy(),
+              fileSystemPlugin.createIcebergFileIO(
+                  fileSystemPlugin.getSystemUserFS(), null, null, null, null),
+              null,
+              null);
       when(fileSystemPlugin.getIcebergModel()).thenReturn(icebergHadoopModel);
       Table table =
           icebergHadoopModel.getIcebergTable(

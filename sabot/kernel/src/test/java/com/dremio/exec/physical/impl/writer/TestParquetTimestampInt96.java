@@ -81,7 +81,7 @@ public class TestParquetTimestampInt96 extends BaseTestQuery {
             testResPath)
         .ordered()
         .csvBaselineFile("testframework/testParquetReader/testInt96DictChange/q1.tsv")
-        .baselineTypes(TypeProtos.MinorType.TIMESTAMP)
+        .baselineTypes(TypeProtos.MinorType.TIMESTAMPMILLI)
         .baselineColumns("int96_ts")
         .build()
         .run();

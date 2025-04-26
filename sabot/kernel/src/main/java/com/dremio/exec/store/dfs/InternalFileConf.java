@@ -15,11 +15,13 @@
  */
 package com.dremio.exec.store.dfs;
 
+import static com.dremio.exec.store.dfs.CloudFsConstants.S3_REGION_OVERRIDE;
+
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.io.file.Path;
 import com.dremio.service.coordinator.proto.DataCredentials;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
@@ -32,6 +34,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.List;
 import javax.inject.Provider;
+import org.apache.commons.lang3.StringUtils;
 
 /** Source type used for internal purposes. */
 @SourceType(value = "INTERNAL", configurable = false)
@@ -93,9 +96,7 @@ public class InternalFileConf
   public String accountKind = null;
 
   @Tag(19)
-  public String sharedAccessKey = null;
-
-  // Tag has been deprecated please do not use.
+  public String sharedAccessKey = null; // This tag has been deprecated. Please do not use.
 
   @Override
   public Path getPath() {
@@ -174,8 +175,10 @@ public class InternalFileConf
 
   @Override
   public MayBeDistFileSystemPlugin<InternalFileConf> newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new MayBeDistFileSystemPlugin<>(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new MayBeDistFileSystemPlugin<>(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   public InternalFileConf() {}
@@ -184,14 +187,12 @@ public class InternalFileConf
       String connection,
       String path,
       boolean enableImpersonation,
-      List<Property> propertyList,
       SchemaMutability mutability,
       boolean enableAsync,
       DataCredentials dataCredentials) {
     this.connection = connection;
     this.path = path;
     this.enableImpersonation = enableImpersonation;
-    this.propertyList = propertyList;
     this.mutability = mutability;
     this.enableAsync = enableAsync;
     if (dataCredentials != null) {
@@ -201,6 +202,10 @@ public class InternalFileConf
       } else if (dataCredentials.hasDataRole()) {
         this.iamRole = dataCredentials.getDataRole().getIamRole();
         this.externalId = dataCredentials.getDataRole().getExternalId();
+        if (StringUtils.isNotEmpty(dataCredentials.getDataRole().getRegion())) {
+          propertyList.add(
+              new Property(S3_REGION_OVERRIDE, dataCredentials.getDataRole().getRegion()));
+        }
       } else if (dataCredentials.hasClientAccess()) {
         this.tokenEndpoint = dataCredentials.getClientAccess().getTokenEndpoint();
         this.clientId = dataCredentials.getClientAccess().getClientId();
@@ -228,7 +233,7 @@ public class InternalFileConf
 
     InternalFileConf fc =
         new InternalFileConf(
-            connection, path.getPath(), false, null, mutability, enableAsync, dataCredentials);
+            connection, path.getPath(), false, mutability, enableAsync, dataCredentials);
     conf.setConnectionConf(fc);
     conf.setMetadataPolicy(policy);
     conf.setName(name);

@@ -27,6 +27,7 @@ import com.dremio.exec.expr.fn.FunctionLookupContext;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.Sender;
 import com.dremio.exec.physical.config.ExternalSort;
+import com.dremio.exec.physical.config.HashJoinPOP;
 import com.dremio.exec.physical.config.MinorFragmentEndpoint;
 import com.dremio.exec.planner.fragment.EndpointsIndex;
 import com.dremio.exec.planner.physical.PlannerSettings;
@@ -156,13 +157,17 @@ public class OperatorContextCreator implements OperatorContext.Creator, AutoClos
   @Override
   public OperatorContext newOperatorContext(PhysicalOperator popConfig) throws Exception {
     Preconditions.checkState(this.fragmentOutputAllocator != null);
-    final String allocatorName =
+
+    String allocatorName =
         String.format(
             "op:%s:%d:%s",
             QueryIdHelper.getFragmentId(handle),
             popConfig.getProps().getLocalOperatorId(),
             popConfig.getClass().getSimpleName());
 
+    if (popConfig instanceof HashJoinPOP && ((HashJoinPOP) popConfig).isSpill()) {
+      allocatorName = allocatorName + "Spill";
+    }
     long memReserve = popConfig.getProps().getMemReserve();
     long memLimit = popConfig.getProps().getMemLimit();
     if (enableMA) {

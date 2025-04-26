@@ -27,6 +27,7 @@ import com.dremio.service.namespace.MetadataProtoUtils;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.util.List;
+import java.util.Map;
 import org.apache.commons.io.FileUtils;
 import org.junit.Test;
 
@@ -58,7 +59,8 @@ public class TestIcebergColumnCounts extends BaseTestQuery {
       DatasetSplit split = chunks.get(0).getSplits().iterator().next();
       ParquetDatasetSplitXAttr xattr =
           LegacyProtobufSerializer.parseFrom(
-              ParquetDatasetSplitXAttr.PARSER, MetadataProtoUtils.toProtobuf(split.getExtraInfo()));
+              ParquetDatasetSplitXAttr.parser(),
+              MetadataProtoUtils.toProtobuf(split.getExtraInfo()));
       assertEquals(2, xattr.getColumnValueCountsCount());
 
       // both the columns have null values.
@@ -105,11 +107,25 @@ public class TestIcebergColumnCounts extends BaseTestQuery {
       DatasetSplit split = chunks.get(0).getSplits().iterator().next();
       ParquetDatasetSplitXAttr xattr =
           LegacyProtobufSerializer.parseFrom(
-              ParquetDatasetSplitXAttr.PARSER, MetadataProtoUtils.toProtobuf(split.getExtraInfo()));
+              ParquetDatasetSplitXAttr.parser(),
+              MetadataProtoUtils.toProtobuf(split.getExtraInfo()));
 
       assertEquals(10, tableWrapper.getTableInfo().getRecordCount());
+      Map<String, Long> expectedValueCounts =
+          Map.of(
+              "rownum", 10L,
+              "name", 10L,
+              "age", 10L,
+              "gpa", 10L,
+              "studentnum", 10L,
+              "create_time", 10L,
+              "interests.element", 30L,
+              "favorites.color", 10L,
+              "favorites.sport", 10L,
+              "favorites.food", 10L);
+      assertEquals(expectedValueCounts.size(), xattr.getColumnValueCountsList().size());
       for (ColumnValueCount entry : xattr.getColumnValueCountsList()) {
-        assertEquals(10, entry.getCount());
+        assertEquals(expectedValueCounts.get(entry.getColumn()).longValue(), entry.getCount());
       }
     } finally {
       FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), tableName));

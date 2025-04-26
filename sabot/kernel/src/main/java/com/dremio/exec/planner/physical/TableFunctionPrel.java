@@ -38,6 +38,7 @@ import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.util.LongRange;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import io.protostuff.ByteString;
 import java.io.IOException;
@@ -78,7 +79,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
       RelOptCluster cluster,
       RelTraitSet traits,
       RelOptTable table,
-      RelNode child,
+      RelNode input,
       TableMetadata tableMetadata,
       TableFunctionConfig functionConfig,
       RelDataType rowType) {
@@ -86,7 +87,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
         cluster,
         traits,
         table,
-        child,
+        input,
         tableMetadata,
         functionConfig,
         rowType,
@@ -99,7 +100,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
   public TableFunctionPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
-      RelNode child,
+      RelNode input,
       TableFunctionConfig functionConfig,
       RelDataType rowType,
       Function<RelMetadataQuery, Double> estimateRowCountFn,
@@ -109,7 +110,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
         cluster,
         traits,
         null,
-        child,
+        input,
         null,
         functionConfig,
         rowType,
@@ -123,7 +124,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
       RelOptCluster cluster,
       RelTraitSet traits,
       RelOptTable table,
-      RelNode child,
+      RelNode input,
       TableMetadata tableMetadata,
       TableFunctionConfig functionConfig,
       RelDataType rowType,
@@ -132,7 +133,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
         cluster,
         traits,
         table,
-        child,
+        input,
         tableMetadata,
         functionConfig,
         rowType,
@@ -146,7 +147,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
       RelOptCluster cluster,
       RelTraitSet traits,
       RelOptTable table,
-      RelNode child,
+      RelNode input,
       TableMetadata tableMetadata,
       TableFunctionConfig functionConfig,
       RelDataType rowType,
@@ -155,7 +156,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
         cluster,
         traits,
         table,
-        child,
+        input,
         tableMetadata,
         functionConfig,
         rowType,
@@ -169,7 +170,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
       RelOptCluster cluster,
       RelTraitSet traits,
       RelOptTable table,
-      RelNode child,
+      RelNode input,
       TableMetadata tableMetadata,
       TableFunctionConfig functionConfig,
       RelDataType rowType,
@@ -177,7 +178,7 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
       Long survivingRecords,
       List<RuntimeFilteredRel.Info> runtimeFilteredRels,
       String user) {
-    super(cluster, traits, child);
+    super(cluster, traits, Preconditions.checkNotNull(input, "input is required"));
     this.tableMetadata = tableMetadata;
     this.functionConfig = functionConfig;
     this.rowType = rowType;
@@ -360,6 +361,10 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
     return survivingRecords;
   }
 
+  public String getUser() {
+    return user;
+  }
+
   @Override
   public void addRuntimeFilter(RuntimeFilteredRel.Info filterInfo) {
     runtimeFilters = ImmutableList.<Info>builder().addAll(runtimeFilters).add(filterInfo).build();
@@ -393,7 +398,9 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
           schemaBuilder.addField(field);
         }
         BatchSchema expectedInputSchema = schemaBuilder.build();
-        if (!inputSchema.equalsTypesWithoutPositions(expectedInputSchema)) {
+        // TODO: Revert this workaround once we have a proper fix for DX-98085
+        // The call should be querySchema.equalsTypesWithoutPositions()
+        if (!inputSchema.insertsInto(expectedInputSchema)) {
           throw UserException.validationError()
               .message(
                   "Table schema %s doesn't match with query schema %s.",

@@ -33,6 +33,7 @@ import com.dremio.exec.planner.sql.parser.SqlMergeIntoTable;
 import com.dremio.exec.planner.sql.parser.SqlOptimize;
 import com.dremio.exec.planner.sql.parser.SqlShowCreate;
 import com.dremio.exec.planner.sql.parser.SqlUpdateTable;
+import com.dremio.exec.planner.sql.parser.SqlVacuumCatalog;
 import com.dremio.exec.planner.sql.parser.SqlVersionedTableCollectionCall;
 import com.dremio.exec.planner.sql.parser.SqlVersionedTableMacroCall;
 import com.dremio.exec.tablefunctions.TableMacroNames;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.prepare.Prepare;
 import org.apache.calcite.rel.type.DynamicRecordType;
@@ -101,7 +103,6 @@ import org.apache.calcite.sql.validate.SqlValidatorUtil;
 import org.apache.calcite.util.Static;
 import org.apache.calcite.util.Util;
 import org.apache.iceberg.RowLevelOperationMode;
-import org.checkerframework.checker.nullness.qual.Nullable;
 
 public class SqlValidatorImpl extends org.apache.calcite.sql.validate.SqlValidatorImpl {
   private final FlattenOpCounter flattenCount;
@@ -162,6 +163,11 @@ public class SqlValidatorImpl extends org.apache.calcite.sql.validate.SqlValidat
       return node;
     } else if (node instanceof SqlJoin && ((SqlJoin) node).getCondition() instanceof SqlBasicCall) {
       node = rewriteJoinWithVersionedTables(node);
+    } else if (node instanceof SqlVacuumCatalog) {
+      SqlVacuumCatalog sqlVacuumCatalog = (SqlVacuumCatalog) node;
+      SqlSelect select = createSourceSelectForVacuumCatalog(sqlVacuumCatalog);
+      sqlVacuumCatalog.setSourceSelect(select);
+      return node;
     }
 
     return super.performUnconditionalRewrites(node, underFrom);
@@ -280,6 +286,45 @@ public class SqlValidatorImpl extends org.apache.calcite.sql.validate.SqlValidat
         null,
         null,
         null);
+  }
+
+  private SqlSelect createSourceSelectForVacuumCatalog(SqlVacuumCatalog call) {
+    SqlParserPos pos = SqlParserPos.ZERO;
+    final SqlNodeList selectList = new SqlNodeList(pos);
+    selectList.add(SqlIdentifier.star(pos));
+
+    final SqlNodeList tableList = call.getExcludeTableList();
+    if (tableList.size() > 0) {
+      SqlNode fromClause = tableList.get(0);
+      for (int i = 1; i < tableList.size(); i++) {
+        SqlNode nextTable = tableList.get(i);
+        fromClause =
+            new SqlJoin(
+                pos,
+                fromClause,
+                SqlLiteral.createBoolean(false, pos),
+                JoinType.CROSS.symbol(pos),
+                nextTable,
+                JoinConditionType.NONE.symbol(SqlParserPos.ZERO),
+                null);
+      }
+
+      return new SqlSelect(
+          SqlParserPos.ZERO,
+          null,
+          selectList,
+          fromClause,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null);
+    }
+    return null;
   }
 
   @Override

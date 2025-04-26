@@ -17,7 +17,6 @@ package com.dremio.dac.server;
 
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.dac.annotations.RestResourceUsedForTesting;
-import com.dremio.exec.server.BootStrapContext;
 import javax.inject.Inject;
 import javax.ws.rs.core.Configuration;
 import javax.ws.rs.core.Feature;
@@ -28,8 +27,8 @@ public class TestResourcesFeature implements Feature {
   private final ScanResult scanResult;
 
   @Inject
-  public TestResourcesFeature(BootStrapContext context) {
-    this.scanResult = context.getClasspathScan();
+  public TestResourcesFeature(ScanResult scanResult) {
+    this.scanResult = scanResult;
   }
 
   @Override

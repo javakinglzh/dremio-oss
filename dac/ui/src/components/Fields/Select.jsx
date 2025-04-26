@@ -45,6 +45,7 @@ export default class Select extends PureComponent {
     itemClass: PropTypes.string,
     listWidthSameAsAnchorEl: PropTypes.bool,
     listStyle: PropTypes.object,
+    container: PropTypes.node,
   };
 
   static defaultProps = {
@@ -126,6 +127,7 @@ export default class Select extends PureComponent {
       listWidthSameAsAnchorEl = true,
       listStyle,
       ariaLabel,
+      container,
     } = this.props;
 
     const defaultOption = this.props.items.length
@@ -154,6 +156,7 @@ export default class Select extends PureComponent {
         dataQa={dataQa}
         rootAttrs={{ role: "listbox", "aria-label": ariaLabel ?? buttonLabel }}
         listWidthSameAsAnchorEl={listWidthSameAsAnchorEl}
+        container={container}
       >
         {({ closeDD }) => this.renderItems(selectedValue, closeDD)}
       </SelectView>

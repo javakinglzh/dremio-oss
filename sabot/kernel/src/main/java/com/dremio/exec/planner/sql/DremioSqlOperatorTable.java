@@ -41,11 +41,13 @@ import org.apache.calcite.sql.SqlCallBinding;
 import org.apache.calcite.sql.SqlFunction;
 import org.apache.calcite.sql.SqlFunctionCategory;
 import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlOperandCountRange;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.SqlOperatorBinding;
 import org.apache.calcite.sql.fun.SqlBaseContextVariable;
 import org.apache.calcite.sql.fun.SqlBasicAggFunction;
+import org.apache.calcite.sql.fun.SqlCastFunction;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.OperandTypes;
 import org.apache.calcite.sql.type.ReturnTypes;
@@ -117,6 +119,25 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
   // STD Library Functions
   // ---------------------
 
+  // Overloading CAST function to support VARIANT type.
+  public static final SqlOperator CAST =
+      new SqlCastFunction() {
+        @Override
+        public boolean checkOperandTypes(SqlCallBinding callBinding, boolean throwOnFailure) {
+          SqlNode left = callBinding.operand(0);
+          RelDataType validatedNodeType = callBinding.getValidator().getValidatedNodeType(left);
+
+          boolean isVariant =
+              (validatedNodeType == VariantNotNullRelDataType.INSTANCE)
+                  || (validatedNodeType == VariantNullableRelDataType.INSTANCE);
+          if (isVariant) {
+            return true;
+          }
+
+          return super.checkOperandTypes(callBinding, throwOnFailure);
+        }
+      };
+
   public static final SqlOperator ROUND =
       SqlOperatorBuilder.name("ROUND")
           .returnType(DremioReturnTypes.NULLABLE_ROUND)
@@ -178,7 +199,7 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
   public static final SqlOperator CARDINALITY =
       SqlOperatorBuilder.name("CARDINALITY")
           .returnType(ReturnTypes.INTEGER_NULLABLE)
-          .operandTypes(SqlOperand.union(SqlOperands.ARRAY, SqlOperands.MAP))
+          .operandTypes(UnionedSqlOperand.create(SqlOperands.ARRAY, SqlOperands.MAP))
           .build();
 
   // Concat needs to support taking a variable length argument and honor a nullability check
@@ -400,6 +421,8 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
   public static final SqlOperator CONVERT_FROMUTF8 = ConvertFromOperators.CONVERT_FROMUTF8;
 
   public static final SqlOperator CONVERT_REPLACEUTF8 = ConvertFromOperators.CONVERT_REPLACEUTF8;
+
+  public static final SqlOperator TRY_CONVERT_FROM = new SqlTryConvertFromFunction();
 
   public static final SqlOperator CONVERT_TO = ConvertToOperators.CONVERT_TO;
   public static final SqlOperator CONVERT_TOBASE64 = ConvertToOperators.CONVERT_TOBASE64;
@@ -804,63 +827,6 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
           .operandTypes(OperandTypes.ARRAY)
           .build();
 
-  private static final SqlOperandTypeChecker COMPARABLE_ARRAY_TYPE_CHECKER =
-      new SqlOperandTypeChecker() {
-        @Override
-        public boolean checkOperandTypes(SqlCallBinding callBinding, boolean throwOnFailure) {
-          RelDataType operandType = callBinding.getOperandType(0);
-          if (operandType.getSqlTypeName() != SqlTypeName.ARRAY) {
-            if (throwOnFailure) {
-              throw UserException.validationError()
-                  .message("Expected argument to be an ARRAY.")
-                  .build();
-            }
-
-            return false;
-          }
-
-          List<SqlTypeName> comparableTypes =
-              new ImmutableList.Builder<SqlTypeName>()
-                  .addAll(SqlTypeName.BOOLEAN_TYPES)
-                  .addAll(SqlTypeName.NUMERIC_TYPES)
-                  .addAll(SqlTypeName.CHAR_TYPES)
-                  .addAll(SqlTypeName.DATETIME_TYPES)
-                  .build();
-
-          if (!comparableTypes.contains(operandType.getComponentType().getSqlTypeName())) {
-            if (throwOnFailure) {
-              throw UserException.validationError()
-                  .message("Expected argument to be an ARRAY of comparable types.")
-                  .build();
-            }
-
-            return false;
-          }
-
-          return true;
-        }
-
-        @Override
-        public SqlOperandCountRange getOperandCountRange() {
-          return SqlOperandCountRanges.of(1);
-        }
-
-        @Override
-        public String getAllowedSignatures(SqlOperator op, String opName) {
-          return null;
-        }
-
-        @Override
-        public Consistency getConsistency() {
-          return null;
-        }
-
-        @Override
-        public boolean isOptional(int i) {
-          return false;
-        }
-      };
-
   private static final SqlOperandTypeChecker NUMERIC_ARRAY_TYPE_CHECKER =
       new SqlOperandTypeChecker() {
         @Override
@@ -1149,12 +1115,6 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
       SqlOperatorBuilder.name("ARRAY_DISTINCT")
           .returnType(ReturnTypes.ARG0)
           .operandTypes(SqlOperands.ARRAY)
-          .build();
-
-  public static final SqlOperator ARRAY_SORT =
-      SqlOperatorBuilder.name("ARRAY_SORT")
-          .returnType(ReturnTypes.ARG0)
-          .operandTypes(COMPARABLE_ARRAY_TYPE_CHECKER)
           .build();
 
   public static final SqlOperator ARRAY_PREPEND =
@@ -1557,7 +1517,7 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
           .returnType(ReturnTypes.ARG1)
           .operandTypes(
               SqlOperands.CHAR_TYPES,
-              SqlOperand.union(SqlOperands.INTERVAL_TYPES, SqlOperands.DATETIME_TYPES))
+              UnionedSqlOperand.create(SqlOperands.INTERVAL_TYPES, SqlOperands.DATETIME_TYPES))
           .withImplicitCoercionStrategy(
               (sqlCallBinding) -> {
                 if (!SqlTypeName.CHAR_TYPES.contains(
@@ -1575,7 +1535,8 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
       SqlOperatorBuilder.name("NEXT_DAY")
           .returnType(ReturnTypes.DATE)
           .operandTypes(
-              SqlOperand.union(SqlOperands.DATE, SqlOperands.TIMESTAMP), SqlOperands.CHAR_TYPES)
+              UnionedSqlOperand.create(SqlOperands.DATE, SqlOperands.TIMESTAMP),
+              SqlOperands.CHAR_TYPES)
           .build();
 
   // ---------------------

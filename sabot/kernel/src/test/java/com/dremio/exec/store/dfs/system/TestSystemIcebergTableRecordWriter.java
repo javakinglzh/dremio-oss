@@ -17,7 +17,6 @@ package com.dremio.exec.store.dfs.system;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.notNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +33,7 @@ import com.dremio.exec.store.dfs.copyinto.CopyJobHistoryTableSchemaProvider;
 import com.dremio.exec.store.dfs.copyinto.CopyJobHistoryTableVectorContainerBuilder;
 import com.dremio.exec.store.dfs.system.SystemIcebergTableMetadataFactory.SupportedSystemIcebergTable;
 import com.dremio.exec.store.iceberg.DremioFileIO;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -114,7 +114,7 @@ public class TestSystemIcebergTableRecordWriter extends BaseTestQuery {
                   null,
                   null,
                   new HadoopFileSystemConfigurationAdapter(new Configuration())));
-      when(plugin.createFS(notNull(), notNull(), notNull()))
+      when(plugin.createFS(any(SupportsFsCreation.Builder.class)))
           .thenReturn(HadoopFileSystem.getLocal(new Configuration()));
       SystemIcebergTableMetadata tableMetadata =
           new CopyJobHistoryTableMetadata(

@@ -16,11 +16,8 @@
 package com.dremio.service.jobs;
 
 import com.dremio.common.logging.StructuredLogger;
-import com.dremio.common.utils.protos.AttemptIdUtils;
-import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.datastore.api.LegacyIndexedStore;
 import com.dremio.exec.proto.CoordinationProtos;
-import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.beans.NodeEndpoint;
 import com.dremio.service.job.NodeStatusRequest;
@@ -30,8 +27,10 @@ import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobInfo;
 import com.dremio.service.job.proto.JobResult;
 import com.dremio.service.job.proto.JobState;
-import com.dremio.service.jobtelemetry.DeleteProfileRequest;
-import com.dremio.service.jobtelemetry.JobTelemetryServiceGrpc;
+import com.dremio.service.jobs.cleanup.ExternalCleaner;
+import com.dremio.service.jobs.cleanup.ExternalCleanerRunner;
+import com.dremio.service.jobs.cleanup.OnlineProfileCleaner;
+import com.dremio.service.jobtelemetry.JobTelemetryClient;
 import com.google.common.annotations.VisibleForTesting;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
@@ -43,6 +42,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import javax.inject.Provider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -55,7 +55,7 @@ public final class AbandonJobsHelper {
   @VisibleForTesting
   @WithSpan("terminate-abandoned-jobs-due-to-coordinator-death")
   static void setAbandonedJobsToFailedState(
-      JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub jobTelemetryServiceStub,
+      Provider<JobTelemetryClient> jobTelemetryClientProvider,
       LegacyIndexedStore<JobId, JobResult> jobStore,
       Collection<CoordinationProtos.NodeEndpoint> coordinators,
       StructuredLogger<Job> jobResultLogger,
@@ -68,12 +68,16 @@ public final class AbandonJobsHelper {
                 jobStore
                     .find(
                         new LegacyIndexedStore.LegacyFindByCondition()
-                            .setCondition(JobsServiceUtil.getApparentlyAbandonedQuery()))
+                            .setCondition(JobsServiceUtil.getApparentlyAbandonedQuery())
+                            .setPageSize(20))
                     .spliterator(),
                 false)
             .collect(Collectors.toSet());
     final Set<CoordinationProtos.NodeEndpoint> coordEndpoints = new HashSet<>(coordinators);
     final Map<CoordinationProtos.NodeEndpoint, Boolean> coordStatus = new HashMap<>();
+    final List<ExternalCleaner> externalCleaners =
+        List.of(new OnlineProfileCleaner(jobTelemetryClientProvider, true));
+    final ExternalCleanerRunner externalCleanerRunner = new ExternalCleanerRunner(externalCleaners);
     for (final Map.Entry<JobId, JobResult> entry : apparentlyAbandoned) {
       logger.debug("{} Checking if job is abandoned", entry.getKey().getId());
       final JobResult jobResult = entry.getValue();
@@ -93,23 +97,8 @@ public final class AbandonJobsHelper {
                     coordStatus);
         if (shouldAbandon) {
           // Delete sub-profiles related to the corresponding queryId before terminating the job.
-          for (JobAttempt attempt : attempts) {
-            UserBitShared.QueryId queryId =
-                AttemptIdUtils.fromString(attempt.getAttemptId()).toQueryId();
-            DeleteProfileRequest request =
-                DeleteProfileRequest.newBuilder()
-                    .setQueryId(queryId)
-                    .setOnlyDeleteSubProfiles(true)
-                    .build();
-            try {
-              jobTelemetryServiceStub.deleteProfile(request);
-            } catch (Exception e) {
-              logger.warn(
-                  "Not able to delete sub profiles for queryId {}",
-                  QueryIdHelper.getQueryId(queryId),
-                  e);
-            }
-          }
+          externalCleanerRunner.run(entry.getValue());
+
           logger.debug("{} Failing abandoned job", lastAttempt.getInfo().getJobId().getId());
           final long finishTimestamp = System.currentTimeMillis();
           List<com.dremio.exec.proto.beans.AttemptEvent> attemptEventList =
@@ -132,7 +121,8 @@ public final class AbandonJobsHelper {
               lastAttempt
                   .setState(JobState.FAILED)
                   .setStateListList(attemptEventList)
-                  .setInfo(jobInfo);
+                  .setInfo(jobInfo)
+                  .setIsProfileIncomplete(true);
           attempts.remove(numAttempts - 1);
           attempts.add(newLastAttempt);
           jobResult.setCompleted(true); // mark the job as completed
@@ -148,6 +138,11 @@ public final class AbandonJobsHelper {
               job.getJobAttempt().getState());
         }
       }
+    }
+
+    // Log any errors related to sub-profiles cleanup.
+    if (externalCleanerRunner.hasErrors()) {
+      externalCleanerRunner.printLastErrors();
     }
   }
 

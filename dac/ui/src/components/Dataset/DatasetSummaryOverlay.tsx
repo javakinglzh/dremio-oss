@@ -45,6 +45,7 @@ type DatasetSummaryOverlayProps = {
   hideGoToButton?: boolean;
   handlePanelDetails?: (dataset: any) => void;
   hideMainActionButtons?: boolean;
+  hideAllActions?: boolean;
 };
 
 const DatasetSummaryOverlay = (
@@ -68,11 +69,14 @@ const DatasetSummaryOverlay = (
     hideGoToButton,
     handlePanelDetails,
     hideMainActionButtons,
+    hideAllActions,
   } = props;
 
   const { type: contextType, value: contextValue } = versionContext ?? {};
 
   useEffect(() => {
+    // This action is intentionally memoized to prevent multiple calls
+    // Refactor should include using react-query instead
     dispatchLoadSummaryDataset(
       fullPath,
       VIEW_ID,
@@ -128,13 +132,14 @@ const DatasetSummaryOverlay = (
       isPanel={isPanel}
       hideGoToButton={hideGoToButton}
       hideMainActionButtons={hideMainActionButtons}
+      hideAllActions={hideAllActions}
     />
   );
 };
 
 const mapStateToProps = (
   state: Record<string, any>,
-  props: { fullPath: string[] },
+  props: { fullPath: Immutable.List<string> },
 ) => {
   const fullPath = props.fullPath?.join(",");
   return {

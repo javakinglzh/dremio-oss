@@ -38,5 +38,11 @@
   "Decimal256":       { supported: false },
   # Consider supporting half float. https://github.com/apache/arrow/pull/15169
   "Float2":           { supported: false },
+  # Consider supporting View types. https://github.com/apache/arrow/issues/40339
+  "BinaryView":       { supported: false },
+  "Utf8View":         { supported: false },
+  "ListView":         { supported: false },
+  "ViewVarChar":      { supported: false },
+  "ViewVarBinary":    { supported: false },
 }
 

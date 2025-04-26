@@ -19,17 +19,14 @@ package com.dremio.common.util;
 public enum DremioEdition {
   OSS,
   COMMUNITY,
-  ENTERPRISE,
-  MARKETPLACE;
+  ENTERPRISE;
 
   private static final DremioEdition CURRENT;
 
   static {
     DremioEdition edition = DremioEdition.OSS;
 
-    if (is("Marketplace")) {
-      edition = DremioEdition.MARKETPLACE;
-    } else if (is("Enterprise")) {
+    if (is("Enterprise")) {
       edition = DremioEdition.ENTERPRISE;
     } else if (is("Community")) {
       edition = DremioEdition.COMMUNITY;
@@ -50,8 +47,6 @@ public enum DremioEdition {
         return "CE";
       case ENTERPRISE:
         return "EE";
-      case MARKETPLACE:
-        return "ME";
       default:
         return CURRENT.name();
     }

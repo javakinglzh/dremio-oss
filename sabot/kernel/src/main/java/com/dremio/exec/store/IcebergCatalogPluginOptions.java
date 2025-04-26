@@ -22,10 +22,16 @@ import com.dremio.options.TypeValidators;
 public final class IcebergCatalogPluginOptions {
 
   public static final TypeValidators.BooleanValidator RESTCATALOG_PLUGIN_ENABLED =
-      new TypeValidators.BooleanValidator("plugins.restcatalog.enabled", false);
+      new TypeValidators.BooleanValidator("plugins.restcatalog.enabled", true);
+
+  public static final TypeValidators.BooleanValidator RESTCATALOG_PLUGIN_MUTABLE_ENABLED =
+      new TypeValidators.BooleanValidator("plugins.restcatalog.mutable.enabled", true);
 
   public static final TypeValidators.BooleanValidator RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED =
       new TypeValidators.BooleanValidator("plugins.restcatalog.table_cache.enabled", true);
+
+  public static final TypeValidators.BooleanValidator RESTCATALOG_PLUGIN_VIEW_CACHE_ENABLED =
+      new TypeValidators.BooleanValidator("plugins.restcatalog.view_cache.enabled", true);
 
   public static final TypeValidators.RegexStringValidator RESTCATALOG_ALLOWED_NS_SEPARATOR =
       new TypeValidators.RegexStringValidator("plugins.restcatalog.allowed.ns.separator", "\\.");
@@ -38,12 +44,12 @@ public final class IcebergCatalogPluginOptions {
   public static final TypeValidators.PositiveLongValidator
       RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS =
           new TypeValidators.PositiveLongValidator(
-              "plugins.restcatalog.table_cache.expire_after_write_seconds", 600 /* 10 mins */, 3);
+              "plugins.restcatalog.table_cache.expire_after_write_seconds", 120 /* 2 mins */, 3);
 
   public static final TypeValidators.PositiveLongValidator
       RESTCATALOG_PLUGIN_FILE_SYSTEM_EXPIRE_AFTER_WRITE_MINUTES =
           new TypeValidators.PositiveLongValidator(
-              "plugins.restcatalog.file_system.expire_after_write_minutes", 60 /* an hour */, 5);
+              "plugins.restcatalog.file_system.expire_after_write_minutes", 20 /* 20 mins */, 5);
 
   public static final TypeValidators.PositiveLongValidator
       RESTCATALOG_PLUGIN_CATALOG_EXPIRE_SECONDS =

@@ -111,7 +111,6 @@ public class StreamAggPrule extends AggPruleBase {
                       traits,
                       newInput,
                       aggregate.getGroupSet(),
-                      aggregate.getGroupSets(),
                       aggregate.getAggCallList(),
                       OperatorPhase.PHASE_1of2);
 
@@ -123,7 +122,6 @@ public class StreamAggPrule extends AggPruleBase {
                   singleDistTrait,
                   exch,
                   phase1Agg.getPhase2GroupSet(),
-                  null,
                   phase1Agg.getPhase2AggCalls().stream()
                       .map(Pair::getKey)
                       .collect(Collectors.toList()),
@@ -188,7 +186,6 @@ public class StreamAggPrule extends AggPruleBase {
                       newTraitSet(Prel.PHYSICAL, getOutputCollation(aggregate), distOnAllKeys),
                       newInput,
                       aggregate.getGroupSet(),
-                      aggregate.getGroupSets(),
                       aggregate.getAggCallList(),
                       OperatorPhase.PHASE_1of2);
 
@@ -208,7 +205,6 @@ public class StreamAggPrule extends AggPruleBase {
                   exch.getTraitSet(),
                   exch,
                   phase1Agg.getPhase2GroupSet(),
-                  null,
                   phase1Agg.getPhase2AggCalls().stream()
                       .map(Pair::getKey)
                       .collect(Collectors.toList()),
@@ -253,7 +249,6 @@ public class StreamAggPrule extends AggPruleBase {
             outputTraits,
             convertedInput,
             aggregate.getGroupSet(),
-            aggregate.getGroupSets(),
             aggregate.getAggCallList(),
             OperatorPhase.PHASE_1of1);
 

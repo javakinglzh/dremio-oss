@@ -16,6 +16,7 @@
 
 import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
 import { TabsNavigationItem } from "dremio-ui-lib";
+import { useTabsKeyboardListener } from "dremio-ui-lib/components";
 
 import { AboutModalState, ActionTypes } from "./aboutModalReducer";
 
@@ -40,8 +41,10 @@ function AboutModalTabs({ state, dispatch }: AboutModalTabsProps) {
     },
   ];
 
+  const { setTabsEl } = useTabsKeyboardListener();
+
   return (
-    <div className={classes["about-tabs"]}>
+    <div ref={(r) => setTabsEl(r)} className={classes["about-tabs"]}>
       {tabs.map((tab) => (
         <TabsNavigationItem
           name={tab.name}

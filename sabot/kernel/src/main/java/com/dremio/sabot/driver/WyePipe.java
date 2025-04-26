@@ -50,7 +50,7 @@ class WyePipe extends Pipe {
     try {
       switch (downstream.getState()) {
 
-          // want to consume from upstream, need to either consume or return not ready upstream.
+        // want to consume from upstream, need to either consume or return not ready upstream.
         case CAN_CONSUME_L:
           {
             switch (left.getState().getMasterState()) {
@@ -69,7 +69,7 @@ class WyePipe extends Pipe {
             }
           }
 
-          // want to consume from upstream, need to either consume or return not ready upstream.
+        // want to consume from upstream, need to either consume or return not ready upstream.
         case CAN_CONSUME_R:
           {
             switch (right.getState().getMasterState()) {
@@ -88,7 +88,7 @@ class WyePipe extends Pipe {
             }
           }
 
-          // need to produce before doing anything else.
+        // need to produce before doing anything else.
         case CAN_PRODUCE:
           return Result.NOT_READY_DOWNSTREAM;
 

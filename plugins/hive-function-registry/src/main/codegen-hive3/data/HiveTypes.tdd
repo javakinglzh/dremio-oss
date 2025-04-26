@@ -99,7 +99,7 @@
       javaType: "org.apache.hadoop.hive.common.type.Timestamp",
       type: "TimeStampMilli",
       needOIForType: true,
-      minorType: "TIMESTAMP"
+      minorType: "TIMESTAMPMILLI"
     },
     {
       hiveType: "DECIMAL",

@@ -98,7 +98,8 @@ public class TestHashAggEstimator extends BaseTestOperator {
       // Step 2: Use aggregate expressions in that Pop to generate a HashAgg memory estimator and
       // get an accumulator memory estimate from it
       final OperatorContextImpl context =
-          testContext.getNewOperatorContext(getTestAllocator(), pop, batchSize, null);
+          (OperatorContextImpl)
+              testContext.getNewOperatorContext(getTestAllocator(), pop, batchSize, null);
 
       try (AutoCloseable options1 = with(ExecConstants.TARGET_BATCH_RECORDS_MAX, batchSize)) {
         final AccumulatorBuilder.MaterializedAggExpressionsResult materializeAggExpressionsResult =

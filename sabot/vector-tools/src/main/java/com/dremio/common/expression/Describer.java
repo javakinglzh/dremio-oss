@@ -23,6 +23,7 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -33,14 +34,18 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Int;
 import org.apache.arrow.vector.types.pojo.ArrowType.Interval;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeBinary;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeList;
+import org.apache.arrow.vector.types.pojo.ArrowType.LargeListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeUtf8;
 import org.apache.arrow.vector.types.pojo.ArrowType.List;
+import org.apache.arrow.vector.types.pojo.ArrowType.ListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Null;
+import org.apache.arrow.vector.types.pojo.ArrowType.RunEndEncoded;
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct;
 import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 import org.apache.arrow.vector.types.pojo.Field;
 
 /** Describes Field, CompleteType and ArrowType in human readable form. */
@@ -225,6 +230,11 @@ public final class Describer {
     }
 
     @Override
+    public String visit(ListView type) {
+      return "listview";
+    }
+
+    @Override
     public String visit(Union type) {
       return "union";
     }
@@ -245,8 +255,18 @@ public final class Describer {
     }
 
     @Override
+    public String visit(Utf8View type) {
+      return "utf8view";
+    }
+
+    @Override
     public String visit(Binary type) {
       return "varbinary";
+    }
+
+    @Override
+    public String visit(BinaryView type) {
+      return "binaryview";
     }
 
     @Override
@@ -318,6 +338,16 @@ public final class Describer {
     @Override
     public String visit(LargeUtf8 paramLargeUtf8) {
       throw new UnsupportedOperationException("Dremio does not support LargeUtf8 yet");
+    }
+
+    @Override
+    public String visit(LargeListView param) {
+      throw new UnsupportedOperationException("Dremio does not support LargeListView yet");
+    }
+
+    @Override
+    public String visit(RunEndEncoded param) {
+      throw new UnsupportedOperationException("Dremio does not support RunEndEncoded yet");
     }
 
     @Override

@@ -40,7 +40,9 @@ class DatasetResourcePathUtils {
   toHrefV2(datasetFullPath) {
     const encodedDatasetFullPath = datasetFullPath
       .toJS()
-      .map((item) => encodeURIComponent(item));
+      .map((item) =>
+        encodeURIComponent(item.includes(".") ? `"${item}"` : item),
+      );
     const rootSpace = encodedDatasetFullPath.shift();
     return `/space/${rootSpace}/${encodedDatasetFullPath.join(".")}`;
   }

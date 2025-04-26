@@ -56,6 +56,18 @@
       <scope>test</scope>
     </dependency>
     <dependency>
+      <groupId>org.projectnessie.nessie</groupId>
+      <artifactId>nessie-multi-env-test-engine</artifactId>
+      <!-- Cf. https://github.com/projectnessie/nessie/pull/9453
+      Nessie PR#9453 changed the behaviour of the "multi-env" test engine so that the engine now
+      incorrectly runs each multi-env test in *all* environments, even if the test uses an extension
+      that did not declare that environment. This breaks proper operation of MultipleDataplaneStorageExtension.
+      Therefore, until the OSS test engine is fixed, we use an older version that is known to work well in
+      Dremio builds. -->
+      <version>0.94.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
       <groupId>io.findify</groupId>
       <artifactId>s3mock_2.12</artifactId>
       <scope>test</scope>
@@ -101,6 +113,11 @@
     <dependency>
       <groupId>com.azure</groupId>
       <artifactId>azure-storage-blob</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-storage-file-datalake</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -164,7 +181,7 @@
           <skip>${skipTests}</skip>
           <!-- Preferred way, specify the GAV of the Nessie Quarkus server runnable (uber-jar) -->
           <appArtifactId>org.projectnessie.nessie:nessie-quarkus:jar:runner:${nessie.version}</appArtifactId>
-          <javaVersion>17</javaVersion>
+          <javaVersion>21</javaVersion>
           <systemProperties>
             <nessie.version.store.type>IN_MEMORY</nessie.version.store.type>
             <nessie.version.store.persist.cache-capacity-mb>1</nessie.version.store.persist.cache-capacity-mb>

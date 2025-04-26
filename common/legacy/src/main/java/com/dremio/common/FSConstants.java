@@ -42,9 +42,6 @@ public interface FSConstants {
   // AZURE AAD client secret
   String AZURE_CLIENT_SECRET = "dremio.azure.clientSecret";
 
-  // AZURE Account Name
-  String AZURE_ACCOUNT = "dremio.azure.account";
-
   // AZURE Account Kind
   String AZURE_MODE = "dremio.azure.mode";
 

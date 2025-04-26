@@ -35,6 +35,12 @@ public interface QueryObserver {
   /** called when QueryJob is done and no more queries will be attempted */
   void execCompletion(UserResult result);
 
+  void putExecutorProfile(String nodeEndpoint);
+
+  void removeExecutorProfile(String nodeEndpoint);
+
+  void queryClosed();
+
   default void planParallelized(PlanningSet planningSet) {}
   ;
 }

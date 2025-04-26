@@ -35,7 +35,6 @@ import com.dremio.exec.proto.ExecProtos;
 import com.dremio.exec.proto.UserBitShared.MinorFragmentProfile;
 import com.dremio.exec.proto.UserBitShared.OperatorProfile;
 import com.dremio.exec.proto.UserBitShared.StreamProfile;
-import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.server.NodeDebugContextProvider;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.service.executor.ExecutorServiceImpl;
@@ -83,13 +82,14 @@ public class FragmentWorkManager implements Service, SafeExit {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(FragmentWorkManager.class);
 
-  private final BootStrapContext context;
+  private final BufferAllocator rootAllocator;
   private final Provider<NodeEndpoint> identity;
   private final Provider<SabotContext> dbContext;
   private final Provider<FabricService> fabricServiceProvider;
   private final Provider<CatalogService> sources;
   private final Provider<ContextInformationFactory> contextInformationFactory;
   private final Provider<WorkloadTicketDepot> workloadTicketDepotProvider;
+  private final Provider<ReservedResourceDepot> reserveredResourceDepotProvider;
   private final WorkStats workStats;
 
   private FragmentStatusThread statusThread;
@@ -100,8 +100,6 @@ public class FragmentWorkManager implements Service, SafeExit {
   private MaestroProxy maestroProxy;
   private SabotContext bitContext;
   private BufferAllocator allocator;
-  private WorkloadTicketDepot ticketDepot;
-  private QueriesClerk clerk;
   private CloseableExecutorService executor;
   private final Provider<MaestroClientFactory> maestroServiceClientFactoryProvider;
   private final Provider<JobTelemetryExecutorClientFactory> jobTelemetryClientFactoryProvider;
@@ -117,7 +115,7 @@ public class FragmentWorkManager implements Service, SafeExit {
 
   @Inject
   public FragmentWorkManager(
-      final BootStrapContext context,
+      final BufferAllocator rootAllocator,
       final SabotConfig sabotConfig,
       Provider<NodeEndpoint> identity,
       final Provider<SabotContext> dbContext,
@@ -125,17 +123,19 @@ public class FragmentWorkManager implements Service, SafeExit {
       final Provider<CatalogService> sources,
       final Provider<ContextInformationFactory> contextInformationFactory,
       final Provider<WorkloadTicketDepot> workloadTicketDepotProvider,
+      final Provider<ReservedResourceDepot> reserveredResourceDepotProvider,
       final Provider<TaskPool> taskPool,
       final Provider<MaestroClientFactory> maestroServiceClientFactoryProvider,
       final Provider<JobTelemetryExecutorClientFactory> jobTelemetryClientFactoryProvider,
       final Provider<JobResultsClientFactory> jobResultsClientFactoryProvider) {
-    this.context = context;
+    this.rootAllocator = rootAllocator;
     this.identity = identity;
     this.sources = sources;
     this.fabricServiceProvider = fabricServiceProvider;
     this.dbContext = dbContext;
     this.contextInformationFactory = contextInformationFactory;
     this.workloadTicketDepotProvider = workloadTicketDepotProvider;
+    this.reserveredResourceDepotProvider = reserveredResourceDepotProvider;
     this.pool = taskPool;
     this.workStats = new WorkStatsImpl();
     this.executorService = new ExecutorServiceImpl.NoExecutorService();
@@ -312,15 +312,15 @@ public class FragmentWorkManager implements Service, SafeExit {
 
     // start the internal rpc layer.
     this.allocator =
-        context
-            .getAllocator()
-            .newChildAllocator(
-                "fragment-work-manager",
-                context.getConfig().getLong("dremio.exec.rpc.bit.server.memory.data.reservation"),
-                context.getConfig().getLong("dremio.exec.rpc.bit.server.memory.data.maximum"));
+        rootAllocator.newChildAllocator(
+            "fragment-work-manager",
+            sabotConfig.getLong("dremio.exec.rpc.bit.server.memory.data.reservation"),
+            sabotConfig.getLong("dremio.exec.rpc.bit.server.memory.data.maximum"));
 
-    this.ticketDepot = workloadTicketDepotProvider.get();
-    this.clerk = new QueriesClerk(ticketDepot);
+    WorkloadTicketDepot ticketDepot = workloadTicketDepotProvider.get();
+    ReservedResourceDepot reservedResourceDepot = reserveredResourceDepotProvider.get();
+    QueriesClerk clerk =
+        new QueriesClerk(ticketDepot, reservedResourceDepot, bitContext.getOptionManager());
 
     final ExitCallback callback =
         new ExitCallback() {
@@ -340,7 +340,7 @@ public class FragmentWorkManager implements Service, SafeExit {
 
     fragmentExecutors =
         new FragmentExecutors(
-            context,
+            rootAllocator,
             bitContext.getNodeDebugContext(),
             sabotConfig,
             clerk,

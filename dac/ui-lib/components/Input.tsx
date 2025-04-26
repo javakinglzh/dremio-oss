@@ -33,6 +33,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>((props, ref) => {
   const handleClear = () => {
     setInternalValue("");
     inputEl.current.value = "";
+    // TODO: This isn't propagating the cleared value to onChange since the input is using `onChange` instead of `onInput`
     inputEl.current.dispatchEvent(new Event("input", { bubbles: true }));
     inputEl.current.focus();
   };

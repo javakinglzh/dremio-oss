@@ -17,13 +17,14 @@ package com.dremio.service.reflection;
 
 import static com.dremio.exec.planner.acceleration.IncrementalUpdateUtils.UPDATE_COLUMN;
 import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_REFLECTION_ICEBERG_TRANSFORMS;
-import static com.dremio.service.accelerator.AccelerationUtils.selfOrEmpty;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.service.reflection.ReflectionServiceImpl.ACCELERATOR_STORAGEPLUGIN_NAME;
 import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
 
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionType;
+import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.ErrorHelper;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.PathUtils;
@@ -43,7 +44,6 @@ import com.dremio.exec.store.OperationType;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
-import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
 import com.dremio.proto.model.UpdateId;
 import com.dremio.service.accelerator.AccelerationDetailsUtils;
@@ -81,7 +81,6 @@ import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.dremio.service.namespace.proto.RefreshPolicyType;
 import com.dremio.service.reflection.ReflectionStatus.REFRESH_STATUS;
 import com.dremio.service.reflection.materialization.AccelerationStoragePlugin;
-import com.dremio.service.reflection.proto.DataPartition;
 import com.dremio.service.reflection.proto.ExternalReflection;
 import com.dremio.service.reflection.proto.JobDetails;
 import com.dremio.service.reflection.proto.Materialization;
@@ -104,10 +103,8 @@ import com.dremio.service.reflection.proto.RefreshId;
 import com.dremio.service.reflection.proto.Transform;
 import com.dremio.service.reflection.store.MaterializationStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
-import com.google.common.base.Predicates;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -129,37 +126,50 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import javax.inject.Inject;
+import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
-import org.apache.arrow.vector.util.Text;
-import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.logical.LogicalProject;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
-import org.apache.calcite.rel.type.RelDataTypeField;
-import org.apache.calcite.rex.RexBuilder;
-import org.apache.calcite.rex.RexNode;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.iceberg.Table;
 
 /** Helper functions for Reflection management */
 public class ReflectionUtils {
+  static final String REFLECTION_UTILS = "dremio.reflection.reflection-utils.class";
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ReflectionUtils.class);
+
+  @FunctionalInterface
+  public interface ReflectionModeProvider {
+    String getReflectionMode(ReflectionGoal goal);
+  }
+
+  public static final ReflectionModeProvider REFLECTION_MODE_PROVIDER =
+      goal -> MANUAL_REFLECTION_MODE;
+
+  @Inject
+  public ReflectionUtils() {}
 
   public static boolean isHomeDataset(DatasetType t) {
     return t == DatasetType.PHYSICAL_DATASET_HOME_FILE
         || t == DatasetType.PHYSICAL_DATASET_HOME_FOLDER;
   }
 
+  public static DatasetConfig getAnchorDataset(CatalogService service, ReflectionEntry entry) {
+    EntityExplorer catalog = CatalogUtil.getSystemCatalogForReflections(service);
+    return CatalogUtil.getDatasetConfig(catalog, entry.getDatasetId());
+  }
+
   @WithSpan
   public static JobId submitRefreshJob(
       JobsService jobsService,
-      CatalogService catalogService,
+      DatasetConfig datasetConfig,
       ReflectionEntry entry,
       MaterializationId materializationId,
       String sql,
       QueryType queryType,
       JobStatusListener jobStatusListener,
-      OptionManager optionManager) {
+      OptionManager optionManager,
+      String reflectionMode) {
 
     final SqlQuery query =
         SqlQuery.newBuilder()
@@ -167,10 +177,7 @@ public class ReflectionUtils {
             .addAllContext(Collections.<String>emptyList())
             .setUsername(SYSTEM_USERNAME)
             .build();
-    EntityExplorer catalog = CatalogUtil.getSystemCatalogForReflections(catalogService);
-    DatasetConfig config = CatalogUtil.getDatasetConfig(catalog, entry.getDatasetId());
-
-    NamespaceKey datasetPathList = new NamespaceKey(config.getFullPathList());
+    NamespaceKey datasetPathList = new NamespaceKey(datasetConfig.getFullPathList());
     JobProtobuf.MaterializationSummary materializationSummary =
         JobProtobuf.MaterializationSummary.newBuilder()
             .setDatasetId(entry.getDatasetId())
@@ -179,6 +186,7 @@ public class ReflectionUtils {
             .setMaterializationId(materializationId.getId())
             .setReflectionName(entry.getName())
             .setReflectionType(entry.getType().toString())
+            .setReflectionMode(reflectionMode)
             .build();
 
     final JobSubmittedListener submittedListener = new JobSubmittedListener();
@@ -282,49 +290,30 @@ public class ReflectionUtils {
       final Materialization materialization,
       final MaterializationPlan plan,
       double originalCost,
-      final CatalogService catalogService) {
+      final CatalogService catalogService,
+      final ReflectionUtils reflectionUtils) {
     final IncrementalUpdateSettings updateSettings =
         new IncrementalUpdateSettings(
             reflectionEntry.getRefreshMethod() == RefreshMethod.INCREMENTAL,
             reflectionEntry.getRefreshField(),
             reflectionEntry.getSnapshotBased());
     return new UnexpandedMaterializationDescriptor(
-        toReflectionInfo(reflectionGoal),
+        toReflectionInfo(reflectionGoal, reflectionUtils::getReflectionMode),
         materialization.getId().getId(),
         materialization.getTag(),
         materialization.getExpiration(),
         plan.getLogicalPlan().toByteArray(),
+        plan.getHashFragment() == null ? null : plan.getHashFragment().toByteArray(),
+        plan.getMatchingHash(),
         getMaterializationPath(materialization),
         originalCost,
         materialization.getInitRefreshSubmit(),
-        getPartitionNames(materialization.getPartitionList()),
         updateSettings,
         JoinDependencyProperties.NONE,
         materialization.getStripVersion(),
         materialization.getDisableDefaultReflection() == Boolean.TRUE,
         catalogService,
         materialization.getIsStale());
-  }
-
-  public static List<String> getPartitionNames(List<DataPartition> partitions) {
-    if (partitions == null || partitions.isEmpty()) {
-      return Collections.emptyList();
-    }
-
-    return FluentIterable.from(partitions)
-        .transform(
-            new Function<DataPartition, String>() {
-              @Override
-              public String apply(DataPartition partition) {
-                return partition.getAddress();
-              }
-            })
-        .toList();
-  }
-
-  static boolean hasMissingPartitions(List<DataPartition> partitions, Set<String> hosts) {
-    final List<String> partitionNames = getPartitionNames(partitions);
-    return !hosts.containsAll(partitionNames);
   }
 
   public static MaterializationDescriptor getMaterializationDescriptor(
@@ -368,13 +357,13 @@ public class ReflectionUtils {
             externalReflection.getId(),
             ReflectionType.EXTERNAL,
             externalReflection.getName(),
-            false,
             null,
             null,
             null,
             null,
             null,
-            null),
+            null,
+            MANUAL_REFLECTION_MODE),
         externalReflection.getId(),
         Optional.ofNullable(externalReflection.getTag()).orElse("0"),
         queryDatasetConfig.getFullPathList(),
@@ -389,7 +378,8 @@ public class ReflectionUtils {
     return store.getAllMaterializations();
   }
 
-  public static ReflectionInfo toReflectionInfo(ReflectionGoal reflectionGoal) {
+  public static ReflectionInfo toReflectionInfo(
+      ReflectionGoal reflectionGoal, ReflectionModeProvider reflectionModeProvider) {
     String id = reflectionGoal.getId().getId();
     final ReflectionDetails details = reflectionGoal.getDetails();
     return new ReflectionInfo(
@@ -398,15 +388,17 @@ public class ReflectionUtils {
             ? ReflectionType.RAW
             : ReflectionType.AGG,
         reflectionGoal.getName(),
-        reflectionGoal.getArrowCachingEnabled(),
         s(details.getSortFieldList()).map(t -> t.getName()).collect(Collectors.toList()),
-        s(details.getPartitionFieldList()).map(t -> t.getName()).collect(Collectors.toList()),
+        s(details.getPartitionFieldList())
+            .map(ReflectionDDLUtils::toPartitionFieldSQL)
+            .collect(Collectors.toList()),
         s(details.getDistributionFieldList()).map(t -> t.getName()).collect(Collectors.toList()),
         s(details.getDimensionFieldList()).map(t -> t.getName()).collect(Collectors.toList()),
         s(details.getMeasureFieldList())
             .map(ReflectionUtils::toMeasureColumn)
             .collect(Collectors.toList()),
-        s(details.getDisplayFieldList()).map(t -> t.getName()).collect(Collectors.toList()));
+        s(details.getDisplayFieldList()).map(t -> t.getName()).collect(Collectors.toList()),
+        reflectionModeProvider.getReflectionMode(reflectionGoal));
   }
 
   private static UserBitShared.MeasureColumn toMeasureColumn(ReflectionMeasureField field) {
@@ -713,37 +705,6 @@ public class ReflectionUtils {
     return contains;
   }
 
-  public static RelNode removeColumns(RelNode node, Predicate<RelDataTypeField> predicate) {
-    if (node.getTraitSet() == null) {
-      // for test purposes.
-      return node;
-    }
-
-    // identify all fields that match passed predicate
-    Set<RelDataTypeField> toRemove =
-        FluentIterable.from(node.getRowType().getFieldList()).filter(predicate).toSet();
-
-    if (toRemove.isEmpty()) {
-      return node;
-    }
-
-    final RexBuilder rexBuilder = node.getCluster().getRexBuilder();
-    final RelDataTypeFactory.FieldInfoBuilder rowTypeBuilder =
-        new RelDataTypeFactory.FieldInfoBuilder(node.getCluster().getTypeFactory());
-    final List<RexNode> projects =
-        FluentIterable.from(node.getRowType().getFieldList())
-            .filter(Predicates.not(toRemove::contains))
-            .transform(
-                (RelDataTypeField field) -> {
-                  rowTypeBuilder.add(field);
-                  return (RexNode) rexBuilder.makeInputRef(field.getType(), field.getIndex());
-                })
-            .toList();
-
-    return new LogicalProject(
-        node.getCluster(), node.getTraitSet(), node, projects, rowTypeBuilder.build());
-  }
-
   public static List<ViewFieldType> removeUpdateColumn(final List<ViewFieldType> fields) {
     return FluentIterable.from(fields)
         .filter(
@@ -764,15 +725,12 @@ public class ReflectionUtils {
       final UpdateId updateId,
       JobDetails details,
       MaterializationMetrics metrics,
-      List<DataPartition> dataPartitions,
-      final boolean isIcebergRefresh,
       final String icebergBasePath) {
     final String path = PathUtils.getPathJoiner().join(Iterables.skip(refreshPath, 1));
 
     return new Refresh()
         .setId(new RefreshId(UUID.randomUUID().toString()))
         .setReflectionId(reflectionId)
-        .setPartitionList(dataPartitions)
         .setMetrics(metrics)
         .setCreatedAt(System.currentTimeMillis())
         .setSeriesId(seriesId)
@@ -780,37 +738,7 @@ public class ReflectionUtils {
         .setSeriesOrdinal(seriesOrdinal)
         .setPath(path)
         .setJob(details)
-        .setIsIcebergRefresh(isIcebergRefresh)
         .setBasePath(icebergBasePath);
-  }
-
-  public static List<String> getRefreshPath(
-      final JobId jobId,
-      final Path accelerationBasePath,
-      JobsService jobsService,
-      BufferAllocator allocator) {
-    // extract written path from writer's metadata
-    try (JobDataFragment data =
-        JobDataClientUtils.getJobData(jobsService, allocator, jobId, 0, 1)) {
-      Text text =
-          (Text)
-              Preconditions.checkNotNull(
-                  data.extractValue(RecordWriter.PATH_COLUMN, 0),
-                  "Empty write path for job %s",
-                  jobId.getId());
-
-      // relative path to the acceleration base path
-      final String path =
-          PathUtils.relativePath(
-              Path.of(Path.getContainerSpecificRelativePath(Path.of(text.toString()))),
-              Path.of(Path.getContainerSpecificRelativePath(accelerationBasePath)));
-
-      // extract first 2 components of the path "<reflection-id>."<modified-materialization-id>"
-      List<String> components = PathUtils.toPathComponents(path);
-      Preconditions.checkState(components.size() >= 2, "Refresh path %s is incomplete", path);
-
-      return ImmutableList.of(ACCELERATOR_STORAGEPLUGIN_NAME, components.get(0), components.get(1));
-    }
   }
 
   public static JobDetails computeJobDetails(final JobAttempt jobAttempt) {
@@ -831,12 +759,6 @@ public class ReflectionUtils {
           .setOutputRecords(stats.getOutputRecords());
     }
     return details;
-  }
-
-  public static List<DataPartition> computeDataPartitions(JobInfo jobInfo) {
-    return FluentIterable.from(selfOrEmpty(jobInfo.getPartitionsList()))
-        .transform(DataPartition::new)
-        .toList();
   }
 
   public static MaterializationMetrics computeMetrics(
@@ -890,11 +812,7 @@ public class ReflectionUtils {
         .setNumFiles(fileDelta);
   }
 
-  public static String getIcebergReflectionBasePath(
-      List<String> refreshPath, boolean isIcebergRefresh) {
-    if (!isIcebergRefresh) {
-      return "";
-    }
+  public static String getIcebergReflectionBasePath(List<String> refreshPath) {
     Preconditions.checkState(refreshPath.size() >= 2, "Unexpected state");
     return refreshPath.get(refreshPath.size() - 1);
   }
@@ -1144,7 +1062,7 @@ public class ReflectionUtils {
   }
 
   public REFRESH_STATUS getRefreshStatusForActiveReflection(
-      OptionManager optionManager, ReflectionEntry entry) {
+      OptionManager optionManager, ReflectionGoal goal, ReflectionEntry entry) {
     if (entry.getRefreshPolicyTypeList() != null
         && entry.getRefreshPolicyTypeList().size() == 1
         && RefreshPolicyType.NEVER.equals(entry.getRefreshPolicyTypeList().get(0))) {
@@ -1152,5 +1070,19 @@ public class ReflectionUtils {
     } else {
       return REFRESH_STATUS.SCHEDULED;
     }
+  }
+
+  public String getReflectionMode(ReflectionGoal goal) {
+    return REFLECTION_MODE_PROVIDER.getReflectionMode(goal);
+  }
+
+  public ReflectionValidator newReflectionValidator(
+      Provider<CatalogService> catalogService, final Provider<OptionManager> optionManager) {
+    return new ReflectionValidator(catalogService, optionManager);
+  }
+
+  public static ReflectionUtils createReflectionUtils(SabotConfig config) {
+    return config.getInstance(
+        ReflectionUtils.REFLECTION_UTILS, ReflectionUtils.class, new ReflectionUtils());
   }
 }

@@ -32,6 +32,7 @@ import com.dremio.exec.exception.SchemaChangeException;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.RecordBatchLoader;
 import com.dremio.exec.record.VectorWrapper;
+import com.dremio.options.TypeValidators.LongValidator;
 import com.dremio.sabot.rpc.user.QueryDataBatch;
 import java.io.BufferedOutputStream;
 import java.io.File;
@@ -606,7 +607,7 @@ public class TestJsonReader extends PlanTestBase {
       assertTrue(
           e.getMessage()
               .contains(
-                  "UNSUPPORTED_OPERATION ERROR: Row exceeds the size limit of 1000 bytes, actual size is 1101 bytes."));
+                  "UNSUPPORTED_OPERATION ERROR: Exceeded maximum allowed row size of 960 bytes reading data."));
     }
   }
 
@@ -620,7 +621,7 @@ public class TestJsonReader extends PlanTestBase {
       assertTrue(
           e.getMessage()
               .contains(
-                  "UNSUPPORTED_OPERATION ERROR: Row exceeds the size limit of 5 bytes, actual size is 32 bytes."));
+                  "UNSUPPORTED_OPERATION ERROR: Exceeded maximum allowed row size of 5 bytes reading data."));
     }
   }
 
@@ -634,7 +635,7 @@ public class TestJsonReader extends PlanTestBase {
       assertTrue(
           e.getMessage()
               .contains(
-                  "UNSUPPORTED_OPERATION ERROR: Row exceeds the size limit of 5 bytes, actual size is 8 bytes."));
+                  "UNSUPPORTED_OPERATION ERROR: Exceeded maximum allowed row size of 5 bytes reading data."));
     }
   }
 
@@ -664,6 +665,20 @@ public class TestJsonReader extends PlanTestBase {
           .baselineValues(1L, 3L)
           .baselineValues(null, 3L)
           .baselineValues(1L, null)
+          .build()
+          .run();
+    }
+  }
+
+  @Test
+  public void testOperatorBatchBytesSize() throws Exception {
+    try (AutoCloseable c =
+        withOption((LongValidator) ExecConstants.OPERATOR_TARGET_BATCH_BYTES_VALIDATOR, 1000)) {
+      final String query = "select * from cp.\"jsoninput/twitter_43.json\"";
+      testBuilder()
+          .sqlQuery(query)
+          .ordered()
+          .jsonBaselineFile("jsoninput/drill-1832-1-result.json")
           .build()
           .run();
     }

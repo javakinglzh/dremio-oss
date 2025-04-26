@@ -65,7 +65,7 @@ public class NestedLoopJoinPrel extends JoinPrel {
 
   private final RexNode vectorExpression;
 
-  private NestedLoopJoinPrel(
+  public NestedLoopJoinPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode left,
@@ -235,5 +235,9 @@ public class NestedLoopJoinPrel extends JoinPrel {
   @Override
   public RexNode getExtraCondition() {
     return null;
+  }
+
+  public RexNode getVectorExpression() {
+    return vectorExpression;
   }
 }

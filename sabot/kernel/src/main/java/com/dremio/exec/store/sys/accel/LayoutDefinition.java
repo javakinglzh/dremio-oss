@@ -35,7 +35,6 @@ public class LayoutDefinition {
   private final List<String> sort;
   private final List<String> distribution;
   private final List<PartitionTransform> partition;
-  private final Boolean arrowCachingEnabled;
   private final PartitionDistributionStrategy partitionDistributionStrategy;
   private final String name;
 
@@ -48,7 +47,6 @@ public class LayoutDefinition {
       List<String> sort,
       List<String> distribution,
       List<PartitionTransform> partition,
-      Boolean arrowCachingEnabled,
       PartitionDistributionStrategy partitionDistributionStrategy) {
     super();
     this.name = name;
@@ -59,7 +57,6 @@ public class LayoutDefinition {
     this.sort = sort;
     this.distribution = distribution;
     this.partition = partition;
-    this.arrowCachingEnabled = arrowCachingEnabled;
     this.partitionDistributionStrategy = partitionDistributionStrategy;
   }
 
@@ -93,10 +90,6 @@ public class LayoutDefinition {
 
   public List<PartitionTransform> getPartition() {
     return partition;
-  }
-
-  public Boolean getArrowCachingEnabled() {
-    return arrowCachingEnabled;
   }
 
   public PartitionDistributionStrategy getPartitionDistributionStrategy() {

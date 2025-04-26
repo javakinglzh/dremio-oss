@@ -312,6 +312,16 @@ public class QueryTrackerImpl implements QueryTracker {
     return context.getExecutionControls();
   }
 
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {
+    fragmentTracker.putExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {
+    fragmentTracker.removeExecutorProfile(nodeEndpoint);
+  }
+
   @VisibleForTesting
   ResourceSet getResources() {
     return resourceTracker.getResources();

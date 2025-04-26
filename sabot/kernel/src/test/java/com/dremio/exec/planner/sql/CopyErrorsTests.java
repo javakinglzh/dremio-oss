@@ -43,6 +43,7 @@ import com.dremio.io.file.Path;
 import com.dremio.sabot.rpc.user.QueryDataBatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Lists;
 import java.io.File;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -228,42 +229,42 @@ public class CopyErrorsTests extends ITCopyIntoBase {
                 3L,
                 2L,
                 "age",
-                "While processing field \"age\". Could not convert \"NaN\" to INT.")
+                "Failure while attempting to cast value 'NaN' to Integer.")
             .baselineValues(
                 jobId2,
                 rejectedFiles.get(0),
                 5L,
                 4L,
                 "age",
-                "While processing field \"age\". Could not convert \"aaa\" to INT.")
+                "Failure while attempting to cast value 'aaa' to Integer.")
             .baselineValues(
                 jobId2,
                 rejectedFiles.get(0),
                 7L,
                 6L,
                 "age",
-                "While processing field \"age\". Could not convert \"Barbie\" to INT.")
+                "Failure while attempting to cast value 'Barbie' to Integer.")
             .baselineValues(
                 jobId2,
                 rejectedFiles.get(0),
                 8L,
                 7L,
                 "age",
-                "While processing field \"age\". Could not convert \"young\" to INT.")
+                "Failure while attempting to cast value 'young' to Integer.")
             .baselineValues(
                 jobId2,
                 rejectedFiles.get(1),
                 3L,
                 2L,
                 "age",
-                "While processing field \"age\". Could not convert \"false\" to INT.")
+                "Failure while attempting to cast value 'false' to Integer.")
             .baselineValues(
                 jobId2,
                 rejectedFiles.get(2),
                 1L,
                 0L,
                 null,
-                "No column name matches target schema(name::varchar, age::int32) in file "
+                "No column name matches target schema [`name`, `age`] in file "
                     + rejectedFiles.get(2))
             .go();
       } else {
@@ -344,7 +345,7 @@ public class CopyErrorsTests extends ITCopyIntoBase {
                 1L,
                 0L,
                 null,
-                "No column name matches target schema(name::varchar, age::int32) in file "
+                "No column name matches target schema [`name`, `age`] in file "
                     + rejectedFiles.get(2))
             .go();
 
@@ -383,16 +384,16 @@ public class CopyErrorsTests extends ITCopyIntoBase {
                 jobId3,
                 rejectedFiles.get(3),
                 1L,
-                0L,
+                1L,
                 "age",
-                "While processing field \"age\". Could not convert \"age\" to INT.")
+                "Failure while attempting to cast value 'age' to Integer.")
             .baselineValues(
                 jobId3,
                 rejectedFiles.get(3),
                 2L,
-                1L,
+                2L,
                 "age",
-                "While processing field \"age\". Could not convert \"abc\" to INT.")
+                "Failure while attempting to cast value 'abc' to Integer.")
             .go();
 
         // Unmatched quote symbol with EOF
@@ -427,7 +428,7 @@ public class CopyErrorsTests extends ITCopyIntoBase {
                 3L,
                 2L,
                 "num",
-                "While processing field \"num\". Could not convert \"two\" to INT.")
+                "Failure while attempting to cast value 'two' to Integer.")
             .baselineValues(
                 jobId4,
                 quoteRejectedFiles.get(0),
@@ -450,7 +451,7 @@ public class CopyErrorsTests extends ITCopyIntoBase {
                   3L,
                   2L,
                   "num",
-                  "While processing field \"num\". Could not convert \"two\" to INT.")
+                  "Failure while attempting to cast value 'two' to Integer.")
               .baselineValues(
                   jobId4,
                   quoteRejectedFiles.get(0),
@@ -468,91 +469,120 @@ public class CopyErrorsTests extends ITCopyIntoBase {
   }
 
   @Test
-  public void testParquetValidationWithTransformations() throws Exception {
+  public void testParquetCsvValidationWithTransformations() throws Exception {
     try (AutoCloseable ignored =
         withSystemOption(ExecConstants.COPY_INTO_ENABLE_TRANSFORMATIONS, true)) {
 
-      String targetTableName = "transformations";
-      ImmutableList<Pair<String, String>> tableSchema =
-          ImmutableList.of(Pair.of("new_name", "varchar"), Pair.of("new_age", "int"));
-      final String[] inputFileNames =
-          new String[] {
-            "typeError5.parquet",
-            "typeError4.parquet",
-            "syntaxError.parquet",
-            "corruption_in_2nd_rowgroup.parquet",
-            "corruption_in_2nd_rowgroup_without_corruption.parquet"
-          };
-      File inputFilesLocation = createTempLocation();
-      File[] inputFiles =
-          createTableAndGenerateSourceFiles(
-              targetTableName, tableSchema, inputFileNames, inputFilesLocation, FileFormat.PARQUET);
-      List<String> rejectedFiles =
-          Arrays.stream(inputFiles).map(File::getAbsolutePath).collect(Collectors.toList());
-      String jobId = "9c15b65b-82fd-4672-a213-919ac365957c";
-      String transformationProp =
-          "{\n"
-              + "  \"properties\" : [ {\n"
-              + "    \"transformationExpression\" : \"add(`D_R_E_M_I_O_V_I_R_T_U_A_L_C_O_L_U_M_N_AGE`, 4i) \",\n"
-              + "    \"sourceColNames\" : [ \"age\" ],\n"
-              + "    \"targetColName\" : \"new_age\"\n"
-              + "  }, {\n"
-              + "    \"transformationExpression\" : \"concat(`D_R_E_M_I_O_V_I_R_T_U_A_L_C_O_L_U_M_N_NAME`, ''_tmp'') \",\n"
-              + "    \"sourceColNames\" : [ \"name\" ],\n"
-              + "    \"targetColName\" : \"new_name\"\n"
-              + "  } ]\n"
-              + "}";
-      addJobAndFileHistoryEntry(
-          jobId,
-          targetTableName,
-          inputFilesLocation.getName(),
-          rejectedFiles,
-          new HashMap<>(),
-          "parquet",
-          transformationProp);
+      for (FileFormat fileFormat : Lists.newArrayList(FileFormat.PARQUET, FileFormat.CSV)) {
 
-      final ImmutableList.Builder<Map<String, Object>> recordBuilder = ImmutableList.builder();
-      recordBuilder.add(
-          new HashMap<>() {
-            {
-              put("`job_id`", jobId);
-              put("`file_name`", rejectedFiles.get(3));
-              put("`error`", "Failed to read data from parquet file in rowgroup 1");
-              put("`line_number`", null);
-            }
-          });
-      recordBuilder.add(
-          new HashMap<>() {
-            {
-              put("`job_id`", jobId);
-              put("`file_name`", rejectedFiles.get(2));
-              put(
-                  "`error`",
-                  "The file file:" + rejectedFiles.get(2) + " is not in Parquet format.");
-              put("`line_number`", null);
-            }
-          });
-      recordBuilder.add(
-          new HashMap<>() {
-            {
-              put("`job_id`", jobId);
-              put("`file_name`", rejectedFiles.get(0));
-              put(
-                  "`error`",
-                  "Failure while attempting to cast value 'not an age' to Integer. in rowgroup 0");
-              put("`line_number`", 2L);
-            }
-          });
+        String targetTableName = "transformations";
+        ImmutableList<Pair<String, String>> tableSchema =
+            ImmutableList.of(Pair.of("new_name", "varchar"), Pair.of("new_age", "int"));
+        final String[] inputFileNames =
+            fileFormat == FileFormat.PARQUET
+                ? new String[] {
+                  "typeError5.parquet",
+                  "typeError4.parquet",
+                  "syntaxError.parquet",
+                  "corruption_in_2nd_rowgroup.parquet",
+                  "corruption_in_2nd_rowgroup_without_corruption.parquet"
+                }
+                : new String[] {"typeError1.csv", "typeError5.csv"};
+        File inputFilesLocation = createTempLocation();
+        File[] inputFiles =
+            createTableAndGenerateSourceFiles(
+                targetTableName, tableSchema, inputFileNames, inputFilesLocation, fileFormat);
+        List<String> rejectedFiles =
+            Arrays.stream(inputFiles).map(File::getAbsolutePath).collect(Collectors.toList());
+        String jobId =
+            fileFormat == FileFormat.PARQUET
+                ? "9c15b65b-82fd-4672-a213-919ac365957c"
+                : "9c15b65b-82fd-4672-a213-919ac365957d";
+        String transformationProp =
+            "{\n"
+                + "  \"properties\" : [ {\n"
+                + "    \"transformationExpression\" : \"add(`D_R_E_M_I_O_V_I_R_T_U_A_L_C_O_L_U_M_N_AGE`, 4i) \",\n"
+                + "    \"sourceColNames\" : [ \"age\" ],\n"
+                + "    \"targetColName\" : \"new_age\"\n"
+                + "  }, {\n"
+                + "    \"transformationExpression\" : \"concat(`D_R_E_M_I_O_V_I_R_T_U_A_L_C_O_L_U_M_N_NAME`, ''_tmp'') \",\n"
+                + "    \"sourceColNames\" : [ \"name\" ],\n"
+                + "    \"targetColName\" : \"new_name\"\n"
+                + "  } ]\n"
+                + "}";
+        addJobAndFileHistoryEntry(
+            jobId,
+            targetTableName,
+            inputFilesLocation.getName(),
+            rejectedFiles,
+            new HashMap<>(),
+            fileFormat.name().toLowerCase(),
+            transformationProp);
 
-      testBuilder()
-          .sqlQuery(
-              getCopyErrorsQuery(
-                  targetTableName, jobId, "job_id", "file_name", "error", "line_number"))
-          .unOrdered()
-          .baselineRecords(recordBuilder.build())
-          .go();
+        final ImmutableList.Builder<Map<String, Object>> recordBuilder = ImmutableList.builder();
+        if (fileFormat == FileFormat.PARQUET) {
+          recordBuilder.add(
+              new HashMap<>() {
+                {
+                  put("`job_id`", jobId);
+                  put("`file_name`", rejectedFiles.get(3));
+                  put("`error`", "Failed to read data from parquet file in rowgroup 1");
+                  put("`line_number`", null);
+                }
+              });
+          recordBuilder.add(
+              new HashMap<>() {
+                {
+                  put("`job_id`", jobId);
+                  put("`file_name`", rejectedFiles.get(2));
+                  put(
+                      "`error`",
+                      "The file file:" + rejectedFiles.get(2) + " is not in Parquet format.");
+                  put("`line_number`", null);
+                }
+              });
+          recordBuilder.add(
+              new HashMap<>() {
+                {
+                  put("`job_id`", jobId);
+                  put("`file_name`", rejectedFiles.get(0));
+                  put(
+                      "`error`",
+                      "Failure while attempting to cast value 'not an age' to Integer. in rowgroup 0");
+                  put("`line_number`", 2L);
+                }
+              });
+        } else {
+          recordBuilder.add(
+              new HashMap<>() {
+                {
+                  put("`job_id`", jobId);
+                  put("`file_name`", rejectedFiles.get(0));
+                  put("`error`", "Failure while attempting to cast value 'false' to Integer.");
+                  put("`line_number`", 3L);
+                }
+              });
+          recordBuilder.add(
+              new HashMap<>() {
+                {
+                  put("`job_id`", jobId);
+                  put("`file_name`", rejectedFiles.get(1));
+                  put("`error`", "Failure while attempting to cast value 'not an age' to Integer.");
+                  put("`line_number`", 2L);
+                }
+              });
+        }
 
-      dropTable(targetTableName);
+        testBuilder()
+            .sqlQuery(
+                getCopyErrorsQuery(
+                    targetTableName, jobId, "job_id", "file_name", "error", "line_number"))
+            .unOrdered()
+            .baselineRecords(recordBuilder.build())
+            .go();
+
+        dropTable(targetTableName);
+      }
     }
   }
 

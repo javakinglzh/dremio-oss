@@ -39,6 +39,7 @@ public class SampleMutator implements OutputMutator, AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(SampleMutator.class);
 
   private final Map<String, ValueVector> fieldVectorMap = Maps.newHashMap();
+  private final Map<String, Field> fieldDecimalMap = Maps.newHashMap();
   private final MutatorSchemaChangeCallBack callBack = new MutatorSchemaChangeCallBack();
   private final VectorContainer container = new VectorContainer();
   private final BufferAllocator allocator;
@@ -155,5 +156,14 @@ public class SampleMutator implements OutputMutator, AutoCloseable {
     fieldVectorMap.clear();
     container.clear();
     bufferManager.close();
+    fieldDecimalMap.clear();
+  }
+
+  public void addDecimalField(Field field) {
+    fieldDecimalMap.put(field.getName(), field);
+  }
+
+  public Map<String, Field> getFieldDecimalMap() {
+    return fieldDecimalMap;
   }
 }

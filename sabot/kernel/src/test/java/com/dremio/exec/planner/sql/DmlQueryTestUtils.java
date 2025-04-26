@@ -33,10 +33,12 @@ import com.dremio.test.TemporarySystemProperties;
 import com.dremio.test.UserExceptionAssert;
 import com.google.common.base.Strings;
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -158,6 +160,53 @@ public class DmlQueryTestUtils {
   public static Table createTable(
       String source, String[] paths, String name, ColumnInfo[] schema, Object[][] data)
       throws Exception {
+    String fqn = doCreateTable(source, paths, name, schema, data, Collections.emptyMap());
+
+    return new Table(
+        name,
+        paths,
+        fqn,
+        Arrays.stream(schema).map(column -> column.name).toArray(String[]::new),
+        data);
+  }
+
+  /**
+   * Creates a table with the given name, schema, data, and the source
+   *
+   * @param source where the table belongs
+   * @param paths paths
+   * @param name table name
+   * @param schema schema / column data type info
+   * @param data data to insert
+   * @return table that's created with data inserted
+   */
+  public static Table createTableWithIcebergProperties(
+      String source,
+      String[] paths,
+      String name,
+      ColumnInfo[] schema,
+      Object[][] data,
+      Map<String, String> tableProperties)
+      throws Exception {
+
+    String fqn = doCreateTable(source, paths, name, schema, data, tableProperties);
+
+    return new Table(
+        name,
+        paths,
+        fqn,
+        Arrays.stream(schema).map(column -> column.name).toArray(String[]::new),
+        data);
+  }
+
+  private static String doCreateTable(
+      String source,
+      String[] paths,
+      String name,
+      ColumnInfo[] schema,
+      Object[][] data,
+      Map<String, String> tableProperties)
+      throws Exception {
     String fullPath = String.join(".", paths);
     String fqn = source + (fullPath.isEmpty() ? "" : "." + fullPath) + "." + name;
     String createTableSql =
@@ -169,7 +218,9 @@ public class DmlQueryTestUtils {
             Arrays.stream(schema)
                 .filter(columnInfo -> columnInfo.sortColumn)
                 .map(columnInfo -> columnInfo.name)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList()),
+            tableProperties,
+            null);
     String schemaSql =
         Arrays.stream(schema)
             .map(
@@ -206,13 +257,7 @@ public class DmlQueryTestUtils {
     if (!dataSql.isEmpty()) {
       test(insertIntoSql, fqn, columnSql, dataSql);
     }
-
-    return new Table(
-        name,
-        paths,
-        fqn,
-        Arrays.stream(schema).map(column -> column.name).toArray(String[]::new),
-        data);
+    return fqn;
   }
 
   /**
@@ -242,7 +287,9 @@ public class DmlQueryTestUtils {
             Arrays.stream(schema)
                 .filter(columnInfo -> columnInfo.sortColumn)
                 .map(columnInfo -> columnInfo.name)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList()),
+            Collections.emptyMap(),
+            null);
     String schemaSql =
         Arrays.stream(schema)
             .map(
@@ -303,7 +350,7 @@ public class DmlQueryTestUtils {
 
   private static Type toIcebergType(SqlTypeName sqlTypeName) {
     switch (sqlTypeName) {
-        // Including only primitive types for sanity tests, extend as per need
+      // Including only primitive types for sanity tests, extend as per need
       case INTEGER:
         return Types.IntegerType.get();
       case BIGINT:
@@ -331,7 +378,8 @@ public class DmlQueryTestUtils {
       String name,
       ColumnInfo[] schema,
       Object[][] data,
-      String dateTimeOutputFormat)
+      String dateTimeOutputFormat,
+      PartitionTransform.Type transform)
       throws Exception {
     String fullPath = String.join(".", paths);
     String fqn = source + (fullPath.isEmpty() ? "" : "." + fullPath) + "." + name;
@@ -344,7 +392,9 @@ public class DmlQueryTestUtils {
             Arrays.stream(schema)
                 .filter(columnInfo -> columnInfo.sortColumn)
                 .map(columnInfo -> columnInfo.name)
-                .collect(Collectors.toList()));
+                .collect(Collectors.toList()),
+            Collections.emptyMap(),
+            transform);
     String schemaSql =
         Arrays.stream(schema)
             .map(
@@ -439,15 +489,55 @@ public class DmlQueryTestUtils {
     return createTable(source, EMPTY_PATHS, name, schema, data);
   }
 
-  private static String getCreateTableSql(List<String> partitionColumns, List<String> sortColumns) {
+  private static String getCreateTableSql(
+      List<String> partitionColumns,
+      List<String> sortColumns,
+      Map<String, String> tableProperties,
+      PartitionTransform.Type transform) {
+    String partitionByClause = buildPartitionByClause(partitionColumns, transform);
+    String sortByClause = buildSortByClause(sortColumns);
+    String tablePropertiesClause = buildTablePropertiesClause(tableProperties);
     return String.format(
-        "CREATE TABLE %%s (%%s)%s%sSTORE AS (type => 'Iceberg')",
-        CollectionUtils.isEmpty(partitionColumns)
-            ? " "
-            : String.format(" PARTITION BY (%s) ", String.join(", ", partitionColumns)),
-        CollectionUtils.isEmpty(sortColumns)
-            ? " "
-            : String.format(" LOCALSORT BY (%s) ", String.join(", ", sortColumns)));
+        "CREATE TABLE %%s (%%s)%s%s %s STORE AS (type => 'Iceberg')",
+        partitionByClause, sortByClause, tablePropertiesClause);
+  }
+
+  /**
+   * Builds 'partition by' sub-statement with an optional transform. If Transform is present,
+   * transform will be applied to all partition columns
+   */
+  private static String buildPartitionByClause(
+      List<String> partitionColumns, PartitionTransform.Type transform) {
+    if (CollectionUtils.isEmpty(partitionColumns)) {
+      return " ";
+    }
+    // Optionally includes a Transformation to the partition column
+    String partitionClause =
+        partitionColumns.stream()
+            .map(
+                column ->
+                    transform != null ? String.format("%s(%s)", transform.name(), column) : column)
+            .collect(Collectors.joining(", "));
+
+    return String.format(" PARTITION BY (%s) ", partitionClause);
+  }
+
+  /** Builds the optional Iceberg Sort Order Clause. Not to be confused with SQL Sort. */
+  private static String buildSortByClause(List<String> sortColumns) {
+    if (CollectionUtils.isEmpty(sortColumns)) {
+      return " ";
+    }
+    return String.format(" LOCALSORT BY (%s) ", String.join(", ", sortColumns));
+  }
+
+  private static String buildTablePropertiesClause(Map<String, String> tableProperties) {
+    return tableProperties.isEmpty()
+        ? " "
+        : String.format(
+            " TBLPROPERTIES (%s)",
+            tableProperties.keySet().stream()
+                .map(key -> String.format("'%s' = '%s'", key, tableProperties.get(key)))
+                .collect(Collectors.joining(", ")));
   }
 
   public static String createRandomId() {
@@ -500,6 +590,74 @@ public class DmlQueryTestUtils {
       Set<Integer> sortColumnIndexes,
       String tableName)
       throws Exception {
+
+    ArrayList<Object> result =
+        doCreateSchemaAndData(
+            columnCount, rowCount, startingRowId, partitionColumnIndexes, sortColumnIndexes);
+
+    String[] paths = pathCount > 0 ? new String[pathCount] : EMPTY_PATHS;
+    for (int i = 0; i < pathCount; i++) {
+      paths[i] = createRandomId();
+    }
+
+    return createTable(
+        source,
+        paths,
+        Objects.isNull(tableName) ? createRandomId() : tableName,
+        (ColumnInfo[]) result.get(0),
+        (Object[][]) result.get(1));
+  }
+
+  /**
+   * Creates a table where the first column is `id` numbered from 0 to `rowCount` - 1. For every
+   * extra columns, it'll create a `column_#` with the (row #)_(col #) string. The table name it
+   * uses is a random UUID, and therefore, the tests can run in parallel.
+   *
+   * @param source where the table should exist
+   * @param pathCount number of paths between the source and the table name
+   * @param columnCount number of columns
+   * @param rowCount number of rows
+   * @param startingRowId starting row id
+   * @param partitionColumnIndexes contains column indexes for partition columns
+   * @param tableName
+   */
+  public static Table createBasicTableWithIcebergProperties(
+      String source,
+      int pathCount,
+      int columnCount,
+      int rowCount,
+      int startingRowId,
+      Set<Integer> partitionColumnIndexes,
+      Set<Integer> sortColumnIndexes,
+      String tableName,
+      Map<String, String> tableProperties)
+      throws Exception {
+
+    ArrayList<Object> result =
+        doCreateSchemaAndData(
+            columnCount, rowCount, startingRowId, partitionColumnIndexes, sortColumnIndexes);
+
+    String[] paths = pathCount > 0 ? new String[pathCount] : EMPTY_PATHS;
+    for (int i = 0; i < pathCount; i++) {
+      paths[i] = createRandomId();
+    }
+
+    return createTableWithIcebergProperties(
+        source,
+        paths,
+        Objects.isNull(tableName) ? createRandomId() : tableName,
+        (ColumnInfo[]) result.get(0),
+        (Object[][]) result.get(1),
+        tableProperties);
+  }
+
+  private static ArrayList<Object> doCreateSchemaAndData(
+      int columnCount,
+      int rowCount,
+      int startingRowId,
+      Set<Integer> partitionColumnIndexes,
+      Set<Integer> sortColumnIndexes) {
+    ArrayList<Object> result = new ArrayList<Object>(2);
     ColumnInfo[] schema = new ColumnInfo[columnCount];
     schema[0] =
         new ColumnInfo(
@@ -524,13 +682,9 @@ public class DmlQueryTestUtils {
       }
     }
 
-    String[] paths = pathCount > 0 ? new String[pathCount] : EMPTY_PATHS;
-    for (int i = 0; i < pathCount; i++) {
-      paths[i] = createRandomId();
-    }
-
-    return createTable(
-        source, paths, Objects.isNull(tableName) ? createRandomId() : tableName, schema, data);
+    result.add(schema);
+    result.add(data);
+    return result;
   }
 
   public static Table createStockIcebergTable(
@@ -685,6 +839,21 @@ public class DmlQueryTestUtils {
       throws Exception {
     return createBasicTable(
         source, 0, columnCount, rowCount, Collections.emptySet(), Collections.emptySet());
+  }
+
+  public static Table createBasicTableWithIcebergProperties(
+      String source, int columnCount, int rowCount, Map<String, String> tableProperties)
+      throws Exception {
+    return createBasicTableWithIcebergProperties(
+        source,
+        0,
+        columnCount,
+        rowCount,
+        0,
+        Collections.emptySet(),
+        Collections.emptySet(),
+        null,
+        tableProperties);
   }
 
   public static Table createBasicTable(
@@ -961,13 +1130,15 @@ public class DmlQueryTestUtils {
         data);
   }
 
-  public static Table createBasicTableWithDates(
+  private static Table createBasicTableWithDatesInternal(
       String source,
       int columnCount,
       int rowCount,
       int startingRowId,
       String startDateString,
-      String dateFormat)
+      String dateFormat,
+      boolean isPartitioned,
+      PartitionTransform.Type transform)
       throws Exception {
     LocalDateTime startDate =
         LocalDateTime.parse(
@@ -975,7 +1146,7 @@ public class DmlQueryTestUtils {
     ColumnInfo[] schema = new ColumnInfo[columnCount];
     schema[0] = new ColumnInfo("id", SqlTypeName.INTEGER, false, false);
     for (int c = 0; c < columnCount - 1; c++) {
-      schema[c + 1] = new ColumnInfo("column_" + c, SqlTypeName.DATE, false, false);
+      schema[c + 1] = new ColumnInfo("column_" + c, SqlTypeName.DATE, isPartitioned, false);
     }
 
     Object[][] data = new Object[rowCount][columnCount];
@@ -994,7 +1165,33 @@ public class DmlQueryTestUtils {
         String.format("\"%s\"", UUID.randomUUID().toString().replace("-", "")),
         schema,
         data,
-        dateFormat);
+        dateFormat,
+        transform);
+  }
+
+  public static Table createBasicTableWithDates(
+      String source,
+      int columnCount,
+      int rowCount,
+      int startingRowId,
+      String startDateString,
+      String dateFormat)
+      throws Exception {
+    return createBasicTableWithDatesInternal(
+        source, columnCount, rowCount, startingRowId, startDateString, dateFormat, false, null);
+  }
+
+  public static Table createBasicTableWithWithDatesPartitionTransform(
+      String source,
+      int columnCount,
+      int rowCount,
+      int startingRowId,
+      String startDateString,
+      String dateFormat,
+      PartitionTransform.Type transform)
+      throws Exception {
+    return createBasicTableWithDatesInternal(
+        source, columnCount, rowCount, startingRowId, startDateString, dateFormat, true, transform);
   }
 
   public static Table createEmptyTableWithListOfType(
@@ -1050,7 +1247,8 @@ public class DmlQueryTestUtils {
         String.format("\"%s\"", UUID.randomUUID().toString().replace("-", "")),
         schema,
         data,
-        timeFormat);
+        timeFormat,
+        null);
   }
 
   public static Table createBasicTableWithTimestamps(
@@ -1087,7 +1285,8 @@ public class DmlQueryTestUtils {
         String.format("\"%s\"", UUID.randomUUID().toString().replace("-", "")),
         schema,
         data,
-        timestampFormat);
+        timestampFormat,
+        null);
   }
 
   public static AutoCloseable createView(String source, String name) throws Exception {

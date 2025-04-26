@@ -43,7 +43,7 @@ public final class CacheRefresher implements Runnable {
   @WithSpan
   private void refreshMaterializationAndPlanCaches() {
     final Instant refreshCacheStart = Instant.now();
-    reflectionService.refreshCache();
+    reflectionService.getMaterializationCache().refreshCache();
     long refreshMaterializationCacheDuration =
         Duration.between(refreshCacheStart, Instant.now()).toMillis();
     final Instant planCacheSyncStart = Instant.now();

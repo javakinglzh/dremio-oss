@@ -38,6 +38,7 @@ import com.dremio.exec.store.dfs.SplitReaderCreator;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
 import com.dremio.exec.store.dfs.implicit.ImplicitFilesystemColumnFinder;
 import com.dremio.exec.store.dfs.implicit.NameValuePair;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.deletes.ParquetRowLevelDeleteFileReaderFactory;
 import com.dremio.exec.store.iceberg.deletes.RowLevelDeleteFilterFactory;
@@ -193,7 +194,12 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
     this.trimRowGroups = context.getOptions().getOption(ExecConstants.TRIM_ROWGROUPS_FROM_FOOTER);
     this.plugin = fragmentExecContext.getStoragePlugin(config.getPluginId());
     try {
-      this.fs = plugin.createFS(null, config.getProps().getUserName(), context);
+      this.fs =
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context)
+                  .datasetFromTablePaths(tablePath));
     } catch (IOException e) {
       throw new ExecutionSetupException("Cannot access plugin filesystem", e);
     }
@@ -277,22 +283,20 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
     this.trimRowGroups = context.getOptions().getOption(ExecConstants.TRIM_ROWGROUPS_FROM_FOOTER);
     this.plugin = fragmentExecContext.getStoragePlugin(config.getFunctionContext().getPluginId());
     try {
-      // hive iceberg tables go through native iceberg path. so, need async options injected
-      if (config.getFunctionContext().getInternalTablePluginId() == null) {
-        this.fs =
-            plugin.createFSWithAsyncOptions(
-                config.getFunctionContext().getFormatSettings().getLocation(),
-                props.getUserName(),
-                context);
-      } else {
-        // fs native iceberg, or all internal iceberg tables are handled correctly by respective
-        // plugins
-        this.fs =
-            plugin.createFS(
-                config.getFunctionContext().getFormatSettings().getLocation(),
-                props.getUserName(),
-                context);
-      }
+      // true: hive iceberg tables go through native iceberg path. so, need async options injected
+      //
+      // false: fs native iceberg, or all internal iceberg tables are handled correctly by
+      // respective plugins
+      boolean isAsync = config.getFunctionContext().getInternalTablePluginId() == null;
+
+      this.fs =
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .withAsyncOptions(isAsync)
+                  .filePath(config.getFunctionContext().getFormatSettings().getLocation())
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .datasetFromTablePaths(tablePath));
     } catch (IOException e) {
       throw new ExecutionSetupException("Cannot access plugin filesystem", e);
     }
@@ -369,7 +373,7 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
                   return Pair.of(
                       s,
                       LegacyProtobufSerializer.parseFrom(
-                          ParquetProtobuf.ParquetDatasetSplitScanXAttr.PARSER,
+                          ParquetProtobuf.ParquetDatasetSplitScanXAttr.parser(),
                           s.getDatasetSplitInfo().getExtendedProperty()));
                 } catch (InvalidProtocolBufferException e) {
                   throw new RuntimeException(
@@ -804,7 +808,7 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
       long fileLastModificationTime) {
     List<ParquetProtobuf.ParquetDatasetSplitScanXAttr> rowGroupSplitAttrs = new LinkedList<>();
     for (int rowGroupNum : rowGroupNums.keySet()) {
-      rowGroupSplitAttrs.add(
+      ParquetProtobuf.ParquetDatasetSplitScanXAttr.Builder splitScanXAttrBuilder =
           ParquetProtobuf.ParquetDatasetSplitScanXAttr.newBuilder()
               .setRowGroupIndex(rowGroupNum)
               .setRowIndexOffset(rowGroupNums.get(rowGroupNum))
@@ -813,8 +817,13 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
               .setLength(blockSplit.getLength()) // max row group size possible
               .setFileLength(fileLength)
               .setLastModificationTime(fileLastModificationTime)
-              .setOriginalPath(blockSplit.getPath())
-              .build());
+              .setOriginalPath(blockSplit.getPath());
+
+      if (blockSplit.hasFileGroupIndex()) {
+        splitScanXAttrBuilder.setFileGroupIndex(blockSplit.getFileGroupIndex());
+      }
+
+      rowGroupSplitAttrs.add(splitScanXAttrBuilder.build());
     }
     return rowGroupSplitAttrs;
   }
@@ -972,14 +981,14 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
     try {
       IcebergProtobuf.IcebergDatasetXAttr icebergDatasetXAttr =
           LegacyProtobufSerializer.parseFrom(
-              IcebergProtobuf.IcebergDatasetXAttr.PARSER, extendedProperty);
+              IcebergProtobuf.IcebergDatasetXAttr.parser(), extendedProperty);
       icebergSchemaFields = icebergDatasetXAttr.getColumnIdsList();
       icebergDefaultNameMapping = icebergDatasetXAttr.getDefaultNameMappingList();
     } catch (InvalidProtocolBufferException ie) {
       try {
         ParquetProtobuf.ParquetDatasetXAttr parquetDatasetXAttr =
             LegacyProtobufSerializer.parseFrom(
-                ParquetProtobuf.ParquetDatasetXAttr.PARSER, extendedProperty);
+                ParquetProtobuf.ParquetDatasetXAttr.parser(), extendedProperty);
         // found XAttr from 5.0.1 release. return null
         icebergSchemaFields = null;
         icebergDefaultNameMapping = null;

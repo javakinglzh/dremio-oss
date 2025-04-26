@@ -96,9 +96,6 @@ public class TestChangingWeights extends DremioTest {
     createSchedule(0, testSchedules[0], incrementers[0], null);
     createSchedule(0, testSchedules[1], incrementers[1], latchesFor2);
     createSchedule(0, testSchedules[2], incrementers[2], latchesFor3);
-    Thread.yield();
-    Thread.yield();
-    Thread.yield();
     createSchedule(1, testSchedules[0], incrementers[0], null);
     createSchedule(1, testSchedules[1], incrementers[1], latchesFor2);
     createSchedule(1, testSchedules[2], incrementers[2], latchesFor3);

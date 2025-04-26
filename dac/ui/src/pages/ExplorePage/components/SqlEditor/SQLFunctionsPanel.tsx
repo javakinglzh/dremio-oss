@@ -110,6 +110,12 @@ const SQLFunctionsPanel = ({
           resetDisabled ? classes["--disabled"] : ""
         }`}
         onClick={onResetCategories}
+        onKeyDown={(e) => {
+          if (e.code === "Space" || e.code === "Enter") {
+            onResetCategories();
+          }
+        }}
+        tabIndex={resetDisabled ? -1 : 0}
       >
         {intl.formatMessage({ id: "Common.Reset" })}
       </span>

@@ -111,6 +111,11 @@ function SaveMenu({
             className={item.class}
             disabled={isDisabled(item.id)}
             onClick={() => saveAction(item.id)}
+            onKeyPress={(e: any) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                saveAction(item.id);
+              }
+            }}
             showTooltip={showTooltip}
             title={
               showTooltip

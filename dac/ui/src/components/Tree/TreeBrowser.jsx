@@ -32,15 +32,20 @@ import SortDropDownMenu from "#oss/components/SortDropDownMenu";
 import SQLScripts from "../SQLScripts/SQLScripts";
 import TreeNode from "./TreeNode";
 import { TabsNavigationItem } from "dremio-ui-lib";
-import "./TreeBrowser.less";
-import * as classes from "./TreeBrowser.less";
 import { useFilterTreeArs } from "#oss/utils/datasetTreeUtils";
 import { getHomeSource, getSortedSources } from "#oss/selectors/home";
 import { useIsArsEnabled } from "@inject/utils/arsUtils";
 import { useMultiTabIsEnabled } from "../SQLScripts/useMultiTabIsEnabled";
 import { isTabbableUrl } from "#oss/utils/explorePageTypeUtils";
 import { showNavCrumbs } from "@inject/components/NavCrumbs/NavCrumbs";
-import { NewTreeSwitcher } from "./NewTreeSwitcher";
+import { CatalogTreeContainer } from "./CatalogTreeContainer";
+import { IconButton, TabsWrapper } from "dremio-ui-lib/components";
+import { useQuery } from "@tanstack/react-query";
+import { starredResourcesQuery } from "@inject/queries/stars";
+import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
+
+import * as classes from "./TreeBrowser.less";
+import "./TreeBrowser.less";
 
 export const TreeBrowser = (props) => {
   const {
@@ -62,12 +67,19 @@ export const TreeBrowser = (props) => {
   const [selectedTab, setSelectedTab] = useState(DATA_SCRIPT_TABS.Data);
   const [sort, setSort] = useState(RESOURCE_LIST_SORT_MENU[1]);
 
-  const [collapaseText, setCollapseText] = useState();
+  const [collapseText, setCollapseText] = useState();
   const [starredTabsArray, setStarredTabsArray] = useState([
     intl.formatMessage({ id: "Resource.Tree.All" }),
   ]);
 
   const [isArsLoading, isArsEnabled] = useIsArsEnabled();
+
+  const isNewTreeEnabled = false;
+
+  const starredResources = useQuery({
+    ...starredResourcesQuery(getSonarContext().getSelectedProjectId?.()),
+    enabled: isNewTreeEnabled,
+  }).data;
 
   useEffect(() => {
     if (isArsLoading || isArsEnabled) return;
@@ -75,9 +87,15 @@ export const TreeBrowser = (props) => {
     setStarredTabsArray([
       intl.formatMessage({ id: "Resource.Tree.All" }),
       intl.formatMessage({ id: "Resource.Tree.Starred" }) +
-        ` (${starredItems && starredItems.length})`,
+        ` (${isNewTreeEnabled ? (starredResources?.size ?? 0) : starredItems?.length})`,
     ]);
-  }, [isArsEnabled, starredItems, isArsLoading]);
+  }, [
+    isArsEnabled,
+    isNewTreeEnabled,
+    starredResources?.size,
+    starredItems,
+    isArsLoading,
+  ]);
 
   useEffect(() => {
     if (location && location.state && location.state.renderScriptTab) {
@@ -198,7 +216,7 @@ export const TreeBrowser = (props) => {
 
   const renderTabs = () => {
     return props.isSqlEditorTab ? (
-      <>
+      <TabsWrapper className="flex items-center">
         <TabsNavigationItem
           name="Data"
           activeTab={selectedTab}
@@ -213,7 +231,7 @@ export const TreeBrowser = (props) => {
         >
           {intl.formatMessage({ id: "Common.Scripts" })}
         </TabsNavigationItem>
-      </>
+      </TabsWrapper>
     ) : (
       <div className="TreeBrowser-tab">Data</div>
     );
@@ -221,15 +239,21 @@ export const TreeBrowser = (props) => {
 
   const renderCollapseIcon = () => {
     return (
-      <dremio-icon
-        title={collapaseText}
-        alt={intl.formatMessage({ id: "Explore.Left.Panel.Collapse.Alt" })}
-        name={
-          sidebarCollapsed ? "scripts/CollapseRight" : "scripts/CollapseLeft"
-        }
+      <IconButton
         onClick={props.handleSidebarCollapse}
-        class={classes["collapseButton"]}
-      ></dremio-icon>
+        tooltip={collapseText || "collapse"}
+        tooltipPortal
+        className={classes["collapseButton"]}
+      >
+        <dremio-icon
+          alt={intl.formatMessage({
+            id: "Explore.Left.Panel.Collapse.Alt",
+          })}
+          name={
+            sidebarCollapsed ? "scripts/CollapseRight" : "scripts/CollapseLeft"
+          }
+        ></dremio-icon>
+      </IconButton>
     );
   };
 
@@ -243,12 +267,22 @@ export const TreeBrowser = (props) => {
             dragType={props.dragType}
             addtoEditor={props.addtoEditor}
             shouldAllowAdd
-            isStarredLimitReached={starredItems.length === 25}
+            isStarredLimitReached={
+              isNewTreeEnabled
+                ? starredResources?.size === 25
+                : starredItems.length === 25
+            }
             starNode={starNode}
-            starredItems={starredItems}
+            starredItems={
+              isNewTreeEnabled
+                ? Array.from(starredResources ?? new Set())
+                : starredItems
+            }
             unstarNode={unstarNode}
           />
-          <NewTreeSwitcher
+          <CatalogTreeContainer
+            sort={sort.dir}
+            starsOnly={selectedStarredTab === starTabNames.starred}
             oldRenderHome={renderHome}
             oldRenderItems={renderItems}
           />

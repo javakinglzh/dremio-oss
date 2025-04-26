@@ -24,6 +24,7 @@ import {
 } from "./utilities/elementIsScrolled";
 import { Tooltip } from "./Tooltip/Tooltip";
 import { Popover } from "./Popover";
+import { useTabsKeyboardListener } from "./utilities/useTabsKeyboardListener";
 
 type TabListWrapperProps = {
   children: React.ReactNode;
@@ -50,6 +51,8 @@ export const TabListWrapper = (props: TabListWrapperProps) => {
   const { isScrolledToLeft, isScrolledToRight } =
     useScrollMonitor(tablistWrapperRef);
 
+  const { setTabsEl } = useTabsKeyboardListener();
+
   return (
     <div className="tab-list">
       {!isScrolledToLeft && (
@@ -72,7 +75,14 @@ export const TabListWrapper = (props: TabListWrapperProps) => {
           ></dremio-icon>
         </IconButton>
       )}
-      <div className="tab-list-tabs" role="tablist" ref={tablistWrapperRef}>
+      <div
+        className="tab-list-tabs"
+        role="tablist"
+        ref={(r) => {
+          tablistWrapperRef.current = r;
+          setTabsEl(r);
+        }}
+      >
         {props.children}
       </div>
       {!isScrolledToRight && (
@@ -139,6 +149,17 @@ const renderMenuItems = (
                 close();
               }
             }}
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                e.preventDefault();
+                e.stopPropagation();
+                if (!menuItem.disabled) {
+                  menuItem.handler();
+                  close();
+                }
+              }
+            }}
+            tabIndex={0}
           >
             {menuItem.label}
           </li>
@@ -183,6 +204,7 @@ export const TabListTab = (props: TabListTabProps) => {
         e.stopPropagation();
         onSelected();
       }}
+      tabIndex={selected ? 0 : -1}
     >
       {props.isUnsaved &&
         (props.unsavedLabel ? (
@@ -212,6 +234,7 @@ export const TabListTab = (props: TabListTabProps) => {
             <IconButton
               aria-label="Script options"
               style={{ marginRight: "-8px" }}
+              tabIndex={selected ? 0 : -1}
             >
               <dremio-icon
                 name="interface/ellipses"
@@ -233,6 +256,7 @@ export const TabListTab = (props: TabListTabProps) => {
           e.stopPropagation();
           onClose?.();
         }}
+        tabIndex={selected ? 0 : -1}
       >
         <dremio-icon name="interface/close-small" alt=""></dremio-icon>
       </IconButton>

@@ -25,6 +25,9 @@ public enum ExtendedType {
   TIMESTAMP(ExtendedTypeName.TIMESTAMP),
   INTERVAL(ExtendedTypeName.INTERVAL),
   INTEGER(ExtendedTypeName.INTEGER),
+  LONG(ExtendedTypeName.LONG),
+  FLOAT(ExtendedTypeName.FLOAT),
+  DOUBLE(ExtendedTypeName.DOUBLE),
   DECIMAL(ExtendedTypeName.DECIMAL);
 
   public final SerializedString serialized;

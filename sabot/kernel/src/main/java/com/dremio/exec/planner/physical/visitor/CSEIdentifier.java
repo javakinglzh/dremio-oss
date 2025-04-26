@@ -25,17 +25,13 @@ import com.dremio.exec.planner.physical.BridgeReaderPrel;
 import com.dremio.exec.planner.physical.ExchangePrel;
 import com.dremio.exec.planner.physical.FilterPrel;
 import com.dremio.exec.planner.physical.JoinPrel;
-import com.dremio.exec.planner.physical.PhysicalPlanCreator;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.TableFunctionPrel;
-import com.dremio.exec.planner.physical.explain.PrelSequencer;
-import com.dremio.exec.record.BatchSchema;
 import com.dremio.options.OptionResolver;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
@@ -72,7 +68,7 @@ public class CSEIdentifier {
     }
     logger.debug("CommonSubExpressions after filtering: {}", candidates.size());
     CostingRootNodeAndBitSet costingRootNodeAndBitSet =
-        rewriteWithCostingNodes(context, prel, filteredcandidates);
+        rewriteWithCostingNodes(prel, filteredcandidates);
     costingRootNodeAndBitSet.bitSet.set(0, filteredcandidates.size());
     logger.debug(
         "Costing CommonSubExpression:\n{}", RelOptUtil.toString(costingRootNodeAndBitSet.relNode));
@@ -222,13 +218,14 @@ public class CSEIdentifier {
   }
 
   private static CostingRootNodeAndBitSet rewriteWithCostingNodes(
-      QueryContext context, Prel prel, Map<Long, List<Prel>> digestToCommonSubExpressions) {
+      Prel prel, Map<Long, List<Prel>> digestToCommonSubExpressions) {
     RelMetadataQuery relMetadataQuery = prel.getCluster().getMetadataQuery();
     BitSet bitSet = new BitSet();
     RelNode relNode =
         prel.accept(
             new RewritePrelVisitor<Void>() {
               final Map<Long, UuidAndIndex> digestToUuidAndIndex = new HashMap<>();
+              final Map<Long, Prel> digestToBridgeExchangeRef = new HashMap<>();
 
               @Override
               public RelNode visitExchange(ExchangePrel prel, Void value) throws RuntimeException {
@@ -244,12 +241,12 @@ public class CSEIdentifier {
                   // - add a bridge reader below the top-level exchange
                   // - delete the rest of the child sub-tree
 
-                  // compute schema for the BridgeReader
+                  RelDataType rowType = digestToBridgeExchangeRef.get(prelDigest).getRowType();
                   Prel readerChild =
                       new BridgeReaderPrel(
                           child.getCluster(),
                           child.getTraitSet(),
-                          child.getRowType(),
+                          rowType, // Use the rowType of the BridgeExchange
                           relMetadataQuery.getRowCount(child),
                           Long.toHexString(uuidAndIndex.uuid));
                   RelNode rewrittenOffNode = ((Prel) prel.getInput()).accept(this, value);
@@ -269,22 +266,10 @@ public class CSEIdentifier {
                           child.getTraitSet(),
                           child,
                           Long.toHexString(uuidAndIndex.uuid));
+                  digestToBridgeExchangeRef.put(prelDigest, newPrel);
                   CostingNode costingNode =
                       new CostingNode(bitSet, uuidAndIndex.index, child, newPrel);
                   return prel.copy(prel.getTraitSet(), ImmutableList.of(costingNode));
-                }
-              }
-
-              private BatchSchema lookupSchema(Prel prel) {
-                // This is need to get row type for execution, we do not have calcite to arrow row
-                // type
-                // conversion.
-                try {
-                  PhysicalPlanCreator planCreator =
-                      new PhysicalPlanCreator(context, PrelSequencer.getIdMap(prel));
-                  return prel.getPhysicalOperator(planCreator).getProps().getSchema();
-                } catch (IOException e) {
-                  throw new RuntimeException(e);
                 }
               }
             },

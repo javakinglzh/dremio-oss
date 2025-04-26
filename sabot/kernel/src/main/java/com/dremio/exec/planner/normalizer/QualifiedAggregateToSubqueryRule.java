@@ -92,11 +92,10 @@ public final class QualifiedAggregateToSubqueryRule
       newProjects.add(passthrough);
     }
 
-    CorrelationId correlationId = aggregate.getCluster().createCorrel();
-    RexNode correlatedFilterExpr = createCorrelatedFilter(rexBuilder, aggregate, correlationId);
-
     int groupCount = aggregate.getGroupCount();
     for (int i = 0; i < aggregate.getAggCallList().size(); i++) {
+      CorrelationId correlationId = aggregate.getCluster().createCorrel();
+      RexNode correlatedFilterExpr = createCorrelatedFilter(rexBuilder, aggregate, correlationId);
       AggregateCall aggregateCall = aggregate.getAggCallList().get(i);
       if (!needsRewrite(aggregateCall)) {
         RexNode newProject =
@@ -164,13 +163,15 @@ public final class QualifiedAggregateToSubqueryRule
         }
 
         RexNode newProject;
+        CorrelationId subqueryCorrelationId =
+            correlatedFilterExpr.isAlwaysTrue() ? null : correlationId;
         if (aggregateCall.getAggregation() == DremioSqlOperatorTable.ARRAY_AGG) {
           RelNode subquery = relBuilder.build();
-          newProject = RexSubQuery.array(subquery, correlationId);
+          newProject = RexSubQuery.array(subquery, subqueryCorrelationId);
         } else {
           relBuilder.aggregate(relBuilder.groupKey(), ImmutableList.of(aggregateCall));
           RelNode subquery = relBuilder.build();
-          newProject = RexSubQuery.scalar(subquery, correlationId);
+          newProject = RexSubQuery.scalar(subquery, subqueryCorrelationId);
         }
 
         newProjects.add(newProject);

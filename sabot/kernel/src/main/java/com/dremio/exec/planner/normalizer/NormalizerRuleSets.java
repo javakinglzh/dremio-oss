@@ -15,25 +15,28 @@
  */
 package com.dremio.exec.planner.normalizer;
 
+import static com.dremio.exec.planner.PlannerPhase.AGGREGATE_REWRITE;
 import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_PROJECT_REDUCE_CONST_TYPE_CAST;
 import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_REDUCE_FILTER;
 import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_REDUCE_JOIN;
 import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_REDUCE_PROJECT;
 import static com.dremio.exec.planner.physical.PlannerSettings.PRUNE_EMPTY_RELNODES;
-import static com.dremio.exec.planner.rules.DremioCoreRules.CONVERT_FILTER_SUB_QUERY_TO_CORRELATE;
-import static com.dremio.exec.planner.rules.DremioCoreRules.CONVERT_JOIN_SUB_QUERY_TO_CORRELATE;
-import static com.dremio.exec.planner.rules.DremioCoreRules.CONVERT_PROJECT_SUB_QUERY_TO_CORRELATE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.FILTER_REDUCE_EXPRESSIONS_CALCITE_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.FILTER_REDUCE_EXPRESSIONS_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.GROUPSET_TO_CROSS_JOIN_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.GROUP_SET_TO_CROSS_JOIN_RULE_ROLLUP;
 import static com.dremio.exec.planner.rules.DremioCoreRules.JOIN_REDUCE_EXPRESSIONS_CALCITE_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.JOIN_REDUCE_EXPRESSIONS_RULE;
+import static com.dremio.exec.planner.rules.DremioCoreRules.LEGACY_SUBQUERY_REMOVE_RULE_FILTER;
+import static com.dremio.exec.planner.rules.DremioCoreRules.LEGACY_SUBQUERY_REMOVE_RULE_JOIN;
+import static com.dremio.exec.planner.rules.DremioCoreRules.LEGACY_SUBQUERY_REMOVE_RULE_PROJECT;
 import static com.dremio.exec.planner.rules.DremioCoreRules.PROJECT_REDUCE_CONST_TYPE_CAST_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.PROJECT_REDUCE_EXPRESSIONS_CALCITE_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.PROJECT_REDUCE_EXPRESSIONS_RULE;
 import static com.dremio.exec.planner.rules.DremioCoreRules.REDUCE_FUNCTIONS_FOR_GROUP_SETS;
-import static com.dremio.exec.planner.rules.DremioCoreRules.REWRITE_PROJECT_TO_FLATTEN_RULE;
+import static com.dremio.exec.planner.rules.DremioCoreRules.SUBQUERY_REMOVE_RULE_FILTER;
+import static com.dremio.exec.planner.rules.DremioCoreRules.SUBQUERY_REMOVE_RULE_JOIN;
+import static com.dremio.exec.planner.rules.DremioCoreRules.SUBQUERY_REMOVE_RULE_PROJECT;
 
 import com.dremio.exec.catalog.udf.TabularUserDefinedFunctionExpanderRule;
 import com.dremio.exec.ops.UserDefinedFunctionExpander;
@@ -77,13 +80,28 @@ public class NormalizerRuleSets {
         new DremioRuleSetBuilder(optionResolver)
             .add(new TabularUserDefinedFunctionExpanderRule(userDefinedFunctionExpander))
             .add(new RexNodeConverterRule(optionResolver, userDefinedFunctionExpander))
-            // RexSubquery To Correlate Rules
-            // These rules are needed since RelOptRules can't operate on the RelNode inside a
-            // RexSubquery
-            .add(CONVERT_FILTER_SUB_QUERY_TO_CORRELATE)
-            .add(CONVERT_JOIN_SUB_QUERY_TO_CORRELATE)
-            .add(CONVERT_PROJECT_SUB_QUERY_TO_CORRELATE)
+            .add(CollectToArrayAggRule.INSTANCE)
             .add(UnionCastRule.INSTANCE);
+
+    // RexSubquery To Correlate Rules
+    // These rules are needed since RelOptRules can't operate on the RelNode inside a
+    // RexSubquery
+    if (optionResolver.getOption(PlannerSettings.USE_LEGACY_DECORRELATOR)) {
+      builder
+          .add(LEGACY_SUBQUERY_REMOVE_RULE_PROJECT)
+          .add(LEGACY_SUBQUERY_REMOVE_RULE_FILTER)
+          .add(LEGACY_SUBQUERY_REMOVE_RULE_JOIN);
+    } else {
+      builder
+          .add(SUBQUERY_REMOVE_RULE_PROJECT)
+          .add(SUBQUERY_REMOVE_RULE_FILTER)
+          .add(SUBQUERY_REMOVE_RULE_JOIN);
+    }
+
+    if (optionResolver.getOption(PlannerSettings.REMOVE_SINGLE_VALUE_AGGREGATES_IN_EXPANSION)) {
+      builder.add(RemoveSingleValueAggregateRule.Config.DEFAULT.toRule());
+    }
+
     if (optionResolver.getOption(PlannerSettings.ENABLE_QUALIFIED_AGGREGATE_REWRITE)) {
       builder.add(QualifiedAggregateToSubqueryRule.INSTANCE);
     }
@@ -91,6 +109,9 @@ public class NormalizerRuleSets {
     if (optionResolver.getOption(PlannerSettings.REWRITE_LISTAGG_TO_ARRAY_AGG)) {
       builder.add(
           new AggregateCallRewriteRule(ImmutableSet.of(ListaggToArrayAggConvertlet.INSTANCE)));
+    }
+    if (optionResolver.getOption(PlannerSettings.CLEANUP_SUBQUERY_REMOVE_RULE)) {
+      builder.addAll(CleanupSubqueryRemoveRules.RULES);
     }
 
     return new HepPlannerRunner.HepPlannerRunnerConfig()
@@ -113,13 +134,12 @@ public class NormalizerRuleSets {
                 .add(
                     GROUPSET_TO_CROSS_JOIN_RULE,
                     optionResolver.getOption(PlannerSettings.ROLLUP_BRIDGE_EXCHANGE))
-                .add(REWRITE_PROJECT_TO_FLATTEN_RULE)
                 .build());
   }
 
   public HepPlannerRunner.HepPlannerRunnerConfig createAggregateRewrite() {
     return new HepPlannerRunner.HepPlannerRunnerConfig()
-        .setPlannerPhase(PlannerPhase.AGGREGATE_REWRITE)
+        .setPlannerPhase(AGGREGATE_REWRITE)
         .getHepMatchOrder(HepMatchOrder.ARBITRARY)
         .setRuleSet(
             new DremioRuleSetBuilder(optionResolver)

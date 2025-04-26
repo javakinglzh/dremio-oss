@@ -669,6 +669,7 @@ public class FlightWorkManager {
 
   public void runPreparedStatement(
       UserProtos.PreparedStatementHandle preparedStatementHandle,
+      List<UserProtos.PreparedStatementParameterValue> parameters,
       FlightProducer.ServerStreamListener listener,
       BufferAllocator allocator,
       UserSession userSession,
@@ -685,6 +686,7 @@ public class FlightWorkManager {
                         .setWorkloadClass(UserBitShared.WorkloadClass.GENERAL))
                 .setSource(UserProtos.SubmissionSource.FLIGHT)
                 .setPreparedStatementHandle(preparedStatementHandle)
+                .addAllParameters(parameters)
                 .build());
 
     final UserResponseHandler responseHandler =

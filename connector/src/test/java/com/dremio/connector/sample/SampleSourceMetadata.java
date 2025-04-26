@@ -22,7 +22,6 @@ import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetHandleListing;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.DatasetSplit;
-import com.dremio.connector.metadata.DatasetSplitListing;
 import com.dremio.connector.metadata.DatasetStats;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.GetDatasetOption;
@@ -408,14 +407,7 @@ public class SampleSourceMetadata implements SourceMetadata, SupportsListingData
     }
 
     for (PartitionChunk partitionChunk : partitionChunks) {
-      List<DatasetSplit> datasetSplits = new ArrayList<>();
-      DatasetSplitListing datasetSplitListing = (partitionChunk.getSplits());
-      Iterator splits = datasetSplitListing.iterator();
-      while (splits.hasNext()) {
-        datasetSplits.add((DatasetSplit) splits.next());
-      }
-
-      allDatasetSplits.add(datasetSplits);
+      allDatasetSplits.add(new ArrayList<>(partitionChunk.getSplits()));
     }
 
     return allDatasetSplits;

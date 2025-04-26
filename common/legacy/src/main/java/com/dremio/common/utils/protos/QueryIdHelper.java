@@ -29,6 +29,10 @@ public class QueryIdHelper {
     return (new UUID(queryId.getPart1(), queryId.getPart2())).toString();
   }
 
+  public static String getJobId(final QueryId queryId) {
+    return ExternalIdHelper.toString(AttemptId.of(queryId).getExternalId());
+  }
+
   public static QueryId getQueryIdFromString(final String queryId) {
     final UUID uuid = UUID.fromString(queryId);
     return QueryId.newBuilder()

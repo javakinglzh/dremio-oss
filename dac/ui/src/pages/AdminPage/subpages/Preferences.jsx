@@ -32,8 +32,10 @@ import { compose } from "redux";
 import {
   ALLOW_DOWNLOAD,
   NEW_DATASET_NAVIGATION,
+  RERUN_QUERY_ON_DOWNLOAD,
 } from "#oss/exports/endpoints/SupportFlags/supportFlagConstants";
 import { getSupportFlag } from "#oss/exports/endpoints/SupportFlags/getSupportFlag";
+import { isNotSoftware } from "dyn-load/utils/versionUtils";
 
 import "./Preferences.less";
 import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
@@ -63,6 +65,10 @@ const Preferences = (props) => {
     supportFlags?.[NEW_DATASET_NAVIGATION] || config.useNewDatasetNavigation,
   );
 
+  const [isRerunQueryEnabled, setIsRerunQueryEnabled] = useState(
+    supportFlags?.[RERUN_QUERY_ON_DOWNLOAD] || true,
+  );
+
   useEffect(() => {
     dispatchFetchSupportFlags("ui.autocomplete.allow").then((res) => {
       setAutocompleteIsEnabled(res.payload.value);
@@ -78,6 +84,9 @@ const Preferences = (props) => {
       try {
         const res = await getSupportFlag(ALLOW_DOWNLOAD);
         setDownloadIsEnabled(res.value);
+
+        const rerunQuery = await getSupportFlag(RERUN_QUERY_ON_DOWNLOAD);
+        setIsRerunQueryEnabled(rerunQuery.value);
       } catch (e) {
         //
       }
@@ -103,6 +112,10 @@ const Preferences = (props) => {
 
     if (supportFlags?.[NEW_DATASET_NAVIGATION] !== undefined) {
       setIsQueryDatasetEnabled(supportFlags[NEW_DATASET_NAVIGATION]);
+    }
+
+    if (supportFlags?.[RERUN_QUERY_ON_DOWNLOAD] !== undefined) {
+      setIsRerunQueryEnabled(supportFlags[RERUN_QUERY_ON_DOWNLOAD]);
     }
   }, [supportFlags]);
 
@@ -134,6 +147,16 @@ const Preferences = (props) => {
     };
     dispatchSaveSupportFlag(NEW_DATASET_NAVIGATION, saveObj);
     setIsQueryDatasetEnabled(!isQueryDatasetEnabled);
+  };
+
+  const handleRerunQueryChange = () => {
+    const saveObj = {
+      type: "BOOLEAN",
+      id: RERUN_QUERY_ON_DOWNLOAD,
+      value: !isRerunQueryEnabled,
+    };
+    dispatchSaveSupportFlag(RERUN_QUERY_ON_DOWNLOAD, saveObj);
+    setIsRerunQueryEnabled(!isRerunQueryEnabled);
   };
 
   return (
@@ -188,6 +211,29 @@ const Preferences = (props) => {
               <FormattedMessage id="Admin.Preferences.DownloadDescription" />
             </span>
           </div>
+          {!isNotSoftware() && (
+            <>
+              <hr className="setting-body-preferences-hr" />
+              <div className="preferences-settings-button-section">
+                <div className="preferences-settings-button-name">
+                  <span>
+                    <FormattedMessage id="Admin.Preferences.RerunQuery" />
+                  </span>
+                </div>
+                <div>
+                  <Toggle
+                    value={!isRerunQueryEnabled}
+                    onChange={handleRerunQueryChange}
+                  />
+                </div>
+              </div>
+              <div className="preferences-settings-description">
+                <span>
+                  <FormattedMessage id="Admin.Preferences.RerunQueryDescription" />
+                </span>
+              </div>
+            </>
+          )}
           <hr className="setting-body-preferences-hr" />
           <div className="preferences-settings-button-section">
             <div className="preferences-settings-button-name">

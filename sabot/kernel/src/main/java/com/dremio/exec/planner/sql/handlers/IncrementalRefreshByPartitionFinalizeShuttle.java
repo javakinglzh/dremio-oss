@@ -17,7 +17,9 @@ package com.dremio.exec.planner.sql.handlers;
 
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.physical.HashJoinPrel;
+import com.dremio.exec.planner.physical.HashToRandomExchangePrel;
 import com.dremio.exec.planner.physical.IncrementalRefreshByPartitionPlaceholderPrel;
+import com.google.common.collect.ImmutableList;
 import org.apache.calcite.rel.RelNode;
 
 /**
@@ -52,6 +54,18 @@ class IncrementalRefreshByPartitionFinalizeShuttle extends StatelessRelShuttleIm
               placeholderPrel.getSnapshotDiffContext().getDeleteFilesFilter(),
               hashJoinPrel.getJoinType(),
               hashJoinPrel.isSemiJoinDone());
+        }
+      }
+    } else if (other instanceof HashToRandomExchangePrel) {
+      HashToRandomExchangePrel hashToRandomExchangePrel = (HashToRandomExchangePrel) other;
+      if (hashToRandomExchangePrel.getInput()
+          instanceof IncrementalRefreshByPartitionPlaceholderPrel) {
+        final IncrementalRefreshByPartitionPlaceholderPrel placeholderPrel =
+            (IncrementalRefreshByPartitionPlaceholderPrel) hashToRandomExchangePrel.getInput();
+        if (placeholderPrel.getSnapshotDiffContext().getDeleteFilesFilter() != null) {
+          return hashToRandomExchangePrel.copy(
+              hashToRandomExchangePrel.getTraitSet(),
+              ImmutableList.of(placeholderPrel.getSnapshotDiffContext().getDeleteFilesFilter()));
         }
       }
     }

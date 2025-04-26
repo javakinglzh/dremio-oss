@@ -15,6 +15,8 @@
  */
 package com.dremio.services.pubsub.inprocess;
 
+import com.dremio.common.util.Closeable;
+import com.dremio.context.RequestContext;
 import com.dremio.options.OptionManager;
 import com.dremio.services.pubsub.PubSubClient;
 import io.opentelemetry.api.OpenTelemetry;
@@ -23,7 +25,8 @@ import javax.inject.Provider;
 import javax.inject.Singleton;
 
 @Singleton
-public class InProcessPubSubClientProvider {
+public class InProcessPubSubClientProvider implements Closeable {
+  private final Provider<RequestContext> requestContextProvider;
   private final Provider<OptionManager> optionManagerProvider;
   private final Provider<OpenTelemetry> openTelemetry;
   private final Provider<InProcessPubSubEventListener> eventListenerProvider;
@@ -32,9 +35,11 @@ public class InProcessPubSubClientProvider {
 
   @Inject
   public InProcessPubSubClientProvider(
+      Provider<RequestContext> requestContextProvider,
       Provider<OptionManager> optionManagerProvider,
       Provider<OpenTelemetry> openTelemetry,
       Provider<InProcessPubSubEventListener> eventListenerProvider) {
+    this.requestContextProvider = requestContextProvider;
     this.optionManagerProvider = optionManagerProvider;
     this.openTelemetry = openTelemetry;
     this.eventListenerProvider = eventListenerProvider;
@@ -44,8 +49,19 @@ public class InProcessPubSubClientProvider {
     if (pubSubClient == null) {
       pubSubClient =
           new InProcessPubSubClient(
-              optionManagerProvider.get(), openTelemetry.get(), eventListenerProvider.get());
+              requestContextProvider,
+              optionManagerProvider.get(),
+              openTelemetry.get(),
+              eventListenerProvider.get());
     }
     return pubSubClient;
+  }
+
+  @Override
+  public void close() {
+    if (pubSubClient != null) {
+      pubSubClient.close();
+      pubSubClient = null;
+    }
   }
 }

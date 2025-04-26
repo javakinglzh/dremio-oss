@@ -15,11 +15,16 @@
  */
 package com.dremio.sabot.join.hash;
 
+import static com.dremio.exec.ExecConstants.TARGET_BATCH_RECORDS_MAX;
 import static com.dremio.sabot.Fixtures.NULL_INT;
 import static com.dremio.sabot.Fixtures.NULL_VARCHAR;
 import static com.dremio.sabot.Fixtures.t;
 import static com.dremio.sabot.Fixtures.th;
 import static com.dremio.sabot.Fixtures.tr;
+import static com.dremio.sabot.PerformanceTestsHelper.getFieldInfos;
+import static com.dremio.sabot.PerformanceTestsHelper.getFieldNames;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.dremio.common.expression.BooleanOperator;
 import com.dremio.common.expression.FieldReference;
@@ -28,10 +33,14 @@ import com.dremio.common.expression.InputReference;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.ValueExpressions;
 import com.dremio.common.logical.data.JoinCondition;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.physical.config.HashJoinPOP;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValue;
+import com.dremio.sabot.BatchDataGenerator;
+import com.dremio.sabot.FieldInfo;
 import com.dremio.sabot.Fixtures;
+import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.join.BaseTestJoin;
 import com.dremio.sabot.op.join.hash.HashJoinOperator;
 import com.dremio.sabot.op.join.vhash.VectorizedHashJoinOperator;
@@ -40,6 +49,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Random;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.junit.After;
 import org.junit.Before;
@@ -126,7 +136,7 @@ public class TestVHashJoin extends BaseTestJoin {
 
   @Test
   public void manyColumnsDecimal() throws Exception {
-    baseManyColumnsDecimal();
+    baseManyColumnsDecimal(JoinRelType.LEFT);
   }
 
   @Test
@@ -150,6 +160,93 @@ public class TestVHashJoin extends BaseTestJoin {
         RIGHT.toGenerator(getTestAllocator()),
         DEFAULT_BATCH,
         expected);
+  }
+
+  @Test
+  public void testInnerJoinRowSizeLimit() throws Exception {
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 53); ) {
+      JoinInfo info =
+          getJoinInfo(
+              Arrays.asList(
+                  new JoinCondition("EQUALS", f("all_int_l"), f("all_int_r")),
+                  new JoinCondition("EQUALS", f("all_string_l"), f("all_string_r"))),
+              buildAndCondition(lengthVarcharGreaterThan("none_string_l", "none_string_r")),
+              JoinRelType.INNER);
+
+      // only 1 and 3 matches for extra condition, while all matches for join
+      final Fixtures.Table expected =
+          t(TH, tr(combine(R_ROWS[0], L_ROWS[0])), tr(combine(R_ROWS[2], L_ROWS[2])));
+
+      validateDual(
+          info.operator,
+          info.clazz,
+          LEFT.toGenerator(getTestAllocator()),
+          RIGHT.toGenerator(getTestAllocator()),
+          DEFAULT_BATCH,
+          expected);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+  }
+
+  @Test
+  public void testLeftJoinRowSizeLimit() throws Exception {
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 52); ) {
+      JoinInfo info =
+          getJoinInfo(
+              Arrays.asList(
+                  new JoinCondition("EQUALS", f("all_int_l"), f("all_int_r")),
+                  new JoinCondition("EQUALS", f("all_string_l"), f("all_string_r"))),
+              buildAndCondition(lengthVarcharGreaterThan("none_string_l", "none_string_r")),
+              JoinRelType.LEFT);
+
+      // only 1 and 3 matches for extra condition, while all matches for join
+      final Fixtures.Table expected =
+          t(TH, tr(combine(R_ROWS[0], L_ROWS[0])), tr(combine(R_ROWS[2], L_ROWS[2])));
+
+      validateDual(
+          info.operator,
+          info.clazz,
+          LEFT.toGenerator(getTestAllocator()),
+          RIGHT.toGenerator(getTestAllocator()),
+          DEFAULT_BATCH,
+          expected);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+  }
+
+  @Test
+  public void testRightJoinRowSizeLimit() throws Exception {
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 52); ) {
+      JoinInfo info =
+          getJoinInfo(
+              Arrays.asList(
+                  new JoinCondition("EQUALS", f("all_int_l"), f("all_int_r")),
+                  new JoinCondition("EQUALS", f("all_string_l"), f("all_string_r"))),
+              buildAndCondition(lengthVarcharGreaterThan("none_string_l", "none_string_r")),
+              JoinRelType.RIGHT);
+
+      // only 1 and 3 matches for extra condition, while all matches for join
+      final Fixtures.Table expected =
+          t(TH, tr(combine(R_ROWS[0], L_ROWS[0])), tr(combine(R_ROWS[2], L_ROWS[2])));
+
+      validateDual(
+          info.operator,
+          info.clazz,
+          LEFT.toGenerator(getTestAllocator()),
+          RIGHT.toGenerator(getTestAllocator()),
+          DEFAULT_BATCH,
+          expected);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
   }
 
   @Test
@@ -452,6 +549,70 @@ public class TestVHashJoin extends BaseTestJoin {
         right.toGenerator(getTestAllocator()),
         batchSize,
         expected);
+  }
+
+  @Test
+  public void testPivotSubBatches() throws Exception {
+    List<FieldInfo> buildFieldInfos = new ArrayList<>();
+    List<FieldInfo> probeFieldInfos = new ArrayList<>();
+    int batchSize = 4096;
+
+    buildFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Int(32, true), batchSize, FieldInfo.SortOrder.RANDOM, 7));
+    buildFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Utf8(), batchSize, FieldInfo.SortOrder.RANDOM, 2));
+    probeFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Int(32, true), batchSize, FieldInfo.SortOrder.RANDOM, 7));
+    probeFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Utf8(), batchSize, FieldInfo.SortOrder.RANDOM, 2));
+
+    List<String> buildKeyNames = getFieldNames(buildFieldInfos);
+    List<String> probeKeyNames = getFieldNames(probeFieldInfos);
+
+    int dataSize = 1100000;
+    int numOfBatches = (dataSize / batchSize / (2 * 18));
+
+    try (BatchDataGenerator buildGenerator =
+            new BatchDataGenerator(
+                buildFieldInfos,
+                getTestAllocator(),
+                numOfBatches * batchSize,
+                batchSize,
+                250,
+                10_000 * batchSize);
+        BatchDataGenerator probeGenerator =
+            new BatchDataGenerator(
+                probeFieldInfos,
+                getTestAllocator(),
+                numOfBatches * batchSize,
+                batchSize,
+                250,
+                10_000 * batchSize)) {
+      JoinInfo info = null;
+
+      List<JoinCondition> joinConditions = new ArrayList<>();
+      int numOfFixedJoinKeysPerSide = 5;
+      int numOfVarJoinKeysPerSide = 2;
+      for (int index = 0; index < numOfFixedJoinKeysPerSide; index++) {
+        joinConditions.add(
+            new JoinCondition("EQUALS", f(probeKeyNames.get(index)), f(buildKeyNames.get(index))));
+      }
+      for (int index = 7; index < numOfVarJoinKeysPerSide + 7; index++) {
+        joinConditions.add(
+            new JoinCondition("EQUALS", f(probeKeyNames.get(index)), f(buildKeyNames.get(index))));
+      }
+
+      info = getJoinInfo(joinConditions, JoinRelType.INNER);
+
+      OperatorStats stats;
+
+      try (AutoCloseable ac1 = with(HashJoinOperator.PAGE_SIZE, 4 * 1024);
+          AutoCloseable ac2 = with(TARGET_BATCH_RECORDS_MAX, 4096); ) {
+        stats =
+            validateDual(
+                info.operator, info.clazz, probeGenerator, buildGenerator, batchSize, null, true);
+      }
+    }
   }
 
   protected JoinInfo getJoinInfo(

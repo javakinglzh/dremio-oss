@@ -14,31 +14,80 @@
  * limitations under the License.
  */
 
-import { CatalogReference } from "@dremio/dremio-js/interfaces";
+import { type FC } from "react";
+import type { CatalogReference } from "@dremio/dremio-js/oss";
 import { CatalogReferenceIcon } from "./CatalogReferenceIcon";
-import { FC } from "react";
-import { HighlightIndices } from "../components/HighlightIndices";
+import clsx from "clsx";
+import Highlighter from "react-highlight-words";
 
 export const CatalogReferenceDisplay: FC<{
   catalogReference: CatalogReference;
-  highlightIndices?: {
-    name?: number[];
-    pathString: number[];
-  };
-}> = (props) => (
-  <div className="flex flex-row items-center gap-1">
-    <CatalogReferenceIcon catalogReference={props.catalogReference} />
-    <div className="flex flex-col gap-05">
-      <div className="text-semibold">
-        <HighlightIndices indices={props.highlightIndices?.name}>
-          {props.catalogReference.name}
-        </HighlightIndices>
-      </div>
-      <div className="text-sm dremio-typography-less-important">
-        <HighlightIndices indices={props.highlightIndices?.pathString}>
-          {props.catalogReference.pathString(".")}
-        </HighlightIndices>
+  className?: string;
+  searchWords?: string[];
+  searchWordsWithInFilter?: string[];
+  showPath?: boolean;
+}> = (props) => {
+  const modifiedSearchWords =
+    props.searchWordsWithInFilter || props.searchWords;
+  return (
+    <div
+      className={clsx(
+        "flex flex-row items-center gap-rel-1 overflow-hidden",
+        props.className,
+      )}
+      draggable="true"
+      onDragStart={(e) => {
+        e.dataTransfer.setData(
+          "text/plain",
+          props.catalogReference.pathString(),
+        );
+        e.dataTransfer.setData(
+          "text/json",
+          JSON.stringify({
+            type: "CatalogObject",
+            data: {
+              id: props.catalogReference.id,
+              path: props.catalogReference.path,
+              type: props.catalogReference.type,
+            },
+          }),
+        );
+      }}
+    >
+      <CatalogReferenceIcon
+        catalogReference={props.catalogReference}
+        style={{ width: "1.425em", height: "1.425em" }}
+      />
+      <div className="flex flex-col gap-rel-05 overflow-hidden">
+        <div
+          title={props.catalogReference.name}
+          className={clsx({ "text-semibold": props.showPath }, "truncate")}
+        >
+          {props.searchWords ? (
+            <Highlighter
+              searchWords={props.searchWords}
+              textToHighlight={props.catalogReference.name}
+            />
+          ) : (
+            props.catalogReference.name
+          )}
+        </div>
+        {props.showPath && (
+          <div
+            title={props.catalogReference.pathString(".")}
+            className="text-rel-sm dremio-typography-less-important truncate"
+          >
+            {modifiedSearchWords ? (
+              <Highlighter
+                searchWords={modifiedSearchWords}
+                textToHighlight={props.catalogReference.pathString(".")}
+              />
+            ) : (
+              props.catalogReference.pathString(".")
+            )}
+          </div>
+        )}
       </div>
     </div>
-  </div>
-);
+  );
+};

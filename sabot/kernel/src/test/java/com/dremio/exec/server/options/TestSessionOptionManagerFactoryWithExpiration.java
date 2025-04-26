@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.server.options;
 
-import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import com.dremio.test.DremioTest;
 import java.time.Duration;

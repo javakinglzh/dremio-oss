@@ -15,7 +15,19 @@
  */
 package com.dremio.exec.store.easy;
 
+import static java.util.Objects.requireNonNullElse;
+
 import com.dremio.common.expression.CompleteType;
+import com.dremio.common.expression.FieldReference;
+import com.dremio.common.expression.FunctionCallFactory;
+import com.dremio.common.expression.IfExpression;
+import com.dremio.common.expression.IfExpression.IfCondition;
+import com.dremio.common.expression.LogicalExpression;
+import com.dremio.common.expression.NullExpression;
+import com.dremio.common.expression.SchemaPath;
+import com.dremio.common.expression.ValueExpressions.QuotedString;
+import com.dremio.common.logical.data.NamedExpression;
+import com.dremio.common.util.MajorTypeHelper;
 import com.dremio.exec.expr.fn.impl.DateFunctionsUtils;
 import com.dremio.exec.expr.fn.impl.DecimalFunctions;
 import com.dremio.exec.physical.config.ExtendedFormatOptions;
@@ -30,11 +42,98 @@ import org.joda.time.DateTime;
 import org.joda.time.Days;
 import org.joda.time.format.DateTimeFormatter;
 
-public class EasyFormatUtils {
+public final class EasyFormatUtils {
 
   public static final String DEFAULT_DATE_FORMAT = "YYYY-MM-DD";
   public static final String DEFAULT_TIME_FORMAT = "HH24:MI:SS.FFF";
   public static final String DEFAULT_TIMESTAMP_FORMAT = "YYYY-MM-DD HH24:MI:SS.FFF";
+
+  public static NamedExpression createExpression(
+      SchemaPath inputRef, Field targetField, ExtendedFormatOptions extendedFormatOptions) {
+
+    FieldReference outputRef = FieldReference.getWithQuotedRef(targetField.getName());
+    LogicalExpression expression = inputRef;
+
+    // We don't add trimming (e.g. BTRIM) for TRIM_SPACE 'true'; it is handled by the text parser
+
+    // EMPTY_AS_NULL 'true' and/or NULL_IF (...): Build an IF expression with all the values
+    // (NULLIF function does not exist; it is also rewritten if used in the SQL)
+    LogicalExpression valueCheck = null;
+    if (requireNonNullElse(extendedFormatOptions.getEmptyAsNull(), false)) {
+      valueCheck = FunctionCallFactory.createExpression("equal", expression, new QuotedString(""));
+    }
+    for (String nullIfValues :
+        requireNonNullElse(extendedFormatOptions.getNullIfExpressions(), List.<String>of())) {
+      if (valueCheck == null) {
+        valueCheck =
+            FunctionCallFactory.createExpression(
+                "equal", expression, new QuotedString(nullIfValues));
+      } else {
+        valueCheck =
+            FunctionCallFactory.createExpression(
+                "booleanOr",
+                valueCheck,
+                FunctionCallFactory.createExpression(
+                    "equal", expression, new QuotedString(nullIfValues)));
+      }
+    }
+    if (valueCheck != null) {
+      expression =
+          IfExpression.newBuilder()
+              .setIfCondition(new IfCondition(valueCheck, NullExpression.INSTANCE))
+              .setElse(expression)
+              .setOutputType(CompleteType.VARCHAR)
+              .build();
+    }
+
+    // VARCHAR -> target type
+    switch (CompleteType.fromField(targetField).toMinorType()) {
+      case BIT:
+      case INT:
+      case BIGINT:
+      case FLOAT4:
+      case FLOAT8:
+      case DECIMAL:
+        expression =
+            FunctionCallFactory.createCast(
+                MajorTypeHelper.getMajorTypeForField(targetField), expression);
+        break;
+      case VARCHAR:
+        // no-op
+        break;
+      case DATE:
+        expression =
+            FunctionCallFactory.createExpression(
+                "to_date",
+                expression,
+                new QuotedString(
+                    requireNonNullElse(
+                        extendedFormatOptions.getDateFormat(), DEFAULT_DATE_FORMAT)));
+        break;
+      case TIME:
+        expression =
+            FunctionCallFactory.createExpression(
+                "to_time",
+                expression,
+                new QuotedString(
+                    requireNonNullElse(
+                        extendedFormatOptions.getTimeFormat(), DEFAULT_TIME_FORMAT)));
+        break;
+      case TIMESTAMPMILLI:
+        expression =
+            FunctionCallFactory.createExpression(
+                "to_timestamp",
+                expression,
+                new QuotedString(
+                    requireNonNullElse(
+                        extendedFormatOptions.getTimeStampFormat(), DEFAULT_TIMESTAMP_FORMAT)));
+        break;
+      default:
+        throw new IllegalArgumentException("Unsupported target type in field: " + targetField);
+    }
+
+    return new NamedExpression(expression, outputRef);
+  }
 
   public static Object getValue(
       Field field, String varcharValue, ExtendedFormatOptions extendedFormatOptions) {
@@ -302,4 +401,6 @@ public class EasyFormatUtils {
     input = input.substring(0, input.length() - tzAbbr.length()) + offset.get();
     return input;
   }
+
+  private EasyFormatUtils() {}
 }

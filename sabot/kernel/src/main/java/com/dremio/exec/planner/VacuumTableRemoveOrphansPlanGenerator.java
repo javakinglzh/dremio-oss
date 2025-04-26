@@ -26,7 +26,6 @@ import static com.dremio.exec.store.SystemSchemas.TABLE_LOCATION;
 import static com.dremio.exec.store.iceberg.SnapshotsScanOptions.Mode.ALL_SNAPSHOTS;
 import static org.apache.calcite.sql.type.SqlTypeName.BIGINT;
 
-import com.dremio.common.JSONOptions;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.datastore.LegacyProtobufSerializer;
 import com.dremio.exec.catalog.StoragePluginId;
@@ -56,7 +55,6 @@ import com.dremio.io.file.UriSchemes;
 import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf;
 import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
@@ -106,9 +104,11 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
       VacuumOptions vacuumOptions,
       StoragePluginId internalStoragePlugin,
       StoragePluginId storagePluginId,
-      String user,
+      String userName,
+      String userId,
       CreateTableEntry createTableEntry,
-      String tableLocation) {
+      String tableLocation,
+      List<String> qualifiedTableName) {
     super(
         cluster,
         traitSet,
@@ -117,7 +117,9 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
         vacuumOptions,
         internalStoragePlugin,
         storagePluginId,
-        user);
+        userName,
+        userId,
+        qualifiedTableName);
     this.tableLocation = tableLocation;
     this.schemeVariate = getFilePathScheme(tableLocation, createTableEntry);
   }
@@ -187,7 +189,8 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
     try {
       Prel locationProviderPlan = locationProviderPrel();
       Prel allRemovablePathsPlan = listAllWalkableReferencesPlan(locationProviderPlan);
-      Prel allLiveRefsPlan = deDupFilePathAndTypeScanPlan(createLiveSnapshotsProducerPlan());
+      Prel allLiveRefsPlan =
+          deDupFilePathAndTypeScanPlan(liveSnapshotsScanPlan(ALL_SNAPSHOTS, qualifiedTableName));
       Prel orphanFilesPlan = orphanFilesPlan(allRemovablePathsPlan, allLiveRefsPlan);
       Prel deleteOrphanFilesPlan = deleteOrphanFilesPlan(orphanFilesPlan);
       return outputSummaryPlan(deleteOrphanFilesPlan);
@@ -247,11 +250,7 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
         Iterables.getFirst(splits.get(0).getDatasetSplits(), null);
     Preconditions.checkNotNull(extendedProp, "SplitXAttrs not setup correctly");
     return LegacyProtobufSerializer.parseFrom(
-        IcebergProtobuf.IcebergDatasetSplitXAttr.PARSER, extendedProp.getSplitExtendedProperty());
-  }
-
-  protected Prel createLiveSnapshotsProducerPlan() {
-    return snapshotsScanPlan(ALL_SNAPSHOTS);
+        IcebergProtobuf.IcebergDatasetSplitXAttr.parser(), extendedProp.getSplitExtendedProperty());
   }
 
   @Override
@@ -310,7 +309,6 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
             unionExchangePlan.getTraitSet(),
             unionExchangePlan,
             ImmutableBitSet.of(),
-            Collections.EMPTY_LIST,
             aggs,
             null);
 
@@ -334,20 +332,21 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
   }
 
   protected Prel locationProviderPrel() {
-    ObjectNode dirListingEntry = OBJECT_MAPPER.createObjectNode();
     // Adopt user-input location to list orphan files, if applicable. Otherwise, use table's
     // location itself.
     String dirListingLocation =
         StringUtils.isNoneEmpty(vacuumOptions.getLocation())
             ? vacuumOptions.getLocation()
             : tableLocation;
-    dirListingEntry.put(PATH, dirListingLocation);
+    RelDataType rowType = getRowType(PATH_SCHEMA, cluster.getTypeFactory());
     return new ValuesPrel(
         cluster,
         traitSet,
-        VacuumOutputSchema.getRowType(PATH_SCHEMA, cluster.getTypeFactory()),
-        new JSONOptions(dirListingEntry),
-        1);
+        rowType,
+        ImmutableList.of(
+            ImmutableList.of(
+                DremioRexBuilder.INSTANCE.makeLiteral(
+                    dirListingLocation, rowType.getFieldList().get(0).getType()))));
   }
 
   protected Prel projectFilePathOnDirList(Prel dirList) {
@@ -407,7 +406,7 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
             getRowType(dirListingSchema, cluster.getTypeFactory()),
             estimateRowCountFn,
             icebergCostEstimates.getEstimatedRows(),
-            user);
+            userName);
 
     return dirListingPrel;
   }
@@ -452,7 +451,6 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
           input.getTraitSet(),
           input,
           groupSet,
-          ImmutableList.of(groupSet),
           ImmutableList.of(aggOnFilePath),
           null);
     } catch (InvalidRelException e) {
@@ -479,8 +477,9 @@ public class VacuumTableRemoveOrphansPlanGenerator extends VacuumPlanGenerator {
         outSchema,
         input,
         icebergCostEstimates.getEstimatedRows(),
-        user,
-        tableLocation);
+        userName,
+        tableLocation,
+        qualifiedTableName);
   }
 
   @Override

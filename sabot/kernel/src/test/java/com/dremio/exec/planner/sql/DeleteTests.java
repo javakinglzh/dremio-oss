@@ -33,6 +33,7 @@ import static com.dremio.exec.planner.sql.DmlQueryTestUtils.verifyData;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.exec.planner.sql.DmlQueryTestUtils.DmlRowwiseOperationWriteMode;
+import com.dremio.exec.planner.sql.PartitionTransform.Type;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.commons.lang3.ArrayUtils;
@@ -753,6 +754,23 @@ public class DeleteTests {
           table,
           0,
           null);
+    }
+  }
+
+  public static void testDeleteWithPartitionTransform(
+      BufferAllocator allocator, String source, DmlRowwiseOperationWriteMode dmlWriteMode)
+      throws Exception {
+    try (DmlQueryTestUtils.Table table =
+        DmlQueryTestUtils.createBasicTableWithWithDatesPartitionTransform(
+            source, 2, 10, 0, "2000-01-01", "YYYY-MM-DD", Type.DAY)) {
+      configureDmlWriteModeProperties(table, dmlWriteMode);
+      testDmlQuery(
+          allocator,
+          "DELETE FROM %s",
+          new Object[] {table.fqn, table.columns[1]},
+          table,
+          10,
+          EMPTY_EXPECTED_DATA);
     }
   }
   // END: Contexts + Paths

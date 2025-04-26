@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.hadoop;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.hadoop.FSErrorTestUtils.getDummyArguments;
 import static com.dremio.exec.hadoop.FSErrorTestUtils.newFSError;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -76,7 +75,6 @@ public class TestFSDataInputStreamWrapper {
     Class<?> byteBufferPositionedReadableClass =
         getClass("org.apache.hadoop.fs.ByteBufferPositionedReadable");
 
-    assumeNonMaprProfile();
     final IOException ioException = new IOException("test io exception");
     final FSError fsError = newFSError(ioException);
     FSDataInputStream fdis =

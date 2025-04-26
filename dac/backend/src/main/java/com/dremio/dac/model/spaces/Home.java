@@ -15,6 +15,8 @@
  */
 package com.dremio.dac.model.spaces;
 
+import static com.dremio.service.namespace.NamespaceUtils.HOME_PREFIX;
+
 import com.dremio.dac.model.job.JobFilters;
 import com.dremio.dac.model.namespace.DatasetContainer;
 import com.dremio.dac.model.namespace.NamespaceTree;
@@ -42,7 +44,7 @@ public class Home implements DatasetContainer {
 
   @JsonCreator
   public Home(@JsonProperty("homeConfig") HomeConfig homeConfig) {
-    this.homePath = new HomePath(new HomeName(HomeName.HOME_PREFIX + homeConfig.getOwner()));
+    this.homePath = new HomePath(new HomeName(HOME_PREFIX + homeConfig.getOwner()));
     this.homeConfig = homeConfig;
   }
 

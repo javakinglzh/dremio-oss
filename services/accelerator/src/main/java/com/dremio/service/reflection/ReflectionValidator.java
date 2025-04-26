@@ -74,40 +74,26 @@ public class ReflectionValidator {
   /**
    * @return false if reflection goal is invalid
    */
-  public boolean isValid(ReflectionGoal goal, DremioTable table) {
+  public boolean isValid(ReflectionGoal goal, DremioTable table, boolean isReadOnly) {
     try {
-      validate(goal, table);
+      validate(goal, table, isReadOnly);
     } catch (Exception e) {
       return false;
     }
     return true;
   }
 
-  public void validate(ReflectionGoal goal) {
-    validate(goal, null);
+  public void validate(ReflectionGoal goal, boolean isReadOnly) {
+    validate(goal, null, isReadOnly);
   }
 
   /**
    * @throws UserException if reflection goal is invalid
    */
-  public void validate(ReflectionGoal goal, DremioTable table) {
+  public void validate(ReflectionGoal goal, DremioTable table, boolean isReadOnly) {
     ReflectionUtils.validateReflectionGoalWithoutSchema(goal, optionManager.get());
 
-    if (table == null) {
-      // The dataset that the reflection refers to must exist.
-      final EntityExplorer entityExplorer =
-          catalogService
-              .get()
-              .getCatalog(
-                  MetadataRequestOptions.newBuilder()
-                      .setSchemaConfig(
-                          SchemaConfig.newBuilder(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
-                              .build())
-                      .setCheckValidity(false)
-                      .build());
-      table = entityExplorer.getTable(goal.getDatasetId());
-      Preconditions.checkNotNull(table, "datasetId must reference an existing dataset");
-    }
+    table = validateTable(goal, table, isReadOnly);
 
     final List<ViewFieldType> schemaFields =
         ViewFieldsHelper.getBatchSchemaFields(table.getSchema());
@@ -127,6 +113,25 @@ public class ReflectionValidator {
         goal.getDetails().getPartitionFieldList(), schemaMap, "Partition", true);
     validateDimensions(goal.getDetails().getDimensionFieldList(), schemaMap);
     validatePartitionTransformsWithSchema(goal.getDetails().getPartitionFieldList(), table);
+  }
+
+  protected DremioTable validateTable(ReflectionGoal goal, DremioTable table, boolean isReadOnly) {
+    if (table == null) {
+      // The dataset that the reflection refers to must exist.
+      final EntityExplorer entityExplorer =
+          catalogService
+              .get()
+              .getCatalog(
+                  MetadataRequestOptions.newBuilder()
+                      .setSchemaConfig(
+                          SchemaConfig.newBuilder(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
+                              .build())
+                      .setCheckValidity(false)
+                      .build());
+      table = entityExplorer.getTable(goal.getDatasetId());
+      Preconditions.checkNotNull(table, "datasetId must reference an existing dataset");
+    }
+    return table;
   }
 
   /**

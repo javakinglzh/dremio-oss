@@ -18,6 +18,8 @@ package com.dremio.sabot.op.fromjson;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.FieldSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.Describer;
 import com.dremio.common.expression.SchemaPath;
@@ -25,7 +27,10 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogOptions;
 import com.dremio.exec.exception.JsonFieldChangeExceptionContext;
 import com.dremio.exec.exception.SetupException;
+import com.dremio.exec.physical.base.GroupScan;
+import com.dremio.exec.physical.config.ExtendedFormatOptions;
 import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorAccessibleComplexWriter;
@@ -33,8 +38,10 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.exec.store.easy.json.JsonProcessor.ReadState;
 import com.dremio.exec.vector.complex.fn.JsonReader;
+import com.dremio.exec.vector.complex.fn.JsonReaderIOException;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.fromjson.ConvertFromJsonPOP.ConversionColumn;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.base.Preconditions;
 import java.io.EOFException;
@@ -42,9 +49,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ComplexWriter;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.util.TransferPair;
@@ -52,15 +61,22 @@ import org.apache.arrow.vector.util.TransferPair;
 public class ConvertFromJsonOperator implements SingleInputOperator {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ConvertFromJsonOperator.class);
+  private static final long INT_SIZE = 4;
 
   private final ConvertFromJsonPOP config;
   private final OperatorContext context;
+  private int rowSizeLimit;
+  private boolean rowSizeLimitEnabled;
 
   private State state = State.NEEDS_SETUP;
   private VectorAccessible incoming;
   private VectorContainer outgoing;
   private List<TransferPair> transfers = new ArrayList<>();
   private List<JsonConverter<?>> converters = new ArrayList<>();
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private boolean rowSizeLimitEnabledForThisOperator;
 
   public ConvertFromJsonOperator(OperatorContext context, ConvertFromJsonPOP config) {
     this.config = config;
@@ -77,6 +93,13 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
     final Map<String, ConversionColumn> cMap = new HashMap<>();
     for (ConversionColumn c : config.getColumns()) {
       cMap.put(c.getInputField().toLowerCase(), c);
+
+      if (c.getErrorMode() == ConvertFromErrorMode.NULL_ON_ERROR) {
+        if (c.hasDummySchema()) {
+          throw new UnsupportedOperationException(
+              "Schema must be provided when using NULL_ON_ERROR mode.");
+        }
+      }
     }
 
     final int sizeLimit =
@@ -85,10 +108,11 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
         Math.toIntExact(
             this.context.getOptions().getOption(CatalogOptions.METADATA_LEAF_COLUMN_MAX));
 
-    final int rowSizeLimit =
+    this.rowSizeLimit =
         Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
-    final boolean rowSizeLimitEnabled =
+    this.rowSizeLimitEnabled =
         this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
 
     for (VectorWrapper<?> w : accessible) {
       final Field f = w.getField();
@@ -106,8 +130,6 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
               new BinaryConverter(
                   conversion,
                   sizeLimit,
-                  rowSizeLimitEnabled,
-                  rowSizeLimit,
                   maxLeafLimit,
                   (VarBinaryVector) incomingVector,
                   outgoingVector));
@@ -116,15 +138,14 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
               new CharConverter(
                   conversion,
                   sizeLimit,
-                  rowSizeLimitEnabled,
-                  rowSizeLimit,
                   maxLeafLimit,
                   (VarCharVector) incomingVector,
                   outgoingVector));
         }
 
       } else {
-        TransferPair pair = incomingVector.getTransferPair(context.getAllocator());
+        TransferPair pair =
+            incomingVector.getTransferPair(incomingVector.getField(), context.getAllocator());
         transfers.add(pair);
         outgoing.add(pair.getTo());
       }
@@ -136,9 +157,22 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
               "Expected %d input column(s) but only found %d",
               config.getColumns().size(), converters.size()));
     }
-
     outgoing.buildSchema();
     state = State.CAN_CONSUME;
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (!VectorContainerHelper.isVarLenColumnPresent(outgoing)) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+      }
+    }
+
     return outgoing;
   }
 
@@ -164,8 +198,37 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
 
     outgoing.setRecordCount(records);
     state = State.CAN_CONSUME;
+    checkForRowSizeOverLimit(records);
 
     return records;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   @Override
@@ -177,6 +240,10 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
   @Override
   public void close() throws Exception {
     AutoCloseables.close(outgoing);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   @Override
@@ -195,19 +262,10 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
     BinaryConverter(
         ConversionColumn column,
         int sizeLimit,
-        boolean rowSizeLimitEnabled,
-        int rowSizeLimit,
         int maxLeafLimit,
         VarBinaryVector vector,
         ValueVector outgoingVector) {
-      super(
-          column,
-          sizeLimit,
-          rowSizeLimitEnabled,
-          rowSizeLimit,
-          maxLeafLimit,
-          vector,
-          outgoingVector);
+      super(column, sizeLimit, maxLeafLimit, vector, outgoingVector);
     }
 
     @Override
@@ -226,19 +284,10 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
     CharConverter(
         ConversionColumn column,
         int sizeLimit,
-        boolean rowSizeLimitEnabled,
-        int rowSizeLimit,
         int maxLeafLimit,
         VarCharVector vector,
         ValueVector outgoingVector) {
-      super(
-          column,
-          sizeLimit,
-          rowSizeLimitEnabled,
-          rowSizeLimit,
-          maxLeafLimit,
-          vector,
-          outgoingVector);
+      super(column, sizeLimit, maxLeafLimit, vector, outgoingVector);
     }
 
     @Override
@@ -264,27 +313,51 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
     public JsonConverter(
         ConversionColumn column,
         int sizeLimit,
-        boolean rowSizeLimitEnabled,
-        int rowSizeLimit,
         int maxLeafLimit,
         T vector,
         ValueVector outgoingVector) {
       this.column = column;
       this.vector = vector;
       this.writer = VectorAccessibleComplexWriter.getWriter(column.getInputField(), outgoing);
+      boolean schemaImposedMode = false;
+      BatchSchema targetSchema = null;
+      if (column.getErrorMode() == ConvertFromErrorMode.NULL_ON_ERROR) {
+        schemaImposedMode = true;
+        targetSchema = BatchSchema.of(column.asField(column.getInputField()));
+
+        // if we're running in schema imposed mode, preset the ComplexWriter to the desired write
+        // mode - STRUCT or LIST - so that invalid data can't put it into the wrong mode
+        if (column.getType().isStruct()) {
+          writer.rootAsStruct();
+        } else if (column.getType().isList()) {
+          writer.rootAsList();
+        }
+      }
+
       this.reader =
-          new JsonReader(
-              context.getManagedBuffer(),
-              sizeLimit,
-              rowSizeLimitEnabled,
-              rowSizeLimit,
-              maxLeafLimit,
-              context.getOptions().getOption(ExecConstants.JSON_READER_ALL_TEXT_MODE_VALIDATOR),
-              false,
-              false,
-              context
-                  .getOptions()
-                  .getOption(PlannerSettings.ENFORCE_VALID_JSON_DATE_FORMAT_ENABLED));
+          JsonReader.builder()
+              .setManagedBuf(context.getManagedBuffer())
+              .setMaxFieldSize(sizeLimit)
+              .setMaxLeafLimit(maxLeafLimit)
+              .setAllTextMode(
+                  context.getOptions().getOption(ExecConstants.JSON_READER_ALL_TEXT_MODE_VALIDATOR))
+              .setEnforceValidJsonDateFormat(
+                  context
+                      .getOptions()
+                      .getOption(PlannerSettings.ENFORCE_VALID_JSON_DATE_FORMAT_ENABLED))
+              .setSchemaImposedMode(schemaImposedMode)
+              .setAllowRootList(true)
+              .setTargetSchema(targetSchema)
+              .setColumns(GroupScan.ALL_COLUMNS)
+              .setExtendedFormatOptions(new ExtendedFormatOptions())
+              // we don't want to limit the row size here because convert from json could contain
+              // several call in one row, but in reader,
+              // limit w ill be checked for each call separately. And we don't want to
+              // double-checking
+              // the row size limit,
+              // so we will check the row size limit in the operator itself
+              .setRowSizeLimitEnabled(false)
+              .build();
       this.outgoingVector = outgoingVector;
       this.sizeLimit = sizeLimit;
     }
@@ -302,10 +375,29 @@ public class ConvertFromJsonOperator implements SingleInputOperator {
           }
           reader.setSource(bytes);
 
-          final ReadState state = reader.write(writer);
-          if (state == ReadState.END_OF_STREAM) {
-            throw new EOFException("Unexpected end of stream while parsing JSON data.");
+          try {
+            final ReadState state = reader.write(writer);
+            if (state == ReadState.END_OF_STREAM) {
+              throw new EOFException("Unexpected end of stream while parsing JSON data.");
+            }
+          } catch (JsonReaderIOException ex) {
+            if (column.getErrorMode() == ConvertFromErrorMode.NULL_ON_ERROR) {
+              // reset the position as it will have been advanced by the reader
+              writer.setPosition(i);
+              if (column.getType().isStruct()) {
+                writer.rootAsStruct().writeNull();
+              } else if (column.getType().isList()) {
+                writer.rootAsList().writeNull();
+              } else {
+                throw new UnsupportedOperationException(
+                    "Unsupported output vector type " + column.getType().toString());
+              }
+              logger.trace("NULL_ON_ERROR mode - returning NULL due to error", ex);
+            } else {
+              throw ex;
+            }
           }
+
           writer.setValueCount(records);
         }
 

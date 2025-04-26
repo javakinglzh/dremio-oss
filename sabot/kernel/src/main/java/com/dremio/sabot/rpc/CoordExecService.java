@@ -20,6 +20,7 @@ import static com.dremio.telemetry.api.metrics.MeterProviders.newGauge;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableThreadPool;
+import com.dremio.common.concurrent.ContextMigratingExecutorService.ContextMigratingCloseableExecutorService;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.proto.CoordExecRPC;
@@ -84,7 +85,7 @@ public class CoordExecService implements Service {
   private final Provider<CoordinationProtos.NodeEndpoint> selfEndpoint;
   private final Provider<JobTelemetryClient> jobTelemetryClient;
   private final RpcConfig config;
-  private CloseableThreadPool rpcOffloadPool;
+  private ContextMigratingCloseableExecutorService rpcOffloadPool;
 
   /**
    * Create a new exec service. Note that at start time, the provider to one of the handlers may be
@@ -126,7 +127,9 @@ public class CoordExecService implements Service {
   @Override
   public void start() throws Exception {
     fabricService.get().registerProtocol(new CoordExecProtocol());
-    rpcOffloadPool = new CloseableThreadPool("Fabric-RPC-Offload");
+    rpcOffloadPool =
+        new ContextMigratingCloseableExecutorService<>(
+            new CloseableThreadPool(("Fabric-RPC-Offload")));
 
     newGauge("rpc.bit.control_current", allocator::getAllocatedMemory);
     newGauge("rpc.bit.control_peak", allocator::getPeakMemoryAllocation);
@@ -200,44 +203,44 @@ public class CoordExecService implements Service {
 
       switch (rpcType) {
 
-          // coordinator > executor
+        // coordinator > executor
         case RpcType.REQ_CANCEL_FRAGMENTS_VALUE:
           {
-            final CancelFragments fragments = get(pBody, CancelFragments.PARSER);
+            final CancelFragments fragments = get(pBody, CancelFragments.parser());
             executorService.get().cancelFragments(fragments, responseObserver);
             break;
           }
 
-          // coordinator > executor
+        // coordinator > executor
         case RpcType.REQ_RECONCILE_ACTIVE_QUERIES_VALUE:
           {
-            final ActiveQueryList activeQueryList = get(pBody, ActiveQueryList.PARSER);
+            final ActiveQueryList activeQueryList = get(pBody, ActiveQueryList.parser());
             executorService.get().reconcileActiveQueries(activeQueryList, responseObserver);
             break;
           }
 
-          // coordinator > executor
+        // coordinator > executor
         case RpcType.REQ_SOURCE_CONFIG_VALUE:
         case RpcType.REQ_DEL_SOURCE_VALUE:
           {
             final CoordExecRPC.SourceWrapper sourceWrapper =
-                get(pBody, CoordExecRPC.SourceWrapper.PARSER);
+                get(pBody, CoordExecRPC.SourceWrapper.parser());
             executorService.get().propagatePluginChange(sourceWrapper, responseObserver);
             break;
           }
 
-          // coordinator > executor
+        // coordinator > executor
         case RpcType.REQ_START_FRAGMENTS_VALUE:
           {
-            final InitializeFragments fragments = get(pBody, InitializeFragments.PARSER);
+            final InitializeFragments fragments = get(pBody, InitializeFragments.parser());
             executorService.get().startFragments(fragments, responseObserver);
             break;
           }
 
-          // coordinator > executor
+        // coordinator > executor
         case RpcType.REQ_ACTIVATE_FRAGMENTS_VALUE:
           {
-            final ActivateFragments fragments = get(pBody, ActivateFragments.PARSER);
+            final ActivateFragments fragments = get(pBody, ActivateFragments.parser());
             executorService.get().activateFragment(fragments, responseObserver);
             break;
           }
@@ -265,21 +268,21 @@ public class CoordExecService implements Service {
           executorService.get().getNodeStats(Empty.newBuilder().build(), responseObserverStats);
           break;
 
-          // executor > coordinator
+        // executor > coordinator
         case RpcType.REQ_QUERY_DATA_VALUE:
-          QueryData header = get(pBody, QueryData.PARSER);
+          QueryData header = get(pBody, QueryData.parser());
           execResults.get().dataArrived(header, dBody, null, sender);
           break;
 
-          // offload screen complete, node query complete and node query error to a different
-          // thread.
-          // this causes outbound rpcs to master like
-          // 1. profile update
-          // 2. wlm stats update
-          // the first is likely to cause a deadlock
-          // the second will fail and block the query
+        // offload screen complete, node query complete and node query error to a different
+        // thread.
+        // this causes outbound rpcs to master like
+        // 1. profile update
+        // 2. wlm stats update
+        // the first is likely to cause a deadlock
+        // the second will fail and block the query
         case RpcType.REQ_NODE_QUERY_SCREEN_COMPLETION_VALUE:
-          NodeQueryScreenCompletion completion = get(pBody, NodeQueryScreenCompletion.PARSER);
+          NodeQueryScreenCompletion completion = get(pBody, NodeQueryScreenCompletion.parser());
           rpcOffloadPool.submit(
               () -> {
                 try {
@@ -297,7 +300,7 @@ public class CoordExecService implements Service {
           break;
 
         case RpcType.REQ_NODE_QUERY_COMPLETION_VALUE:
-          NodeQueryCompletion nodeQueryCompletion = get(pBody, NodeQueryCompletion.PARSER);
+          NodeQueryCompletion nodeQueryCompletion = get(pBody, NodeQueryCompletion.parser());
           rpcOffloadPool.submit(
               () -> {
                 try {
@@ -317,7 +320,7 @@ public class CoordExecService implements Service {
           break;
 
         case RpcType.REQ_NODE_QUERY_ERROR_VALUE:
-          NodeQueryFirstError firstError = get(pBody, NodeQueryFirstError.PARSER);
+          NodeQueryFirstError firstError = get(pBody, NodeQueryFirstError.parser());
           rpcOffloadPool.submit(
               () -> {
                 try {
@@ -337,42 +340,49 @@ public class CoordExecService implements Service {
           break;
 
         case RpcType.REQ_NODE_QUERY_PROFILE_VALUE:
-          ExecutorQueryProfile profile = get(pBody, ExecutorQueryProfile.PARSER);
-          // propagate to job-telemetry service (in-process server).
-          JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub stub =
-              jobTelemetryClient.get().getBlockingStub();
-          if (stub == null) {
-            // telemetry client/service has not been fully started. a message can still arrive
-            // if coordinator has been restarted while active queries are running in executor.
-            logger.info(
-                "Dropping a profile message from end point : "
-                    + profile.getEndpoint()
-                    + ". This is harmless since the query will be terminated shortly due to coordinator "
-                    + "restarting");
-          } else {
-            PutExecutorProfileRequest request =
-                PutExecutorProfileRequest.newBuilder().setProfile(profile).build();
-            String jobId = QueryIdHelper.getQueryId(request.getProfile().getQueryId());
-            try {
-              jobTelemetryClient.get().getRetryer().call(() -> stub.putExecutorProfile(request));
-            } catch (RuntimeException ex) {
-              jobTelemetryClient
-                  .get()
-                  .getSuppressedErrorCounter()
-                  .withTags(
-                      MetricLabel.JTS_METRIC_TAG_KEY_RPC,
-                      MetricLabel.JTS_METRIC_TAG_VALUE_RPC_PUT_EXECUTOR_PROFILE,
-                      MetricLabel.JTS_METRIC_TAG_KEY_ERROR_ORIGIN,
-                      MetricLabel.JTS_METRIC_TAG_VALUE_COORD_EXEC_NODE_QUERY_PROFILE)
-                  .increment();
-              logger.warn(
-                  "Could not send intermediate executor profile for job id "
-                      + jobId
-                      + " to JTS."
-                      + ex.getMessage());
-            }
-          }
-          sender.send(OK);
+          ExecutorQueryProfile profile = get(pBody, ExecutorQueryProfile.parser());
+          rpcOffloadPool.submit(
+              () -> {
+                // propagate to job-telemetry service (in-process server).
+                JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub stub =
+                    jobTelemetryClient.get().getBlockingStub();
+                if (stub == null) {
+                  // telemetry client/service has not been fully started. a message can still arrive
+                  // if coordinator has been restarted while active queries are running in executor.
+                  logger.info(
+                      "Dropping a profile message from end point : "
+                          + profile.getEndpoint()
+                          + ". This is harmless since the query will be terminated shortly due to coordinator "
+                          + "restarting");
+                } else {
+                  PutExecutorProfileRequest request =
+                      PutExecutorProfileRequest.newBuilder().setProfile(profile).build();
+                  String jobId = QueryIdHelper.getQueryId(request.getProfile().getQueryId());
+                  try {
+                    jobTelemetryClient
+                        .get()
+                        .getRetryer()
+                        .call(() -> stub.putExecutorProfile(request));
+                  } catch (RuntimeException ex) {
+                    jobTelemetryClient
+                        .get()
+                        .getSuppressedErrorCounter()
+                        .withTags(
+                            MetricLabel.JTS_METRIC_TAG_KEY_RPC,
+                            MetricLabel.JTS_METRIC_TAG_VALUE_RPC_PUT_EXECUTOR_PROFILE,
+                            MetricLabel.JTS_METRIC_TAG_KEY_ERROR_ORIGIN,
+                            MetricLabel.JTS_METRIC_TAG_VALUE_COORD_EXEC_NODE_QUERY_PROFILE)
+                        .increment();
+                    logger.warn(
+                        "Could not send intermediate executor profile for job id "
+                            + jobId
+                            + " to JTS."
+                            + ex.getMessage());
+                  }
+                }
+                sender.send(OK);
+              });
+
           break;
 
         default:

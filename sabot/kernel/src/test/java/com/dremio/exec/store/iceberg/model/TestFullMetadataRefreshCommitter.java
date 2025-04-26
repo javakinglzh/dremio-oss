@@ -87,12 +87,10 @@ public class TestFullMetadataRefreshCommitter {
                 null,
                 "test",
                 new BatchSchema(new ArrayList<>()),
-                null,
                 new ArrayList<>(),
                 icebergCommand,
                 client,
                 datasetConfig,
-                null,
                 null,
                 null,
                 null));

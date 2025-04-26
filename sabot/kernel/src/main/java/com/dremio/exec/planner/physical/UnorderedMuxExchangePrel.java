@@ -105,4 +105,8 @@ public class UnorderedMuxExchangePrel extends ExchangePrel {
   public SelectionVectorMode getEncoding() {
     return SelectionVectorMode.NONE;
   }
+
+  public int getFragmentsPerNode() {
+    return fragmentsPerNode;
+  }
 }

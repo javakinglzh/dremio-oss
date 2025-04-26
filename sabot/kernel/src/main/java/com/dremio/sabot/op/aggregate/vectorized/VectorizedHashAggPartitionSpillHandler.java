@@ -31,6 +31,7 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -108,6 +109,7 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
   private VectorizedHashAggPartitionSerializable inProgressSpill;
   private final OperatorStats operatorStats;
   private final long warnMaxSpillTime;
+  private boolean useNewFixedAccumulatorAllocation;
 
   public VectorizedHashAggPartitionSpillHandler(
       final VectorizedHashAggPartition[] hashAggPartitions,
@@ -118,7 +120,8 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
       final PartitionToLoadSpilledData loadingPartition,
       final SpillService spillService,
       final boolean minimizeSpilledPartitions,
-      final OperatorStats stats) {
+      final OperatorStats stats,
+      final boolean useNewFixedAccumulatorAllocation) {
 
     this.activePartitions = hashAggPartitions;
     this.spilledPartitions = new LinkedList<>();
@@ -151,6 +154,7 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
     this.inProgressSpill = null;
     this.operatorStats = stats;
     this.warnMaxSpillTime = optionManager.getOption(ExecConstants.SPILL_IO_WARN_MAX_RUNTIME_MS);
+    this.useNewFixedAccumulatorAllocation = useNewFixedAccumulatorAllocation;
   }
 
   /**
@@ -247,45 +251,69 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
    *
    * @return chosen partition that will be spilled by the caller.
    */
-  public VectorizedHashAggPartition chooseVictimPartition() {
-    if (allPartitionsAtMinimum()) {
+  public VectorizedHashAggPartition chooseVictimPartition(boolean MARequest) {
+    if (allPartitionsAtMinimum(MARequest)) {
       /* no point in trying to choose the optimal victim partition
-       * as every partition is at minimum preallocation.
+       * as every partition is at minimum preallocation, when it is a MARequest,
        */
-      logger.debug(
-          "All partitions are at minimum required memory usage. We will spill the current partition");
+      logger.debug("All partitions are at minimum required memory usage with no records to spill");
       return null;
     }
     /* choose the optimal partition to spill only if there
-     * a possibility of releasing memory because there is at least
+     * is a possibility of releasing memory because there is at least
      * one partition consuming memory strictly greater than minimum
      * preallocation needed for all partitions.
      */
-    VectorizedHashAggPartition victimPartition = considerAllSpilledPartitionsLargerThanThreshold();
+    VectorizedHashAggPartition victimPartition = null;
+    if (!MARequest && useNewFixedAccumulatorAllocation) {
+      victimPartition = considerAllSpilledPartitionsWithLowerMemoryUsage();
+    } else {
+      victimPartition = considerAllSpilledPartitionsLargerThanThreshold();
+    }
     if (victimPartition == null) {
       /* if we couldn't choose a partition from the set of active spilled partitions
-       * we just look at all active partitions and choose the one with highest
+       * we just look at all active partitions and choose the one with the lowest/highest
        * memory usage
        */
-      victimPartition = getPartitionWithHighestMemoryUsage();
+      if (useNewFixedAccumulatorAllocation) {
+        victimPartition = getPartitionWithLowerMemoryUsage();
+      } else {
+        victimPartition = getPartitionWithHighestMemoryUsage();
+      }
     }
     return victimPartition;
   }
 
   /**
    * We currently use this function when handling out of memory to check if there is at least one
-   * partition with more than 1 batches/blocks in hashtable (and accumulator).
+   * partition with more than 1 batches/blocks in hashtable (and accumulator) and some rows in it.
    *
    * @return false if at least one partition's hash table has more than one batch/block, true if all
-   *     partitions are at minimum
+   *     partitions are having a single batch with 0 records to spill.
    */
-  private boolean allPartitionsAtMinimum() {
+  private boolean allPartitionsAtMinimum(boolean MARequest) {
+    long totalRecords = 0;
+    if (MARequest) {
+      for (VectorizedHashAggPartition partition : activePartitions) {
+        if (partition.getNumberOfBlocks() > 1) {
+          return false;
+        }
+      }
+      return true;
+    }
     for (VectorizedHashAggPartition partition : activePartitions) {
-      if (partition.getNumberOfBlocks() > 1) {
+      int[] numberOfRecords = partition.hashTable.getRecordsInBlocks();
+      // There are more than one block in some partition, so spilling can be done
+      if (numberOfRecords.length > 1) {
         return false;
       }
+      totalRecords += Arrays.stream(numberOfRecords).sum();
     }
-    return true;
+    if (totalRecords == 0) {
+      return true;
+    }
+    // Possible to shrink a partition with one batch if there are any records in it.
+    return false;
   }
 
   /**
@@ -321,6 +349,12 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
       if (inmemoryPartition.getNumberOfBlocks() >= THRESHOLD_BLOCKS) {
         /* consider this partition iff it's memory usage is strictly above minimum preallocation */
         final long partitionSize = spilledPartition.getSize();
+        if (partitionSize <= 0) {
+          logger.debug(
+              "Size of partition {} is less than 0 {}",
+              spilledPartition.getIdentifier(),
+              partitionSize);
+        }
         if (partitionSize > maxPartitionSize) {
           /* choose based on actual size (in bytes) */
           maxPartitionSize = partitionSize;
@@ -342,6 +376,39 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
     return victimPartition;
   }
 
+  private VectorizedHashAggPartition considerAllSpilledPartitionsWithLowerMemoryUsage() {
+    if (!minimizeSpilledPartitions) {
+      return null;
+    }
+    /* grab local references for efficiency */
+    final List<VectorizedHashAggDiskPartition> activeSpilledPartitions =
+        this.activeSpilledPartitions;
+    VectorizedHashAggPartition victimPartition = null;
+    long minPartitionSize = Long.MAX_VALUE;
+    for (VectorizedHashAggDiskPartition spilledPartition : activeSpilledPartitions) {
+      final VectorizedHashAggPartition inmemoryPartition =
+          spilledPartition.getInmemoryPartitionBackPointer();
+      /* consider this partition if it's memory usage is strictly above minimum preallocation */
+      final long partitionSize = inmemoryPartition.getSize();
+      if (partitionSize > 0 && partitionSize < minPartitionSize) {
+        minPartitionSize = partitionSize;
+        victimPartition = inmemoryPartition;
+      }
+    }
+    /* could be null if there were no spilled partitions or none of
+     * the spilled partitions had size greater than threshold.
+     */
+    if (victimPartition != null) {
+      logger.debug(
+          "Chose victim partition from spilled partitions, total number of partitions: {}, active spill partition count: {}, spill queue size: {}, victim partition size: {}",
+          activePartitions.length,
+          activeSpilledPartitions.size(),
+          spilledPartitions.size(),
+          minPartitionSize);
+    }
+    return victimPartition;
+  }
+
   /**
    * Go over the set of all active operator's partitions and get the partition with highest memory
    * usage. Since we are here only after ascertaining that there is at least one partition with
@@ -352,8 +419,6 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
    */
   private VectorizedHashAggPartition getPartitionWithHighestMemoryUsage() {
     /* grab local references for efficiency */
-    final List<VectorizedHashAggDiskPartition> activeSpilledPartitions =
-        this.activeSpilledPartitions;
     final VectorizedHashAggPartition[] activePartitions = this.activePartitions;
     VectorizedHashAggPartition victimPartition = null;
     long maxPartitionSize = 0;
@@ -367,12 +432,42 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
 
     Preconditions.checkArgument(
         victimPartition != null, "Error: failed to select a victim partition");
-    logger.debug(
-        "Chose victim partition, total number of partitions: {}, active spill partition count: {}, spill queue size: {}, victim partition size: {}",
-        activePartitions.length,
-        activeSpilledPartitions.size(),
-        spilledPartitions.size(),
-        maxPartitionSize);
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Chose victim partition {} , total number of partitions: {}, active spill partition count: {}, spill queue size: {}, victim partition size: {}",
+          victimPartition.getIdentifier(),
+          activePartitions.length,
+          activeSpilledPartitions.size(),
+          spilledPartitions.size(),
+          maxPartitionSize);
+    }
+    return victimPartition;
+  }
+
+  private VectorizedHashAggPartition getPartitionWithLowerMemoryUsage() {
+    /* grab local references for efficiency */
+    final VectorizedHashAggPartition[] activePartitions = this.activePartitions;
+    VectorizedHashAggPartition victimPartition = null;
+    long minPartitionSize = Long.MAX_VALUE;
+    for (VectorizedHashAggPartition partition : activePartitions) {
+      final long partitionSize = partition.getSize();
+      if (partitionSize > 0 && partitionSize < minPartitionSize) {
+        minPartitionSize = partitionSize;
+        victimPartition = partition;
+      }
+    }
+
+    Preconditions.checkArgument(
+        victimPartition != null, "Error: failed to select a victim partition");
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Chose victim partition {} , total number of partitions: {}, active spill partition count: {}, spill queue size: {}, victim partition size: {}",
+          victimPartition.getIdentifier(),
+          activePartitions.length,
+          activeSpilledPartitions.size(),
+          spilledPartitions.size(),
+          minPartitionSize);
+    }
     return victimPartition;
   }
 
@@ -545,7 +640,16 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
           new VectorizedHashAggPartitionSerializable(
               victimPartition, this.operatorStats, this.warnMaxSpillTime);
     }
-
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Spilling a single batch {} of {} from partition: {}, spill file path: {}, active spilled partition count: {}, spill queue size; {}",
+          inProgressSpill.getCurrentBatchIndex(),
+          inProgressSpill.getPartition().getHashTable().getNumChunks(),
+          victimPartition.getIdentifier(),
+          partitionSpillFile.getPath(),
+          activeSpilledPartitions.size(),
+          spilledPartitions.size());
+    }
     Preconditions.checkState(
         inProgressSpill.getPartition().getIdentifier().equals(victimPartition.getIdentifier()));
     /* spill a single batch from victim partition */
@@ -558,23 +662,17 @@ public class VectorizedHashAggPartitionSpillHandler implements AutoCloseable {
           inProgressSpill.getNumBatchesSpilled(),
           inProgressSpill.getNumRecordsSpilled(),
           inProgressSpill.getSpilledDataSize());
-      victimPartition.resetToMinimumSize();
-      victimPartition.resetRecords();
-      inProgressSpill = null;
       logger.debug(
           "Finished spilling the last batch from partition: {}, spill file path: {}, active spilled partition count: {}, spill queue size; {}",
           victimPartition.getIdentifier(),
           partitionSpillFile.getPath(),
           activeSpilledPartitions.size(),
           spilledPartitions.size());
+      victimPartition.resetToMinimumSize();
+      victimPartition.resetRecords();
+      inProgressSpill = null;
     } else {
       updatePartitionSpillState(victimPartition, partitionSpillFile, partitionSpillFileStream, 1);
-      logger.debug(
-          "Spilled a single batch from partition: {}, spill file path: {}, active spilled partition count: {}, spill queue size; {}",
-          victimPartition.getIdentifier(),
-          partitionSpillFile.getPath(),
-          activeSpilledPartitions.size(),
-          spilledPartitions.size());
     }
 
     return done;

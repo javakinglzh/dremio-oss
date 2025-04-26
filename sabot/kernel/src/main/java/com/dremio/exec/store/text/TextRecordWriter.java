@@ -20,9 +20,9 @@ import com.dremio.exec.proto.ExecProtos.FragmentHandle;
 import com.dremio.exec.store.EventBasedRecordWriter.FieldConverter;
 import com.dremio.exec.store.StringOutputRecordWriter;
 import com.dremio.exec.store.WritePartition;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.easy.text.TextFormatPlugin.TextFormatConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -45,7 +45,7 @@ public class TextRecordWriter extends StringOutputRecordWriter {
   private final String fieldDelimiter;
   private final String lineDelimiter;
   private final String extension;
-  private final FileSystemPlugin<?> plugin;
+  private final SupportsFsCreation fileSystemCreator;
   private final String queryUser;
 
   private WritePartition partition;
@@ -61,28 +61,32 @@ public class TextRecordWriter extends StringOutputRecordWriter {
   // Record write status
   private boolean fRecordStarted =
       false; // true once the startRecord() is called until endRecord() is called
-  private StringBuilder currentRecord; // contains the current record separated by field delimiter
+  private final StringBuilder
+      currentRecord; // contains the current record separated by field delimiter
 
-  public TextRecordWriter(OperatorContext context, EasyWriter config, TextFormatConfig textConfig) {
+  public TextRecordWriter(
+      OperatorContext context, EasyWriter easyWriter, TextFormatConfig textConfig) {
     super(context);
 
     final FragmentHandle handle = context.getFragmentHandle();
-    this.queryUser = config.getProps().getUserName();
+    this.queryUser = easyWriter.getProps().getUserName();
     this.context = context;
-    this.location = config.getLocation();
+    this.location = easyWriter.getLocation();
     this.prefix = String.format("%d_%d", handle.getMajorFragmentId(), handle.getMinorFragmentId());
     this.fieldDelimiter = textConfig.getFieldDelimiter();
     this.lineDelimiter = textConfig.getLineDelimiter();
     this.extension = textConfig.outputExtension;
     this.currentRecord = new StringBuilder();
     this.index = 0;
-    this.plugin = config.getFormatPlugin().getFsPlugin();
+    this.fileSystemCreator = easyWriter.getFileSystemCreator();
   }
 
   @Override
   public void setup(List<String> columnNames) throws IOException {
     this.columnNames = columnNames;
-    this.fs = plugin.createFS(queryUser, context);
+    this.fs =
+        fileSystemCreator.createFS(
+            SupportsFsCreation.builder().userName(queryUser).operatorContext(context));
   }
 
   public static final String NEWLINE = "\n";
@@ -193,6 +197,14 @@ public class TextRecordWriter extends StringOutputRecordWriter {
 
     @Override
     public void writeField() throws IOException {
+      if (!reader.isSet()) {
+        addField(fieldId, null);
+        return;
+      }
+      String value = reader.readObject().toString();
+      if (isRowSizeLimitCheckEnabled()) {
+        currentFieldSize = value.getBytes().length;
+      }
       addField(fieldId, reader.readObject().toString());
     }
   }

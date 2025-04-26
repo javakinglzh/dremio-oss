@@ -32,6 +32,7 @@ import com.dremio.common.expression.ValueExpressions.TimeStampExpression;
 import com.dremio.common.expression.visitors.AbstractExprVisitor;
 import com.dremio.common.types.TypeProtos;
 import com.dremio.common.types.TypeProtos.MajorType;
+import com.dremio.common.types.TypeProtos.MinorType;
 import com.dremio.common.types.Types;
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -292,8 +293,11 @@ public class ExpressionStringBuilder
     sb.append("cast( (");
     e.getInput().accept(this, sb);
     sb.append(" ) as ");
-    sb.append(mt.getMinorType().name());
-
+    if (mt.getMinorType() == MinorType.TIMESTAMPMILLI) {
+      sb.append("TIMESTAMP");
+    } else {
+      sb.append(mt.getMinorType().name());
+    }
     switch (mt.getMinorType()) {
       case FLOAT4:
       case FLOAT8:
@@ -307,7 +311,7 @@ public class ExpressionStringBuilder
       case UINT4:
       case UINT8:
       case DATE:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case TIMESTAMPTZ:
       case TIME:
       case INTERVAL:

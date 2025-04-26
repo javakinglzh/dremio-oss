@@ -102,6 +102,7 @@ export default class DependantDatasetsWarning extends PureComponent {
                 fullPath={Immutable.List(fullPath)}
                 typeIcon="entities/dataset-view"
                 className="dependantItem"
+                showSummaryOverlay={false}
               />
             </div>
           );

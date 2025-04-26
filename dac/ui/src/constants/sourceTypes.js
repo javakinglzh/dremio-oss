@@ -16,7 +16,7 @@
 
 // Note: These IDs need to match values in source.proto
 export const UNITY = "UNITY";
-export const POLARIS = "POLARIS";
+export const SNOWFLAKEOPENCATALOG = "SNOWFLAKEOPENCATALOG";
 export const REDSHIFT = "REDSHIFT";
 export const S3 = "S3";
 export const ELASTIC = "ELASTIC";
@@ -31,7 +31,6 @@ export const MYSQL = "MYSQL";
 export const NAS = "NAS";
 export const ORACLE = "ORACLE";
 export const POSTGRESQL = "POSTGRES";
-export const ADL = "ADL";
 export const AWSGLUE = "AWSGLUE";
 export const GCS = "GCS";
 export const AMAZONELASTIC = "AMAZONELASTIC";
@@ -78,8 +77,7 @@ export const sourceProperties = [
   { label: "Oracle", sourceType: ORACLE },
   { label: "PostgreSQL", sourceType: POSTGRESQL },
   { label: "Unity Catalog", sourceType: UNITY },
-  { label: "Polaris Catalog", sourceType: POLARIS },
-  { label: "Azure Data Lake Store", sourceType: ADL, beta: true },
+  { label: "Snowflake Open Catalog", sourceType: SNOWFLAKEOPENCATALOG },
   { label: "AWS Glue Catalog", sourceType: AWSGLUE, beta: true },
   { label: "Google Cloud Storage", sourceType: GCS, beta: true },
   { label: "Microsoft Azure Synapse Analytics", sourceType: SYNAPSE },
@@ -97,7 +95,7 @@ export const lakehouseSourceType = {
   [RESTCATALOG]: true,
   [NESSIE]: true,
   [UNITY]: true,
-  [POLARIS]: true,
+  [SNOWFLAKEOPENCATALOG]: true,
 };
 
 export const metastoresSourceType = {
@@ -106,12 +104,11 @@ export const metastoresSourceType = {
   [AWSGLUE]: true,
   [RESTCATALOG]: true,
   [UNITY]: true,
-  [POLARIS]: true,
+  [SNOWFLAKEOPENCATALOG]: true,
 };
 
 export const objectStorageSourceType = {
   [S3]: true,
-  [ADL]: true,
   [AZURE_STORAGE]: true,
   [HDFS]: true,
   [MAPRFS]: true,
@@ -123,7 +120,6 @@ export const objectStorageSourceType = {
 
 export const dataLakeSourceType = {
   [S3]: true,
-  [ADL]: true,
   [AZURE_STORAGE]: true,
   [HDFS]: true,
   [MAPRFS]: true,
@@ -135,7 +131,7 @@ export const dataLakeSourceType = {
   [HISTORYTABLES]: true,
   [RESTCATALOG]: true,
   [UNITY]: true,
-  [POLARIS]: true,
+  [SNOWFLAKEOPENCATALOG]: true,
 };
 
 export const dataPlaneSources = {

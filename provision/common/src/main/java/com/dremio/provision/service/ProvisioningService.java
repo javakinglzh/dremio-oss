@@ -80,6 +80,9 @@ public interface ProvisioningService extends Service {
   ClusterEnriched resizeCluster(ClusterId clusterId, int newContainersCount)
       throws ProvisioningHandlingException;
 
+  /** Restart the cluster. */
+  ClusterEnriched restartCluster(ClusterId clusterId) throws ProvisioningHandlingException;
+
   /**
    * Stop cluster API
    *
@@ -115,7 +118,7 @@ public interface ProvisioningService extends Service {
    * @return Iterable<ClusterEnriched>
    * @throws ProvisioningHandlingException
    */
-  Iterable<ClusterEnriched> getClustersInfo() throws ProvisioningHandlingException;
+  Iterable<ClusterEnriched> getClustersInfo();
 
   /**
    * Return info about clusters of a particular {@link ClusterType}
@@ -124,8 +127,7 @@ public interface ProvisioningService extends Service {
    * @return Iterable<ClusterEnriched>
    * @throws ProvisioningHandlingException
    */
-  Iterable<ClusterEnriched> getClusterInfoByType(ClusterType type)
-      throws ProvisioningHandlingException;
+  Iterable<ClusterEnriched> getClusterInfoByType(ClusterType type);
 
   /**
    * Get all the clusters of a particular type in a particular state
@@ -159,6 +161,9 @@ public interface ProvisioningService extends Service {
 
   /** update cluster information and save it into the kvstore. */
   void updateCluster(ClusterId clusterId);
+
+  /** update cluster information and save it into the kvstore. */
+  ClusterEnriched updateCluster(Cluster cluster) throws ProvisioningHandlingException;
 
   /**
    * Health check of the cluster state

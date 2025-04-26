@@ -30,7 +30,6 @@ import java.util.EnumSet;
 import javax.inject.Provider;
 import javax.servlet.DispatcherType;
 import javax.ws.rs.container.DynamicFeature;
-import org.eclipse.jetty.http.MimeTypes;
 import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -143,11 +142,6 @@ public class WebServer implements Service {
         EnumSet.of(DispatcherType.REQUEST));
     servletContextHandler.addFilter(
         GenericResponseHeadersFilter.class.getName(), "/api/*", EnumSet.of(DispatcherType.REQUEST));
-
-    // add the font mime type.
-    final MimeTypes mimeTypes = servletContextHandler.getMimeTypes();
-    mimeTypes.addMimeMapping("woff2", "application/font-woff2; charset=utf-8");
-    servletContextHandler.setMimeTypes(mimeTypes);
 
     // WebSocket API
     final SocketServlet servlet =

@@ -138,6 +138,7 @@ public class DescribeTableHandler implements SqlDirectHandler<DescribeTableHandl
               new DescribeResult(
                   field.getName(),
                   column.DATA_TYPE,
+                  field.getType().isNullable(),
                   precision,
                   scale,
                   extendedPropertiesString,
@@ -158,16 +159,10 @@ public class DescribeTableHandler implements SqlDirectHandler<DescribeTableHandl
     }
   }
 
-  private Map<String, Integer> fillSortOrderPriorityMap(
+  protected Map<String, Integer> fillSortOrderPriorityMap(
       DremioTable table, IcebergMetadata icebergMetadata) {
     if (icebergMetadata == null || icebergMetadata.getSortOrder() == null) {
-      return Collections.EMPTY_MAP;
-    }
-
-    // We may repurpose it but for now, if we use sort order as clustering columns, we won't show
-    // the sort order priority to avoid confusion
-    if (IcebergUtils.hasClusteringColumns(table)) {
-      return Collections.EMPTY_MAP;
+      return Collections.emptyMap();
     }
 
     String sortOrder = icebergMetadata.getSortOrder();
@@ -282,9 +277,12 @@ public class DescribeTableHandler implements SqlDirectHandler<DescribeTableHandl
   }
 
   public static class DescribeResult {
+    private static final String YES = "YES";
+    private static final String NO = "NO";
+
     public final String COLUMN_NAME;
     public final String DATA_TYPE;
-    public final String IS_NULLABLE = "YES";
+    public final String IS_NULLABLE;
     public final Integer NUMERIC_PRECISION;
     public final Integer NUMERIC_SCALE;
     public final String EXTENDED_PROPERTIES;
@@ -294,6 +292,7 @@ public class DescribeTableHandler implements SqlDirectHandler<DescribeTableHandl
     public DescribeResult(
         String columnName,
         String dataType,
+        boolean isNullable,
         Integer numericPrecision,
         Integer numericScale,
         String extendedProperties,
@@ -302,6 +301,7 @@ public class DescribeTableHandler implements SqlDirectHandler<DescribeTableHandl
       super();
       COLUMN_NAME = columnName;
       DATA_TYPE = dataType;
+      IS_NULLABLE = isNullable ? YES : NO;
       NUMERIC_PRECISION = numericPrecision;
       NUMERIC_SCALE = numericScale;
       EXTENDED_PROPERTIES = extendedProperties;

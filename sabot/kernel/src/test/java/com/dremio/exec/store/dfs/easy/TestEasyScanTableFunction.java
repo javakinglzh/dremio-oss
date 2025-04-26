@@ -214,11 +214,8 @@ public class TestEasyScanTableFunction extends BaseTestEasyScanTableFunction {
           OUTPUT_SCHEMA_ALL_TYPE,
           FileType.TEXT);
     } catch (UserException e) {
-      assertTrue(
-          e.getMessage()
-              .contains(
-                  "Error processing input: While processing field \"col1\". Could not convert \"f\" to BOOLEAN. Reason: Unsupported boolean type value : f"));
-      assertTrue(e.getMessage().contains("store/text/data/errortype.csvh, line=2, char=91"));
+      assertTrue(e.getMessage().contains("Invalid value for boolean: 'f'"));
+      assertTrue(e.getVerboseMessage().contains("store/text/data/errortype.csvh"));
     }
   }
 

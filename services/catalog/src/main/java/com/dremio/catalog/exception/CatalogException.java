@@ -15,7 +15,9 @@
  */
 package com.dremio.catalog.exception;
 
-public class CatalogException extends Exception {
+import javax.ws.rs.WebApplicationException;
+
+public abstract class CatalogException extends Exception {
   public CatalogException(String message) {
     super(message);
   }
@@ -23,4 +25,6 @@ public class CatalogException extends Exception {
   public CatalogException(String message, Throwable cause) {
     super(message, cause);
   }
+
+  public abstract WebApplicationException toRestApiException();
 }

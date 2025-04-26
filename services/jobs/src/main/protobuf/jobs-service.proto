@@ -55,12 +55,11 @@ service Chronicle {
 
   rpc GetJobCounts (JobCountsRequest) returns (JobCounts) {}
 
+  rpc GetJobCountsDaily (JobCountsRequestDaily) returns (JobCounts) {}
+
   rpc GetJobStats (JobStatsRequest) returns (JobStats) {}
 
   rpc GetJobAndUserStats (JobAndUserStatsRequest) returns (JobAndUserStats) {}
-
-  // Get count of unique users who triggered job during the duration mentioned in request.
-  rpc GetUniqueUserStats (UniqueUserStatsRequest) returns (UniqueUserStats) {}
 
   rpc GetProfile (QueryProfileRequest) returns (exec.shared.QueryProfile) {}
 
@@ -250,6 +249,12 @@ message RecentJobSummary {
   bool is_profile_incomplete = 36;
   int64 execution_allocated_bytes = 37; // total bytes of direct memory allocated for query execution
   int64 execution_cpu_time_millis = 38; // cpu time of query execution (summed across all fragments)
+  double query_cost = 39;
+  int64 memory_allocated = 40;
+  int64 setup_time_ns = 41;
+  int64 wait_time_ns = 42;
+  int64 execution_cpu_time_ns = 43;
+  string context = 44;
 }
 
 //proto2 enums cannot be used directly in proto3 syntax
@@ -377,6 +382,15 @@ message VersionedDatasetPath {
 }
 
 message JobCountsRequest {
+  // Conditions are mutually exclusive.
+  // Only one condition should be specified at a time.
+  // If more than one conditions provided, only the first non-empty one will be used.
+  repeated VersionedDatasetPath datasets = 1;
+  UsedReflections reflections = 2;
+  int32 job_counts_age_in_days = 3;
+}
+
+message JobCountsRequestDaily {
   // Conditions are mutually exclusive.
   // Only one condition should be specified at a time.
   // If more than one conditions provided, only the first non-empty one will be used.

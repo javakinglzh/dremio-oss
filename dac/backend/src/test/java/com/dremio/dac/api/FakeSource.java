@@ -23,6 +23,7 @@ import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AuthenticationType;
 import com.dremio.exec.catalog.conf.ConnectionConf;
@@ -32,9 +33,6 @@ import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.planner.logical.ViewTable;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.service.namespace.NamespaceKey;
@@ -117,11 +115,6 @@ public class FakeSource extends ConnectionConf<FakeSource, StoragePlugin> {
     }
 
     @Override
-    public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-      return null;
-    }
-
-    @Override
     public Class<? extends StoragePluginRulesFactory> getRulesFactoryClass() {
       return null;
     }
@@ -167,7 +160,9 @@ public class FakeSource extends ConnectionConf<FakeSource, StoragePlugin> {
 
   @Override
   public StoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     return new FakeSourcePlugin(this, name);
   }
 }

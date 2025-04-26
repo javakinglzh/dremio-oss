@@ -22,7 +22,9 @@ import com.dremio.plan.serialization.PSqlTypeName;
 import com.dremio.plan.serialization.PStructKind;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableBiMap;
+import com.google.common.collect.ImmutableList;
 import java.nio.charset.Charset;
+import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.avatica.util.TimeUnit;
 import org.apache.calcite.rel.type.RelDataType;
@@ -103,6 +105,16 @@ public final class TypeSerde {
     return factory.createTypeWithNullability(baseType, type.getNullable());
   }
 
+  public List<PRelDataTypeField> toProto(List<RelDataTypeField> fields) {
+    return fields.stream().map(this::toProto).collect(ImmutableList.toImmutableList());
+  }
+
+  public RelDataType fromProto(List<PRelDataTypeField> fields) {
+    return factory.createStructType(
+        fields.stream().map(t -> fromProto(t.getType())).collect(Collectors.toList()),
+        fields.stream().map(PRelDataTypeField::getName).collect(Collectors.toList()));
+  }
+
   public PRelDataTypeField toProto(RelDataTypeField field) {
     return PRelDataTypeField.newBuilder()
         .setName(field.getName())
@@ -175,7 +187,7 @@ public final class TypeSerde {
 
     switch (type.getTypeName()) {
 
-        // scalar types.
+      // scalar types.
       case ANY:
       case BIGINT:
       case BINARY:
@@ -200,7 +212,7 @@ public final class TypeSerde {
           return factory.createSqlType(name);
         }
 
-        // char types.
+      // char types.
       case CHAR:
       case VARCHAR:
         final RelDataType newType =
@@ -215,7 +227,7 @@ public final class TypeSerde {
 
         return factory.createTypeWithCharsetAndCollation(newType, charset, sqlCollation);
 
-        // interval types
+      // interval types
       case INTERVAL_DAY:
         return factory.createSqlIntervalType(
             new SqlIntervalQualifier(
@@ -321,7 +333,7 @@ public final class TypeSerde {
                 RelDataType.PRECISION_NOT_SPECIFIED,
                 SqlParserPos.ZERO));
 
-        // map and struct types.
+      // map and struct types.
       case MAP:
         return factory.createMapType(fromProto(type.getKeyType()), fromProto(type.getValueType()));
 

@@ -118,6 +118,11 @@ class TaskCompositeEventCollector implements SchedulerEvents {
     }
 
     @Override
+    public void bookingPaused() {
+      perTaskEventsSinks.forEach(PerTaskMainEvents::bookingPaused);
+    }
+
+    @Override
     public void contractError() {
       perTaskEventsSinks.forEach(PerTaskMainEvents::contractError);
     }

@@ -16,6 +16,8 @@
 package com.dremio.dac.service.datasets;
 
 import static org.junit.Assert.assertEquals;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.model.spaces.SpaceName;
@@ -32,11 +34,11 @@ import com.dremio.service.jobs.JobRequest;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.jobs.TestJobService;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceOptions;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.space.proto.SpaceConfig;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-import javax.inject.Provider;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -45,14 +47,15 @@ public class TestDatasetVersionMutatorDeleteOrphans extends BaseTestServer {
   private static final String SPACE_NAME = "space";
   private static final String VIEW_NAME = "view";
 
-  private Provider<OptionManager> optionManagerProvider;
+  private OptionManager optionManager;
 
   private KVStore<VersionDatasetKey, VirtualDatasetVersion> datasetVersionsStore;
 
   @Before
   public void setup() throws Exception {
     clearAllDataExceptUser();
-    optionManagerProvider = p(OptionManager.class);
+
+    optionManager = mock(OptionManager.class);
 
     KVStoreProvider provider = l(KVStoreProvider.class);
     datasetVersionsStore = provider.getStore(DatasetVersionMutator.VersionStoreCreator.class);
@@ -65,11 +68,19 @@ public class TestDatasetVersionMutatorDeleteOrphans extends BaseTestServer {
   }
 
   @Test
-  public void testDeleteOrphans() throws NamespaceException {
-    testDeleteOrphans(5);
+  public void testDisable() throws NamespaceException {
+    testDeleteOrphans(5, false);
   }
 
-  private void testDeleteOrphans(int numberOfVds) throws NamespaceException {
+  @Test
+  public void testDeleteOrphans() throws NamespaceException {
+    testDeleteOrphans(5, true);
+  }
+
+  private void testDeleteOrphans(int numberOfVds, boolean enable) {
+    when(optionManager.getOption(NamespaceOptions.DATASET_VERSION_ORPHAN_DELETION_ENABLED))
+        .thenReturn(enable);
+
     // Every new call to "CREATE VDS ... AS SELECT *" results in
     // two dataset versions: one with tmp.UNTITLED name and one with the actual
     // name. When the view is identical no new dataset version is created.
@@ -83,20 +94,22 @@ public class TestDatasetVersionMutatorDeleteOrphans extends BaseTestServer {
 
     // 2 versions are created for every call to createVDS, except the
     // second call with the same name.
-    int expectedNumberOfDatasetVersions = 2 + numberOfVds * 2 + 2;
-    assertEquals(expectedNumberOfDatasetVersions, toStream(datasetVersionsStore.find()).count());
+    int expectedNumVersionsBeforeDelete = 2 + numberOfVds * 2 + 2;
+    assertEquals(expectedNumVersionsBeforeDelete, toStream(datasetVersionsStore.find()).count());
 
     // delete all the jobs, this will make the tmp.UNTITLED be an orphan
     TestJobService.cleanJobs();
 
     // Under test
-    DatasetVersionMutator.deleteOrphans(optionManagerProvider, datasetVersionsStore, 0, true);
+    DatasetVersionMutator.deleteOrphans(() -> optionManager, datasetVersionsStore, 0, true);
 
     // It is expected to have all tmp.UNTITLED versions are deleted.
     // It is expected to have (_numberOfVds_ + 1) a.vds dataset versions.
     // It is expected to have one dataset versions of a.ds1 as second is identical.
-    int expected = numberOfVds + 1 + 1;
-    assertEquals(expected, toStream(datasetVersionsStore.find()).count());
+    int expectedNumVersionsAfterDelete = numberOfVds + 1 + 1;
+    assertEquals(
+        enable ? expectedNumVersionsAfterDelete : expectedNumVersionsBeforeDelete,
+        toStream(datasetVersionsStore.find()).count());
   }
 
   private void createVDS(String name, boolean replace) {

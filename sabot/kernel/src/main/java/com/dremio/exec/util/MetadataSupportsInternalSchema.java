@@ -50,6 +50,8 @@ public interface MetadataSupportsInternalSchema extends SupportsTypeCoercionsAnd
 
         if (droppedFields != null && modifiedFields != null) {
           BatchSchemaDiffer batchSchemaDiffer = new BatchSchemaDiffer();
+          batchSchemaDiffer.setAllowComplexToPrimitiveConversions(
+              isComplexToVarcharCoercionSupported());
           BatchSchemaDiff diff =
               batchSchemaDiffer.diff(oldSchema.getFields(), newSchema.getFields());
 

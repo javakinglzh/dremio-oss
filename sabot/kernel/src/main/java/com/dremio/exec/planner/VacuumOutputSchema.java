@@ -82,7 +82,8 @@ public class VacuumOutputSchema {
     for (Field field : schema) {
       builder.add(
           field.getName(),
-          CalciteArrowHelper.wrap(CompleteType.fromField(field)).toCalciteType(factory, true));
+          CalciteArrowHelper.wrap(CompleteType.fromField(field), field.isNullable())
+              .toCalciteType(factory, true));
     }
     return builder.build();
   }

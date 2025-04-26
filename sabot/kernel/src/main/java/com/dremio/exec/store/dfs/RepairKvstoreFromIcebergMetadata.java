@@ -466,7 +466,7 @@ public class RepairKvstoreFromIcebergMetadata {
 
       DirListInputSplitProto.DirListInputSplit dirListInputSplit =
           LegacyProtobufSerializer.parseFrom(
-              DirListInputSplitProto.DirListInputSplit.PARSER,
+              DirListInputSplitProto.DirListInputSplit.parser(),
               MetadataProtoUtils.toProtobuf(output));
       partitionPaths.add(dirListInputSplit.getOperatingPath());
     }

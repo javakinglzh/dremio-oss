@@ -16,15 +16,16 @@
 package com.dremio.exec.store.iceberg;
 
 import static com.dremio.exec.work.foreman.AttemptManager.INJECTOR_CLEANING_FAILURE;
-import static com.dremio.exec.work.foreman.AttemptManager.INJECTOR_COMMIT_FAILURE;
+import static com.dremio.exec.work.foreman.AttemptManager.INJECTOR_COMMITTER_CHECKED_EXCEPTION;
+import static com.dremio.exec.work.foreman.AttemptManager.INJECTOR_COMMITTER_UNCHECKED_EXCEPTION;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.BaseTestQuery;
+import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.TestTools;
 import com.dremio.exec.testing.Controls;
 import com.dremio.exec.testing.ControlsInjectionUtil;
 import com.dremio.exec.work.foreman.AttemptManager;
-import com.dremio.exec.work.foreman.ForemanException;
 import java.io.File;
 import org.apache.commons.io.FileUtils;
 import org.junit.Test;
@@ -64,8 +65,13 @@ public class TestCommitAndCleaningFailure extends BaseTestQuery {
   }
 
   @Test
-  public void testCommitFailure() throws Exception {
-    testWithInjectFailure(INJECTOR_COMMIT_FAILURE, ForemanException.class);
+  public void testCommitCheckedExceptionFailure() throws Exception {
+    testWithInjectFailure(INJECTOR_COMMITTER_CHECKED_EXCEPTION, Exception.class);
+  }
+
+  @Test
+  public void testCommitUncheckedExceptionFailure() throws Exception {
+    testWithInjectFailure(INJECTOR_COMMITTER_UNCHECKED_EXCEPTION, UserException.class);
   }
 
   @Test

@@ -35,7 +35,7 @@ import com.dremio.dac.homefiles.HomeFileSystemStoragePlugin;
 import com.dremio.dac.homefiles.HomeFileTool;
 import com.dremio.dac.model.common.DACException;
 import com.dremio.dac.model.common.NamespacePath;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.FolderName;
 import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.job.JobDataFragment;
@@ -171,10 +171,26 @@ public class HomeResource extends BaseResourceWithAllocator {
     return File.newInstance(id, filePath, fileFormat, jobCount, isStaged, true, isQueryable, null);
   }
 
-  protected Folder newFolder(
+  protected FolderModel newHomeFolder(
       FolderPath folderPath, FolderConfig folderConfig, NamespaceTree contents)
       throws NamespaceNotFoundException {
-    return Folder.newInstance(folderPath, folderConfig, contents, false, false);
+    String id =
+        folderConfig.getId() == null ? folderPath.toUrlPath() : folderConfig.getId().getId();
+    return new FolderModel(
+        id,
+        folderConfig.getName(),
+        folderPath.toUrlPath(),
+        folderConfig.getIsPhysicalDataset(),
+        false,
+        false,
+        folderConfig.getExtendedConfig(),
+        folderConfig.getTag(),
+        null,
+        contents,
+        null,
+        0,
+        folderConfig.getStorageUri(),
+        folderConfig.getTag());
   }
 
   protected Home newHome(HomePath homePath, HomeConfig homeConfig) {
@@ -265,15 +281,6 @@ public class HomeResource extends BaseResourceWithAllocator {
   }
 
   @POST
-  @Path("upload_cancel/{path: .*}")
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
-  public void cancelUploadFile(FileFormat fileFormat, @PathParam("path") String path)
-      throws IOException {
-    homeFileTool.deleteFile(fileFormat.getLocation());
-  }
-
-  @POST
   @Path("upload_finish/{path: .*}")
   @Consumes(MediaType.APPLICATION_JSON)
   @Produces(MediaType.APPLICATION_JSON)
@@ -334,7 +341,7 @@ public class HomeResource extends BaseResourceWithAllocator {
     }
 
     FilePath filePath = FilePath.fromURLPath(homeName, path);
-    logger.debug("filePath: " + filePath.toPathString());
+    logger.debug("previewFormatSettingsStaging filePath: " + filePath.toPathString());
     // use file's location directly to query file
     String fileLocation =
         PathUtils.toDottedPath(com.dremio.io.file.Path.of(fileFormat.getLocation()));
@@ -374,7 +381,7 @@ public class HomeResource extends BaseResourceWithAllocator {
       FileFormat fileFormat, @PathParam("path") String path)
       throws FileNotFoundException, SourceNotFoundException {
     FilePath filePath = FilePath.fromURLPath(homeName, path);
-    logger.debug("filePath: " + filePath.toPathString());
+    logger.debug("previewFormatSettings filePath: " + filePath.toPathString());
     // TODO, this should be moved to dataset resource and be paginated.
 
     final SqlQuery query =
@@ -486,7 +493,7 @@ public class HomeResource extends BaseResourceWithAllocator {
   @GET
   @Path("/folder/{path: .*}")
   @Produces(MediaType.APPLICATION_JSON)
-  public Folder getFolder(
+  public FolderModel getFolder(
       @PathParam("path") String path,
       @QueryParam("includeContents") @DefaultValue("true") boolean includeContents)
       throws Exception {
@@ -499,7 +506,7 @@ public class HomeResource extends BaseResourceWithAllocator {
             newNamespaceTree(
                 namespaceService.list(folderPath.toNamespaceKey(), null, Integer.MAX_VALUE));
       }
-      return newFolder(folderPath, folderConfig, contents);
+      return newHomeFolder(folderPath, folderConfig, contents);
     } catch (NamespaceNotFoundException nfe) {
       throw new FolderNotFoundException(folderPath, nfe);
     }
@@ -528,7 +535,8 @@ public class HomeResource extends BaseResourceWithAllocator {
   @Path("/folder/{path: .*}")
   @Produces(MediaType.APPLICATION_JSON)
   @Consumes(MediaType.APPLICATION_JSON)
-  public Folder createFolder(FolderName name, @PathParam("path") String path) throws Exception {
+  public FolderModel createFolder(FolderName name, @PathParam("path") String path)
+      throws Exception {
     String fullPath = PathUtils.toFSPathString(Arrays.asList(path, name.toString()));
     FolderPath folderPath = FolderPath.fromURLPath(homeName, fullPath);
 
@@ -541,7 +549,7 @@ public class HomeResource extends BaseResourceWithAllocator {
       throw new ClientErrorException("Parent folder doesn't exist", nfe);
     }
 
-    return newFolder(folderPath, folderConfig, null);
+    return newHomeFolder(folderPath, folderConfig, null);
   }
 
   @GET

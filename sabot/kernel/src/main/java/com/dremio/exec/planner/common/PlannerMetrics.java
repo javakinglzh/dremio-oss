@@ -19,6 +19,7 @@ import static com.dremio.telemetry.api.metrics.CommonTags.TAG_OUTCOME_KEY;
 import static com.dremio.telemetry.api.metrics.CommonTags.TAG_OUTCOME_VALUE_ERROR;
 import static com.dremio.telemetry.api.metrics.CommonTags.TAG_OUTCOME_VALUE_SUCCESS;
 
+import com.dremio.exec.proto.UserBitShared.CancelType;
 import com.dremio.service.users.SystemUser;
 import com.google.common.base.Joiner;
 import io.micrometer.core.instrument.Counter;
@@ -39,8 +40,6 @@ public class PlannerMetrics {
   // Counter for accelerated jobs
   public static final String ACCELERATED_QUERIES = "accelerated_queries";
 
-  public static final String PLAN_CACHE_SYNC = "plan_cache_sync";
-  public static final String PLAN_CACHE_ENTRIES = "plan_cache_entries";
   public static final String AMBIGUOUS_COLUMN = "ambiguous_column";
   // Metric tags
   public static final String TAG_REASON = "reason";
@@ -98,5 +97,32 @@ public class PlannerMetrics {
 
   public static Meter.MeterProvider<Counter> getAcceleratedQueriesCounter() {
     return ACCELERATED_QUERIES_COUNTER;
+  }
+
+  public static CancelType toCancelTypeCode(String cancelType) {
+    switch (cancelType) {
+      case CANCEL_USER_INITIATED:
+        return CancelType.CANCEL_USER_INITIATED;
+      case CANCEL_CONNECTION_CLOSED:
+        return CancelType.CANCEL_CONNECTION_CLOSED;
+      case CANCEL_EXECUTION_RUNTIME_EXCEEDED:
+        return CancelType.CANCEL_EXECUTION_RUNTIME_EXCEEDED;
+      case CANCEL_RESOURCE_UNAVAILABLE:
+        return CancelType.CANCEL_RESOURCE_UNAVAILABLE;
+      case CANCEL_HEAP_MONITOR:
+        return CancelType.CANCEL_HEAP_MONITOR;
+      case CANCEL_DIRECT_MEMORY_EXCEEDED:
+        return CancelType.CANCEL_DIRECT_MEMORY_EXCEEDED;
+      case COORDINATOR_CANCEL_HEAP_MONITOR:
+        return CancelType.COORDINATOR_CANCEL_HEAP_MONITOR;
+      case EXECUTOR_CANCEL_HEAP_MONITOR:
+        return CancelType.EXECUTOR_CANCEL_HEAP_MONITOR;
+      case EXECUTOR_CANCEL_DIRECT_MEMORY_EXCEEDED:
+        return CancelType.EXECUTOR_CANCEL_DIRECT_MEMORY_EXCEEDED;
+      case COORDINATOR_CANCEL_DIRECT_MEMORY_EXCEEDED:
+        return CancelType.COORDINATOR_CANCEL_DIRECT_MEMORY_EXCEEDED;
+      default:
+        return CancelType.CANCEL_UNCLASSIFIED;
+    }
   }
 }

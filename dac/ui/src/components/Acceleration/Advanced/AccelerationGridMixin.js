@@ -19,5 +19,8 @@ export default function (input) {
     checkIfUserHasCanAlter() {
       return true;
     },
+    shouldHideUpdates() {
+      return false;
+    },
   });
 }

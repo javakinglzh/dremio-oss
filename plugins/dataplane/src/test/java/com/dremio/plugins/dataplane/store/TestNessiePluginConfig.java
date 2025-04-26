@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.dataplane.store;
 
+import static com.dremio.exec.ExecConstants.FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AWS_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AZURE_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_GCS_STORAGE_ENABLED;
@@ -38,14 +39,15 @@ import static org.mockito.Mockito.when;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
+import com.dremio.exec.catalog.conf.GCSAuthType;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
+import com.dremio.exec.catalog.conf.StorageProviderType;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.options.OptionManager;
-import com.dremio.plugins.azure.AzureAuthenticationType;
-import com.dremio.plugins.dataplane.store.AbstractDataplanePluginConfig.StorageProviderType;
-import com.dremio.plugins.gcs.GCSConf.AuthMode;
 import com.dremio.service.users.UserService;
 import com.google.common.collect.ImmutableList;
 import java.util.Arrays;
@@ -297,7 +299,7 @@ public class TestNessiePluginConfig {
           .containsAll(
               Arrays.asList(
                   new Property("dremio.azure.mode", "STORAGE_V2"),
-                  new Property("dremio.azure.account", azureStorageAccount),
+                  new Property(AzureStorageConfProperties.ACCOUNT, azureStorageAccount),
                   new Property("dremio.azure.rootPath", azureRootPath)));
     }
 
@@ -435,7 +437,7 @@ public class TestNessiePluginConfig {
     @Test
     public void testGoogleFilesystemConfig() {
       NessiePluginConfig nessiePluginConfig = basicGoogleConfig();
-      nessiePluginConfig.googleAuthenticationType = AuthMode.AUTO;
+      nessiePluginConfig.googleAuthenticationType = GCSAuthType.AUTO;
       final String googleProjectId = "SomeProjectId";
 
       nessiePluginConfig.googleProjectId = googleProjectId;
@@ -449,7 +451,7 @@ public class TestNessiePluginConfig {
       NessiePluginConfig nessiePluginConfig = basicGoogleConfig();
       nessiePluginConfig.googleProjectId = IGNORED;
 
-      nessiePluginConfig.googleAuthenticationType = AuthMode.AUTO;
+      nessiePluginConfig.googleAuthenticationType = GCSAuthType.AUTO;
 
       assertThat(nessiePluginConfig.getProperties())
           .containsAll(List.of(new Property("dremio.gcs.use_keyfile", "false")));
@@ -464,7 +466,7 @@ public class TestNessiePluginConfig {
       final String googlePrivateKeyId = "SomePrivateKeyId";
       final String googlePrivateKey = "SomePrivateKey";
 
-      nessiePluginConfig.googleAuthenticationType = AuthMode.SERVICE_ACCOUNT_KEYS;
+      nessiePluginConfig.googleAuthenticationType = GCSAuthType.SERVICE_ACCOUNT_KEYS;
       nessiePluginConfig.googleClientId = googleClientId;
       nessiePluginConfig.googleClientEmail = googleClientEmail;
       nessiePluginConfig.googlePrivateKeyId = googlePrivateKeyId;
@@ -542,7 +544,7 @@ public class TestNessiePluginConfig {
         String googlePrivateKey) {
       NessiePluginConfig nessiePluginConfig = basicGoogleConfig();
       nessiePluginConfig.googleProjectId = IGNORED;
-      nessiePluginConfig.googleAuthenticationType = AuthMode.SERVICE_ACCOUNT_KEYS;
+      nessiePluginConfig.googleAuthenticationType = GCSAuthType.SERVICE_ACCOUNT_KEYS;
 
       nessiePluginConfig.googleClientId = googleClientId;
       nessiePluginConfig.googleClientEmail = googleClientEmail;
@@ -614,6 +616,9 @@ public class TestNessiePluginConfig {
     doReturn(BYPASS_CONTENT_CACHE.getDefault().getBoolVal())
         .when(optionManager)
         .getOption(BYPASS_CONTENT_CACHE);
+    doReturn(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS.getDefault().getBoolVal())
+        .when(optionManager)
+        .getOption(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS);
     when(sabotContext.getOptionManager()).thenReturn(optionManager);
   }
 

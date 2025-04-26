@@ -226,6 +226,9 @@ public class TestSysFlightResource extends ExternalResource {
     c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
     c.setConfig(conf.toBytesString());
 
-    node.getContext().getCatalogService().getSystemUserCatalog().createSource(c);
+    node.getContext()
+        .getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 }

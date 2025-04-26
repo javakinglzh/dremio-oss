@@ -17,11 +17,18 @@ package com.dremio.service.nessie;
 
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseConnectionProvider;
+import com.dremio.service.nessie.upgrade.kvstore.NessieCommitLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalPointerStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieKeyListStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieNamedRefHeadsStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRefNamesStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRepoDescriptionStoreBuilder;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.StampedLock;
 import javax.inject.Provider;
-import org.projectnessie.versioned.persist.adapter.DatabaseConnectionProvider;
 
 /** Creates KV stores for Nessie */
 public class NessieDatastoreInstance implements DatabaseConnectionProvider<DatastoreDbConfig> {

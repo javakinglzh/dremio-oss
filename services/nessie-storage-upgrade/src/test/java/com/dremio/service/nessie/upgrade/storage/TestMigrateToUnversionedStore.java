@@ -15,43 +15,45 @@
  */
 package com.dremio.service.nessie.upgrade.storage;
 
+import static com.dremio.legacy.org.projectnessie.versioned.CommitMetaSerializer.METADATA_SERIALIZER;
 import static com.dremio.test.DremioTest.CLASSPATH_SCAN_RESULT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.InstanceOfAssertFactories.type;
-import static org.projectnessie.versioned.CommitMetaSerializer.METADATA_SERIALIZER;
 
 import com.dremio.datastore.LocalKVStoreProvider;
+import com.dremio.legacy.org.projectnessie.model.CommitMeta;
+import com.dremio.legacy.org.projectnessie.model.Content;
+import com.dremio.legacy.org.projectnessie.model.ContentKey;
+import com.dremio.legacy.org.projectnessie.model.IcebergTable;
+import com.dremio.legacy.org.projectnessie.model.Namespace;
+import com.dremio.legacy.org.projectnessie.versioned.BranchName;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceConflictException;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceNotFoundException;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.ContentId;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyWithBytes;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.store.DefaultStoreWorker;
+import com.dremio.service.embedded.catalog.EmbeddedContent;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedUnversionedStore;
 import com.dremio.service.nessie.DatastoreDatabaseAdapterFactory;
 import com.dremio.service.nessie.ImmutableDatastoreDbConfig;
-import com.dremio.service.nessie.NessieCommitLogStoreBuilder;
 import com.dremio.service.nessie.NessieDatastoreInstance;
-import com.dremio.service.nessie.NessieGlobalLogStoreBuilder;
-import com.dremio.service.nessie.NessieGlobalPointerStoreBuilder;
-import com.dremio.service.nessie.NessieKeyListStoreBuilder;
-import com.dremio.service.nessie.NessieNamedRefHeadsStoreBuilder;
-import com.dremio.service.nessie.NessieRefLogStoreBuilder;
-import com.dremio.service.nessie.NessieRefNamesStoreBuilder;
-import com.dremio.service.nessie.NessieRepoDescriptionStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieCommitLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalPointerStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieKeyListStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieNamedRefHeadsStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRefLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRefNamesStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRepoDescriptionStoreBuilder;
 import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.projectnessie.model.CommitMeta;
-import org.projectnessie.model.Content;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.model.Namespace;
-import org.projectnessie.versioned.BranchName;
-import org.projectnessie.versioned.ReferenceConflictException;
-import org.projectnessie.versioned.ReferenceNotFoundException;
-import org.projectnessie.versioned.persist.adapter.ContentId;
-import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
-import org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
-import org.projectnessie.versioned.persist.adapter.KeyWithBytes;
-import org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.store.DefaultStoreWorker;
 
 /** Unit tests for {@link MigrateToUnversionedStore}. */
 class TestMigrateToUnversionedStore {
@@ -127,6 +129,10 @@ class TestMigrateToUnversionedStore {
             .build());
   }
 
+  private static EmbeddedContentKey key(ContentKey key) {
+    return EmbeddedContentKey.of(key.getElements());
+  }
+
   @Test
   void testMigrateEntries() throws Exception {
     ContentKey key1 = ContentKey.of("dremio.internal", "table1");
@@ -138,18 +144,18 @@ class TestMigrateToUnversionedStore {
 
     task.upgrade(storeProvider, 1);
 
-    assertThat(store.getValue(BranchName.of("main"), key1, false).content())
-        .asInstanceOf(type(IcebergTable.class))
-        .extracting(IcebergTable::getMetadataLocation)
+    assertThat(store.getValue(key(key1)))
+        .asInstanceOf(type(EmbeddedContent.class))
+        .extracting(EmbeddedContent::location)
         .isEqualTo("loc111");
-    assertThat(store.getValue(BranchName.of("main"), key2, false).content())
-        .asInstanceOf(type(IcebergTable.class))
-        .extracting(IcebergTable::getMetadataLocation)
+    assertThat(store.getValue(key(key2)))
+        .asInstanceOf(type(EmbeddedContent.class))
+        .extracting(EmbeddedContent::location)
         .isEqualTo("loc222");
-    assertThat(store.getValue(BranchName.of("main"), ns.toContentKey(), false).content())
-        .asInstanceOf(type(Namespace.class))
-        .extracting(Namespace::toContentKey)
-        .isEqualTo(ns.toContentKey());
+    assertThat(store.getValue(key(ns.toContentKey())))
+        .asInstanceOf(type(EmbeddedContent.class))
+        .extracting(EmbeddedContent::key)
+        .isEqualTo(key(ns.toContentKey()));
   }
 
   @Test

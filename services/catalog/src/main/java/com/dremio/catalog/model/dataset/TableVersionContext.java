@@ -20,6 +20,8 @@ import com.dremio.catalog.model.VersionContext;
 import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude.Include;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -29,6 +31,7 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -45,27 +48,31 @@ import org.slf4j.LoggerFactory;
 public class TableVersionContext {
   private static final Logger logger = LoggerFactory.getLogger(TableVersionContext.class);
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-  private final TableVersionType type;
-  private final Object value;
-  private final Instant timestamp;
-
   // TODO: DX-85701
   // We should remove NOT_SPECIFIED (or disallow TableVersionContext to be null)
   public static final TableVersionContext NOT_SPECIFIED =
       new TableVersionContext(TableVersionType.NOT_SPECIFIED, "");
 
-  @JsonCreator
-  public TableVersionContext(
-      @JsonProperty("type") TableVersionType type, @JsonProperty("value") Object value) {
-    this.type = Preconditions.checkNotNull(type);
-    this.value = validateTypeAndSpecifier(type, value);
-    this.timestamp = null;
+  private final TableVersionType type;
+  private final Object value;
+  private final @Nullable Long refTimestamp;
+
+  public TableVersionContext(TableVersionType type, Object value) {
+    this(type, value, (Long) null);
   }
 
-  public TableVersionContext(TableVersionType type, Object value, Instant timestamp) {
+  public TableVersionContext(TableVersionType type, Object value, Instant refTimestamp) {
+    this(type, value, refTimestamp == null ? null : refTimestamp.toEpochMilli());
+  }
+
+  @JsonCreator
+  public TableVersionContext(
+      @JsonProperty("type") TableVersionType type,
+      @JsonProperty("value") Object value,
+      @JsonProperty("refTimestamp") @Nullable Long refTimestamp) {
     this.type = Preconditions.checkNotNull(type);
     this.value = validateTypeAndSpecifier(type, value);
-    this.timestamp = timestamp;
+    this.refTimestamp = refTimestamp;
   }
 
   public TableVersionType getType() {
@@ -80,6 +87,12 @@ public class TableVersionContext {
     return clazz.cast(value);
   }
 
+  @Nullable
+  @JsonInclude(Include.NON_NULL)
+  public Long getRefTimestamp() {
+    return refTimestamp;
+  }
+
   @Override
   public String toString() {
     StringBuilder builder = new StringBuilder();
@@ -87,6 +100,12 @@ public class TableVersionContext {
     if (value != null) {
       builder.append(" ");
       builder.append(value);
+    }
+
+    if (refTimestamp != null) {
+      builder.append(" AS OF '");
+      builder.append(new Timestamp(refTimestamp));
+      builder.append("'");
     }
     return builder.toString();
   }
@@ -97,12 +116,18 @@ public class TableVersionContext {
    * @return
    */
   public String toSql() {
+    String asOfTimestamp = "";
     switch (type) {
       case BRANCH:
       case TAG:
-      case COMMIT:
       case REFERENCE:
-        return String.format("%s \"%s\"", type.toSqlRepresentation(), value);
+        if (refTimestamp != null) {
+          Timestamp refTs = new Timestamp(refTimestamp);
+          asOfTimestamp = String.format(" AS OF '%s'", refTs);
+        }
+      // intentional fall-through
+      case COMMIT:
+        return String.format("%s \"%s\"%s", type.toSqlRepresentation(), value, asOfTimestamp);
       case TIMESTAMP:
         Timestamp ts = new Timestamp(Long.valueOf(value.toString()));
         return String.format("%s '%s'", type.toSqlRepresentation(), ts);
@@ -124,12 +149,14 @@ public class TableVersionContext {
     }
 
     TableVersionContext other = (TableVersionContext) obj;
-    return Objects.equals(type, other.type) && Objects.equals(value, other.value);
+    return Objects.equals(type, other.type)
+        && Objects.equals(value, other.value)
+        && Objects.equals(refTimestamp, other.refTimestamp);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(type, value);
+    return Objects.hash(type, value, refTimestamp);
   }
 
   private static Object validateTypeAndSpecifier(TableVersionType type, Object value) {
@@ -155,20 +182,23 @@ public class TableVersionContext {
   public VersionContext asVersionContext() {
     switch (type) {
       case BRANCH:
-        if (timestamp != null) {
-          return VersionContext.ofBranchAsOfTimestamp(getValueAs(String.class), timestamp);
+        if (refTimestamp != null) {
+          return VersionContext.ofBranchAsOfTimestamp(
+              getValueAs(String.class), Instant.ofEpochMilli(refTimestamp));
         }
         return VersionContext.ofBranch(getValueAs(String.class));
       case TAG:
-        if (timestamp != null) {
-          return VersionContext.ofTagAsOfTimestamp(getValueAs(String.class), timestamp);
+        if (refTimestamp != null) {
+          return VersionContext.ofTagAsOfTimestamp(
+              getValueAs(String.class), Instant.ofEpochMilli(refTimestamp));
         }
         return VersionContext.ofTag(getValueAs(String.class));
       case COMMIT:
         return VersionContext.ofCommit(getValueAs(String.class));
       case REFERENCE:
-        if (timestamp != null) {
-          return VersionContext.ofRefAsOfTimestamp(getValueAs(String.class), timestamp);
+        if (refTimestamp != null) {
+          return VersionContext.ofRefAsOfTimestamp(
+              getValueAs(String.class), Instant.ofEpochMilli(refTimestamp));
         }
         return VersionContext.ofRef(getValueAs(String.class));
       case SNAPSHOT_ID:

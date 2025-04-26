@@ -28,7 +28,6 @@ import com.dremio.exec.store.iceberg.TableSnapshotProvider;
 import com.dremio.options.OptionResolver;
 import com.dremio.service.namespace.file.proto.FileConfig;
 import java.util.function.Supplier;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 import org.junit.Before;
 import org.junit.Test;
@@ -39,7 +38,6 @@ public class TestSystemIcebergTablesExecutionDatasetAccessor {
 
   @Mock private EntityPath entityPath;
   @Mock private Supplier<Table> tableSupplier;
-  @Mock private Configuration configuration;
   @Mock private TableSnapshotProvider tableSnapshotProvider;
   @Mock private SystemIcebergTablesStoragePlugin plugin;
   @Mock private TableSchemaProvider tableSchemaProvider;
@@ -52,13 +50,7 @@ public class TestSystemIcebergTablesExecutionDatasetAccessor {
     MockitoAnnotations.openMocks(this);
     datasetHandle =
         new SystemIcebergTablesExecutionDatasetAccessor(
-            entityPath,
-            tableSupplier,
-            configuration,
-            tableSnapshotProvider,
-            plugin,
-            tableSchemaProvider,
-            optionResolver);
+            entityPath, tableSupplier, tableSnapshotProvider, tableSchemaProvider, optionResolver);
   }
 
   @Test

@@ -44,6 +44,7 @@ public class NessieCommitsGroupScan extends AbstractBase implements GroupScan<Sp
   private final int maxParallelizationWidth;
   private final String fsScheme;
   private final String schemeVariate;
+  private final List<String> excludedContentIDs;
 
   public NessieCommitsGroupScan(
       OpProps props,
@@ -52,7 +53,8 @@ public class NessieCommitsGroupScan extends AbstractBase implements GroupScan<Sp
       SnapshotsScanOptions snapshotsScanOptions,
       int maxParallelizationWidth,
       String fsScheme,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> excludedContentIDs) {
     super(props);
     this.snapshotsScanOptions = snapshotsScanOptions;
     this.columns = columns;
@@ -60,6 +62,7 @@ public class NessieCommitsGroupScan extends AbstractBase implements GroupScan<Sp
     this.maxParallelizationWidth = maxParallelizationWidth;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
+    this.excludedContentIDs = excludedContentIDs;
   }
 
   @Override
@@ -116,7 +119,8 @@ public class NessieCommitsGroupScan extends AbstractBase implements GroupScan<Sp
         snapshotsScanOptions,
         works,
         fsScheme,
-        schemeVariate);
+        schemeVariate,
+        excludedContentIDs);
   }
 
   @Override

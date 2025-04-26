@@ -14,19 +14,20 @@
  * limitations under the License.
  */
 import { addProjectBase as wrapBackendLink } from "dremio-ui-common/utilities/projectBase.js";
-
+import { browserHistory } from "react-router";
 export function checkIfUserShouldGetDeadLink() {
   return false;
 }
 
-export function getHref(entity, context) {
+export function getHref(entity) {
+  const location = browserHistory.getCurrentLocation();
   const fileType = entity.get("fileType");
   if (entity.get("fileType") === "file") {
     if (entity.get("queryable")) {
       return wrapBackendLink(entity.getIn(["links", "query"]));
     }
     return {
-      ...context.location,
+      ...location,
       state: {
         modal: "DatasetSettingsModal",
         tab: "format",

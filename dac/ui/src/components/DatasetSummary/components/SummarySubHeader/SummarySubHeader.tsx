@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import Immutable from "immutable";
 import { useRef, useState } from "react";
 // @ts-ignore
 import { Tooltip } from "dremio-ui-lib";
@@ -21,6 +20,7 @@ import { addTooltip } from "../../datasetSummaryUtils";
 import VersionContext, {
   VersionContextType,
 } from "dremio-ui-common/components/VersionContext.js";
+import { isLimitedVersionSource } from "@inject/utils/sourceUtils";
 
 import * as classes from "./SummarySubHeader.module.less";
 
@@ -28,14 +28,17 @@ const SummarySubHeader = ({
   subTitle,
   versionContext,
   detailsView,
+  sourceType,
 }: {
   subTitle: string;
+  sourceType?: string;
   versionContext?: VersionContextType;
   detailsView?: boolean;
 }) => {
   const [showTooltip, setShowTooltip] = useState(false);
   const subTitleRef = useRef(null);
-
+  const showVersionContext =
+    versionContext && sourceType && !isLimitedVersionSource(sourceType);
   return (
     <div
       className={`${classes["summary-subHeader-container"]} ${
@@ -55,7 +58,7 @@ const SummarySubHeader = ({
           {subTitle}
         </p>
       )}
-      {versionContext && (
+      {showVersionContext && (
         <VersionContext
           versionContext={versionContext}
           className={classes["summary-secondarySubHeader"]}

@@ -874,6 +874,7 @@ public class FragmentExecutor implements MemoryArbiterTask {
       taskState = State.DONE;
     }
 
+    ticket.updateMemoryConsumption();
     deferredException.suppressingClose(contextCreator);
     deferredException.suppressingClose(outputAllocator);
     synchronized (allocatorLock) {
@@ -975,7 +976,7 @@ public class FragmentExecutor implements MemoryArbiterTask {
         dropStateChange(FragmentState.RUNNING);
         return;
 
-        // reasonable initial states.
+      // reasonable initial states.
       case AWAITING_ALLOCATION:
       case SENDING:
         state = FragmentState.RUNNING;

@@ -100,12 +100,9 @@ public final class SqlOperatorSerde {
 
     if (overloads.isEmpty()) {
       throw new UnsupportedOperationException("Failed to match SQL Operators for: " + o.getName());
-    } else if (overloads.size() > 1) {
-      // We need an elegant tie breaking algorithm, but for now let's just return the first one:
-      return overloads.get(0);
-    } else {
-      return overloads.get(0);
     }
+    // We need an elegant tie breaking algorithm, but for now let's just return the first one:
+    return overloads.get(0);
   }
 
   private Optional<SqlOperator> fromProtoLegacy(PSqlOperator o) {

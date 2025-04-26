@@ -204,6 +204,7 @@ export function resetHomeContents() {
   return {
     type: RESET_HOME_CONTENTS,
     meta: {
+      success: true,
       viewId: "HomeContents",
       invalidateViewIds: ["HomeContents"],
     },

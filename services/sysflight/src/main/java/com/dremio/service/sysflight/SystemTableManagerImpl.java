@@ -49,6 +49,10 @@ public class SystemTableManagerImpl implements SystemTableManager {
     this.tableFunctionsProvider = tableFunctionsProvider;
   }
 
+  protected BufferAllocator getAllocator() {
+    return allocator;
+  }
+
   @Override
   public void streamData(SysFlightTicket ticket, ServerStreamListener listener) throws Exception {
     if (!ticket.hasTableFunction()

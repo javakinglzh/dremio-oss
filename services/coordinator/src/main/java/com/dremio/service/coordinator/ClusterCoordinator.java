@@ -164,4 +164,8 @@ public abstract class ClusterCoordinator
   public abstract ElectionRegistrationHandle joinElection(String name, ElectionListener listener);
 
   public abstract LinearizableHierarchicalStore getHierarchicalStore();
+
+  public int getSessionTimeoutMillis() {
+    return -1;
+  }
 }

@@ -45,7 +45,8 @@ public class TestForemenWorkManager {
 
     CommandPool commandPool = CommandPoolFactory.INSTANCE.newPool(config, null);
     ForemenWorkManager foremenWorkManager =
-        new ForemenWorkManager(null, null, () -> commandPool, null, null, null, null, null, null);
+        new ForemenWorkManager(
+            null, null, () -> commandPool, null, null, null, null, null, null, null);
 
     foremenWorkManager = spy(foremenWorkManager);
     UserException userException =

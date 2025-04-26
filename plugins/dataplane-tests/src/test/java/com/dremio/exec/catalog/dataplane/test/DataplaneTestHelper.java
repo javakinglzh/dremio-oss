@@ -16,7 +16,19 @@
 package com.dremio.exec.catalog.dataplane.test;
 
 import static com.dremio.catalog.model.VersionContext.NOT_SPECIFIED;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.*;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_COUNT_COLUMN;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.describeUdfQueryWithAt;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.fullyQualifiedTableName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectCountAtBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectCountDataFilesQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectCountQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectCountSnapshotQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectCountTablePartitionQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.showBranchesQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.showTagQuery;
+import static com.dremio.plugins.NessieClient.Properties.NAMESPACE_URI_LOCATION;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.dremio.BaseTestQueryJunit5;
@@ -41,13 +53,14 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.iceberg.io.FileIO;
-import org.projectnessie.client.api.NessieApiV2;
 import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.IcebergView;
+import org.projectnessie.model.Namespace;
 
 /** Dataplane test common helper class */
-public abstract class DataplaneTestHelper extends BaseTestQueryJunit5 {
+public abstract class DataplaneTestHelper extends BaseTestQueryJunit5
+    implements DataplaneTestHelperInterface {
 
   public void assertTableHasExpectedNumRows(List<String> tablePath, long expectedNumRows)
       throws Exception {
@@ -256,6 +269,24 @@ public abstract class DataplaneTestHelper extends BaseTestQueryJunit5 {
         .getMetadataLocation();
   }
 
+  public String getStorageUriForFolder(List<String> folderKey, ITDataplanePluginTestSetup base)
+      throws NessieNotFoundException {
+    ContentKey key = ContentKey.of(folderKey);
+    Namespace namespace =
+        (Namespace)
+            getNessieApi()
+                .getContent()
+                .key(key)
+                .reference(getNessieApi().getDefaultBranch())
+                .get()
+                .get(key);
+
+    if (namespace != null) {
+      return namespace.getProperties().get(NAMESPACE_URI_LOCATION);
+    }
+    return null;
+  }
+
   public FileIO getFileIO(DataplanePlugin dataplanePlugin) throws IOException {
     return dataplanePlugin.createIcebergFileIO(
         dataplanePlugin.getSystemUserFS(), null, null, null, null);
@@ -428,8 +459,4 @@ public abstract class DataplaneTestHelper extends BaseTestQueryJunit5 {
     assertThat(result.get(2)).isEqualTo(functionType);
     assertThat(result.get(3)).contains(function);
   }
-
-  public abstract NessieApiV2 getNessieApi();
-
-  public abstract DataplaneStorage getDataplaneStorage();
 }

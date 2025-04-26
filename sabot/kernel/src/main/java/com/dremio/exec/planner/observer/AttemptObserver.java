@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.observer;
 
+import com.dremio.common.exceptions.UserCancellationException;
 import com.dremio.common.utils.protos.QueryWritableBatch;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.planner.PlannerPhase;
@@ -23,12 +24,13 @@ import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.fragment.PlanningSet;
 import com.dremio.exec.planner.physical.Prel;
-import com.dremio.exec.planner.plancache.CachedPlan;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -42,9 +44,12 @@ import com.dremio.resource.GroupResourceInformation;
 import com.dremio.resource.ResourceSchedulingDecisionInfo;
 import java.util.List;
 import org.apache.calcite.plan.RelOptPlanner;
+import org.apache.calcite.plan.RelOptUtil;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.sql.SqlExplainFormat;
+import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlNode;
 
 public interface AttemptObserver {
@@ -97,11 +102,17 @@ public interface AttemptObserver {
       long millisTaken,
       boolean isMaterializationCacheInitialized);
 
-  /** Printing a message to indicate the plan cache is used. */
-  default void planCacheUsed(int count) {}
+  /**
+   * Generic method to provide information about some step within planning.
+   *
+   * @param phaseName
+   * @param text
+   * @param millisTaken
+   */
+  void planStepLogging(String phaseName, String text, long millisTaken);
 
   /** Adding updated Acceleration profile into cached plan */
-  default void addAccelerationProfileToCachedPlan(CachedPlan plan) {}
+  default void addAccelerationProfileToCachedPlan(PlanCacheEntry plan) {}
 
   /** Sets the cached acceleration profile that the profile should show */
   default void restoreAccelerationProfileFromCachedPlan(AccelerationProfile accelerationProfile) {}
@@ -183,12 +194,13 @@ public interface AttemptObserver {
   void tablesCollected(Iterable<DremioTable> tables);
 
   /**
-   * The text of the final query plan was produced.
+   * The text of the final query plan was produced and break down of time taken by each visitor.
    *
    * @param text Text based explain plan.
-   * @param millisTaken
+   * @param millisTaken Total time taken by final physical transformation.
+   * @param stats Time taken by each visitor during final physical transformation.
    */
-  void planText(String text, long millisTaken);
+  void planFinalPhysical(String text, long millisTaken, List<PlannerPhaseRulesStats> stats);
 
   void finalPrelPlanGenerated(Prel prel);
 
@@ -219,7 +231,15 @@ public interface AttemptObserver {
   void planSubstituted(long millisTaken);
 
   /**
-   * Report considered target materializations and substitution matches.
+   * Report considered target materializations.
+   *
+   * @param profile
+   * @param target
+   */
+  void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target);
+
+  /**
+   * Report substitution matches.
    *
    * @param materialization
    * @param substitutions
@@ -286,6 +306,12 @@ public interface AttemptObserver {
    * @param result The result of the query.
    */
   void attemptCompletion(UserResult result);
+
+  void putExecutorProfile(String nodeEndpoint);
+
+  void removeExecutorProfile(String nodeEndpoint);
+
+  void queryClosed();
 
   /** Executor nodes were selected for the query */
   void executorsSelected(
@@ -367,11 +393,37 @@ public interface AttemptObserver {
 
   void putProfileFailed();
 
+  void putProfileUpdateComplete();
+
   static AttemptEvent toEvent(AttemptEvent.State state) {
     return toEvent(state, System.currentTimeMillis());
   }
 
   static AttemptEvent toEvent(AttemptEvent.State state, long startTime) {
     return AttemptEvent.newBuilder().setState(state).setStartTime(startTime).build();
+  }
+
+  static String toStringOrEmpty(final RelNode plan, boolean verbose, boolean ensureDump) {
+    if (!verbose && !ensureDump) {
+      return "";
+    }
+
+    if (plan == null) {
+      return "";
+    }
+
+    try {
+      return RelOptUtil.dumpPlan(
+          "",
+          plan,
+          SqlExplainFormat.TEXT,
+          verbose ? SqlExplainLevel.ALL_ATTRIBUTES : SqlExplainLevel.EXPPLAN_ATTRIBUTES);
+    } catch (UserCancellationException userCancellationException) {
+      return "";
+    }
+  }
+
+  default boolean isVerbose() {
+    return false;
   }
 }

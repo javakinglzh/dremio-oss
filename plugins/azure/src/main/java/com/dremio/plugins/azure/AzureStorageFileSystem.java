@@ -17,10 +17,13 @@ package com.dremio.plugins.azure;
 
 import static com.dremio.common.utils.PathUtils.removeLeadingSlash;
 import static com.dremio.common.utils.PathUtils.removeTrailingSlash;
-import static com.dremio.plugins.azure.AzureAuthenticationType.ACCESS_KEY;
+import static com.dremio.exec.catalog.conf.AzureAuthenticationType.ACCESS_KEY;
+import static com.dremio.plugins.Constants.DREMIO_ENABLE_BUCKET_DISCOVERY;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.util.Retryer;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.hadoop.MayProvideAsyncStream;
 import com.dremio.exec.store.dfs.DremioFileSystemCache;
 import com.dremio.exec.store.dfs.FileSystemConf;
@@ -52,7 +55,6 @@ import org.slf4j.LoggerFactory;
 public class AzureStorageFileSystem extends ContainerFileSystem implements MayProvideAsyncStream {
   private static final Logger logger = LoggerFactory.getLogger(AzureStorageFileSystem.class);
   private static final String CONTAINER_HUMAN_NAME = "Container";
-  public static final String ACCOUNT = "dremio.azure.account";
   public static final String KEY = "dremio.azure.key";
   public static final String MODE = "dremio.azure.mode";
   public static final String SECURE = "dremio.azure.secure";
@@ -64,7 +66,8 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
   public static final String CLIENT_ID = "dremio.azure.clientId";
   public static final String TOKEN_ENDPOINT = "dremio.azure.tokenEndpoint";
   public static final String CLIENT_SECRET = "dremio.azure.clientSecret";
-  static final String AZURE_ENDPOINT = "fs.azure.endpoint";
+  public static final String SAS_SIGNATURE = "dremio.azure.sas-signature";
+  private static final String AZURE_ENDPOINT = "fs.azure.endpoint";
 
   public static final String AZURE_SHAREDKEY_SIGNER_TYPE = "fs.azure.sharedkey.signer.type";
 
@@ -87,7 +90,7 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
 
   @Override
   public void close() throws IOException {
-    AutoCloseables.close(IOException.class, () -> fsCache.closeAll(true), super::close);
+    AutoCloseables.close(IOException.class, fsCache::closeAll, super::close);
   }
 
   protected AzureStorageFileSystem() {
@@ -119,7 +122,7 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
     azureEndpoint = conf.get(AZURE_ENDPOINT);
     // -- End --
 
-    account = Objects.requireNonNull(conf.get(ACCOUNT));
+    account = Objects.requireNonNull(conf.get(AzureStorageConfProperties.ACCOUNT));
     asyncHttpClient = AsyncHttpClientProvider.getInstance();
     enableMD5Checksum = conf.getBoolean(AzureStorageOptions.ENABLE_CHECKSUM.getOptionName(), true);
 
@@ -143,7 +146,15 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
           this.tokenProvider = sharedKeyCredentials;
           break;
         }
+      case SAS_SIGNATURE:
+        {
+          final AzureSasSignatureCredentials sasSignatureCredentials =
+              new AzureSasSignatureCredentials();
+          sasSignatureCredentials.initialize(conf, account);
 
+          this.tokenProvider = sasSignatureCredentials;
+          break;
+        }
       default:
         throw new IOException("Unrecognized credential type");
     }
@@ -205,6 +216,16 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
                     (ClientCredentialsBasedTokenProvider) tokenProvider);
             break;
 
+          case SAS_SIGNATURE:
+            containerProvider =
+                new BlobContainerProviderSasSignature(
+                    this,
+                    connection,
+                    account,
+                    containerList,
+                    (AzureSasSignatureCredentials) tokenProvider);
+            break;
+
           default:
             throw new IllegalStateException("Unrecognized credential type: " + credentialsType);
         }
@@ -214,7 +235,11 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
         throw new IllegalStateException("Unrecognized account kind: " + accountKind);
     }
 
-    containerProvider.verfiyContainersExist();
+    if (conf.getBoolean(DREMIO_ENABLE_BUCKET_DISCOVERY, true)) {
+      // Temporary credentials like SAS tokens or Access Tokens might not have privileges to
+      // check container existence. So, we disable container verification here.
+      containerProvider.verfiyContainersExist();
+    }
   }
 
   private String[] getContainerNames(String value) {
@@ -307,6 +332,11 @@ public class AzureStorageFileSystem extends ContainerFileSystem implements MayPr
             parent.proto.setImpl(conf, parent.account, key, parent.azureEndpoint);
             return parent.fsCache.get(
                 new Path(location).toUri(), conf, AbstractAzureStorageConf.KEY_AUTH_PROPS);
+
+          case SAS_SIGNATURE:
+            parent.proto.setImpl(conf, AzureSasSignatureCredentials.class.getName());
+            return parent.fsCache.get(
+                new Path(location).toUri(), conf, AbstractAzureStorageConf.SAS_SIGNATURE_PROPS);
 
           default:
             throw new IllegalStateException("Unrecognized credential type: " + credentialsType);

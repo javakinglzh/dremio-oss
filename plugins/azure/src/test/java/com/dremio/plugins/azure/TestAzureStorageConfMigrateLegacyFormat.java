@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.azure;
 
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.services.credentials.CredentialsService;
 import java.net.URI;

@@ -26,8 +26,8 @@ import com.dremio.dac.model.sources.SourceUI;
 import com.dremio.dac.model.sources.UIMetadataPolicy;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.exec.catalog.CatalogServiceImpl;
-import com.dremio.exec.catalog.CatalogServiceImpl.UpdateType;
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceUpdateType;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.namespace.NamespaceKey;
@@ -98,7 +98,7 @@ public class TestRefreshForMultiCoordinators extends BaseTestServer {
     setUpForCreateSource();
     masterCatalogService.createSourceIfMissingWithThrow(sourceConfig);
     masterCatalogService.refreshSource(
-        new NamespaceKey(PLUGIN_NAME), metadataPolicy, UpdateType.FULL);
+        new NamespaceKey(PLUGIN_NAME), metadataPolicy, SourceUpdateType.FULL);
     Thread.sleep(3_000);
 
     // retrieve the added plugin from slave coordinator's catalog service
@@ -144,7 +144,7 @@ public class TestRefreshForMultiCoordinators extends BaseTestServer {
     setUpForCreateSource();
     slaveCatalogService.createSourceIfMissingWithThrow(sourceConfig);
     slaveCatalogService.refreshSource(
-        new NamespaceKey(PLUGIN_NAME), metadataPolicy, UpdateType.FULL);
+        new NamespaceKey(PLUGIN_NAME), metadataPolicy, SourceUpdateType.FULL);
     Thread.sleep(3_000);
 
     // retrieve the added plugin from master coordinator's catalog service

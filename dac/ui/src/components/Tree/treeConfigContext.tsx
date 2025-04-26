@@ -18,12 +18,30 @@ import { sortByName } from "#oss/components/Tree/resourceTreeUtils";
 import { createContext, useContext, RefObject } from "react";
 import Immutable from "immutable";
 
+export type TreeItemInfo = {
+  entityId: string;
+  fromTreeNode: boolean;
+  getEntityUrl: () => string;
+};
+
+export type TreeLeafInfo = {
+  entityId: string;
+  fromTreeNode: boolean;
+  fullPath: string[];
+  id: string;
+  type: string;
+  versionContext: string;
+};
+
 type TreeConfigContextType = {
   nessiePrefix: string;
   filterTree: (tree: any) => any;
   restrictSelection: boolean;
   resourceTreeControllerRef: RefObject<any> | null;
-  handleDatasetDetails?: (dataset: Immutable.Map<any, any>) => void;
+  handleDatasetDetails: (
+    dataset: Immutable.Map<string, unknown> | TreeItemInfo | TreeLeafInfo,
+    event?: any,
+  ) => void;
   addToEditor?: (path: string | string[]) => void;
 };
 
@@ -32,7 +50,7 @@ export const defaultConfigContext: TreeConfigContextType = {
   filterTree: (tree) => tree.sort(sortByName("asc")),
   restrictSelection: false,
   resourceTreeControllerRef: null,
-  handleDatasetDetails: (dataset) => {},
+  handleDatasetDetails: (dataset, event) => {},
 };
 
 export const TreeConfigContext =

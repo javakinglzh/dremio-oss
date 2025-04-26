@@ -3,7 +3,7 @@
 ## Usage
 
 ```typescript
-import { Dremio } from "@dremio/dremio-js/community";
+import { Dremio, Query } from "@dremio/dremio-js/oss";
 
 // Configure the Dremio SDK with your access token and target instance
 const dremio = Dremio({
@@ -11,33 +11,41 @@ const dremio = Dremio({
   origin: "https://your_dremio_instance.example.com:9047",
 });
 
+// List all of the sources available in the Dremio instance
+for await (const source of dremio.catalog.list().data()) {
+  console.log(source);
+}
+
+// Fetch a `CatalogObject` for a view in the Dremio instance's catalog
+const myView = await dremio.catalog
+  .retrieveByPath(["my_source", "my_view"])
+  .then((retrieveResult) => retrieveResult.unwrap());
+
+// Fetch the wiki for the view
+const myViewWiki = await myView
+  .wiki()
+  .then((retrieveResult) => retrieveResult.unwrap());
+
+// Update the wiki contents
+await myViewWiki.update({ text: "Hello world!" });
+
 // Create a query
 const query = new Query("SELECT * FROM mydata;");
 
-// Run the query
-const job = (await dremio.jobs.create(query)).unwrap();
+// Create a job from the query
+const job = await dremio.jobs.create(query).then((result) => result.unwrap());
 
-// Subscribe to job status updates
-job.updates.subscribe((job) => {
-  console.log("Job status updated:", job.status);
-});
-
-// Show job results once they're ready
-// Each item yielded by this generator is an Apache Arrow `RecordBatch`
-for await (let batch of job.results.recordBatches()) {
-  console.table([...batch]);
-}
-
-// List the most recent 20 jobs
-for await (let job of dremio.jobs.list().data().take(20)) {
-  console.log(job);
+// Job results can be iterated as Apache Arrow RecordBatches (shown)
+// or as JSON batches (via `.jsonBatches()`)
+for await (const recordBatch of job.results.recordBatches()) {
+  console.table([...recordBatch]);
 }
 
 // Delete all of the scripts owned by a specific user
-for await (let script of dremio.scripts
+for await (const script of dremio.scripts
   .list()
   .data()
-  .filter((script) => script.userId === "1234-56-7891")) {
+  .filter((script) => script.createdBy === "1234-56-7891")) {
   await script.delete();
 }
 ```

@@ -108,6 +108,7 @@ export default class SelectSourceType extends Component {
           pillText={pillText}
           isCommunity={isCommunity}
           disabled={item.disabled}
+          iconSrc={item.icon} // ARP Connectors don't use dremio-icon, send the icon src here
           dremioIcon={`sources/${item.sourceType}`}
           isSampleDB={item.sourceType === "SAMPLEDB"}
           key={item.sourceType}
@@ -198,7 +199,9 @@ export default class SelectSourceType extends Component {
       : sourceTypesIncludeS3(sourceTypes);
 
     return (
-      (fileStoreSources.length > 0 || renderSampleSource) && (
+      (fileStoreSources.length > 0 ||
+        lakehouseSources.length ||
+        renderSampleSource) && (
         <div className="SelectSourceType">
           <div className="main">
             {lakehouseSources.length > 0 && (

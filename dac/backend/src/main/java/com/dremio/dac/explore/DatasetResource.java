@@ -76,11 +76,11 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
 import io.protostuff.ByteString;
 import java.io.IOException;
 import java.text.ParseException;
 import java.util.List;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
@@ -104,7 +104,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 @Path("/dataset/{cpath}")
 public class DatasetResource extends BaseResourceWithAllocator {
 
-  private final Catalog catalog;
+  private final Catalog userCatalog;
   private final DatasetVersionMutator datasetVersionMutator;
   private final JobsService jobsService;
   private final SecurityContext securityContext;
@@ -115,7 +115,7 @@ public class DatasetResource extends BaseResourceWithAllocator {
 
   @Inject
   public DatasetResource(
-      Catalog catalog,
+      Catalog userCatalog,
       NamespaceService namespaceService,
       DatasetVersionMutator datasetVersionMutator,
       JobsService jobsService,
@@ -125,7 +125,7 @@ public class DatasetResource extends BaseResourceWithAllocator {
       @PathParam("cpath") DatasetPath datasetPath,
       BufferAllocatorFactory allocatorFactory) {
     super(allocatorFactory);
-    this.catalog = catalog;
+    this.userCatalog = userCatalog;
     this.datasetVersionMutator = datasetVersionMutator;
     this.namespaceService = namespaceService;
     this.jobsService = jobsService;
@@ -139,11 +139,9 @@ public class DatasetResource extends BaseResourceWithAllocator {
   @Path("descendants")
   @Produces(APPLICATION_JSON)
   public List<List<String>> getDescendants() throws NamespaceException {
-    final List<List<String>> descendantPaths = Lists.newArrayList();
-    for (DatasetPath path : datasetVersionMutator.getDescendants(datasetPath)) {
-      descendantPaths.add(path.toPathList());
-    }
-    return descendantPaths;
+    return userCatalog.getAllDownstreams(new NamespaceKey(datasetPath.toPathList())).stream()
+        .map(datasetConfig -> datasetConfig.getFullPathList())
+        .collect(Collectors.toList());
   }
 
   @GET
@@ -162,7 +160,7 @@ public class DatasetResource extends BaseResourceWithAllocator {
             .tableVersionContext(
                 versionContext == NOT_SPECIFIED ? null : TableVersionContext.of(versionContext))
             .build();
-    final DremioTable table = catalog.getTable(catalogEntityKey);
+    final DremioTable table = userCatalog.getTable(catalogEntityKey);
 
     if (table == null) {
       throw new DatasetNotFoundException(datasetPath);
@@ -251,9 +249,6 @@ public class DatasetResource extends BaseResourceWithAllocator {
           "refreshPeriod must be less than gracePeriod");
     } else if (descriptor.getAccelerationActivePolicyType() == RefreshPolicyType.SCHEDULE) {
       Preconditions.checkArgument(
-          reflectionServiceHelper.isRefreshSchedulePolicyEnabled(),
-          "refresh schedule policy must be enabled to set a schedule");
-      Preconditions.checkArgument(
           descriptor.getAccelerationRefreshSchedule() != null,
           "refreshSchedule is required when using schedule based refresh policy");
       Preconditions.checkArgument(
@@ -279,7 +274,7 @@ public class DatasetResource extends BaseResourceWithAllocator {
             .tableVersionContext(
                 versionContext == NOT_SPECIFIED ? null : TableVersionContext.of(versionContext))
             .build();
-    final DremioTable table = catalog.getTable(catalogEntityKey);
+    final DremioTable table = userCatalog.getTable(catalogEntityKey);
 
     if (table == null) {
       throw new DatasetNotFoundException(datasetPath);
@@ -296,7 +291,7 @@ public class DatasetResource extends BaseResourceWithAllocator {
     }
 
     if (descriptor.getMethod() == RefreshMethod.INCREMENTAL) {
-      if (CatalogUtil.requestedPluginSupportsVersionedTables(table.getPath(), catalog)) {
+      if (CatalogUtil.requestedPluginSupportsVersionedTables(table.getPath(), userCatalog)) {
         // Validate Iceberg tables in Nessie Catalog
         final String msg = "refresh field is required for incremental updates on Iceberg tables";
         Preconditions.checkArgument(descriptor.getRefreshField() != null, msg);
@@ -418,9 +413,9 @@ public class DatasetResource extends BaseResourceWithAllocator {
     NamespaceKey namespaceKey = new NamespaceKey(datasetPath.toPathList());
     final ResolvedVersionContext resolvedVersionContext =
         CatalogUtil.resolveVersionContext(
-            catalog, datasetPath.getRoot().getName(), VersionContext.ofBranch(branchName));
+            userCatalog, datasetPath.getRoot().getName(), VersionContext.ofBranch(branchName));
     DatasetType datasetType =
-        catalog.getDatasetType(
+        userCatalog.getDatasetType(
             CatalogEntityKey.newBuilder()
                 .keyComponents(datasetPath.toPathList())
                 .tableVersionContext(TableVersionContext.of(resolvedVersionContext))
@@ -438,20 +433,20 @@ public class DatasetResource extends BaseResourceWithAllocator {
       NamespaceKey namespaceKey, ResolvedVersionContext resolvedVersionContext) {
     final TableMutationOptions tableMutationOptions =
         TableMutationOptions.newBuilder().setResolvedVersionContext(resolvedVersionContext).build();
-    catalog.dropTable(namespaceKey, tableMutationOptions);
+    userCatalog.dropTable(namespaceKey, tableMutationOptions);
   }
 
   protected void deleteVersionedView(
       NamespaceKey namespaceKey, ResolvedVersionContext resolvedVersionContext) throws IOException {
     final ViewOptions viewOptions =
         new ViewOptions.ViewOptionsBuilder().version(resolvedVersionContext).build();
-    catalog.dropView(namespaceKey, viewOptions);
+    userCatalog.dropView(namespaceKey, viewOptions);
   }
 
   private boolean isDatasetVersioned() {
     final NamespaceKey namespaceKey = datasetPath.toNamespaceKey();
 
-    return CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, catalog);
+    return CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, userCatalog);
   }
 
   /**
@@ -542,6 +537,6 @@ public class DatasetResource extends BaseResourceWithAllocator {
   }
 
   protected DatasetUI newDataset(VirtualDatasetUI vds) throws NamespaceException {
-    return DatasetUI.newInstance(vds, null, catalog);
+    return DatasetUI.newInstance(vds, null, userCatalog);
   }
 }

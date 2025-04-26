@@ -16,46 +16,33 @@
 package com.dremio.exec.catalog.namespace;
 
 import com.dremio.catalog.model.CatalogEntityId;
-import com.dremio.datastore.SearchTypes;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.FindByCondition;
-import com.dremio.service.namespace.NamespaceAttribute;
-import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.EntityNamespaceService;
 import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.namespace.NamespaceNotFoundException;
-import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
+import com.dremio.service.namespace.folder.FolderNamespaceService;
+import com.dremio.service.namespace.function.FunctionNamespaceService;
+import com.dremio.service.namespace.home.HomeNamespaceService;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
-import java.util.List;
+import com.dremio.service.namespace.source.SourceNamespaceService;
+import com.dremio.service.namespace.space.SpaceNamespaceService;
+import com.dremio.service.namespace.split.SplitNamespaceService;
 
-/** An interface to abstract NamespaceService away from the architectural layers above Catalog. */
-public interface NamespacePassthrough {
-
+/**
+ * A temporary interface to abstract NamespaceService usage out from the architectural layers above
+ * Catalog.
+ */
+public interface NamespacePassthrough
+    extends EntityNamespaceService,
+        SourceNamespaceService,
+        SpaceNamespaceService,
+        FunctionNamespaceService,
+        HomeNamespaceService,
+        FolderNamespaceService,
+        DatasetNamespaceService,
+        SplitNamespaceService {
   boolean existsById(CatalogEntityId id);
 
-  List<NameSpaceContainer> getEntities(List<NamespaceKey> lookupKeys);
-
-  void addOrUpdateDataset(
-      NamespaceKey datasetPath, DatasetConfig dataset, NamespaceAttribute... attributes)
-      throws NamespaceException;
-
-  DatasetConfig renameDataset(NamespaceKey oldDatasetPath, NamespaceKey newDatasetPath)
-      throws NamespaceException;
-
-  String getEntityIdByPath(NamespaceKey entityPath) throws NamespaceNotFoundException;
-
-  NameSpaceContainer getEntityByPath(NamespaceKey entityPath) throws NamespaceException;
-
-  DatasetConfig getDataset(NamespaceKey datasetPath) throws NamespaceException;
-
-  Iterable<NamespaceKey> getAllDatasets(final NamespaceKey parent) throws NamespaceException;
-
-  void deleteDataset(NamespaceKey datasetPath, String version, NamespaceAttribute... attributes)
-      throws NamespaceException;
-
-  List<Integer> getCounts(SearchTypes.SearchQuery... queries) throws NamespaceException;
-
   Iterable<Document<NamespaceKey, NameSpaceContainer>> find(FindByCondition condition);
-
-  List<NameSpaceContainer> getEntitiesByIds(List<EntityId> ids);
 }

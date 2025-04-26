@@ -27,9 +27,7 @@ import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
-import com.dremio.exec.planner.logical.ViewTable;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.SchemaConfig;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.service.namespace.NamespaceKey;
@@ -40,7 +38,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableMap;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
 
 public class InfoSchemaStoragePlugin
@@ -51,14 +48,14 @@ public class InfoSchemaStoragePlugin
       FluentIterable.from(InformationSchemaTable.values())
           .uniqueIndex(input -> input.name().toLowerCase());
 
-  private final SabotContext context;
+  private final PluginSabotContext context;
 
-  public InfoSchemaStoragePlugin(SabotContext context, String name) {
+  public InfoSchemaStoragePlugin(PluginSabotContext context, String name) {
     Preconditions.checkArgument(NAME.equals(name));
     this.context = context;
   }
 
-  SabotContext getSabotContext() {
+  PluginSabotContext getSabotContext() {
     return context;
   }
 
@@ -70,11 +67,6 @@ public class InfoSchemaStoragePlugin
   @Override
   public SourceState getState() {
     return SourceState.GOOD;
-  }
-
-  @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    return null;
   }
 
   @Override

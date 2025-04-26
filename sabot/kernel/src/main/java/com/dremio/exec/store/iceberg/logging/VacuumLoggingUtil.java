@@ -21,8 +21,9 @@ import com.dremio.exec.store.iceberg.SnapshotsScanOptions;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ActionTarget;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.DeleteOrphanFileInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ExpireSnapshotInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.NessieCommitScanInfo;
-import com.dremio.exec.store.iceberg.logging.VacuumLogProto.NessieExpireSnapshotInfo;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.SnapshotInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.TableSkipInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.VacuumLog;
 import java.util.List;
@@ -31,20 +32,21 @@ public class VacuumLoggingUtil {
   private static final String DELETE_ORPHAN_FILE_ACTION = "DeleteOrphanFile";
   private static final String TABLE_SKIP_ACTION = "TableSkip";
   private static final String NESSIE_COMMIT_SCAN_ACTION = "NessieCommitScan";
-  private static final String NESSIE_EXPIRE_SNAPSHOT_ACTION = "NessieExpireSnapshot";
+  private static final String EXPIRE_SNAPSHOT_ACTION = "ExpireSnapshot";
+  private static final String SNAPSHOT_INFO = "SnapshotInfo";
 
   public static StructuredLogger getVacuumLogger() {
     return StructuredLogger.get(VacuumLog.class, "VacuumLogger");
   }
 
-  public static VacuumLog createNessieExpireSnapshotLog(
+  public static VacuumLog createExpireSnapshotLog(
       String queryId,
       String tableId,
       String metadataLocation,
       SnapshotsScanOptions snapshotsScanOptions,
       List<String> snapshots) {
-    final NessieExpireSnapshotInfo.Builder expireSnapshotInfoBuilder =
-        NessieExpireSnapshotInfo.newBuilder()
+    final ExpireSnapshotInfo.Builder expireSnapshotInfoBuilder =
+        ExpireSnapshotInfo.newBuilder()
             .setTable(tableId)
             .setMetadataLocation(metadataLocation)
             .setOlderThanMillis(snapshotsScanOptions.getOlderThanInMillis())
@@ -58,15 +60,15 @@ public class VacuumLoggingUtil {
         .build();
   }
 
-  public static VacuumLog createNessieExpireSnapshotLog(
+  public static VacuumLog createExpireSnapshotLog(
       String queryId,
       String tableId,
       String metadataLocation,
       SnapshotsScanOptions snapshotsScanOptions,
       ErrorType errorType,
       String error) {
-    final NessieExpireSnapshotInfo.Builder expireSnapshotInfoBuilder =
-        NessieExpireSnapshotInfo.newBuilder()
+    final ExpireSnapshotInfo.Builder expireSnapshotInfoBuilder =
+        ExpireSnapshotInfo.newBuilder()
             .setTable(tableId)
             .setMetadataLocation(metadataLocation)
             .setOlderThanMillis(snapshotsScanOptions.getOlderThanInMillis())
@@ -91,6 +93,14 @@ public class VacuumLoggingUtil {
                 .setOlderThanMillis(vacuumOptions.getOlderThanInMillis())
                 .setRetainLast(vacuumOptions.getRetainLast())
                 .build())
+        .setErrorType(errorType)
+        .setError(message)
+        .build();
+  }
+
+  public static VacuumLog createTableSkipLog(
+      String queryId, String contentId, ErrorType errorType, String message) {
+    return commonVacuumLogBuilder(queryId, TableSkipInfo.newBuilder().setTable(contentId).build())
         .setErrorType(errorType)
         .setError(message)
         .build();
@@ -160,11 +170,30 @@ public class VacuumLoggingUtil {
         .build();
   }
 
+  public static VacuumLog createSnapshotInfoLog(
+      String queryId,
+      String tableId,
+      SnapshotsScanOptions snapshotsScanOptions,
+      List<String> snapshots) {
+    final SnapshotInfo.Builder snapshotInfoBuilder =
+        SnapshotInfo.newBuilder()
+            .setTable(tableId)
+            .setScanMode(snapshotsScanOptions.getMode().name())
+            .setOlderThanMillis(snapshotsScanOptions.getOlderThanInMillis())
+            .setRetainLast(snapshotsScanOptions.getRetainLast());
+    for (String s : snapshots) {
+      snapshotInfoBuilder.addSnapshotId(s);
+    }
+    return commonVacuumLogBuilder(queryId, snapshotInfoBuilder.build())
+        .setErrorType(ErrorType.NO_ERROR)
+        .build();
+  }
+
   private static VacuumLog.Builder commonVacuumLogBuilder(
-      String queryId, boolean status, NessieExpireSnapshotInfo expireSnapshotInfo) {
+      String queryId, boolean status, ExpireSnapshotInfo expireSnapshotInfo) {
     return VacuumLog.newBuilder()
         .setJobId(queryId)
-        .setAction(NESSIE_EXPIRE_SNAPSHOT_ACTION)
+        .setAction(EXPIRE_SNAPSHOT_ACTION)
         .setStatus(status)
         .setActionTarget(
             ActionTarget.newBuilder().setExpireSnapshotInfo(expireSnapshotInfo).build());
@@ -195,5 +224,14 @@ public class VacuumLoggingUtil {
         .setAction(TABLE_SKIP_ACTION)
         .setStatus(false)
         .setActionTarget(ActionTarget.newBuilder().setTableSkipInfo(tableSkipInfo).build());
+  }
+
+  public static VacuumLog.Builder commonVacuumLogBuilder(
+      String queryId, SnapshotInfo snapshotInfo) {
+    return VacuumLog.newBuilder()
+        .setJobId(queryId)
+        .setAction(SNAPSHOT_INFO)
+        .setStatus(true)
+        .setActionTarget(ActionTarget.newBuilder().setSnapshotInfo(snapshotInfo).build());
   }
 }

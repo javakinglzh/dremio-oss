@@ -15,14 +15,16 @@
  */
 package com.dremio.plugins.azure;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.dfs.CacheProperties;
 import com.dremio.exec.store.dfs.FileSystemConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
@@ -67,28 +69,31 @@ public abstract class AbstractAzureStorageConf
 
   public static final List<String> KEY_AUTH_PROPS =
       ImmutableList.of(
-          AzureStorageFileSystem.ACCOUNT,
+          AzureStorageConfProperties.ACCOUNT,
           AzureStorageFileSystem.SECURE,
           AzureStorageFileSystem.CONTAINER_LIST,
           AzureStorageFileSystem.KEY);
 
   public static final List<String> AZURE_AD_PROPS =
       ImmutableList.of(
-          AzureStorageFileSystem.ACCOUNT,
+          AzureStorageConfProperties.ACCOUNT,
           AzureStorageFileSystem.SECURE,
           AzureStorageFileSystem.CONTAINER_LIST,
           AzureStorageFileSystem.CLIENT_ID,
           AzureStorageFileSystem.CLIENT_SECRET,
           AzureStorageFileSystem.TOKEN_ENDPOINT);
 
+  public static final List<String> SAS_SIGNATURE_PROPS =
+      ImmutableList.of(AzureStorageFileSystem.SAS_SIGNATURE, AzureStorageFileSystem.CONTAINER_LIST);
+
   /** Type of Storage */
   public enum AccountKind {
     @Tag(1)
-    @DisplayMetadata(label = "StorageV1")
+    @DisplayMetadata(label = "WASBS (Legacy)")
     STORAGE_V1,
 
     @Tag(2)
-    @DisplayMetadata(label = "StorageV2")
+    @DisplayMetadata(label = "ABFSS (Recommended)")
     STORAGE_V2;
 
     @JsonIgnore
@@ -102,7 +107,7 @@ public abstract class AbstractAzureStorageConf
   }
 
   @Tag(1)
-  @DisplayMetadata(label = "Account Version")
+  @DisplayMetadata(label = "Storage Connection Protocol (Driver)")
   public AccountKind accountKind = AccountKind.STORAGE_V2;
 
   @Tag(2)
@@ -185,9 +190,11 @@ public abstract class AbstractAzureStorageConf
 
   @Override
   public AzureStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     Preconditions.checkNotNull(accountName, "Account name must be provided.");
-    return new AzureStoragePlugin(this, context, name, pluginIdProvider);
+    return new AzureStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   @Override

@@ -21,6 +21,8 @@ import com.dremio.dac.cmd.upgrade.UpgradeTask;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.service.embedded.catalog.EmbeddedContent;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedPointerStore;
 import com.dremio.service.embedded.catalog.EmbeddedUnversionedStore;
 import com.dremio.service.nessie.upgrade.version040.MetadataReader;
@@ -28,8 +30,6 @@ import com.dremio.service.nessie.upgrade.version040.MetadataReader040;
 import com.google.common.annotations.VisibleForTesting;
 import java.util.Collections;
 import java.util.UUID;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
 
 /**
  * Migrates legacy Nessie data stored in custom format in the KVStore to {@link
@@ -73,7 +73,7 @@ public class MigrateOldKVStoreToUnversionedStore extends UpgradeTask {
   }
 
   @VisibleForTesting
-  void upgrade(KVStoreProvider kvStoreProvider, MetadataReader reader) throws Exception {
+  void upgrade(KVStoreProvider kvStoreProvider, MetadataReader reader) {
     EmbeddedPointerStore store = new EmbeddedPointerStore(kvStoreProvider);
 
     reader.doUpgrade(
@@ -83,7 +83,7 @@ public class MigrateOldKVStoreToUnversionedStore extends UpgradeTask {
             throw new IllegalStateException("Found unexpected branch: " + branchName);
           }
 
-          ContentKey key = ContentKey.of(contentKey.toArray(new String[0]));
+          EmbeddedContentKey key = EmbeddedContentKey.of(contentKey.toArray(new String[0]));
 
           AdminLogger.log("Migrating key: " + key + ", location: " + location);
 
@@ -97,7 +97,7 @@ public class MigrateOldKVStoreToUnversionedStore extends UpgradeTask {
           // will already be managed by a Nessie DatabaseAdapter, so no low-level upgrade tasks will
           // be required
           // at that time (hopefully).
-          IcebergTable table = IcebergTable.of(location, 0, 0, 0, 0, UUID.randomUUID().toString());
+          EmbeddedContent table = EmbeddedContent.table(location, UUID.randomUUID().toString());
 
           store.put(key, table);
         });

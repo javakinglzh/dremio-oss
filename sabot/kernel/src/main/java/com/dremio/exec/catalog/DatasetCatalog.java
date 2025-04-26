@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.exception.UnsupportedForgetTableException;
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
@@ -58,7 +59,7 @@ public interface DatasetCatalog {
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable);
+      final CreateTableOptions createTableOptions);
 
   void createEmptyTable(NamespaceKey key, BatchSchema batchSchema, WriterOptions writerOptions);
 
@@ -151,7 +152,8 @@ public interface DatasetCatalog {
       TableMutationOptions tableMutationOptions);
 
   boolean alterDataset(
-      final CatalogEntityKey catalogEntityKey, final Map<String, AttributeValue> attributes);
+      final CatalogEntityKey catalogEntityKey, final Map<String, AttributeValue> attributes)
+      throws CatalogUnsupportedOperationException;
 
   boolean alterColumnOption(
       final NamespaceKey key,
@@ -163,8 +165,6 @@ public interface DatasetCatalog {
       final NamespaceKey namespaceKey, List<String> columns, VersionContext statementVersion);
 
   void dropPrimaryKey(final NamespaceKey namespaceKey, VersionContext statementVersion);
-
-  List<String> getPrimaryKey(final NamespaceKey namespaceKey);
 
   boolean toggleSchemaLearning(NamespaceKey path, boolean enableSchemaLearning);
 

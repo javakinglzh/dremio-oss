@@ -183,8 +183,9 @@ public class CopyIntoTests extends ITCopyIntoBase {
     } catch (UserException e) {
       exceptionThrown = true;
       if ("csv".equals(fileFormat)) {
-        Assert.assertTrue(e.getMessage(), e.getMessage().contains("Error processing input: "));
-        Assert.assertTrue(e.getMessage(), e.getMessage().contains("line=2"));
+        Assert.assertTrue(
+            e.getMessage(),
+            e.getMessage().contains("FUNCTION ERROR: Failed to cast the string  to double"));
       } else {
         Assert.assertTrue(e.getMessage(), e.getMessage().contains("Error parsing JSON"));
         Assert.assertTrue(e.getMessage(), e.getMessage().contains("Line: 8, Record: 2"));
@@ -1038,7 +1039,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
         "\"year\"",
         null,
         CSV_SOURCE_FOLDER,
-        "DATA_READ ERROR: Duplicate column name Price.");
+        "Duplicate column name Price.");
   }
 
   public static void testJsonWithDuplicateColumnNames(BufferAllocator allocator, String source)
@@ -1295,7 +1296,9 @@ public class CopyIntoTests extends ITCopyIntoBase {
       test(copyIntoQuery);
     } catch (UserException e) {
       exceptionThrown = true;
-      Assert.assertTrue(e.getMessage().contains("line=2"));
+      Assert.assertTrue(
+          e.getMessage().contains("FUNCTION ERROR: Index 0 out of bounds for length 0")
+              || e.getMessage().contains("FUNCTION ERROR: Failed to cast the string  to double"));
     }
     Assert.assertTrue("Expected exception not thrown", exceptionThrown);
     Assert.assertTrue(newSourceFile.delete());
@@ -1324,8 +1327,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
     } catch (UserException e) {
       exceptionThrown = true;
       Assert.assertTrue(
-          e.getMessage()
-              .contains("No column name matches target schema(col1::varchar, col2::int32)"));
+          e.getMessage().contains("No column name matches target schema [`col1`, `col2`]"));
       Assert.assertTrue(e.getMessage().contains("src1.csv"));
     }
     Assert.assertTrue("Expected exception not thrown", exceptionThrown);
@@ -2858,7 +2860,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
       test(copyIntoQuery);
     } catch (UserException e) {
       isExceptionThrown = true;
-      Assert.assertTrue(e.getMessage().contains("Unsupported data type : Struct"));
+      Assert.assertTrue(e.getMessage().contains("Unsupported target type"));
     }
 
     Assert.assertTrue("No exception thrown", isExceptionThrown);
@@ -2891,7 +2893,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
       test(copyIntoQuery);
     } catch (UserException e) {
       isExceptionThrown = true;
-      Assert.assertTrue(e.getMessage().contains("Unsupported data type : List"));
+      Assert.assertTrue(e.getMessage().contains("Unsupported target type"));
     }
 
     Assert.assertTrue("No exception thrown", isExceptionThrown);
@@ -3273,7 +3275,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
       test(copyIntoQuery);
     } catch (UserException e) {
       isExceptionThrown = true;
-      Assert.assertTrue(e.getMessage().contains("Could not convert \"1.10\" to INT"));
+      Assert.assertTrue(e.getMessage().contains("Failed to cast the string 1.10 to int32_t"));
     }
     Assert.assertTrue("No exception thrown", isExceptionThrown);
 
@@ -3308,7 +3310,7 @@ public class CopyIntoTests extends ITCopyIntoBase {
       test(copyIntoQuery);
     } catch (UserException e) {
       isExceptionThrown = true;
-      Assert.assertTrue(e.getMessage().contains("Could not convert \"1.10\" to BIGINT"));
+      Assert.assertTrue(e.getMessage().contains("Failed to cast the string 1.10 to int64_t"));
     }
     Assert.assertTrue("No exception thrown", isExceptionThrown);
 

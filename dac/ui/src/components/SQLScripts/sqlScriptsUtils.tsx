@@ -33,7 +33,10 @@ import {
   selectTab,
 } from "dremio-ui-common/sonar/SqlRunnerSession/resources/SqlRunnerSessionResource.js";
 import { getLocation } from "#oss/selectors/routing";
-import { isTabbableUrl } from "#oss/utils/explorePageTypeUtils";
+import {
+  hasTemporaryQueryParam,
+  isTabbableUrl,
+} from "#oss/utils/explorePageTypeUtils";
 import { deleteQuerySelectionsFromStorage } from "#oss/sagas/utils/querySelections";
 import { isTemporaryScript } from "dremio-ui-common/sonar/SqlRunnerSession/utilities/temporaryTabs.js";
 
@@ -95,7 +98,9 @@ export function filterAndSortScripts({
   let tempScripts = list;
 
   if (search !== "") {
-    tempScripts = tempScripts.filter((script) => script.name.includes(search));
+    tempScripts = tempScripts.filter((script) =>
+      script.name.toLowerCase().includes(search.toLowerCase()),
+    );
   }
 
   if (sort) {
@@ -292,7 +297,10 @@ function doScriptSelect(
   //Begin polling after a delay since EXPLORE_PAGE_LOCATION_CHANGED cancels job polling, polling will wait for the page change below
   store.dispatch(pollScriptJobs(script, newQueryStatuses));
 
-  const action = isTabbableUrl(location) ? router.replace : router.push;
+  const action =
+    isTabbableUrl(location) || hasTemporaryQueryParam(location)
+      ? router.replace
+      : router.push;
   action({
     query: {
       scriptId: script.id,

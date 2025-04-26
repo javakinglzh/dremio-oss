@@ -15,6 +15,10 @@
  */
 package com.dremio.config;
 
+import static com.dremio.io.file.UriSchemes.FILE_SCHEME;
+import static com.dremio.io.file.UriSchemes.LEGACY_PDFS_SCHEME;
+import static com.dremio.io.file.UriSchemes.SCHEME_SEPARATOR;
+
 import com.dremio.common.config.NestedConfig;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.perf.Timer;
@@ -99,8 +103,6 @@ public class DremioConfig extends NestedConfig {
   public static final String CACHE_FS_QUOTA_LIST = "services.executor.cache.pctquota.fs";
   public static final String CACHE_FS_ENSURE_FREE_SPACE_LIST =
       "services.executor.cache.ensurefreespace.fs";
-  public static final String EXECUTOR_NODE_LIFECYCLE_SERVICE_ENABLED =
-      "services.executor.node_lifecycle_service_enabled";
   public static final String JOBS_ENABLED_BOOL = "services.jobs.enabled";
   public static final String NO_OP_CLUSTER_COORDINATOR_ENABLED =
       "debug.noop.cluster" + ".coordinator.enabled";
@@ -109,6 +111,7 @@ public class DremioConfig extends NestedConfig {
   public static final String PLAN_CACHE_TIMEOUT_MINUTES = "dremio.plan.cache.timeout_minutes";
 
   public static final String PLAN_CACHE_MAX_ENTRIES = "dremio.plan.cache.max_entries";
+  public static final String PLAN_CACHE_MAX_SIZE_BYTES = "dremio.plan.cache.max_bytes";
 
   /** config values related to partition stats caching */
   public static final String PARTITION_STATS_CACHE_TTL =
@@ -154,6 +157,7 @@ public class DremioConfig extends NestedConfig {
   public static final String UPLOADS_PATH_STRING = "paths.uploads";
   public static final String RESULTS_PATH_STRING = "paths.results";
   public static final String SCRATCH_PATH_STRING = "paths.scratch";
+  public static final String PROFILE_PATH_STRING = "paths.profile";
   public static final String SPILLING_PATH_STRING = "paths.spilling";
   public static final String METADATA_PATH_STRING = "paths.metadata";
   public static final String GANDIVA_CACHE_PATH_STRING = "paths.gandiva";
@@ -210,6 +214,7 @@ public class DremioConfig extends NestedConfig {
   public static final String DEBUG_SUPPORT_ASYNC_ENABLED = "debug.support.async.enabled";
   public static final String DEBUG_JOBS_ASYNC_ENABLED = "debug.results.async.enabled";
   public static final String DEBUG_SCRATCH_ASYNC_ENABLED = "debug.scratch.async.enabled";
+  public static final String DEBUG_PROFILE_ASYNC_ENABLED = "debug.profile.async.enabled";
   public static final String DEBUG_DOWNLOAD_ASYNC_ENABLED = "debug.download.async.enabled";
   public static final String DEBUG_METADATA_ASYNC_ENABLED = "debug.metadata.async.enabled";
   public static final String DEBUG_LOGS_ASYNC_ENABLED = "debug.logs.async.enabled";
@@ -284,6 +289,7 @@ public class DremioConfig extends NestedConfig {
    */
   private DremioConfig(SabotConfig sabot, Config unresolved, Config reference, String thisNode) {
     super(inverseMerge(unresolved, reference));
+
     this.unresolved = unresolved;
     this.reference = reference;
     this.sabot = sabot;
@@ -293,22 +299,30 @@ public class DremioConfig extends NestedConfig {
   }
 
   private void check() {
-    final Config inner = getInnerConfig();
-    final Config ref = reference.resolve();
+    final Config resolvedReference = reference.resolve();
 
     // make sure types are right
-    inner.checkValid(ref);
+    getInnerConfig().checkValid(resolvedReference);
 
     // make sure we don't have any extra paths. these are typically typos.
-    List<String> invalidPaths = new ArrayList<>();
-    for (Entry<String, ConfigValue> entry : inner.entrySet()) {
+    checkForInvalidPaths(resolvedReference);
+
+    // check if dist-store is misconfigured.
+    checkForMisconfiguredDistStore();
+  }
+
+  private void checkForInvalidPaths(Config resolvedReference) {
+    final List<String> invalidPaths = new ArrayList<>();
+
+    for (Entry<String, ConfigValue> entry : getInnerConfig().entrySet()) {
       if (DEPRECATED_PATHS.contains(entry.getKey())) {
         logger.warn(
             "Property [{}] is deprecated. Please remove it from the conf file [dremio.conf].",
             entry.getKey());
         continue;
       }
-      if (!ref.hasPath(entry.getKey())) {
+
+      if (!resolvedReference.hasPath(entry.getKey())) {
         invalidPaths.add(entry.getKey());
       }
     }
@@ -323,6 +337,28 @@ public class DremioConfig extends NestedConfig {
       }
 
       throw new RuntimeException(sb.toString());
+    }
+  }
+
+  private void checkForMisconfiguredDistStore() {
+    // Check for PDFS usage.
+    final String distStorePath = getString(DIST_WRITE_PATH_STRING);
+    if (distStorePath.startsWith(LEGACY_PDFS_SCHEME + SCHEME_SEPARATOR)) {
+      logger.warn("PDFS is not supported as a distributed store for Dremio Software.");
+      return;
+    }
+
+    // Check for un-configured dist-store's in a multi-node environment.
+    if (getBoolean(ENABLE_COORDINATOR_BOOL)
+        && getBoolean(ENABLE_MASTER_BOOL)
+        && getBoolean(ENABLE_EXECUTOR_BOOL)) {
+      return;
+    }
+
+    final String localStorePrefix =
+        FILE_SCHEME + SCHEME_SEPARATOR + getString(LOCAL_WRITE_PATH_STRING);
+    if (distStorePath.startsWith(localStorePrefix)) {
+      logger.warn("The distributed store cannot be a local path - update the paths.dist property.");
     }
   }
 

@@ -15,7 +15,7 @@
  */
 package com.dremio.plugins.sysflight;
 
-import static com.dremio.exec.catalog.CatalogServiceImpl.SYSTEM_TABLE_SOURCE_NAME;
+import static com.dremio.exec.catalog.CatalogConstants.SYSTEM_TABLE_SOURCE_NAME;
 
 import com.dremio.exec.catalog.ManagedStoragePlugin;
 import com.dremio.service.namespace.NamespaceKey;

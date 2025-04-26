@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.sql.hive;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.store.hive.HiveTestDataGenerator.HIVE_TEST_PLUGIN_NAME;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -44,9 +43,6 @@ public class ITHiveSchemaEvolution extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testInsertAfterDropColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName  = "iceberg_test_testInsertAfterDropColumn";
     final String tableNameWithHiveCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName;
     try {
@@ -68,9 +64,6 @@ public class ITHiveSchemaEvolution extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testInsertAfterRenameColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName = "iceberg_test_testInsertAfterRenameColumn";
     final String tableNameWithCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName;
     try {
@@ -93,9 +86,6 @@ public class ITHiveSchemaEvolution extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testCTASAfterAddColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName  = "iceberg_test_testInsertAfterAddColumn";
     final String newTableName  = tableName + "1";
     final String tableNameWithCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName;
@@ -122,9 +112,6 @@ public class ITHiveSchemaEvolution extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testDropAddSameColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName = "iceberg_test_testDropAddSameColumn";
     final String tableNameWithCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName;
     try {

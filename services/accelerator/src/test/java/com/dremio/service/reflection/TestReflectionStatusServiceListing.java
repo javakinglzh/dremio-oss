@@ -25,11 +25,11 @@ import static org.mockito.Mockito.when;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.MetadataRequestOptions;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.sys.accel.AccelerationListManager;
 import com.dremio.options.OptionManager;
 import com.dremio.service.DirectProvider;
+import com.dremio.service.coordinator.ClusterCoordinator;
 import com.dremio.service.job.JobCounts;
 import com.dremio.service.job.JobCountsRequest;
 import com.dremio.service.jobs.JobsService;
@@ -73,7 +73,7 @@ public class TestReflectionStatusServiceListing {
 
   @Mock private NamespaceService namespaceService;
 
-  @Mock private SabotContext sabotContext;
+  @Mock private ClusterCoordinator clusterCoordinator;
 
   @Mock private ReflectionGoalsStore goalsStore;
 
@@ -122,9 +122,8 @@ public class TestReflectionStatusServiceListing {
 
     statusService =
         new ReflectionStatusServiceImpl(
-            () -> sabotContext.getClusterCoordinator(),
-            DirectProvider.<MaterializationCache.CacheViewer>wrap(
-                new TestReflectionStatusService.ConstantCacheViewer(true)),
+            () -> clusterCoordinator,
+            DirectProvider.wrap(new TestReflectionStatusService.ConstantCacheViewer(true)),
             goalsStore,
             entriesStore,
             materializationStore,

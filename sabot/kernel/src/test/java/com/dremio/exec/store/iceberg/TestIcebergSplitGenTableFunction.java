@@ -65,7 +65,7 @@ public class TestIcebergSplitGenTableFunction extends BaseTestTableFunction {
 
   @Mock private StoragePluginId pluginId;
 
-  @Mock(extraInterfaces = {SupportsInternalIcebergTable.class})
+  @Mock(extraInterfaces = {SupportsIcebergRootPointer.class})
   private StoragePlugin plugin;
 
   @Test
@@ -73,7 +73,7 @@ public class TestIcebergSplitGenTableFunction extends BaseTestTableFunction {
     try (AutoCloseable option =
         with(ExecConstants.PARQUET_SPLIT_SIZE_VALIDATOR, 300L * 1024 * 1024)) {
       when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
-      when(((SupportsInternalIcebergTable) plugin).createSplitCreator(any(), any(), anyBoolean()))
+      when(((SupportsIcebergRootPointer) plugin).createSplitCreator(any(), any(), anyBoolean()))
           .thenAnswer(i -> new ParquetSplitCreator(i.getArgument(0), true));
 
       Table input =
@@ -121,7 +121,7 @@ public class TestIcebergSplitGenTableFunction extends BaseTestTableFunction {
     try (AutoCloseable option =
         with(ExecConstants.PARQUET_SPLIT_SIZE_VALIDATOR, 300L * 1024 * 1024)) {
       when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
-      when(((SupportsInternalIcebergTable) plugin).createSplitCreator(any(), any(), anyBoolean()))
+      when(((SupportsIcebergRootPointer) plugin).createSplitCreator(any(), any(), anyBoolean()))
           .thenAnswer(i -> new ParquetSplitCreator(i.getArgument(0), true));
 
       Table input =
@@ -201,7 +201,7 @@ public class TestIcebergSplitGenTableFunction extends BaseTestTableFunction {
     try (AutoCloseable option =
         with(ExecConstants.PARQUET_SPLIT_SIZE_VALIDATOR, 300L * 1024 * 1024)) {
       when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
-      when(((SupportsInternalIcebergTable) plugin).createSplitCreator(any(), any(), anyBoolean()))
+      when(((SupportsIcebergRootPointer) plugin).createSplitCreator(any(), any(), anyBoolean()))
           .thenAnswer(i -> new ParquetSplitCreator(i.getArgument(0), true));
 
       Table input =
@@ -235,7 +235,7 @@ public class TestIcebergSplitGenTableFunction extends BaseTestTableFunction {
   @Test
   public void testOutputBufferNotReused() throws Exception {
     when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
-    when(((SupportsInternalIcebergTable) plugin).createSplitCreator(any(), any(), anyBoolean()))
+    when(((SupportsIcebergRootPointer) plugin).createSplitCreator(any(), any(), anyBoolean()))
         .thenAnswer(i -> new ParquetSplitCreator(i.getArgument(0), true));
 
     Table input =

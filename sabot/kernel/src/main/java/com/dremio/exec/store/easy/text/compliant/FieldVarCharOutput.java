@@ -17,12 +17,14 @@ package com.dremio.exec.store.easy.text.compliant;
 
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.exception.SchemaChangeException;
+import com.dremio.exec.store.easy.text.compliant.CompliantTextRecordReader.SetupOption;
 import com.dremio.sabot.op.scan.OutputMutator;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.types.Types.MinorType;
@@ -35,6 +37,7 @@ import org.apache.arrow.vector.types.pojo.FieldType;
  * column. Each record is a single value within each vector of the set.
  */
 class FieldVarCharOutput extends FieldTypeOutput {
+
   static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(FieldVarCharOutput.class);
 
@@ -50,6 +53,7 @@ class FieldVarCharOutput extends FieldTypeOutput {
    * @param columns List of columns selected in the query
    * @param isStarQuery boolean to indicate if all fields are selected or not
    * @param sizeLimit Maximum size for an individual field
+   * @param setupOptions option flags to change default behavior
    * @throws SchemaChangeException
    */
   public FieldVarCharOutput(
@@ -57,12 +61,17 @@ class FieldVarCharOutput extends FieldTypeOutput {
       String[] fieldNames,
       Collection<SchemaPath> columns,
       boolean isStarQuery,
-      int sizeLimit)
+      int sizeLimit,
+      Set<SetupOption> setupOptions)
       throws SchemaChangeException {
     super(sizeLimit, (fieldNames.length + columns.size()));
 
     int totalFields = fieldNames.length;
     List<String> outputColumns = new ArrayList<>(Arrays.asList(fieldNames));
+    boolean addUnmatchedColumns =
+        setupOptions.contains(SetupOption.EXTEND_TARGET_SCHEMA_WITH_UNMATCHED_COLUMNS);
+    boolean failOnDuplicateNames =
+        setupOptions.contains(SetupOption.ENSURE_NO_DUPLICATE_COLUMNS_IN_SELECTION);
 
     if (isStarQuery) {
       maxField = totalFields - 1;
@@ -74,14 +83,16 @@ class FieldVarCharOutput extends FieldTypeOutput {
 
       for (SchemaPath path : columns) {
         pathStr = path.getRootSegment().getPath();
-        index = getIndexOf(outputColumns, pathStr);
-        if (index < 0) {
+        index = getIndexOf(outputColumns, pathStr, failOnDuplicateNames);
+        if (index < 0 && addUnmatchedColumns) {
           // found col that is not a part of fieldNames, add it
           // this col might be part of some another scanner
           index = totalFields++;
           outputColumns.add(pathStr);
         }
-        columnIds.add(index);
+        if (index >= 0) {
+          columnIds.add(index);
+        }
       }
       Collections.sort(columnIds);
 

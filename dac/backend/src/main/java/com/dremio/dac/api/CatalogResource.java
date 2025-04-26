@@ -17,15 +17,15 @@ package com.dremio.dac.api;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
+import com.dremio.catalog.exception.CatalogException;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.dac.annotations.APIResource;
 import com.dremio.dac.annotations.Secured;
 import com.dremio.dac.server.GenericErrorMessage;
 import com.dremio.dac.service.catalog.CatalogServiceHelper;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.service.namespace.NamespaceException;
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
@@ -105,7 +105,8 @@ public class CatalogResource {
   public CatalogEntity createCatalogItem(CatalogEntity entity)
       throws NamespaceException, BadRequestException {
     try {
-      return catalogServiceHelper.createCatalogItem(entity);
+      return catalogServiceHelper.createCatalogItem(
+          entity, SourceRefreshOption.BACKGROUND_DATASETS_CREATION);
     } catch (UnsupportedOperationException e) {
       throw new BadRequestException(e.getMessage());
     } catch (ExecutionSetupException e) {
@@ -136,6 +137,8 @@ public class CatalogResource {
       throw new InternalServerErrorException(e);
     } catch (UnsupportedOperationException e) {
       throw new BadRequestException(e.getMessage());
+    } catch (CatalogException catalogException) {
+      throw catalogException.toRestApiException();
     }
   }
 
@@ -149,6 +152,8 @@ public class CatalogResource {
       throw new NotFoundException(e.getMessage());
     } catch (UnsupportedOperationException e) {
       throw new BadRequestException(e.getMessage());
+    } catch (CatalogException catalogException) {
+      throw catalogException.toRestApiException();
     }
   }
 
@@ -231,11 +236,11 @@ public class CatalogResource {
     }
 
     // Limit number of children.
-    if (maxChildren == null || maxChildren == 0 || maxChildren > MAX_CHILDREN_TO_GET_IN_BULK) {
+    if (maxChildren > MAX_CHILDREN_TO_GET_IN_BULK) {
       throw UserException.validationError()
           .message(
               String.format(
-                  "maxChildren query parameter must be set to [1,%d]", MAX_CHILDREN_TO_GET_IN_BULK))
+                  "maxChildren query parameter must not exceed [%d]", MAX_CHILDREN_TO_GET_IN_BULK))
           .buildSilently();
     }
 
@@ -283,11 +288,11 @@ public class CatalogResource {
     }
 
     // Limit number of children.
-    if (maxChildren == null || maxChildren == 0 || maxChildren > MAX_CHILDREN_TO_GET_IN_BULK) {
+    if (maxChildren > MAX_CHILDREN_TO_GET_IN_BULK) {
       throw UserException.validationError()
           .message(
               String.format(
-                  "maxChildren query parameter must be set to [1,%d]", MAX_CHILDREN_TO_GET_IN_BULK))
+                  "maxChildren query parameter must not exceed [%d]", MAX_CHILDREN_TO_GET_IN_BULK))
           .buildSilently();
     }
 
@@ -319,26 +324,5 @@ public class CatalogResource {
           }
         });
     return responseList;
-  }
-
-  /** MetadataRefreshResponse class */
-  public static class MetadataRefreshResponse {
-    private final boolean changed;
-    private final boolean deleted;
-
-    @JsonCreator
-    public MetadataRefreshResponse(
-        @JsonProperty("changed") boolean changed, @JsonProperty("deleted") boolean deleted) {
-      this.changed = changed;
-      this.deleted = deleted;
-    }
-
-    public boolean getChanged() {
-      return changed;
-    }
-
-    public boolean getDeleted() {
-      return deleted;
-    }
   }
 }

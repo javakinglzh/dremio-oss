@@ -20,7 +20,7 @@ import javax.inject.Inject;
 /**
  * A no-op context implementation. Useful for leader only setups such as tests or admin commands.
  */
-class NoopCredentialsProviderContext implements CredentialsProviderContext {
+public class NoopCredentialsProviderContext implements CredentialsProviderContext {
   @Inject
   NoopCredentialsProviderContext() {}
 

@@ -33,8 +33,10 @@ import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.CatalogEventProto;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceService;
+import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
+import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.users.SimpleUser;
 import com.dremio.service.users.User;
 import com.dremio.service.users.UserNotFoundException;
@@ -84,6 +86,7 @@ public class TestCollaborationHelper {
     NameSpaceContainer sourceContainer = new NameSpaceContainer();
     sourceContainer.setType(NameSpaceContainer.Type.SOURCE);
     sourceContainer.setFullPathList(List.of("source1"));
+    sourceContainer.setSource(new SourceConfig().setId(sourceId));
     when(namespaceService.getEntityById(sourceId)).thenReturn(Optional.of(sourceContainer));
 
     LegacyIndexedStore<String, CollaborationWiki> wikiStore = mock(LegacyIndexedStore.class);
@@ -101,6 +104,7 @@ public class TestCollaborationHelper {
                 .addEvents(
                     CatalogEventProto.CatalogEventMessage.CatalogEvent.newBuilder()
                         .addAllPath(sourceContainer.getFullPathList())
+                        .setEntityId(sourceContainer.getSource().getId().getId())
                         .setEventType(
                             CatalogEventProto.CatalogEventMessage.CatalogEventType
                                 .CATALOG_EVENT_TYPE_UPDATED))
@@ -114,6 +118,7 @@ public class TestCollaborationHelper {
     NameSpaceContainer tableContainer = new NameSpaceContainer();
     tableContainer.setType(NameSpaceContainer.Type.DATASET);
     tableContainer.setFullPathList(List.of("source1", "table1"));
+    tableContainer.setDataset(new DatasetConfig().setId(tableId));
     when(namespaceService.getEntityById(tableId)).thenReturn(Optional.of(tableContainer));
 
     LegacyIndexedStore<String, CollaborationTag> tagsStore = mock(LegacyIndexedStore.class);
@@ -130,6 +135,7 @@ public class TestCollaborationHelper {
                 .addEvents(
                     CatalogEventProto.CatalogEventMessage.CatalogEvent.newBuilder()
                         .addAllPath(tableContainer.getFullPathList())
+                        .setEntityId(tableContainer.getDataset().getId().getId())
                         .setEventType(
                             CatalogEventProto.CatalogEventMessage.CatalogEventType
                                 .CATALOG_EVENT_TYPE_UPDATED))

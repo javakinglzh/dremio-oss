@@ -15,7 +15,6 @@
  */
 package com.dremio.dac.api;
 
-import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_SOURCES;
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
 import com.dremio.dac.annotations.APIResource;
@@ -23,8 +22,6 @@ import com.dremio.dac.annotations.Secured;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
 import com.dremio.dac.service.reflection.ReflectionStatusUI;
 import com.dremio.dac.service.source.SourceService;
-import com.dremio.datastore.SearchQueryUtils;
-import com.dremio.datastore.SearchTypes;
 import com.dremio.edition.EditionProvider;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.server.SabotContext;
@@ -34,7 +31,6 @@ import com.dremio.service.job.JobStatsRequest;
 import com.dremio.service.jobs.JobTypeStats;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.jobs.JobsServiceUtil;
-import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.source.proto.SourceConfig;
@@ -119,21 +115,6 @@ public class ClusterStatsResource {
 
     // source stats
     final List<SourceStats> sources = resource.getAllSources();
-
-    // optimize vds count queries by only going one to the index with a list of queries
-    final List<SearchTypes.SearchQuery> vdsQueries = resource.getVdsQueries();
-
-    try {
-      List<Integer> counts =
-          namespaceService.getCounts(
-              vdsQueries.toArray(new SearchTypes.SearchQuery[vdsQueries.size()]));
-      for (int i = 0; i < counts.size(); i++) {
-        sources.get(i).setVdsCount(counts.get(i));
-      }
-    } catch (NamespaceException e) {
-      logger.warn("Failed to get vds counts", e);
-    }
-
     result.setSources(sources);
 
     final long end = System.currentTimeMillis();
@@ -222,7 +203,6 @@ public class ClusterStatsResource {
       }
 
       SourceStats source = new SourceStats(sourceConfig.getId(), type, pdsCount);
-      resource.addVdsQuery(SearchQueryUtils.newTermQuery(DATASET_SOURCES, sourceConfig.getName()));
       resource.addSource(source);
     }
 
@@ -232,27 +212,17 @@ public class ClusterStatsResource {
   /** Internal Stats */
   static class Stats {
     private List<SourceStats> sources;
-    private List<SearchTypes.SearchQuery> vdsQueries;
 
     public Stats() {
       sources = new ArrayList<>();
-      vdsQueries = new ArrayList<>();
     }
 
     public void addSource(SourceStats source) {
       sources.add(source);
     }
 
-    public void addVdsQuery(SearchTypes.SearchQuery query) {
-      vdsQueries.add(query);
-    }
-
     public List<SourceStats> getAllSources() {
       return sources;
-    }
-
-    public List<SearchTypes.SearchQuery> getVdsQueries() {
-      return vdsQueries;
     }
   }
 

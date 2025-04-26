@@ -15,7 +15,9 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import static com.dremio.exec.planner.physical.TableFunctionUtil.getDataset;
 import static com.dremio.exec.store.SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_COLS;
+import static com.dremio.exec.store.SystemSchemas.DATASET_FIELD;
 import static com.dremio.exec.store.SystemSchemas.METADATA_FILE_PATH;
 import static com.dremio.exec.store.SystemSchemas.SNAPSHOT_ID;
 import static com.dremio.exec.util.VectorUtil.getVectorFromSchemaPath;
@@ -34,7 +36,9 @@ import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.google.common.collect.Streams;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.VarCharVector;
@@ -48,9 +52,12 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
 
   private final FragmentExecutionContext fragmentExecutionContext;
   private final OpProps props;
+  private final List<String> datasetFromFunctionConfig;
   private SupportsIcebergMutablePlugin icebergMutablePlugin;
   private VarCharVector metadataInVector;
   private BigIntVector snapshotIdInVector;
+  private Optional<VarCharVector> datasetInVector;
+  private Optional<VarCharVector> datasetOutVector = Optional.empty();
   private VarCharVector filePathOutVector;
   private VarCharVector fileTypeOutVector;
   private List<TransferPair> transfers;
@@ -58,7 +65,6 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
   private int partitionFileIdx;
   private final List<byte[]> partitionStatsFiles = new ArrayList<>();
   private boolean transfersProcessed = false;
-  private FileIO io = null;
   private String schemeVariate;
   private Configuration conf;
   private String fsScheme;
@@ -71,6 +77,7 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
     super(context, functionConfig);
     this.fragmentExecutionContext = fragmentExecutionContext;
     this.props = props;
+    this.datasetFromFunctionConfig = getDataset(functionConfig);
   }
 
   @Override
@@ -80,6 +87,18 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
     snapshotIdInVector = (BigIntVector) getVectorFromSchemaPath(incoming, SNAPSHOT_ID);
     filePathOutVector = (VarCharVector) getVectorFromSchemaPath(outgoing, SystemSchemas.FILE_PATH);
     fileTypeOutVector = (VarCharVector) getVectorFromSchemaPath(outgoing, SystemSchemas.FILE_TYPE);
+
+    // See if dataset column exists
+    datasetInVector =
+        Streams.stream(incoming)
+            .filter(vw -> vw.getValueVector().getName().equals(DATASET_FIELD))
+            .findFirst()
+            .map(vw -> (VarCharVector) vw.getValueVector());
+    if (datasetInVector.isPresent()
+        && outgoing.getSchema().getFieldId(BasePath.getSimple(DATASET_FIELD)) != null) {
+      datasetOutVector =
+          Optional.of((VarCharVector) getVectorFromSchemaPath(outgoing, DATASET_FIELD));
+    }
 
     // create transfer pairs for any additional input columns
     transfers =
@@ -118,18 +137,30 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
     inputRow = row;
     partitionFileIdx = 0;
     byte[] pathBytes = metadataInVector.get(row);
+    List<String> dataset =
+        datasetInVector
+            .map(v -> Arrays.asList(new String(v.get(row)).split("\\.")))
+            .orElse(datasetFromFunctionConfig);
     String metadataLocation = new String(pathBytes, StandardCharsets.UTF_8);
 
-    if (io == null) {
-      FileSystem fs =
-          icebergMutablePlugin.createFSWithAsyncOptions(
-              metadataLocation, props.getUserName(), context);
-      io =
-          icebergMutablePlugin.createIcebergFileIO(
-              fs, context, null, functionConfig.getFunctionContext().getPluginId().getName(), null);
-      conf = icebergMutablePlugin.getFsConfCopy();
-      fsScheme = fs.getScheme();
-    }
+    FileSystem fs =
+        icebergMutablePlugin.createFS(
+            SupportsFsCreation.builder()
+                .withAsyncOptions(true)
+                .filePath(metadataLocation)
+                .userName(props.getUserName())
+                .operatorContext(context)
+                .dataset(dataset));
+    FileIO io =
+        icebergMutablePlugin.createIcebergFileIO(
+            fs,
+            context,
+            dataset,
+            functionConfig.getFunctionContext().getPluginId().getName(),
+            null);
+    conf = icebergMutablePlugin.getFsConfCopy();
+    fsScheme = fs.getScheme();
+
     long snapshotId = snapshotIdInVector.get(row);
     String partitionStatsMetadataFileName = PartitionStatsMetadataUtil.toFilename(snapshotId);
     String partitionStatsMetadataLocation =
@@ -163,6 +194,10 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
       filePathOutVector.setSafe(outIdx, partitionStatsFiles.get(partitionFileIdx++));
       fileTypeOutVector.setSafe(
           outIdx, IcebergFileType.PARTITION_STATS.name().getBytes(StandardCharsets.UTF_8));
+      if (datasetInVector.isPresent() && datasetOutVector.isPresent()) {
+        byte[] dataset = datasetInVector.get().get(inputRow);
+        datasetOutVector.get().setSafe(outIdx, dataset);
+      }
       outIdx++;
     }
     outgoing.setAllCount(outIdx);

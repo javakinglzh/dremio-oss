@@ -46,6 +46,7 @@ import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.SplitReaderCreator;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValue;
@@ -372,8 +373,7 @@ public class TestParquetSplitReaderCreatorIterator {
                 OptionValue.OptionType.SYSTEM, QUERY_EXEC_OPTION_KEY, "Gandiva"));
     when(context.getStats()).thenReturn(operatorStats);
     when(fragmentExecutionContext.getStoragePlugin(any())).thenReturn(fileSystemPlugin);
-    when(fileSystemPlugin.createFS(any(), any(), any())).thenReturn(fs);
-    when(fileSystemPlugin.createFSWithAsyncOptions(any(), any(), any())).thenReturn(fs);
+    when(fileSystemPlugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
     when(fs.supportsPath(any())).thenReturn(true);
     when(fs.supportsAsync()).thenReturn(true);
     when(config.getPluginId()).thenReturn(storagePluginId);
@@ -486,8 +486,7 @@ public class TestParquetSplitReaderCreatorIterator {
     when(optionManager.getOption(PARQUET_CACHED_ENTITY_SET_FILE_SIZE)).thenReturn(true);
     when(context.getStats()).thenReturn(operatorStats);
     when(fragmentExecutionContext.getStoragePlugin(any())).thenReturn(fileSystemPlugin);
-    when(fileSystemPlugin.createFS(any(), any(), any())).thenReturn(fs);
-    when(fileSystemPlugin.createFSWithAsyncOptions(any(), any(), any())).thenReturn(fs);
+    when(fileSystemPlugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
     when(fs.supportsPath(any())).thenReturn(true);
     when(fs.supportsAsync()).thenReturn(true);
     when(tableFunctionContext.getPluginId()).thenReturn(storagePluginId);

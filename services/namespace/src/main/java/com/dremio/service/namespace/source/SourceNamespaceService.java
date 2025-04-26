@@ -18,6 +18,7 @@ package com.dremio.service.namespace.source;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.source.proto.SourceConfig;
@@ -56,6 +57,30 @@ public interface SourceNamespaceService {
    */
   void deleteSourceChildren(final NamespaceKey sourcePath, String version, DeleteCallback callback)
       throws NamespaceException;
+
+  /**
+   * Delete all children of an entity in a source and optionally delete the entity itself.
+   *
+   * @param path
+   * @param version
+   * @param deleteRoot
+   * @param callback
+   * @throws NamespaceException
+   */
+  void deleteSourceChild(
+      final NamespaceKey path, String version, boolean deleteRoot, DeleteCallback callback)
+      throws NamespaceNotFoundException;
+
+  /**
+   * Delete all children of an entity in a source and optionally delete the entity itself.
+   *
+   * @param path
+   * @param version
+   * @param deleteRoot
+   * @param callback
+   */
+  void deleteSourceChildIfExists(
+      final NamespaceKey path, String version, boolean deleteRoot, DeleteCallback callback);
 
   /**
    * Delete a source and all of its children.

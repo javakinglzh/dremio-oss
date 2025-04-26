@@ -23,12 +23,13 @@ import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.fragment.PlanningSet;
 import com.dremio.exec.planner.physical.Prel;
-import com.dremio.exec.planner.plancache.CachedPlan;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -90,6 +91,11 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   }
 
   @Override
+  public void planStepLogging(String phaseName, String text, long millisTaken) {
+    observer.planStepLogging(phaseName, text, millisTaken);
+  }
+
+  @Override
   public void planSerializable(RelNode serializable) {
     observer.planSerializable(serializable);
   }
@@ -127,8 +133,8 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   }
 
   @Override
-  public void planText(String text, long millisTaken) {
-    observer.planText(text, millisTaken);
+  public void planFinalPhysical(String text, long millisTaken, List<PlannerPhaseRulesStats> stats) {
+    observer.planFinalPhysical(text, millisTaken, stats);
   }
 
   @Override
@@ -173,6 +179,11 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   }
 
   @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+    observer.planConsidered(profile, target);
+  }
+
+  @Override
   public void planSubstituted(
       DremioMaterialization materialization,
       List<RelWithInfo> substitutions,
@@ -189,7 +200,7 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   }
 
   @Override
-  public void addAccelerationProfileToCachedPlan(CachedPlan plan) {
+  public void addAccelerationProfileToCachedPlan(PlanCacheEntry plan) {
     observer.addAccelerationProfileToCachedPlan(plan);
   }
 
@@ -221,6 +232,21 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   @Override
   public void attemptCompletion(UserResult result) {
     observer.attemptCompletion(result);
+  }
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {
+    observer.putExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {
+    observer.removeExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public void queryClosed() {
+    observer.queryClosed();
   }
 
   @Override
@@ -308,5 +334,10 @@ public class DelegatingAttemptObserver implements AttemptObserver {
   @Override
   public void putProfileFailed() {
     observer.putProfileFailed();
+  }
+
+  @Override
+  public void putProfileUpdateComplete() {
+    observer.putProfileUpdateComplete();
   }
 }

@@ -18,15 +18,26 @@ import type {
   ResourceConfig,
   SonarV2Config,
   SonarV3Config,
-} from "../_internal/types/Config.js";
-import { Resources as CommunityResources } from "../community/resources.js";
+  V3Config,
+} from "../_internal/types/Config.ts";
+import { JobsResource } from "../oss/jobs/JobsResource.ts";
+import { Resources as CommunityResources } from "../oss/resources.ts";
+import { EnterpriseCatalogResource } from "./catalog/EnterpriseCatalogResource.ts";
+import { RolesResource } from "./roles/RolesResource.ts";
+import { EnterpriseScriptsResource } from "./scripts/EnterpriseScriptsResource.ts";
+import { EnterpriseUsersResource } from "./users/EnterpriseUsersResource.ts";
 
 /**
  * @internal
  * @hidden
  */
 export const Resources = (
-  config: ResourceConfig & SonarV2Config & SonarV3Config,
+  config: ResourceConfig & SonarV2Config & SonarV3Config & V3Config,
 ) => ({
   ...CommunityResources(config),
+  catalog: EnterpriseCatalogResource(config),
+  jobs: JobsResource(config),
+  roles: RolesResource(config),
+  scripts: EnterpriseScriptsResource(config),
+  users: EnterpriseUsersResource(config),
 });

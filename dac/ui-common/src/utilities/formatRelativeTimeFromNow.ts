@@ -15,9 +15,19 @@
  */
 
 import parseMilliseconds from "parse-ms";
+import { formatFixedDateLong } from "./formatDate";
 
 export const formatRelativeTimeFromNow = (date: Date): string => {
   const parsed = parseMilliseconds(Date.now() - date.getTime());
+
+  if (parsed.days > 7) {
+    return formatFixedDateLong(date);
+  }
+
+  if (parsed.days === 7) {
+    return new Intl.RelativeTimeFormat("default").format(-1, "weeks");
+  }
+
   if (parsed.days > 0) {
     return new Intl.RelativeTimeFormat("default").format(
       parsed.days * -1,

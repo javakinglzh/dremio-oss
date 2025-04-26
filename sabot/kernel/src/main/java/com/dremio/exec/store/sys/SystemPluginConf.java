@@ -15,10 +15,10 @@
  */
 package com.dremio.exec.store.sys;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import javax.inject.Provider;
 
 @SourceType(value = "SYS", configurable = false)
@@ -26,8 +26,10 @@ public class SystemPluginConf extends ConnectionConf<SystemPluginConf, SystemSto
 
   @Override
   public SystemStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new SystemStoragePlugin(context, name);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new SystemStoragePlugin(pluginSabotContext, name);
   }
 
   @Override

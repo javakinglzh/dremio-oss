@@ -15,14 +15,22 @@
  */
 package com.dremio.exec.planner.sql.parser;
 
+import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.VersionedDatasetId;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.exec.calcite.logical.VacuumCatalogCrel;
+import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.ops.DremioCatalogReader;
 import com.dremio.exec.planner.VacuumOutputSchema;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.query.SqlToPlanHandler;
 import com.dremio.exec.planner.sql.handlers.query.SupportsSqlToRelConversion;
 import com.dremio.exec.planner.sql.handlers.query.VacuumCatalogHandler;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
@@ -40,6 +48,7 @@ import org.apache.calcite.sql.SqlLiteral;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSpecialOperator;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.parser.SqlParserPos;
@@ -55,8 +64,8 @@ public class SqlVacuumCatalog extends SqlVacuum
         public SqlCall createCall(
             SqlLiteral functionQualifier, SqlParserPos pos, SqlNode... operands) {
           Preconditions.checkArgument(
-              operands.length == 1, "SqlVacuumCatalog.createCall() " + "has 1 operand!");
-          return new SqlVacuumCatalog(pos, (SqlIdentifier) operands[0]);
+              operands.length == 2, "SqlVacuumCatalog.createCall() " + "has 1 operand!");
+          return new SqlVacuumCatalog(pos, (SqlIdentifier) operands[0], (SqlNodeList) operands[1]);
         }
 
         @Override
@@ -68,9 +77,12 @@ public class SqlVacuumCatalog extends SqlVacuum
       };
 
   private final SqlIdentifier catalogSource;
+  private final SqlNodeList excludeTableList;
+  private SqlSelect sourceSelect;
 
   /** Creates a SqlVacuum. */
-  public SqlVacuumCatalog(SqlParserPos pos, SqlIdentifier catalogSource) {
+  public SqlVacuumCatalog(
+      SqlParserPos pos, SqlIdentifier catalogSource, SqlNodeList excludeTableList) {
     super(
         pos,
         SqlLiteral.createBoolean(true, pos),
@@ -78,6 +90,7 @@ public class SqlVacuumCatalog extends SqlVacuum
         SqlNodeList.EMPTY,
         SqlNodeList.EMPTY);
     this.catalogSource = catalogSource;
+    this.excludeTableList = excludeTableList;
   }
 
   @Override
@@ -89,9 +102,17 @@ public class SqlVacuumCatalog extends SqlVacuum
     return catalogSource;
   }
 
+  public SqlNodeList getExcludeTableList() {
+    return excludeTableList;
+  }
+
+  public void setSourceSelect(SqlSelect select) {
+    this.sourceSelect = select;
+  }
+
   @Override
   public List<SqlNode> getOperandList() {
-    return ImmutableList.of(catalogSource);
+    return ImmutableList.of(catalogSource, excludeTableList);
   }
 
   @Override
@@ -114,6 +135,11 @@ public class SqlVacuumCatalog extends SqlVacuum
     writer.keyword("VACUUM");
     writer.keyword("CATALOG");
     catalogSource.unparse(writer, leftPrec, rightPrec);
+
+    if (excludeTableList.size() > 0) {
+      writer.keyword("EXCLUDE");
+      SqlHandlerUtil.unparseSqlNodeList(writer, leftPrec, rightPrec, excludeTableList);
+    }
   }
 
   @Override
@@ -122,11 +148,31 @@ public class SqlVacuumCatalog extends SqlVacuum
   }
 
   @Override
+  public void validate(SqlValidator validator, SqlValidatorScope scope) {
+    if (sourceSelect != null) {
+      validator.validate(sourceSelect);
+    }
+  }
+
+  @Override
   public RelNode convertToRel(
       RelOptCluster cluster,
       Prepare.CatalogReader catalogReader,
       RelNode inputRel,
       RelOptTable.ToRelContext relContext) {
+    List<String> excludedContentIDs = new ArrayList<>();
+    for (SqlNode tableNode : excludeTableList) {
+      final CatalogEntityKey catalogEntityKey =
+          CatalogEntityKey.newBuilder()
+              .keyComponents(DmlUtils.getPath(tableNode).getPathComponents())
+              .tableVersionContext(getTableVersionContext(tableNode))
+              .build();
+      DremioCatalogReader dremioCatalogReader = catalogReader.unwrap(DremioCatalogReader.class);
+      DremioTable dremioTable = dremioCatalogReader.getTable(catalogEntityKey);
+      excludedContentIDs.add(
+          VersionedDatasetId.tryParse(dremioTable.getDatasetConfig().getId().getId())
+              .getContentId());
+    }
     return new VacuumCatalogCrel(
         cluster,
         cluster.traitSetOf(Convention.NONE),
@@ -136,6 +182,21 @@ public class SqlVacuumCatalog extends SqlVacuum
         null,
         null,
         null,
-        null);
+        null,
+        Collections.unmodifiableList(excludedContentIDs));
+  }
+
+  private TableVersionContext getTableVersionContext(SqlNode table) {
+    if (table instanceof SqlVersionedTableCollectionCall) {
+      TableVersionSpec tableVersionSpec =
+          ((SqlVersionedTableCollectionCall) table)
+              .getVersionedTableMacroCall()
+              .getSqlTableVersionSpec()
+              .getTableVersionSpec();
+      if (tableVersionSpec != null) {
+        return tableVersionSpec.getTableVersionContext();
+      }
+    }
+    return TableVersionContext.NOT_SPECIFIED;
   }
 }

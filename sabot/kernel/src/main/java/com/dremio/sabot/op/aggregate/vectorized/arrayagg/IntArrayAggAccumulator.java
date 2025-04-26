@@ -30,14 +30,14 @@ public final class IntArrayAggAccumulator extends ArrayAggAccumulator<Integer> {
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -53,7 +53,7 @@ public final class IntArrayAggAccumulator extends ArrayAggAccumulator<Integer> {
 
   @Override
   protected ArrayAggAccumulatorHolder<Integer> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new IntArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

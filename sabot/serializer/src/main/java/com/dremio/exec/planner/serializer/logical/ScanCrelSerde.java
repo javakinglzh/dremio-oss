@@ -17,6 +17,9 @@ package com.dremio.exec.planner.serializer.logical;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.dataset.TableVersionContext;
+import com.dremio.common.expression.BasePath;
+import com.dremio.common.expression.PathSegment.NameSegment;
+import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.calcite.logical.ScanCrel;
 import com.dremio.exec.catalog.DremioPrepareTable;
 import com.dremio.exec.catalog.DremioTranslatableTable;
@@ -25,6 +28,7 @@ import com.dremio.exec.planner.serializer.RelNodeSerde;
 import com.dremio.plan.serialization.PScanCrel;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Strings;
+import java.util.stream.Collectors;
 
 /** Serde for ScanCrel */
 public final class ScanCrelSerde implements RelNodeSerde<ScanCrel, PScanCrel> {
@@ -45,18 +49,25 @@ public final class ScanCrelSerde implements RelNodeSerde<ScanCrel, PScanCrel> {
     if (scan.getTableMetadata().getVersionContext() != null) {
       builder.setVersionContext(scan.getTableMetadata().getVersionContext().serialize());
     }
+    if (scan.getProjectedColumns() != null) {
+      builder.addAllColumnNames(
+          scan.getProjectedColumns().stream()
+              .map(BasePath::getAsUnescapedPath)
+              .collect(Collectors.toList()));
+    }
     return builder.addAllPath(scan.getTableMetadata().getName().getPathComponents()).build();
   }
 
   @Override
   public ScanCrel deserialize(PScanCrel node, RelFromProto s) {
+    ScanCrel deSerializedScan;
     if (Strings.isNullOrEmpty(node.getVersionContext())) {
       DremioPrepareTable table = s.tables().getTable(new NamespaceKey(node.getPathList()));
       if (table == null) {
         throw new DeserializationException(
             "Table no longer exists in source: " + node.getPathList());
       }
-      return (ScanCrel) table.toRel(s.toRelContext());
+      deSerializedScan = (ScanCrel) table.toRel(s.toRelContext());
     } else {
       CatalogEntityKey catalogEntityKey =
           CatalogEntityKey.newBuilder()
@@ -68,7 +79,11 @@ public final class ScanCrelSerde implements RelNodeSerde<ScanCrel, PScanCrel> {
         throw new DeserializationException(
             "Table no longer exists in source: " + node.getPathList());
       }
-      return (ScanCrel) table.toRel(s.toRelContext(), null);
+      deSerializedScan = (ScanCrel) table.toRel(s.toRelContext(), null);
     }
+    return deSerializedScan.cloneWithProject(
+        node.getColumnNamesList().stream()
+            .map(name -> new SchemaPath(new NameSegment(name)))
+            .collect(Collectors.toList()));
   }
 }

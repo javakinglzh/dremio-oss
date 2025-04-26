@@ -16,8 +16,6 @@
 package com.dremio.dac.api;
 
 import com.dremio.dac.service.reflection.ReflectionStatusUI;
-import com.dremio.service.reflection.proto.ReflectionGoal;
-import com.dremio.service.reflection.proto.ReflectionGoalState;
 import com.dremio.service.reflection.proto.ReflectionType;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import java.util.List;
@@ -34,37 +32,13 @@ public class ReflectionSummary {
   private final long currentSizeBytes;
   private final long totalSizeBytes;
   private final boolean enabled;
-  private final boolean arrowCachingEnabled;
+  private final String reflectionMode;
 
   private final String datasetId;
   private final Dataset.DatasetType datasetType;
   private final List<String> datasetPath;
 
   private final ReflectionStatusUI status;
-
-  public ReflectionSummary(
-      ReflectionGoal goal,
-      ReflectionStatusUI status,
-      Dataset dataset,
-      long currentSize,
-      long totalSize) {
-    id = goal.getId().getId();
-    name = goal.getName();
-    type = goal.getType();
-    createdAt = goal.getCreatedAt();
-    updatedAt = goal.getModifiedAt();
-    datasetId = goal.getDatasetId();
-    enabled = goal.getState().equals(ReflectionGoalState.ENABLED);
-    this.arrowCachingEnabled = goal.getArrowCachingEnabled();
-
-    this.status = status;
-
-    datasetType = dataset.getType();
-    datasetPath = dataset.getPath();
-
-    currentSizeBytes = currentSize;
-    totalSizeBytes = totalSize;
-  }
 
   public ReflectionSummary(
       String id,
@@ -75,11 +49,11 @@ public class ReflectionSummary {
       long currentSizeBytes,
       long totalSizeBytes,
       boolean enabled,
-      boolean arrowCachingEnabled,
       ReflectionStatusUI status,
       String datasetId,
       Dataset.DatasetType datasetType,
-      List<String> datasetPath) {
+      List<String> datasetPath,
+      String reflectionMode) {
     this.id = id;
     this.type = type;
     this.name = name;
@@ -89,18 +63,14 @@ public class ReflectionSummary {
     this.currentSizeBytes = currentSizeBytes;
     this.totalSizeBytes = totalSizeBytes;
     this.enabled = enabled;
-    this.arrowCachingEnabled = arrowCachingEnabled;
     this.datasetType = datasetType;
     this.datasetPath = datasetPath;
     this.status = status;
+    this.reflectionMode = reflectionMode;
   }
 
   public String getEntityType() {
     return "reflection-summary";
-  }
-
-  public boolean isArrowCachingEnabled() {
-    return arrowCachingEnabled;
   }
 
   public String getId() {
@@ -149,5 +119,9 @@ public class ReflectionSummary {
 
   public ReflectionStatusUI getStatus() {
     return status;
+  }
+
+  public String getReflectionMode() {
+    return reflectionMode;
   }
 }

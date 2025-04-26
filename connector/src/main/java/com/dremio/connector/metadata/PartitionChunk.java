@@ -20,7 +20,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 
-/** Interface for a connector to provide details about a partition. TODO: add what this is */
+/** Interface for a connector to provide details about a partition. */
 public interface PartitionChunk {
 
   /**
@@ -45,7 +45,7 @@ public interface PartitionChunk {
    *
    * @return listing of dataset splits, not null
    */
-  DatasetSplitListing getSplits();
+  List<DatasetSplit> getSplits();
 
   /**
    * Get any additional information about the partition chunk.

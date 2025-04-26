@@ -15,13 +15,7 @@
  */
 package com.dremio.common.util;
 
-import static java.nio.charset.StandardCharsets.UTF_8;
-
 import com.dremio.common.VM;
-import com.google.common.io.Resources;
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.net.URL;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
@@ -97,18 +91,5 @@ public class TestTools {
                 + "module.",
             WORKING_PATH);
     throw new IllegalStateException(msg);
-  }
-
-  public static String readTestResourceAsString(String resPath) {
-    try {
-      if (resPath.startsWith("/")) {
-        // for compatibilty with existing callers
-        resPath = resPath.substring(1);
-      }
-      URL resUrl = Resources.getResource(resPath);
-      return Resources.toString(resUrl, UTF_8);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
   }
 }

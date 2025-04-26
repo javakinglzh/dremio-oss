@@ -17,10 +17,10 @@ package com.dremio.exec.store.iceberg;
 
 import static com.dremio.common.utils.PathUtils.removeLeadingSlash;
 import static com.dremio.exec.ExecConstants.ENABLE_ICEBERG_SPEC_EVOL_TRANFORMATION;
+import static com.dremio.exec.ExecConstants.WRITE_TARGET_FILE_SIZE_BYTES_DREMIO_DEFAULT;
 import static com.dremio.exec.catalog.CatalogUtil.getAndValidateSourceForTableManagement;
 import static com.dremio.exec.hadoop.DremioHadoopUtils.getContainerName;
 import static com.dremio.exec.hadoop.DremioHadoopUtils.pathWithoutContainer;
-import static com.dremio.exec.store.SystemSchemas.CLUSTERING_TABLE_PROPERTY;
 import static com.dremio.exec.store.iceberg.IcebergSerDe.deserializedJsonAsSchema;
 import static com.dremio.exec.store.iceberg.IcebergSerDe.serializedSchemaAsJson;
 import static com.dremio.exec.store.iceberg.model.IcebergBaseCommand.DREMIO_JOB_ID_ICEBERG_PROPERTY;
@@ -31,9 +31,10 @@ import static com.dremio.io.file.Path.CONTAINER_SEPARATOR;
 import static com.dremio.io.file.Path.GCS_FILE_SYSTEM;
 import static com.dremio.io.file.Path.S3_FILE_SYSTEM;
 import static com.dremio.io.file.Path.SEPARATOR;
-import static com.dremio.io.file.UriSchemes.ADL_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_ABFSS_SCHEME;
 import static com.dremio.io.file.UriSchemes.AZURE_ABFS_SCHEME;
-import static com.dremio.io.file.UriSchemes.AZURE_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_WASBS_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_WASB_SCHEME;
 import static com.dremio.io.file.UriSchemes.FILE_SCHEME;
 import static com.dremio.io.file.UriSchemes.GCS_SCHEME;
 import static com.dremio.io.file.UriSchemes.HDFS_SCHEME;
@@ -44,6 +45,7 @@ import static com.dremio.io.file.UriSchemes.SCHEME_SEPARATOR;
 import static org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY;
 import static org.apache.iceberg.TableProperties.GC_ENABLED;
 import static org.apache.iceberg.TableProperties.METADATA_DELETE_AFTER_COMMIT_ENABLED;
+import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.ResolvedVersionContext;
@@ -55,6 +57,7 @@ import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.Describer;
 import com.dremio.common.map.CaseInsensitiveMap;
 import com.dremio.common.types.TypeProtos;
+import com.dremio.common.util.DateTimes;
 import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.connector.metadata.DatasetSplit;
 import com.dremio.connector.metadata.DatasetSplitAffinity;
@@ -63,13 +66,14 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.SourceCatalog;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.VersionedPlugin;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.hadoop.HadoopFileSystemConfigurationAdapter;
 import com.dremio.exec.ops.QueryContext;
+import com.dremio.exec.physical.base.ClusteringOptions;
 import com.dremio.exec.physical.base.CombineSmallFileOptions;
 import com.dremio.exec.physical.base.IcebergWriterOptions;
 import com.dremio.exec.physical.base.ImmutableIcebergWriterOptions;
@@ -88,15 +92,11 @@ import com.dremio.exec.planner.sql.handlers.direct.SimpleCommandResult;
 import com.dremio.exec.planner.sql.handlers.query.OptimizeOptions;
 import com.dremio.exec.planner.sql.parser.PartitionDistributionStrategy;
 import com.dremio.exec.planner.sql.parser.SqlCopyIntoTable;
-import com.dremio.exec.planner.sql.parser.SqlGrant;
 import com.dremio.exec.planner.sql.parser.SqlOptimize;
 import com.dremio.exec.planner.sql.parser.SqlVacuumTable;
-import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.SchemaBuilder;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.SplitIdentity;
 import com.dremio.exec.store.SplitWork;
@@ -151,6 +151,7 @@ import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -185,7 +186,9 @@ import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.complex.impl.NullableStructWriter;
+import org.apache.arrow.vector.types.FloatingPointPrecision;
 import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.ArrowType.PrimitiveType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.util.Text;
@@ -213,6 +216,7 @@ import org.apache.iceberg.TableMetadataParser;
 import org.apache.iceberg.TableMetadataParser.Codec;
 import org.apache.iceberg.exceptions.NotFoundException;
 import org.apache.iceberg.expressions.Expressions;
+import org.apache.iceberg.expressions.Literal;
 import org.apache.iceberg.expressions.Term;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.InputFile;
@@ -220,9 +224,19 @@ import org.apache.iceberg.transforms.Transforms;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.TypeUtil;
 import org.apache.iceberg.types.Types;
+import org.apache.iceberg.types.Types.BinaryType;
+import org.apache.iceberg.types.Types.BooleanType;
+import org.apache.iceberg.types.Types.DateType;
+import org.apache.iceberg.types.Types.DecimalType;
+import org.apache.iceberg.types.Types.DoubleType;
+import org.apache.iceberg.types.Types.FloatType;
+import org.apache.iceberg.types.Types.IntegerType;
+import org.apache.iceberg.types.Types.LongType;
+import org.apache.iceberg.types.Types.StringType;
+import org.apache.iceberg.types.Types.TimestampType;
 import org.apache.iceberg.util.Tasks;
 import org.eclipse.jetty.util.URIUtil;
-import org.joda.time.DateTimeConstants;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 
 /** Class contains miscellaneous utility functions for Iceberg table operations */
@@ -233,8 +247,6 @@ public class IcebergUtils {
   private static final int ICEBERG_TIMESTAMP_PRECISION = 6;
   public static final Pattern LOCALSORT_BY_PATTERN =
       Pattern.compile("LOCALSORT\\s*BY", Pattern.CASE_INSENSITIVE);
-  public static final Pattern CLUSTER_BY_PATTERN =
-      Pattern.compile("CLUSTER\\s*BY", Pattern.CASE_INSENSITIVE);
 
   public static final String VIEW_FORMAT_VERSION_JSON_KEY =
       "format-version"; // Exists in both V0 and V1 formats
@@ -245,15 +257,32 @@ public class IcebergUtils {
   public static final String READ_POSITIONAL_DELETE_JOIN_MODE_PROPERTY =
       "dremio.read.positional_delete_join_mode";
 
+  public static final String CLUSTERING_INFO = "dremio.clustering_info";
+
+  // The property to record the sequence number that the entire partition is dropped.
+  // And, the partitioned table becomes to the non-partitioned table.
+  public static final String PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY =
+      "dremio.partition.dropped.sequence_number";
+
   public static final String ENABLE_AZURE_ABFSS_SCHEME = "dremio.azure.enable_abfs_scheme";
+
+  /** Iceberg/Parquet terminology for not compressed Parquet pages */
+  public static final String ICEBERG_PARQUET_NOT_COMPRESSED = "uncompressed";
+
+  /** Dremio terminology for not compressed Parquet pages */
+  public static final String DREMIO_PARQUET_NOT_COMPRESSED = "none";
 
   public static final Map<String, String> DEFAULT_TABLE_PROPERTIES =
       new HashMap<>() {
         {
-          put(GC_ENABLED, "false");
-          put(METADATA_DELETE_AFTER_COMMIT_ENABLED, "false");
+          put(
+              WRITE_TARGET_FILE_SIZE_BYTES,
+              Long.toString(WRITE_TARGET_FILE_SIZE_BYTES_DREMIO_DEFAULT));
         }
       };
+
+  public static final String CLUSTERING_TABLE_PROPERTY =
+      "dremio.use_sort_order_as_clustering_columns";
 
   public enum ReadPositionalDeleteJoinMode {
     BROADCAST("broadcast"),
@@ -401,8 +430,7 @@ public class IcebergUtils {
     } else if (vector instanceof BitVector) {
       ((BitVector) vector).setSafe(idx, (Boolean) value ? 1 : 0);
     } else if (vector instanceof DateMilliVector) {
-      ((DateMilliVector) vector)
-          .setSafe(idx, ((Integer) value) * ((long) DateTimeConstants.MILLIS_PER_DAY));
+      ((DateMilliVector) vector).setSafe(idx, ((Integer) value) * DateTimes.MILLIS_PER_DAY);
     } else if (vector instanceof TimeStampVector) {
       ((TimeStampVector) vector).setSafe(idx, (Long) value / 1_000);
     } else if (vector instanceof TimeMilliVector) {
@@ -434,6 +462,7 @@ public class IcebergUtils {
         || fieldName.equalsIgnoreCase(RecordReader.SPLIT_INFORMATION)
         || fieldName.equalsIgnoreCase(RecordReader.COL_IDS)
         || fieldName.equalsIgnoreCase(RecordReader.DATAFILE_PATH)
+        || fieldName.equalsIgnoreCase(SystemSchemas.DATASET_FIELD)
         || SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_COLS.contains(fieldName);
   }
 
@@ -745,17 +774,30 @@ public class IcebergUtils {
     if (!isIcebergSortOrderFeatureEnabled(options)) {
       return SortOrder.unsorted();
     }
-    try {
-      Schema schema;
-      if (existingIcebergSchema != null) {
-        schema = existingIcebergSchema;
-      } else {
-        SchemaConverter schemaConverter = SchemaConverter.getBuilder().build();
-        schema = schemaConverter.toIcebergSchema(batchSchema);
-      }
 
+    Schema schema;
+    if (existingIcebergSchema != null) {
+      schema = existingIcebergSchema;
+    } else {
+      SchemaConverter schemaConverter = SchemaConverter.getBuilder().build();
+      schema = schemaConverter.toIcebergSchema(batchSchema);
+    }
+
+    return getIcebergSortOrder(schema, sortColumns);
+  }
+
+  public static SortOrder getIcebergSortOrder(Schema schema, List<String> sortColumns) {
+    try {
       SortOrder.Builder sortOrderBuilder = SortOrder.builderFor(schema);
       for (String sortColumn : sortColumns) {
+        // catch filed not found earlier instead of relying on iceberg SortOrderBuild to improve
+        // error message
+        Types.NestedField sortOrderField = schema.caseInsensitiveFindField(sortColumn);
+        if (sortOrderField == null) {
+          throw UserException.validationError()
+              .message("SortOrder column %s cannot be found in table.", sortColumn)
+              .buildSilently();
+        }
         sortOrderBuilder.asc(
             sortColumn,
             NullOrder.NULLS_FIRST); // ASC and NULLS_FIRST are default sort parameters for a column.
@@ -767,8 +809,12 @@ public class IcebergUtils {
     }
   }
 
+  public static List<String> getColumnsFromSortOrder(SortOrder sortOrder) {
+    return getColumnsFromSortOrder(sortOrder, null);
+  }
+
   public static List<String> getColumnsFromSortOrder(SortOrder sortOrder, OptionManager options) {
-    if (sortOrder == null || !isIcebergSortOrderFeatureEnabled(options)) {
+    if (sortOrder == null || (options != null && !isIcebergSortOrderFeatureEnabled(options))) {
       return Collections.emptyList();
     }
     Preconditions.checkNotNull(sortOrder.schema());
@@ -798,25 +844,28 @@ public class IcebergUtils {
   }
 
   public static String getValidIcebergPath(
-      Path path, FileSystemConfigurationAdapter conf, String fsScheme, String schemeVariate) {
-    String pathStr = path.toString();
+      Path hadoopFsPath,
+      FileSystemConfigurationAdapter conf,
+      String fsScheme,
+      String schemeVariate) {
+    String pathStr = hadoopFsPath.toString();
     try {
       if (fsScheme == null
-          || (path.toUri().getScheme() != null
+          || (hadoopFsPath.toUri().getScheme() != null
               && StringUtils.isEmpty(schemeVariate)
               && pathStr.contains(SCHEME_SEPARATOR))) {
-        return path.toString();
+        return hadoopFsPath.toString();
       }
       // Remove current scheme info
-      if (path.toUri().getScheme() != null) {
-        pathStr = path.toUri().getPath();
+      if (hadoopFsPath.toUri().getScheme() != null) {
+        pathStr = hadoopFsPath.toUri().getPath();
       }
       String modifiedPath = removeLeadingSlash(pathStr);
       if (fsScheme.equalsIgnoreCase(
           FileSystemConf.CloudFileSystemScheme.AZURE_STORAGE_FILE_SYSTEM_SCHEME.getScheme())) {
-        boolean isAbfs = "true".equalsIgnoreCase(conf.get(ENABLE_AZURE_ABFSS_SCHEME));
-        String azureScheme = isAbfs ? AZURE_ABFS_SCHEME : AZURE_SCHEME;
-        String accountName = conf.get("dremio.azure.account");
+
+        String azureScheme = writeWasbs(conf) ? AZURE_WASBS_SCHEME : AZURE_ABFSS_SCHEME;
+        String accountName = conf.get(AzureStorageConfProperties.ACCOUNT);
         StringBuilder urlBuilder = new StringBuilder();
         // If the scheme from the path is a variant of AzureFileSystem, use the variant.
         if (schemeVariate != null
@@ -827,15 +876,19 @@ public class IcebergUtils {
           urlBuilder.append(azureScheme);
         }
         urlBuilder.append(SCHEME_SEPARATOR);
-        if (!StringUtils.isEmpty(path.toUri().getAuthority())) {
-          urlBuilder.append(path.toUri().getAuthority());
+        if (!StringUtils.isEmpty(hadoopFsPath.toUri().getAuthority())) {
+          String authority = syncAzurePrefixSuffix(hadoopFsPath, urlBuilder);
+          urlBuilder.append(authority);
           urlBuilder.append(Path.SEPARATOR);
           urlBuilder.append(modifiedPath);
         } else {
-          urlBuilder.append(getContainerName(path));
-          String suffix = isAbfs ? AZURE_DFS_AUTHORITY_SUFFIX : AZURE_BLOB_AUTHORITY_SUFFIX;
-          urlBuilder.append(CONTAINER_SEPARATOR + accountName + suffix);
-          urlBuilder.append(pathWithoutContainer(path));
+          urlBuilder.append(getContainerName(hadoopFsPath));
+          String suffix =
+              urlBuilder.toString().startsWith(AZURE_WASB_SCHEME)
+                  ? AZURE_BLOB_AUTHORITY_SUFFIX
+                  : AZURE_DFS_AUTHORITY_SUFFIX;
+          urlBuilder.append(CONTAINER_SEPARATOR).append(accountName).append(suffix);
+          urlBuilder.append(pathWithoutContainer(hadoopFsPath));
         }
         return urlBuilder.toString();
       } else if (fsScheme.equalsIgnoreCase(
@@ -851,8 +904,8 @@ public class IcebergUtils {
                 : S3_SCHEME;
         urlBuilder.append(s3Scheme);
         urlBuilder.append(SCHEME_SEPARATOR);
-        if (!StringUtils.isEmpty(path.toUri().getAuthority())) {
-          urlBuilder.append(path.toUri().getAuthority());
+        if (!StringUtils.isEmpty(hadoopFsPath.toUri().getAuthority())) {
+          urlBuilder.append(hadoopFsPath.toUri().getAuthority());
           urlBuilder.append(Path.SEPARATOR);
         }
         urlBuilder.append(modifiedPath);
@@ -862,8 +915,8 @@ public class IcebergUtils {
         StringBuilder urlBuilder = new StringBuilder();
         urlBuilder.append(GCS_SCHEME);
         urlBuilder.append(SCHEME_SEPARATOR);
-        if (!StringUtils.isEmpty(path.toUri().getAuthority())) {
-          urlBuilder.append(path.toUri().getAuthority());
+        if (!StringUtils.isEmpty(hadoopFsPath.toUri().getAuthority())) {
+          urlBuilder.append(hadoopFsPath.toUri().getAuthority());
           urlBuilder.append(Path.SEPARATOR);
         }
         urlBuilder.append(modifiedPath);
@@ -880,18 +933,6 @@ public class IcebergUtils {
         }
       } else if (fsScheme.equalsIgnoreCase(FILE_SCHEME)) {
         return FILE_SCHEME + SCHEME_SEPARATOR + Path.SEPARATOR + modifiedPath;
-      } else if (fsScheme.equalsIgnoreCase(
-          FileSystemConf.CloudFileSystemScheme.ADL_FILE_SYSTEM_SCHEME.getScheme())) {
-        String adlsEndPoint = conf.get(FS_DEFAULT_NAME_KEY, SEPARATOR);
-        String[] endPointParts = adlsEndPoint.split(SCHEME_SEPARATOR);
-        adlsEndPoint = (endPointParts.length > 1) ? endPointParts[1] : SEPARATOR;
-        StringBuilder urlBuilder = new StringBuilder();
-        return urlBuilder
-            .append(ADL_SCHEME)
-            .append(SCHEME_SEPARATOR)
-            .append(adlsEndPoint)
-            .append(modifiedPath)
-            .toString();
       } else if (fsScheme.equalsIgnoreCase(MAPRFS_SCHEME)) {
         return MAPRFS_SCHEME + SCHEME_SEPARATOR + SEPARATOR + modifiedPath;
       } else {
@@ -902,10 +943,68 @@ public class IcebergUtils {
           "Unknown format ("
               + fsScheme
               + ") conversion for path "
-              + path
+              + hadoopFsPath
               + " Error Message : "
               + ex.getMessage());
     }
+  }
+
+  /**
+   * By Default, Azure-URI will use 'abfss' with the '.dfs.' authority. It can optionally write
+   * 'wasbs'.
+   *
+   * @return true (write 'wasbs') if 'dremio.azure.mode' = 'STORAGE_V1';
+   */
+  public static boolean writeWasbs(FileSystemConfigurationAdapter conf) {
+    return ("STORAGE_V1".equals(conf.get("dremio.azure.mode")));
+  }
+
+  /**
+   * <strong>Constructs Azure Storage URLs for Iceberg files with proper authority.</strong>
+   *
+   * <p>The following rules ensure that URI schemes match their respective Azure URI authority:
+   *
+   * <ul>
+   *   <li><code>abfs</code> and <code>abfss</code> schemes correspond to the Azure Data Lake
+   *       Storage Gen2 service, which uses the <code>dfs.core.windows.net</code> authority.
+   *   <li><code>wasb</code> and <code>wasbs</code> schemes correspond to the Azure Blob Storage
+   *       service, which uses the <code>blob.core.windows.net</code> authority.
+   * </ul>
+   *
+   * <p>When writing Azure URLs to Iceberg files:
+   *
+   * <ul>
+   *   <li>Ensure <code>abfs</code> or <code>abfss</code> URLs point to the <code>
+   *       dfs.core.windows.net</code> endpoint.
+   *   <li>Ensure <code>wasb</code> or <code>wasbs</code> URLs point to the <code>
+   *       blob.core.windows.net</code> endpoint.
+   * </ul>
+   *
+   * <p>Some of dremio's Iceberg-related features (orphan file removal, snapshot expiry) perform uri
+   * manipulation. This helper is built uphold this prefix/suffix pairing during url construction
+   *
+   * @param hadoopFsPath the input path for which the URL is being constructed
+   * @param urlBuilder the builder used to construct the output URL
+   * @return the correctly formatted Azure Storage URL
+   */
+  @NotNull
+  public static String syncAzurePrefixSuffix(Path hadoopFsPath, StringBuilder urlBuilder) {
+    String authority = hadoopFsPath.toUri().getAuthority();
+    boolean isBlobEndpoint = authority.contains(AZURE_BLOB_AUTHORITY_SUFFIX);
+    boolean isDfsEndpoint = authority.contains(AZURE_DFS_AUTHORITY_SUFFIX);
+    if (isDfsEndpoint || isBlobEndpoint) {
+      String prefix = urlBuilder.toString();
+      boolean needDfsEndpoint =
+          prefix.startsWith(AZURE_ABFSS_SCHEME) || prefix.startsWith(AZURE_ABFS_SCHEME);
+      boolean needBlobEndpoint =
+          prefix.startsWith(AZURE_WASBS_SCHEME) || prefix.startsWith(AZURE_WASB_SCHEME);
+      if (needDfsEndpoint && isBlobEndpoint) {
+        authority = authority.replace(AZURE_BLOB_AUTHORITY_SUFFIX, AZURE_DFS_AUTHORITY_SUFFIX);
+      } else if (needBlobEndpoint && isDfsEndpoint) {
+        authority = authority.replace(AZURE_DFS_AUTHORITY_SUFFIX, AZURE_BLOB_AUTHORITY_SUFFIX);
+      }
+    }
+    return authority;
   }
 
   public static String getIcebergPathAndValidateScheme(
@@ -940,9 +1039,9 @@ public class IcebergUtils {
     if (fsScheme.equalsIgnoreCase(
             FileSystemConf.CloudFileSystemScheme.AZURE_STORAGE_FILE_SYSTEM_SCHEME.getScheme())
         || AZURE_FILE_SYSTEM.contains(fsScheme)) {
-      return ("true".equalsIgnoreCase(conf.get(ENABLE_AZURE_ABFSS_SCHEME)))
-          ? AZURE_ABFS_SCHEME
-          : AZURE_SCHEME;
+      return writeWasbs(new HadoopFileSystemConfigurationAdapter(conf))
+          ? AZURE_WASBS_SCHEME
+          : AZURE_ABFSS_SCHEME;
     } else if (fsScheme.equalsIgnoreCase(
             FileSystemConf.CloudFileSystemScheme.S3_FILE_SYSTEM_SCHEME.getScheme())
         || S3_FILE_SYSTEM.contains(fsScheme)) {
@@ -955,9 +1054,6 @@ public class IcebergUtils {
       return HDFS_SCHEME;
     } else if (fsScheme.equalsIgnoreCase(FILE_SCHEME)) {
       return FILE_SCHEME;
-    } else if (fsScheme.equalsIgnoreCase(
-        FileSystemConf.CloudFileSystemScheme.ADL_FILE_SYSTEM_SCHEME.getScheme())) {
-      return ADL_SCHEME;
     } else if (fsScheme.equalsIgnoreCase(MAPRFS_SCHEME)) {
       return MAPRFS_SCHEME;
     } else {
@@ -968,9 +1064,19 @@ public class IcebergUtils {
 
   public static SupportsInternalIcebergTable getSupportsInternalIcebergTablePlugin(
       FragmentExecutionContext fec, StoragePluginId pluginId) {
+    return getPluginAs(fec, pluginId, SupportsInternalIcebergTable.class);
+  }
+
+  public static SupportsIcebergRootPointer getSupportsIcebergRootPointerPlugin(
+      FragmentExecutionContext fec, StoragePluginId pluginId) {
+    return getPluginAs(fec, pluginId, SupportsIcebergRootPointer.class);
+  }
+
+  private static <T> T getPluginAs(
+      FragmentExecutionContext fec, StoragePluginId pluginId, Class<T> clazz) {
     StoragePlugin plugin = wrap(() -> fec.getStoragePlugin(pluginId));
-    if (plugin instanceof SupportsInternalIcebergTable) {
-      return (SupportsInternalIcebergTable) plugin;
+    if (clazz.isInstance(plugin)) {
+      return clazz.cast(plugin);
     } else {
       throw UserException.validationError()
           .message("Source identified was invalid type.")
@@ -1088,7 +1194,7 @@ public class IcebergUtils {
           data.setLong(position, null);
         }
         break;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         value = partitionValue.hasLongValue() ? partitionValue.getLongValue() : null;
         data.setLong(position, value != null ? (Long) (value) * 1000L : null);
         break;
@@ -1197,6 +1303,27 @@ public class IcebergUtils {
       return icebergMetadata.getSortOrder();
     }
     return IcebergSerDe.serializeSortOrderAsJson(SortOrder.unsorted());
+  }
+
+  public static String getIcebergSortOrderIfSet(DatasetConfig datasetConfig) {
+    if (DatasetHelper.isIcebergDataset(datasetConfig)
+        && datasetConfig.getPhysicalDataset().getIcebergMetadata() != null
+        && datasetConfig.getPhysicalDataset().getIcebergMetadata().getSortOrder() != null) {
+      return datasetConfig.getPhysicalDataset().getIcebergMetadata().getSortOrder();
+    }
+    return null;
+  }
+
+  public static boolean hasClusteringColumnsProperty(IcebergMetadata metadata) {
+    Preconditions.checkArgument(metadata != null, "No metadata found");
+    Map<String, String> tableProperties =
+        convertListTablePropertiesToMap(metadata.getTablePropertiesList());
+
+    String clusteringTableProperty = tableProperties.get(CLUSTERING_TABLE_PROPERTY);
+    if (clusteringTableProperty == null || !Boolean.parseBoolean(clusteringTableProperty)) {
+      return false;
+    }
+    return true;
   }
 
   public static String getCurrentIcebergSchema(
@@ -1325,19 +1452,6 @@ public class IcebergUtils {
     return options.getOption(ExecConstants.ENABLE_ICEBERG_SORT_ORDER);
   }
 
-  public static void validateIcebergAutoClusteringIfDeclared(String sql, OptionManager options)
-      throws UserException {
-    if (CLUSTER_BY_PATTERN.matcher(sql).find() && !isIcebergAutoClusteringFeatureEnabled(options)) {
-      throw UserException.unsupportedError()
-          .message("Iceberg Auto Clustering Operations are disabled")
-          .buildSilently();
-    }
-  }
-
-  public static boolean isIcebergAutoClusteringFeatureEnabled(OptionManager options) {
-    return options.getOption(ExecConstants.ENABLE_ICEBERG_AUTO_CLUSTERING);
-  }
-
   public static void validateTablePropertiesRequest(OptionManager options) {
     if (!options.getOption(ExecConstants.ENABLE_ICEBERG_TABLE_PROPERTIES)) {
       throw UserException.unsupportedError()
@@ -1418,6 +1532,24 @@ public class IcebergUtils {
     return tableProperties;
   }
 
+  /**
+   * Checks for Iceberg table properties that should never be unset.
+   *
+   * <p>Returns normally if all table properties named in the collection parameter may potentially
+   * be unset. Throws {@linkplain IllegalArgumentException} otherwise.
+   *
+   * @param propertyNames Zero or more table property names to check
+   * @throws IllegalArgumentException After finding the first unsettable table property name in
+   *     {@code propertyNames}, in iteration order
+   */
+  public static void validateTablePropertiesCanBeUnset(final Collection<String> propertyNames) {
+    for (final String pn : propertyNames) {
+      if (org.apache.iceberg.TableProperties.FORMAT_VERSION.equals(pn)) {
+        throw new IllegalArgumentException("Cannot unset Iceberg table property: " + pn);
+      }
+    }
+  }
+
   public static Map<String, String> convertListTablePropertiesToMap(
       List<TableProperties> tablePropertiesList) {
     Map<String, String> tableProperties = new HashMap<>();
@@ -1457,7 +1589,8 @@ public class IcebergUtils {
       Catalog catalog,
       DremioTable table,
       SqlOperator sqlOperator,
-      OptimizeOptions optimizeOptions) {
+      OptimizeOptions optimizeOptions,
+      ClusteringOptions clusteringInfo) {
     final NamespaceKey key = table.getPath();
     return getIcebergCreateTableEntry(
         context,
@@ -1465,6 +1598,7 @@ public class IcebergUtils {
         table,
         sqlOperator,
         optimizeOptions,
+        clusteringInfo,
         CatalogUtil.resolveVersionContext(
             catalog,
             key.getRoot(),
@@ -1476,7 +1610,8 @@ public class IcebergUtils {
       Catalog catalog,
       DremioTable table,
       SqlOperator sqlOperator,
-      OptimizeOptions optimizeOptions) {
+      OptimizeOptions optimizeOptions,
+      ClusteringOptions clusteringInfo) {
     final NamespaceKey key = table.getPath();
     return getIcebergCreateTableEntry(
         config,
@@ -1484,36 +1619,11 @@ public class IcebergUtils {
         table,
         sqlOperator,
         optimizeOptions,
+        clusteringInfo,
         CatalogUtil.resolveVersionContext(
             catalog,
             key.getRoot(),
             config.getContext().getSession().getSessionVersionForSource(key.getRoot())));
-  }
-
-  public static boolean hasClusteringColumns(DremioTable table) {
-    IcebergMetadata metadata = table.getDatasetConfig().getPhysicalDataset().getIcebergMetadata();
-    if (!hasClusteringColumnsProperty(metadata)) {
-      return false;
-    }
-
-    String sortOrderString = metadata.getSortOrder();
-    SortOrder sortOrder =
-        IcebergSerDe.deserializeSortOrderFromJson(
-            SchemaConverter.getBuilder().build().toIcebergSchema(table.getSchema()),
-            sortOrderString);
-    return sortOrder != null && !sortOrder.isUnsorted();
-  }
-
-  public static boolean hasClusteringColumnsProperty(IcebergMetadata metadata) {
-    Preconditions.checkArgument(metadata != null);
-    Map<String, String> tableProperties =
-        convertListTablePropertiesToMap(metadata.getTablePropertiesList());
-
-    String clusteringTableProperty = tableProperties.get(CLUSTERING_TABLE_PROPERTY);
-    if (clusteringTableProperty == null || !Boolean.parseBoolean(clusteringTableProperty)) {
-      return false;
-    }
-    return true;
   }
 
   public static CreateTableEntry getIcebergCreateTableEntry(
@@ -1522,9 +1632,16 @@ public class IcebergUtils {
       DremioTable table,
       SqlOperator sqlOperator,
       OptimizeOptions optimizeOptions,
+      ClusteringOptions clusteringInfo,
       ResolvedVersionContext resolvedVersionContext) {
     return getIcebergCreateTableEntry(
-        config.getContext(), catalog, table, sqlOperator, optimizeOptions, resolvedVersionContext);
+        config.getContext(),
+        catalog,
+        table,
+        sqlOperator,
+        optimizeOptions,
+        clusteringInfo,
+        resolvedVersionContext);
   }
 
   public static CreateTableEntry getIcebergCreateTableEntry(
@@ -1533,6 +1650,7 @@ public class IcebergUtils {
       DremioTable table,
       SqlOperator sqlOperator,
       OptimizeOptions optimizeOptions,
+      ClusteringOptions clusteringInfo,
       ResolvedVersionContext resolvedVersionContext) {
     final NamespaceKey key = table.getPath();
     final DatasetConfig datasetConfig = table.getDatasetConfig();
@@ -1547,13 +1665,14 @@ public class IcebergUtils {
     Map<String, String> properties =
         convertListTablePropertiesToMap(
             datasetConfig.getPhysicalDataset().getIcebergMetadata().getTablePropertiesList());
+    IcebergCommandType commandType = getIcebergCommandType(sqlOperator);
     IcebergTableProps icebergTableProps =
         new IcebergTableProps(
             null,
             queryId,
             null,
             partitionColumnsList,
-            getIcebergCommandType(sqlOperator),
+            commandType,
             null,
             key.getName(),
             null,
@@ -1607,12 +1726,19 @@ public class IcebergUtils {
             .setIcebergSpecificOptions(icebergOptions)
             .setOperation(getTableFormatOperation(sqlOperator));
 
-    boolean withWriteAsClustering = false;
+    if (clusteringInfo != null) {
+      // disable small file combination for clustering job since they are conflicting
+      combineSmallFileOptions = null;
+      tableFormatOptionsBuilder.setClusteringOptions(clusteringInfo);
+    }
+
     if (optimizeOptions != null) {
-      tableFormatOptionsBuilder.setMinInputFilesBeforeOptimize(optimizeOptions.getMinInputFiles());
+      // optimize for clustering should not have minInputFiles limit
+      Long minInputFiles = clusteringInfo != null ? 1 : optimizeOptions.getMinInputFiles();
+      tableFormatOptionsBuilder.setMinInputFilesBeforeOptimize(minInputFiles);
       tableFormatOptionsBuilder.setTargetFileSize(optimizeOptions.getTargetFileSizeBytes());
-      isSingleWriter = optimizeOptions.isSingleDataWriter();
-      withWriteAsClustering = hasClusteringColumns(table);
+      // disable single writer for clustering job
+      isSingleWriter = clusteringInfo != null ? false : optimizeOptions.isSingleDataWriter();
     }
 
     // Add current snapshotId info, as DML and OPTIMIZE committers need this info.
@@ -1636,8 +1762,7 @@ public class IcebergUtils {
                 readDefinition.getExtendedProperty(),
                 version,
                 properties,
-                false,
-                withWriteAsClustering)
+                false)
             .withCombineSmallFileOptions(combineSmallFileOptions);
 
     Schema schema = SchemaConverter.getBuilder().build().toIcebergSchema(batchSchema);
@@ -1645,6 +1770,13 @@ public class IcebergUtils {
     List<String> sortColumns =
         getColumnsFromSortOrder(
             IcebergSerDe.deserializeSortOrderFromJson(schema, sortOrder), context.getOptions());
+
+    // In case clustering is defined but not writing as clustered (i.e., clusteringInfo == null)
+    // set sortColumn as empty since it is reserved for clustering writing
+    if (clusteringInfo == null
+        && hasClusteringColumnsProperty(physicalDataset.getIcebergMetadata())) {
+      sortColumns = Collections.emptyList();
+    }
     options.setSortColumns(sortColumns);
     BatchSchema writerSchema = getWriterSchema(batchSchema, options);
     icebergTableProps.setFullSchema(writerSchema);
@@ -1740,53 +1872,9 @@ public class IcebergUtils {
             || DatasetHelper.isIcebergDataset(datasetConfig));
   }
 
-  public static List<String> validateAndGeneratePrimaryKey(
-      MutablePlugin plugin,
-      SabotContext context,
-      NamespaceKey table,
-      DatasetConfig datasetConfig,
-      SchemaConfig schemaConfig,
-      ResolvedVersionContext versionContext,
-      boolean saveInKvStore) {
-    if (datasetConfig.getPhysicalDataset().getPrimaryKey() != null) {
-      // Return PK from KV store.
-      return datasetConfig.getPhysicalDataset().getPrimaryKey().getColumnList();
-    }
-
-    // Cache the PK in the KV store.
-    try {
-      if (saveInKvStore) { // If we are not going to save in KV store, no point of validating this
-        // Verify if the user has permission to write to the KV store.
-        MetadataRequestOptions options = MetadataRequestOptions.of(schemaConfig);
-
-        Catalog catalog = context.getCatalogService().getCatalog(options);
-        catalog.validatePrivilege(table, SqlGrant.Privilege.ALTER);
-      }
-    } catch (UserException | java.security.AccessControlException ex) {
-      if (ex instanceof java.security.AccessControlException
-          || ((UserException) ex).getErrorType()
-              == UserBitShared.DremioPBError.ErrorType.PERMISSION) {
-        return null; // The user does not have permission.
-      }
-      throw ex;
-    }
-
-    return plugin.getPrimaryKeyFromMetadata(
-        table, datasetConfig, schemaConfig, versionContext, saveInKvStore);
-  }
-
   public static List<String> getPrimaryKey(
-      IcebergModel icebergModel,
-      String path,
-      NamespaceKey table,
-      DatasetConfig datasetConfig,
-      String userName,
-      StoragePlugin storagePlugin,
-      SabotContext context,
-      boolean saveInKvStore) {
-
+      IcebergModel icebergModel, String path, IcebergMetadata icebergMetadata) {
     final List<String> primaryKey;
-    IcebergMetadata icebergMetadata = datasetConfig.getPhysicalDataset().getIcebergMetadata();
 
     if (icebergMetadata != null) {
       primaryKey = getPrimaryKeyFromTableProperties(icebergMetadata.getTablePropertiesList());
@@ -1794,14 +1882,6 @@ public class IcebergUtils {
       final IcebergTableIdentifier tableIdentifier = icebergModel.getTableIdentifier(path);
       final Table icebergTable = icebergModel.getIcebergTable(tableIdentifier);
       primaryKey = getPrimaryKeyFromTableMetadata(icebergTable);
-    }
-    // This can happen if the table already had PK in the metadata, and we just promoted this table.
-    // The key will not be in the KV store for that.
-    // Even if PK is empty, we need to save to KV, so next time we know PK is unset and don't check
-    // from metadata again.
-    if (saveInKvStore) {
-      PrimaryKeyOperations.saveInKvStore(
-          table, datasetConfig, userName, storagePlugin, context, primaryKey);
     }
     return primaryKey;
   }
@@ -1872,7 +1952,7 @@ public class IcebergUtils {
     }
     if (value instanceof Long) {
       // for iceberg timestamps we need to convert from milliseconds to microseconds
-      if (type.getMinorType().equals(TypeProtos.MinorType.TIMESTAMP)
+      if (type.getMinorType().equals(TypeProtos.MinorType.TIMESTAMPMILLI)
           || type.getMinorType().equals(TypeProtos.MinorType.TIMESTAMPTZ)
           || type.getMinorType().equals(TypeProtos.MinorType.TIME)
           || type.getMinorType().equals(TypeProtos.MinorType.TIMETZ)) {
@@ -1928,7 +2008,8 @@ public class IcebergUtils {
         // It would be ideal to read it from any index in this case from the first index.
         extended =
             LegacyProtobufSerializer.parseFrom(
-                EasyProtobuf.EasyDatasetSplitXAttr.PARSER, works.get(0).getSplitExtendedProperty());
+                EasyProtobuf.EasyDatasetSplitXAttr.parser(),
+                works.get(0).getSplitExtendedProperty());
         return extended.getPath();
       } catch (InvalidProtocolBufferException e) {
         throw new RuntimeException("Could not deserialize split info", e);
@@ -1996,7 +2077,13 @@ public class IcebergUtils {
     FileSystem fs;
     try {
       fs =
-          pluginForIceberg.createFSWithAsyncOptions(metadataLocation, props.getUserName(), context);
+          pluginForIceberg.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(metadataLocation)
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .withAsyncOptions(true)
+                  .dataset(dataset));
     } catch (IOException e) {
       throw new RuntimeException("Failed creating filesystem", e);
     }
@@ -2028,7 +2115,12 @@ public class IcebergUtils {
       QueryContext context, NamespaceKey nsKey, SqlOperator operator) {
     return getIcebergTable(
         getIcebergCreateTableEntry(
-            context, context.getCatalog(), context.getCatalog().getTable(nsKey), operator, null));
+            context,
+            context.getCatalog(),
+            context.getCatalog().getTable(nsKey),
+            operator,
+            null,
+            null));
   }
 
   public static Table getIcebergTable(CreateTableEntry createTableEntry) {
@@ -2041,7 +2133,10 @@ public class IcebergUtils {
 
     try (FileSystem fs =
         plugin.createFS(
-            icebergTableProps.getTableLocation(), createTableEntry.getUserName(), null)) {
+            SupportsFsCreation.builder()
+                .filePath(icebergTableProps.getTableLocation())
+                .userName(createTableEntry.getUserName())
+                .datasetFromCreateTableEntry(createTableEntry))) {
       FileIO fileIO = plugin.createIcebergFileIO(fs, null, null, null, null);
       IcebergModel icebergModel;
       icebergModel =
@@ -2069,7 +2164,10 @@ public class IcebergUtils {
 
     try (FileSystem fs =
         plugin.createFS(
-            icebergTableProps.getTableLocation(), createTableEntry.getUserName(), null)) {
+            SupportsFsCreation.builder()
+                .filePath(icebergTableProps.getTableLocation())
+                .userName(createTableEntry.getUserName())
+                .datasetFromCreateTableEntry(createTableEntry))) {
       return fs;
     } catch (IOException ex) {
       throw new UncheckedIOException(ex);
@@ -2284,5 +2382,123 @@ public class IcebergUtils {
       propertiesUpdated = true;
     }
     return propertiesUpdated ? tableMetadata.replaceProperties(properties) : tableMetadata;
+  }
+
+  public static Type toIcebergType(PrimitiveType arrowType) {
+    switch (arrowType.getTypeID()) {
+      case Binary:
+        return BinaryType.get();
+      case Bool:
+        return BooleanType.get();
+      case FloatingPoint:
+        {
+          final FloatingPointPrecision precision =
+              ((ArrowType.FloatingPoint) arrowType).getPrecision();
+          switch (precision) {
+            case SINGLE:
+              return FloatType.get();
+            case DOUBLE:
+              return DoubleType.get();
+            default:
+              throw new IllegalStateException("Unsupported precision: " + precision);
+          }
+        }
+      case Int:
+        {
+          final int bitWidth = ((ArrowType.Int) arrowType).getBitWidth();
+          switch (bitWidth) {
+            case 32:
+              return IntegerType.get();
+            case 64:
+              return LongType.get();
+            default:
+              throw new IllegalStateException("Unsupported bitWith: " + bitWidth);
+          }
+        }
+
+      case Utf8:
+        return StringType.get();
+
+      case Decimal:
+        {
+          final ArrowType.Decimal decimalTypeInfo = (ArrowType.Decimal) arrowType;
+          final int precision = decimalTypeInfo.getPrecision();
+          if (precision > 38) {
+            throw new IllegalStateException(
+                String.format(
+                    "Dremio only supports decimals up to 38 digits in precision. This table has a value with scale of %s digits.",
+                    precision));
+          }
+          return DecimalType.of(precision, decimalTypeInfo.getScale());
+        }
+
+      case Date:
+        return DateType.get();
+
+      case Timestamp:
+        return TimestampType.withZone();
+
+      default:
+        throw new IllegalStateException("Unsupported field type: " + arrowType);
+    }
+  }
+
+  public static <I> Literal<I> toIcebergLiteral(Object value, PrimitiveType arrowType) {
+    switch (arrowType.getTypeID()) {
+      case Binary:
+        return (Literal<I>) Literal.of(ByteBuffer.wrap((byte[]) value));
+      case Bool:
+        return (Literal<I>) Literal.of((Boolean) value);
+      case FloatingPoint:
+        {
+          final FloatingPointPrecision precision =
+              ((ArrowType.FloatingPoint) arrowType).getPrecision();
+          switch (precision) {
+            case SINGLE:
+              return (Literal<I>) Literal.of((Float) value);
+            case DOUBLE:
+              return (Literal<I>) Literal.of((Double) value);
+            default:
+              throw new IllegalStateException("Unsupported precision: " + precision);
+          }
+        }
+      case Int:
+        {
+          final int bitWidth = ((ArrowType.Int) arrowType).getBitWidth();
+          switch (bitWidth) {
+            case 32:
+              return (Literal<I>) Literal.of((Integer) value);
+            case 64:
+              return (Literal<I>) Literal.of((Long) value);
+            default:
+              throw new IllegalStateException("Unsupported bitWith: " + bitWidth);
+          }
+        }
+
+      case Utf8:
+        return (Literal<I>) Literal.of((CharSequence) value);
+
+      case Decimal:
+        {
+          final ArrowType.Decimal decimalTypeInfo = (ArrowType.Decimal) arrowType;
+          final int precision = decimalTypeInfo.getPrecision();
+          if (precision > 38) {
+            throw new IllegalStateException(
+                String.format(
+                    "Dremio only supports decimals up to 38 digits in precision. This table has a value with scale of %s digits.",
+                    precision));
+          }
+          return (Literal<I>) Literal.of((BigDecimal) value);
+        }
+
+      case Date:
+        return (Literal<I>) Literal.of((Integer) value);
+
+      case Timestamp:
+        return (Literal<I>) Literal.of((Long) value);
+
+      default:
+        throw new IllegalStateException("Unsupported field type: " + arrowType);
+    }
   }
 }

@@ -43,4 +43,33 @@ describe("parseQuery tests", () => {
       ],
     });
   });
+
+  test("with only numbers as the searchText", () => {
+    assert.deepStrictEqual(parseQueryText("123"), {
+      searchText: "123",
+      filters: [],
+    });
+  });
+
+  test("with searchText starting with a non alphanumeric", () => {
+    assert.deepStrictEqual(parseQueryText("@"), {
+      searchText: "@",
+      filters: [],
+    });
+    assert.deepStrictEqual(parseQueryText("!"), {
+      searchText: "!",
+      filters: [],
+    });
+    assert.deepStrictEqual(parseQueryText("?"), {
+      searchText: "?",
+      filters: [],
+    });
+  });
+
+  test("with unicode searchText", () => {
+    assert.deepStrictEqual(parseQueryText("字母测试"), {
+      searchText: "字母测试",
+      filters: [],
+    });
+  });
 });

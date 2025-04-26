@@ -51,6 +51,7 @@ const LottieImages = ({
       loop
       autoplay
       mode="normal"
+      key={src}
       style={{
         ...(imageWidth && { width: `${imageWidth}px` }),
         ...(imageHeight && { height: `${imageHeight}px` }),

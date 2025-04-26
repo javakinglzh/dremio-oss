@@ -15,27 +15,13 @@
  */
 package com.dremio.exec.store.easy.text.compliant;
 
-import static com.dremio.exec.planner.ExceptionUtils.collapseExceptionMessages;
-
 import com.dremio.common.exceptions.FieldSizeLimitExceptionHelper;
 import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.physical.config.SimpleQueryContext;
-import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo;
-import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo.Builder;
-import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo.CopyIntoFileState;
-import com.dremio.exec.physical.config.copyinto.CopyIntoQueryProperties;
-import com.dremio.exec.physical.config.copyinto.CopyIntoQueryProperties.OnErrorOption;
-import com.dremio.exec.physical.config.copyinto.IngestionProperties;
-import com.dremio.exec.store.dfs.FileLoadInfo;
-import com.dremio.exec.store.dfs.copyinto.CopyIntoExceptionUtils;
-import com.dremio.exec.util.ColumnUtils;
-import com.dremio.service.namespace.file.proto.FileType;
 import com.univocity.parsers.common.TextParsingException;
 import com.univocity.parsers.csv.CsvParserSettings;
 import io.netty.buffer.NettyArrowBuf;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.OptionalInt;
 import org.apache.arrow.memory.ArrowBuf;
 
 /*******************************************************************************
@@ -47,6 +33,77 @@ import org.apache.arrow.memory.ArrowBuf;
  * for UTF8 parsing and ArrowBuf support.
  */
 final class TextReader implements AutoCloseable {
+
+  private class DefaultEventHandler implements TextRecordReaderEventHandler {
+
+    @Override
+    public void handleTextReadingError(
+        int fieldIndex, int recordIndexInBatch, long linePosition, Exception ex)
+        throws IOException {
+      if (ex instanceof TextParsingException) {
+        throw (TextParsingException) ex;
+      }
+
+      if (ex instanceof ArrayIndexOutOfBoundsException) {
+        ex =
+            UserException.dataReadError(ex)
+                .message(
+                    "Dremio failed to read your text file.  Dremio supports up to %d columns in a text file.  Your file appears to have more than that.",
+                    RepeatedVarCharOutput.MAXIMUM_NUMBER_COLUMNS)
+                .buildSilently();
+      }
+
+      String message = ex.getMessage() + ", File :" + filePath;
+      String tmp = input.getStringSinceMarkForError();
+      char[] chars = tmp.toCharArray();
+      int length = chars.length;
+      if (length > settings.getMaxCharsPerColumn()) {
+        message =
+            "Length of parsed input ("
+                + length
+                + ") exceeds the maximum number of characters defined in your parser settings ("
+                + settings.getMaxCharsPerColumn()
+                + "). ";
+      }
+
+      if (tmp.contains("\n") || tmp.contains("\r")) {
+        tmp = displayLineSeparators(tmp, true);
+        String lineSeparator =
+            displayLineSeparators(Arrays.toString(settings.getNewLineDelimiter()), false);
+        message +=
+            "\nIdentified line separator characters in the parsed content. This may be the cause of the error. The line separator in your parser settings is set to '"
+                + lineSeparator
+                + "'. Parsed content:\n\t"
+                + tmp;
+      }
+
+      int nullCharacterCount = 0;
+      // ensuring the StringBuilder won't grow over Integer.MAX_VALUE to avoid OutOfMemoryError
+      int maxLength = length > Integer.MAX_VALUE / 2 ? Integer.MAX_VALUE / 2 - 1 : length;
+      StringBuilder s = new StringBuilder(maxLength);
+      for (int i = 0; i < maxLength; i++) {
+        if (chars[i] == '\0') {
+          s.append('\\');
+          s.append('0');
+          nullCharacterCount++;
+        } else {
+          s.append(chars[i]);
+        }
+      }
+      tmp = s.toString();
+
+      if (nullCharacterCount > 0) {
+        message +=
+            "\nIdentified "
+                + nullCharacterCount
+                + " null characters ('\0') on parsed content. This may indicate the data is corrupt or its encoding is invalid. Parsed content:\n\t"
+                + tmp;
+      }
+
+      throw new TextParsingException(context, message, ex);
+    }
+  }
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(TextReader.class);
 
@@ -73,7 +130,7 @@ final class TextReader implements AutoCloseable {
    */
   private byte chType;
 
-  private boolean hasErrors = false;
+  private final TextRecordReaderEventHandler eventHandler;
 
   private boolean chIsLineDelimiter() {
     return (chType == 1);
@@ -92,8 +149,11 @@ final class TextReader implements AutoCloseable {
    * needed by the calling code (i.e. eliminate repeated testing canAppend )
    */
   static class OutputWrapper {
+
     /** 'canAppend' controls appending parsed content to output */
     private boolean canAppend = true;
+
+    private int currentRowSize;
 
     private final TextOutput output;
 
@@ -130,6 +190,7 @@ final class TextReader implements AutoCloseable {
     public void endField() {
       if (canAppend) {
         canAppend = output.endField();
+        currentRowSize += output.getFieldCurrentDataPointer();
       }
     }
 
@@ -176,6 +237,12 @@ final class TextReader implements AutoCloseable {
         output.appendIgnoringWhitespace(cur);
       }
     }
+
+    public int getAndResetRowSize() {
+      int tmp = currentRowSize;
+      currentRowSize = 0;
+      return tmp;
+    }
   }
 
   private final OutputWrapper output;
@@ -202,16 +269,7 @@ final class TextReader implements AutoCloseable {
   private final byte[] quote;
   private final byte[] quoteEscape;
   final byte[] lineDelimiter;
-  private String filePath;
-  private long fileSize;
-  private boolean schemaImposedMode;
-  private CopyIntoQueryProperties copyIntoQueryProperties;
-  private IngestionProperties ingestionProperties;
-  private SimpleQueryContext queryContext;
-  private int recordsRejectedCount;
-  private final boolean isValidationMode;
-  private long processingStartTime;
-  private String firstErrorMessage;
+  private final String filePath;
 
   /**
    * The CsvParser supports all settings provided by {@link CsvParserSettings}, and requires this
@@ -221,14 +279,14 @@ final class TextReader implements AutoCloseable {
    * @param input input stream
    * @param output interface to produce output record batch
    * @param workBuf working buffer to handle whitespaces
-   * @param isValidationMode true if this is a copy_errors use case
    */
   public TextReader(
       TextParsingSettings settings,
       TextInput input,
       TextOutput output,
       ArrowBuf workBuf,
-      boolean isValidationMode) {
+      String filePath,
+      TextRecordReaderEventHandler eventHandler) {
     this.context = new TextParsingContext(input, output);
     this.workBuf = workBuf;
     this.settings = settings;
@@ -245,35 +303,12 @@ final class TextReader implements AutoCloseable {
     this.quote = settings.getQuote();
     this.quoteEscape = settings.getQuoteEscape();
     this.comment = settings.getComment();
-    this.schemaImposedMode = false;
     this.lineDelimiter = settings.getNewLineDelimiter();
     this.skipEmptyLine = settings.isSkipEmptyLine();
     this.input = input;
     this.output = new OutputWrapper(output);
-    this.isValidationMode = isValidationMode;
-  }
-
-  public TextReader(
-      TextParsingSettings settings,
-      TextInput input,
-      TextOutput output,
-      ArrowBuf workBuf,
-      String filePath,
-      long fileSize,
-      boolean schemaImposedMode,
-      CopyIntoQueryProperties copyIntoQueryProperties,
-      IngestionProperties ingestionProperties,
-      SimpleQueryContext queryContext,
-      boolean isValidationMode,
-      long processingStartTime) {
-    this(settings, input, output, workBuf, isValidationMode);
     this.filePath = filePath;
-    this.fileSize = fileSize;
-    this.schemaImposedMode = schemaImposedMode;
-    this.copyIntoQueryProperties = copyIntoQueryProperties;
-    this.ingestionProperties = ingestionProperties;
-    this.queryContext = queryContext;
-    this.processingStartTime = processingStartTime;
+    this.eventHandler = eventHandler == null ? new DefaultEventHandler() : eventHandler;
   }
 
   public TextOutput getOutput() {
@@ -307,6 +342,8 @@ final class TextReader implements AutoCloseable {
   private void parseRecord() throws IOException {
     // index of the field within this record
     int fieldIndex = 0;
+
+    eventHandler.handleStartingNewRecord(output.output.currentBatchIndex(), context.currentLine());
 
     try {
       while (!chIsLineDelimiter()) {
@@ -351,16 +388,12 @@ final class TextReader implements AutoCloseable {
     try {
       while (!chIsDelimiter()) {
         if (ignoreTrailingWhitespace) {
-          if (schemaImposedMode) {
-            if (isWhite(ch)) {
-              continuousSpace++;
-            } else {
-              continuousSpace = 0;
-            }
-            output.append(ch);
+          if (isWhite(ch)) {
+            continuousSpace++;
           } else {
-            output.appendIgnoringWhitespace(ch);
+            continuousSpace = 0;
           }
+          output.append(ch);
         } else {
           output.append(ch);
         }
@@ -529,7 +562,7 @@ final class TextReader implements AutoCloseable {
     } else {
       if (input.match(ch, quote)) {
         savedWhitespaces = false;
-        long quoteStartLine = context.currentLine() + 1;
+        long quoteStartLine = context.currentLine();
         parseNextChar();
         try {
           parseQuotedValue();
@@ -654,19 +687,11 @@ final class TextReader implements AutoCloseable {
       return RecordReaderStatus.SUCCESS;
 
     } catch (StreamFinishedPseudoException ex) {
-      stopParsing();
-      return writeErrorEvent();
+      return RecordReaderStatus.END;
     } catch (Exception ex) {
-      hasErrors = true;
-      try {
-        return handleOrRaiseException(ex);
-      } finally {
-        stopParsing();
-      }
+      return handleOrRaiseException(ex);
     }
   }
-
-  private void stopParsing() {}
 
   private String displayLineSeparators(String str, boolean addNewLine) {
     if (addNewLine) {
@@ -686,254 +711,46 @@ final class TextReader implements AutoCloseable {
 
   /**
    * Helper method to handle exceptions caught while processing text files and generate better error
-   * messages associated with the exception. In case the {@link TextReader#copyIntoQueryProperties}
-   * is set to {@link CopyIntoQueryProperties.OnErrorOption#CONTINUE} or {@link
-   * CopyIntoQueryProperties.OnErrorOption#SKIP_FILE} the exception will be ignored.
+   * messages associated with the exception. In case the {@link #eventHandler}'s {@link
+   * TextRecordReaderEventHandler#handleTextReadingError(int, long, long, Exception)} method does
+   * not throw an exception, the returned status will be {@link RecordReaderStatus#SKIP}.
    *
    * @param ex Exception raised
    * @return Exception replacement
    * @throws IOException Selectively augments exception error messages and rethrows
    */
   private RecordReaderStatus handleOrRaiseException(Exception ex) throws IOException {
-    CopyIntoQueryProperties.OnErrorOption onErrorOption = null;
-    if (copyIntoQueryProperties != null) {
-      onErrorOption = copyIntoQueryProperties.getOnErrorOption();
-      if (logger.isDebugEnabled()) {
-        logger.debug(
-            String.format(
-                "Encountered error while reading text file. TextReader is running in '%s' mode.",
-                copyIntoQueryProperties.getOnErrorOption()),
-            ex);
-      }
+    int currentFieldIndex = output.output.currentFieldIndex();
+    int currentBatchIndex = output.output.currentBatchIndex();
+    long lineOfError;
+    if (ex instanceof UnmatchedQuoteException) {
+      lineOfError = ((UnmatchedQuoteException) ex).quoteStartLine;
+    } else {
+      // if error happened at line delimiter, the current line index has already been incremented
+      lineOfError = chIsLineDelimiter() ? context.currentLine() - 1 : context.currentLine();
     }
-    if (OnErrorOption.CONTINUE == onErrorOption
-        || OnErrorOption.SKIP_FILE == onErrorOption
-        || isValidationMode) {
-      if (firstErrorMessage == null) {
-        firstErrorMessage = collapseExceptionMessages(CopyIntoExceptionUtils.redactException(ex));
-      }
-      if (isValidationMode) {
-        // if error was seen during a copy_errors use case we write the details to the output
-        SchemaImposedOutput schemaImposedOutput = (SchemaImposedOutput) output.output();
+    eventHandler.handleTextReadingError(currentFieldIndex, currentBatchIndex, lineOfError, ex);
 
-        // if error happened mid (unfinished with parsing) line we need to increment currentLine()
-        long lineOfError = chIsLineDelimiter() ? context.currentLine() : context.currentLine() + 1;
-
-        if (ex instanceof UnmatchedQuoteException) {
-          lineOfError = ((UnmatchedQuoteException) ex).quoteStartLine;
-        }
-
-        schemaImposedOutput.writeValidationError(
-            recordCount + recordsRejectedCount,
-            lineOfError,
-            collapseExceptionMessages(CopyIntoExceptionUtils.redactException(ex)));
-      }
-      recordsRejectedCount++;
-      // try to skip to the next line, if we are not at the end of the line or file
-      if (chIsFieldDelimiter()) {
-        try {
-          input.skipLines(1);
-        } catch (StreamFinishedPseudoException e) {
-          // we are at the end of the file
-          return RecordReaderStatus.SKIP;
-        }
-      }
-
-      if (ex instanceof UnmatchedQuoteException || onErrorOption == OnErrorOption.SKIP_FILE) {
-        // UnmatchedQuoteException is a structural error in CSV, need to stop processing this file
-        // We also stop processing for SKIP_FILE since we stop at the first error
-        input.close();
-      }
-
-      if (isValidationMode) {
-        return RecordReaderStatus.VALIDATION_ERROR;
-      } else {
-        return RecordReaderStatus.SKIP;
-      }
+    // We cannot continue parsing after these issues because we have lost tracking the syntax
+    if (ex instanceof UnmatchedQuoteException
+        || ex.getCause() instanceof FieldSizeLimitExceptionHelper.FieldSizeLimitException) {
+      return RecordReaderStatus.END;
     }
 
-    if (ex instanceof TextParsingException) {
-      throw (TextParsingException) ex;
-    }
-
-    if (ex instanceof ArrayIndexOutOfBoundsException) {
-      ex =
-          UserException.dataReadError(ex)
-              .message(
-                  "Dremio failed to read your text file.  Dremio supports up to %d columns in a text file.  Your file appears to have more than that.",
-                  RepeatedVarCharOutput.MAXIMUM_NUMBER_COLUMNS)
-              .build(logger);
-    }
-
-    String message = ex.getMessage() + ", File :" + filePath;
-    String tmp = input.getStringSinceMarkForError();
-    char[] chars = tmp.toCharArray();
-    if (chars != null) {
-      int length = chars.length;
-      if (length > settings.getMaxCharsPerColumn()) {
-        message =
-            "Length of parsed input ("
-                + length
-                + ") exceeds the maximum number of characters defined in your parser settings ("
-                + settings.getMaxCharsPerColumn()
-                + "). ";
-      }
-
-      if (tmp.contains("\n") || tmp.contains("\r")) {
-        tmp = displayLineSeparators(tmp, true);
-        String lineSeparator =
-            displayLineSeparators(Arrays.toString(settings.getNewLineDelimiter()), false);
-        message +=
-            "\nIdentified line separator characters in the parsed content. This may be the cause of the error. The line separator in your parser settings is set to '"
-                + lineSeparator
-                + "'. Parsed content:\n\t"
-                + tmp;
-      }
-
-      int nullCharacterCount = 0;
-      // ensuring the StringBuilder won't grow over Integer.MAX_VALUE to avoid OutOfMemoryError
-      int maxLength = length > Integer.MAX_VALUE / 2 ? Integer.MAX_VALUE / 2 - 1 : length;
-      StringBuilder s = new StringBuilder(maxLength);
-      for (int i = 0; i < maxLength; i++) {
-        if (chars[i] == '\0') {
-          s.append('\\');
-          s.append('0');
-          nullCharacterCount++;
-        } else {
-          s.append(chars[i]);
-        }
-      }
-      tmp = s.toString();
-
-      if (nullCharacterCount > 0) {
-        message +=
-            "\nIdentified "
-                + nullCharacterCount
-                + " null characters ('\0') on parsed content. This may indicate the data is corrupt or its encoding is invalid. Parsed content:\n\t"
-                + tmp;
+    if (chIsFieldDelimiter()) {
+      try {
+        input.skipLines(1);
+      } catch (StreamFinishedPseudoException e) {
+        // we are at the end of the file
+        return RecordReaderStatus.END;
       }
     }
-
-    throw new TextParsingException(context, message, ex);
-  }
-
-  /**
-   * Prepare and write error metadata to the target table {@link
-   * ColumnUtils#COPY_HISTORY_COLUMN_NAME} column. The metadata definition is declared by {@link
-   * CopyIntoFileLoadInfo} and it is serialized to json format.
-   */
-  private RecordReaderStatus writeErrorEvent() {
-    if (schemaImposedMode
-        && output.output() instanceof SchemaImposedOutput
-        && recordsRejectedCount > 0) {
-      SchemaImposedOutput schemaImposedOutput = (SchemaImposedOutput) output.output();
-      OptionalInt errorColIndex = schemaImposedOutput.getFileHistoryColIndex();
-      if (errorColIndex.isPresent()) {
-        long recordsLoadedCount;
-        if (copyIntoQueryProperties.getOnErrorOption() == OnErrorOption.SKIP_FILE) {
-          // reset the output so no actual data will be in the output vectors but the errorInfo
-          output.finishBatch();
-          output.startBatch();
-          output.setCanAppend(true);
-          schemaImposedOutput.clearCurrentRecord();
-          recordCount = 0;
-          recordsLoadedCount = 0;
-        } else {
-          recordsLoadedCount = settings.isHeaderExtractionEnabled() ? recordCount - 1 : recordCount;
-        }
-        output.startField(errorColIndex.getAsInt());
-        String infoJson =
-            getFileLoadInfoJson(
-                recordsLoadedCount == 0
-                    ? CopyIntoFileState.SKIPPED
-                    : CopyIntoFileState.PARTIALLY_LOADED,
-                recordsLoadedCount,
-                firstErrorMessage,
-                schemaImposedOutput);
-
-        output.append(infoJson.getBytes());
-        schemaImposedOutput.endHistoryEventField();
-        output.setCanAppend(true);
-        recordCount++;
-        output.finishRecord();
-        recordsRejectedCount = 0;
-        return RecordReaderStatus.ERROR;
-      }
-    }
-    return RecordReaderStatus.END;
-  }
-
-  private String getFileLoadInfoJson(
-      CopyIntoFileState fileState,
-      long recordsLoadedCount,
-      String firstErrorMessage,
-      SchemaImposedOutput schemaImposedOutput) {
-    Builder builder =
-        new Builder(
-                queryContext.getQueryId(),
-                queryContext.getUserName(),
-                queryContext.getTableNamespace(),
-                copyIntoQueryProperties.getStorageLocation(),
-                filePath,
-                schemaImposedOutput.getExtendedFormatOptions(),
-                FileType.CSV.name(),
-                fileState)
-            .setRecordsLoadedCount(recordsLoadedCount)
-            .setRecordsRejectedCount(recordsRejectedCount)
-            .setRecordDelimiter(new String(lineDelimiter))
-            .setFieldDelimiter(new String(fieldDelimiter))
-            .setQuoteChar(new String(quote))
-            .setEscapeChar(new String(quoteEscape))
-            .setBranch(copyIntoQueryProperties.getBranch())
-            .setProcessingStartTime(processingStartTime)
-            .setFileSize(fileSize)
-            .setFirstErrorMessage(firstErrorMessage);
-
-    if (ingestionProperties != null) {
-      builder
-          .setPipeName(ingestionProperties.getPipeName())
-          .setPipeId(ingestionProperties.getPipeId())
-          .setFileNotificationTimestamp(ingestionProperties.getNotificationTimestamp())
-          .setIngestionSourceType(ingestionProperties.getIngestionSourceType())
-          .setRequestId(ingestionProperties.getRequestId());
-    }
-
-    return FileLoadInfo.Util.getJson(builder.build());
-  }
-
-  public int writeSuccessfulParseEvent() {
-    if (!hasErrors
-        && schemaImposedMode
-        && output.output() instanceof SchemaImposedOutput
-        && copyIntoQueryProperties != null
-        && copyIntoQueryProperties.shouldRecord(
-            CopyIntoFileLoadInfo.CopyIntoFileState.FULLY_LOADED)) {
-      SchemaImposedOutput schemaImposedOutput = (SchemaImposedOutput) output.output();
-      OptionalInt copyHistoryColIndex = schemaImposedOutput.getFileHistoryColIndex();
-      long recordsLoadedCount =
-          settings.isHeaderExtractionEnabled() ? recordCount - 1 : recordCount;
-      if (copyHistoryColIndex.isPresent()) {
-        output.startField(copyHistoryColIndex.getAsInt());
-        String infoJson =
-            getFileLoadInfoJson(
-                CopyIntoFileState.FULLY_LOADED, recordsLoadedCount, null, schemaImposedOutput);
-        output.append(infoJson.getBytes());
-        schemaImposedOutput.endHistoryEventField();
-        output.setCanAppend(true);
-        recordCount++;
-        output.finishRecord();
-        logger.debug("Recording successful parsing event for {}", filePath);
-        return 1;
-      }
-    }
-    return 0;
+    return RecordReaderStatus.SKIP;
   }
 
   /** Finish the processing of a batch, indicates to the output interface to wrap up the batch */
   public void finishBatch() {
     output.finishBatch();
-    // System.out.println(String.format("line %d, cnt %d", input.getLineCount(),
-    // output.getRecordCount()));
   }
 
   /**
@@ -958,25 +775,34 @@ final class TextReader implements AutoCloseable {
     return input;
   }
 
+  public int getAndResetRowSize() {
+    return output.getAndResetRowSize();
+  }
+
   public enum RecordReaderStatus {
     SUCCESS,
     SKIP,
-    END,
-    ERROR,
-    VALIDATION_ERROR
+    END
   }
 
-  class UnmatchedQuoteException extends IOException {
+  static class UnmatchedQuoteException extends IOException {
 
     private static final String ERROR_MESSAGE =
         "Malformed CSV file: expected closing quote symbol for a quoted value, started in line %d, but encountered %s"
             + " in line %d.%s";
 
+    // 0-based
     final long quoteStartLine;
 
     // EOF case
     UnmatchedQuoteException(long quoteStartLine, long lineOfException) {
-      super(String.format(ERROR_MESSAGE, quoteStartLine, "EOF", lineOfException, ""));
+      super(
+          String.format(
+              ERROR_MESSAGE,
+              quoteStartLine + 1, // 0-based -> 1-based
+              "EOF",
+              lineOfException,
+              ""));
       this.quoteStartLine = quoteStartLine;
     }
 
@@ -985,7 +811,7 @@ final class TextReader implements AutoCloseable {
       super(
           String.format(
               ERROR_MESSAGE,
-              quoteStartLine,
+              quoteStartLine + 1, // 0-based -> 1-based
               "a size limit exception",
               lineOfException,
               " No further lines " + "will be processed from this file."),

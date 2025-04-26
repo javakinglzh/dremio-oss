@@ -20,6 +20,7 @@ import static com.amazonaws.services.s3.internal.Constants.REQUESTER_PAYS;
 import com.amazonaws.services.s3.internal.Constants;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.io.ReusableAsyncByteReader;
+import com.dremio.plugins.util.CloseableRef;
 import com.google.common.base.Stopwatch;
 import io.netty.buffer.ByteBuf;
 import java.io.FileNotFoundException;
@@ -49,6 +50,7 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
       org.slf4j.LoggerFactory.getLogger(S3AsyncByteReader.class);
 
   private static final AtomicInteger numOutstandingReads = new AtomicInteger(0);
+  private final CloseableRef<S3AsyncClient> closeableClient;
   private final S3AsyncClient client;
   private final String bucket;
   private final String path;
@@ -61,7 +63,7 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
   private final boolean shouldCheckTimestamp;
 
   public S3AsyncByteReader(
-      S3AsyncClient client,
+      CloseableRef<S3AsyncClient> closeableClient,
       String bucket,
       String path,
       String version,
@@ -70,7 +72,9 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
       String sseCustomerKey,
       boolean shouldCheckTimestamp) {
     super();
-    this.client = client;
+
+    this.closeableClient = closeableClient;
+    this.client = closeableClient.acquireRef();
     this.bucket = bucket;
     this.path = path;
     long mtime = Long.parseLong(version);
@@ -80,6 +84,11 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
     this.ssecEnabled = ssecUsed;
     this.ssecKey = sseCustomerKey;
     this.shouldCheckTimestamp = shouldCheckTimestamp;
+  }
+
+  @Override
+  protected void onClose() throws Exception {
+    closeableClient.close();
   }
 
   @Override

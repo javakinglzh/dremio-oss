@@ -26,9 +26,8 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.projectnessie.client.api.NessieApiV2;
-import org.projectnessie.error.NessieNamespaceNotFoundException;
+import org.projectnessie.error.NessieNotFoundException;
 import org.projectnessie.error.NessieReferenceConflictException;
-import org.projectnessie.error.NessieReferenceNotFoundException;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.Namespace;
 
@@ -46,10 +45,13 @@ public abstract class AbstractNessieClientImplTestWithServer {
   }
 
   @Test
-  public void testCreateNamespaces()
-      throws NessieReferenceNotFoundException, NessieNamespaceNotFoundException {
+  public void testCreateNamespaces() throws NessieNotFoundException {
     createNamespaceInDefaultBranchIfNotExists(() -> api, "test.ns.123");
-    assertThat(api.getNamespace().namespace(Namespace.of("test.ns.123")).get())
+    assertThat(
+            api.getNamespace()
+                .reference(api.getDefaultBranch())
+                .namespace(Namespace.of("test.ns.123"))
+                .get())
         .extracting(Namespace::toContentKey)
         .isEqualTo(ContentKey.of("test.ns.123"));
   }

@@ -170,7 +170,15 @@ public class InsertTableHandler extends DataAdditionCmdHandler {
                   .collect(Collectors.toList())
                   .toArray(new Field[querySchema.getFieldCount() - 1]));
     }
-    if (!querySchema.equalsTypesWithoutPositions(partSchemaWithSelectedFields)) {
+
+    try {
+      querySchema = querySchema.subset(sqlInsertTable.getFieldNames()).orElse(querySchema);
+    } catch (UserException ue) {
+      logger.debug("Swallowing exception", ue);
+    }
+    // TODO: Revert this workaround once we have a proper fix for DX-98085
+    // The call should be querySchema.equalsTypesWithoutPositions()
+    if (!querySchema.insertsInto(partSchemaWithSelectedFields)) {
       throw UserException.validationError()
           .message(
               "Table %s doesn't match with query %s.", partSchemaWithSelectedFields, querySchema)

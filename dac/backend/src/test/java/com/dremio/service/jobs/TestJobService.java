@@ -31,6 +31,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.spy;
@@ -54,7 +55,6 @@ import com.dremio.dac.resource.NotificationResponse;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.server.GenericErrorMessage;
 import com.dremio.dac.server.JobsServiceTestUtils;
-import com.dremio.dac.service.datasets.DatasetVersionCleanupHelper;
 import com.dremio.datastore.SearchTypes.SortOrder;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
@@ -65,6 +65,7 @@ import com.dremio.exec.planner.DremioVolcanoPlanner;
 import com.dremio.exec.proto.SearchProtos;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
+import com.dremio.exec.proto.UserBitShared.ExternalId;
 import com.dremio.exec.proto.beans.AttemptEvent;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
@@ -112,9 +113,11 @@ import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.FieldOrigin;
 import com.dremio.service.namespace.dataset.proto.Origin;
 import com.dremio.service.namespace.space.proto.SpaceConfig;
+import com.dremio.service.scheduler.SchedulerService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
+import com.google.errorprone.annotations.MustBeClosed;
 import java.io.File;
 import java.util.Arrays;
 import java.util.Collections;
@@ -373,7 +376,8 @@ public class TestJobService extends BaseTestServer {
     }
   }
 
-  private void injectPauses(String controls) throws Exception {
+  @MustBeClosed
+  private static AutoCloseable withNodeControlsInjections(String controls) throws Exception {
     ObjectMapper objectMapper = spy(new ObjectMapper());
     objectMapper.addMixInAnnotations(Injection.class, ExecutionControls.InjectionMixIn.class);
     ExecutionControls.Controls execControls =
@@ -382,6 +386,7 @@ public class TestJobService extends BaseTestServer {
         .when(objectMapper)
         .readValue(DEFAULT_CONTROLS, ExecutionControls.Controls.class);
     ExecutionControls.setControlsOptionMapper(objectMapper);
+    return () -> ExecutionControls.setControlsOptionMapper(new ObjectMapper());
   }
 
   private Job getJob(JobId jobId) throws Exception {
@@ -395,16 +400,14 @@ public class TestJobService extends BaseTestServer {
   public void testResourceAllocationError() throws Exception {
     final String testKey = TestingFunctionHelper.newKey(() -> {});
 
-    try {
-      String controls =
-          Controls.newBuilder()
-              .addException(
-                  ResourceTracker.class,
-                  ResourceTracker.INJECTOR_RESOURCE_ALLOCATE_UNAVAILABLE_ERROR,
-                  ResourceUnavailableException.class)
-              .build();
-      injectPauses(controls);
-
+    String controls =
+        Controls.newBuilder()
+            .addException(
+                ResourceTracker.class,
+                ResourceTracker.INJECTOR_RESOURCE_ALLOCATE_UNAVAILABLE_ERROR,
+                ResourceUnavailableException.class)
+            .build();
+    try (AutoCloseable ignored = withNodeControlsInjections(controls)) {
       SqlQuery sqlQuery =
           new SqlQuery(
               String.format("SELECT WAIT(key, 5) FROM (VALUES('%s')) tbl(key)", testKey),
@@ -420,22 +423,18 @@ public class TestJobService extends BaseTestServer {
       assertEquals(
           UserException.AttemptCompletionState.ENGINE_TIMEOUT.toString(),
           AttemptAnalyser.LAST_ATTEMPT_COMPLETION_STATE);
-    } finally {
-      // reset, irrespective any exception, so that other test cases are not affected.
-      ExecutionControls.setControlsOptionMapper(new ObjectMapper());
     }
   }
 
   /** Test cancelling of query/job in planning */
   @Test
   public void testCancelPlanning() throws Exception {
-    try {
-      String controls =
-          Controls.newBuilder()
-              .addPause(DremioVolcanoPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
-              .addPause(DremioHepPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
-              .build();
-      injectPauses(controls);
+    String controls =
+        Controls.newBuilder()
+            .addPause(DremioVolcanoPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
+            .addPause(DremioHepPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
+            .build();
+    try (AutoCloseable ignored = withNodeControlsInjections(controls)) {
       AttemptEvent.State[] observedAttemptStates = executeQueryAndCancel(true);
       AttemptEvent.State[] expectedAttemptStates =
           new AttemptEvent.State[] {
@@ -453,11 +452,6 @@ public class TestJobService extends BaseTestServer {
               + " before AttemptEvent.State.FAILED.",
           expectedAttemptStates,
           observedAttemptStates);
-    } catch (Exception e) {
-      throw e;
-    } finally {
-      // reset, irrespective any exception, so that other test cases are not affected.
-      ExecutionControls.setControlsOptionMapper(new ObjectMapper());
     }
   }
 
@@ -467,39 +461,26 @@ public class TestJobService extends BaseTestServer {
    */
   @Test
   public void testQueryCancelByHeapMonitorAfterPlanning() throws Exception {
-    try {
-      String controls =
-          Controls.newBuilder().addPause(AttemptManager.class, INJECTOR_PLAN_PAUSE).build();
-      injectPauses(controls);
+    String controls =
+        Controls.newBuilder().addPause(AttemptManager.class, INJECTOR_PLAN_PAUSE).build();
+    try (AutoCloseable ignored = withNodeControlsInjections(controls)) {
       AttemptEvent.State[] observedAttemptStates = executeQueryAndCancel(false);
       assertEquals(
           "Query should be completed successfully if heap monitor tried to cancel "
               + "query after planning phase.",
           AttemptEvent.State.COMPLETED,
           observedAttemptStates[observedAttemptStates.length - 1]);
-    } catch (Exception e) {
-      throw e;
-    } finally {
-      // reset, irrespective any exception, so that other test cases are not affected.
-      ExecutionControls.setControlsOptionMapper(new ObjectMapper());
     }
   }
 
   @Test
   public void testQueryForemanManagerCompletionBeforeDataArrival() throws Exception {
-    try {
-      AttemptEvent.State[] observedAttemptStates = executeQueryAndInduceForemenWMCompletion(true);
-      assertEquals(
-          "Query should be completed successfully if heap monitor tried to cancel "
-              + "query after planning phase.",
-          AttemptEvent.State.FAILED,
-          observedAttemptStates[observedAttemptStates.length - 1]);
-    } catch (Exception e) {
-      throw e;
-    } finally {
-      // reset, irrespective any exception, so that other test cases are not affected.
-      ExecutionControls.setControlsOptionMapper(new ObjectMapper());
-    }
+    AttemptEvent.State[] observedAttemptStates = executeQueryAndInduceForemenWMCompletion(true);
+    assertEquals(
+        "Query should be completed successfully if heap monitor tried to cancel "
+            + "query after planning phase.",
+        AttemptEvent.State.FAILED,
+        observedAttemptStates[observedAttemptStates.length - 1]);
   }
 
   private AttemptEvent.State[] executeQueryAndInduceForemenWMCompletion(boolean verifyFailed)
@@ -1110,6 +1091,85 @@ public class TestJobService extends BaseTestServer {
     assertTrue(jobDetails2.getJobResultTableName().isEmpty());
   }
 
+  @Test
+  public void testJobWithResultsClean() throws Exception {
+    Job job =
+        createJob(
+            "A1",
+            Arrays.asList("Prod-Sample", "ds-1"),
+            "v1",
+            "A",
+            "Prod-Sample",
+            JobState.COMPLETED,
+            "select * from LocalFS1.\"dac-sample1.json\"",
+            100L,
+            110L,
+            QueryType.UI_RUN);
+    localJobsService.storeJob(job);
+    Job jobWithResultsUncleaned = getJob(job.getJobId());
+    assertFalse(jobWithResultsUncleaned.resultsCleaned());
+
+    job.setResultsCleaned(true);
+    localJobsService.storeJob(job);
+    Job jobWithResultsCleaned = getJob(job.getJobId());
+    assertTrue(jobWithResultsCleaned.resultsCleaned());
+  }
+
+  @Test
+  public void testJobsCleanupWithEndTime() {
+    // Create a completed job with end time
+    final ExternalId externalId = ExternalIdHelper.generateExternalId();
+    final JobId jobId = JobsServiceUtil.getExternalIdAsJobId(externalId);
+    Job job =
+        createJob(
+            jobId.getId(),
+            Arrays.asList("Sample", "test"),
+            "v1",
+            "user",
+            "space",
+            JobState.COMPLETED,
+            "select * from test",
+            100L,
+            110L,
+            QueryType.UI_RUN);
+    job.getJobAttempt().setAttemptId(AttemptIdUtils.toString(AttemptId.of(externalId)));
+    localJobsService.storeJob(job);
+
+    // Cleanup all jobs
+    TestJobService.cleanJobs();
+
+    // Assert that the job does not exist in store
+    assertThrows(
+        JobNotFoundException.class, () -> localJobsService.getJobFromStore(job.getJobId(), false));
+  }
+
+  @Test
+  public void testJobsCleanupWithoutEndTime() {
+    // Create a completed job without end time
+    final ExternalId externalId = ExternalIdHelper.generateExternalId();
+    final JobId jobId = JobsServiceUtil.getExternalIdAsJobId(externalId);
+    Job job =
+        createJobWithoutEndTime(
+            jobId.getId(),
+            Arrays.asList("Sample", "test"),
+            "v1",
+            "user",
+            "space",
+            JobState.COMPLETED,
+            "select * from test",
+            100L,
+            QueryType.UI_RUN);
+    job.getJobAttempt().setAttemptId(AttemptIdUtils.toString(AttemptId.of(externalId)));
+    localJobsService.storeJob(job);
+
+    // Cleanup all jobs
+    TestJobService.cleanJobs();
+
+    // Assert that the job does not exist in store
+    assertThrows(
+        JobNotFoundException.class, () -> localJobsService.getJobFromStore(job.getJobId(), false));
+  }
+
   private Job createJob(
       final String id,
       final List<String> datasetPath,
@@ -1130,6 +1190,34 @@ public class TestJobService extends BaseTestServer {
             .setSpace(space)
             .setStartTime(start)
             .setFinishTime(end)
+            .setQueryType(queryType)
+            .setRequestType(RequestType.RUN_SQL)
+            .setResourceSchedulingInfo(
+                new ResourceSchedulingInfo().setQueueName("SMALL").setRuleName("ruleSmall"));
+
+    final JobAttempt jobAttempt = new JobAttempt().setState(state).setInfo(jobInfo);
+
+    return new Job(jobId, jobAttempt, new SessionId());
+  }
+
+  private Job createJobWithoutEndTime(
+      final String id,
+      final List<String> datasetPath,
+      final String version,
+      final String user,
+      final String space,
+      final JobState state,
+      final String sql,
+      final Long start,
+      QueryType queryType) {
+    final JobId jobId = new JobId(id);
+    final JobInfo jobInfo =
+        new JobInfo(jobId, sql, version, QueryType.UI_RUN)
+            .setClient("client")
+            .setDatasetPathList(datasetPath)
+            .setUser(user)
+            .setSpace(space)
+            .setStartTime(start)
             .setQueryType(queryType)
             .setRequestType(RequestType.RUN_SQL)
             .setResourceSchedulingInfo(
@@ -2037,25 +2125,36 @@ public class TestJobService extends BaseTestServer {
     SqlQuery ctas = getQueryFromSQL("SHOW SCHEMAS");
     final JobId jobId =
         submitJobAndWaitUntilCompletion(JobRequest.newBuilder().setSqlQuery(ctas).build());
-
     OptionValue days =
         OptionValue.createLong(
             OptionType.SYSTEM, ExecConstants.RESULTS_MAX_AGE_IN_DAYS.getOptionName(), 0);
     getOptionManager().setOption(days);
+    // Add a large enough value (5 minutes) so that scheduled cleanup doesn't interfare with unit
+    // test.
     OptionValue millis =
         OptionValue.createLong(
             OptionType.SYSTEM,
             ExecConstants.DEBUG_RESULTS_MAX_AGE_IN_MILLISECONDS.getOptionName(),
-            10);
+            300000);
     getOptionManager().setOption(millis);
 
     Thread.sleep(20);
 
-    LocalJobsService.JobResultsCleanupTask cleanupTask = localJobsService.createCleanupTask();
-    cleanupTask.cleanup();
+    JobResultsCleanerService jobResultsCleanerService =
+        new JobResultsCleanerService(
+            () -> localJobsService.getJobResultsStore(),
+            () -> l(LegacyKVStoreProvider.class),
+            () -> l(OptionManager.class),
+            () -> l(SchedulerService.class));
 
-    // make sure that the job output directory is gone
-    assertFalse(localJobsService.getJobResultsStore().jobOutputDirectoryExists(jobId));
+    jobResultsCleanerService.start();
+
+    // make sure that the job output directory is created for jobId.
+    assertTrue(jobResultsCleanerService.getJobResultsStore().jobOutputDirectoryExists(jobId));
+
+    jobResultsCleanerService.cleanupJobResults(System.currentTimeMillis());
+    // make sure that the job output directory is gone after cleanup.
+    assertFalse(jobResultsCleanerService.getJobResultsStore().jobOutputDirectoryExists(jobId));
     JobDetailsRequest request =
         JobDetailsRequest.newBuilder().setJobId(JobsProtoUtil.toBuf(jobId)).build();
     com.dremio.service.job.JobDetails jobDetails = jobsService.getJobDetails(request);
@@ -2066,13 +2165,14 @@ public class TestJobService extends BaseTestServer {
     getOptionManager()
         .setOption(
             OptionValue.createLong(
-                OptionType.SYSTEM, ExecConstants.RESULTS_MAX_AGE_IN_DAYS.getOptionName(), 30));
+                OptionType.SYSTEM, ExecConstants.RESULTS_MAX_AGE_IN_DAYS.getOptionName(), 1));
     getOptionManager()
         .setOption(
             OptionValue.createLong(
                 OptionType.SYSTEM,
                 ExecConstants.DEBUG_RESULTS_MAX_AGE_IN_MILLISECONDS.getOptionName(),
                 0));
+    jobResultsCleanerService.close();
   }
 
   @Test
@@ -2092,26 +2192,18 @@ public class TestJobService extends BaseTestServer {
 
     LegacyKVStoreProvider provider = l(LegacyKVStoreProvider.class);
 
-    final ExternalCleaner datasetVersionCleaner =
-        DatasetVersionCleanupHelper.datasetVersionCleaner(provider);
     final List<ExternalCleaner> externalCleaners =
-        Arrays.asList(
-            new OnlineProfileCleaner(() -> l(JobTelemetryClient.class)), datasetVersionCleaner);
+        List.of(new OnlineProfileCleaner(() -> l(JobTelemetryClient.class), false));
     String report =
         JobsAndDependenciesCleanerImpl.deleteOldJobsAndDependencies(
             externalCleaners, provider, diffBeforeJob2);
     String expectedReport =
-        ""
-            + "Completed. Deleted 2 jobs."
+        "Completed. Deleted 2 jobs."
             + System.lineSeparator()
             + "\tJobAttempts: 2, Attempts with failure: 0"
             + System.lineSeparator()
             + "\t"
             + OnlineProfileCleaner.class.getSimpleName()
-            + " executions: 2, failures: 0"
-            + System.lineSeparator()
-            + "\t"
-            + datasetVersionCleaner.getName()
             + " executions: 2, failures: 0"
             + System.lineSeparator();
     assertEquals(expectedReport, report);
@@ -2161,7 +2253,8 @@ public class TestJobService extends BaseTestServer {
     assertEquals("SHOW SCHEMAS", extraJobInfo0.getSql());
 
     final List<ExternalCleaner> externalCleaners =
-        Collections.singletonList(new OnlineProfileCleaner(() -> l(JobTelemetryClient.class)));
+        Collections.singletonList(
+            new OnlineProfileCleaner(() -> l(JobTelemetryClient.class), false));
     String report =
         JobsAndDependenciesCleanerImpl.deleteOldJobsAndDependencies(
             externalCleaners, provider, diffBeforeJob2);
@@ -2185,7 +2278,8 @@ public class TestJobService extends BaseTestServer {
   public static void cleanJobs() {
     final LegacyKVStoreProvider provider = l(LegacyKVStoreProvider.class);
     final List<ExternalCleaner> externalCleaners =
-        Collections.singletonList(new OnlineProfileCleaner(() -> l(JobTelemetryClient.class)));
+        Collections.singletonList(
+            new OnlineProfileCleaner(() -> l(JobTelemetryClient.class), false));
     JobsAndDependenciesCleanerImpl.deleteOldJobsAndDependencies(externalCleaners, provider, 0L);
   }
 
@@ -2533,40 +2627,42 @@ public class TestJobService extends BaseTestServer {
    */
   @Test
   public void testJobSubmitFailure() throws Exception {
-    // Submit 4 queries.
-    setSystemOption(MAX_FOREMEN_PER_COORDINATOR, 4);
     String controls =
         Controls.newBuilder()
             .addPause(DremioVolcanoPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
             .addPause(DremioHepPlanner.class, INJECTOR_DURING_PLANNING_PAUSE)
             .build();
-    injectPauses(controls);
-    UserBitShared.ExternalId[] externalId = new UserBitShared.ExternalId[4];
-    JobId[] jobID = new JobId[4];
-    for (int i = 0; i < 4; i++) {
-      final String query = "Select 1";
-      jobID[i] =
-          submitAndWaitUntilSubmitted(
-              JobRequest.newBuilder()
-                  .setSqlQuery(
-                      new SqlQuery(
-                          query, com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME))
-                  .setQueryType(com.dremio.service.job.proto.QueryType.UI_INTERNAL_RUN)
-                  .setDatasetPath(com.dremio.dac.explore.model.DatasetPath.NONE.toNamespaceKey())
-                  .build());
-      externalId[i] =
-          ExternalIdHelper.toExternal(QueryIdHelper.getQueryIdFromString(jobID[i].getId()));
-    }
-    SqlQuery query = getQueryFromSQL("SELECT 1");
-    try {
-      submitJobAndWaitUntilCompletion(JobRequest.newBuilder().setSqlQuery(query).build());
-      fail("job should fail");
-    } catch (Exception e) {
-      // expected
-    }
-    for (int i = 0; i < 4; i++) {
-      foremenWorkManager.resume(externalId[i]);
-      JobDataClientUtils.waitForFinalState(jobsService, jobID[i]);
+    try (AutoCloseable ignored = withNodeControlsInjections(controls);
+        // Submit 4 queries.
+        AutoCloseable ignored1 = withSystemOption(MAX_FOREMEN_PER_COORDINATOR, 4)) {
+      UserBitShared.ExternalId[] externalId = new UserBitShared.ExternalId[4];
+      JobId[] jobID = new JobId[4];
+      for (int i = 0; i < 4; i++) {
+        final String query = "Select 1";
+        jobID[i] =
+            submitAndWaitUntilSubmitted(
+                JobRequest.newBuilder()
+                    .setSqlQuery(
+                        new SqlQuery(
+                            query,
+                            com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME))
+                    .setQueryType(com.dremio.service.job.proto.QueryType.UI_INTERNAL_RUN)
+                    .setDatasetPath(com.dremio.dac.explore.model.DatasetPath.NONE.toNamespaceKey())
+                    .build());
+        externalId[i] =
+            ExternalIdHelper.toExternal(QueryIdHelper.getQueryIdFromString(jobID[i].getId()));
+      }
+      SqlQuery query = getQueryFromSQL("SELECT 1");
+      try {
+        submitJobAndWaitUntilCompletion(JobRequest.newBuilder().setSqlQuery(query).build());
+        fail("job should fail");
+      } catch (Exception e) {
+        // expected
+      }
+      for (int i = 0; i < 4; i++) {
+        foremenWorkManager.resume(externalId[i]);
+        JobDataClientUtils.waitForFinalState(jobsService, jobID[i]);
+      }
     }
   }
 
@@ -2633,16 +2729,14 @@ public class TestJobService extends BaseTestServer {
 
   @Test
   public void testJobFailureInfoRootErrorTypeForFailedJob() throws Exception {
-    try {
-      String controls =
-          Controls.newBuilder()
-              .addException(
-                  AttemptManager.class,
-                  AttemptManager.INJECTOR_RESOURCE_ALLOCATION_EXCEPTION,
-                  ResourceAllocationException.class)
-              .build();
-      injectPauses(controls);
-
+    String controls =
+        Controls.newBuilder()
+            .addException(
+                AttemptManager.class,
+                AttemptManager.INJECTOR_RESOURCE_ALLOCATION_EXCEPTION,
+                ResourceAllocationException.class)
+            .build();
+    try (AutoCloseable ignored = withNodeControlsInjections(controls)) {
       final CompletionListener completionListener = new CompletionListener();
 
       SqlQuery sqlQuery = new SqlQuery("SELECT 1", null, DEFAULT_USERNAME);
@@ -2676,9 +2770,6 @@ public class TestJobService extends BaseTestServer {
       assertEquals(ErrorType.RESOURCE, jobFailureInfo.getRootErrorType());
       assertEquals(
           AttemptManager.INJECTOR_RESOURCE_ALLOCATION_EXCEPTION, jobSummary.getFailureInfo());
-    } finally {
-      // reset, irrespective any exception, so that other test cases are not affected.
-      ExecutionControls.setControlsOptionMapper(new ObjectMapper());
     }
   }
 

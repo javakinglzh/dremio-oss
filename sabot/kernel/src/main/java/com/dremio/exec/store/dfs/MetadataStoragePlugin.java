@@ -21,16 +21,16 @@ import static com.dremio.exec.ExecConstants.NESSIE_METADATA_NAMESPACE;
 
 import com.dremio.common.FSConstants;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.conf.Property;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import com.dremio.io.file.DistStorageMetadataPathRewritingFileSystem;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
-import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.service.namespace.NamespaceKey;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -45,7 +45,7 @@ public class MetadataStoragePlugin extends MayBeDistFileSystemPlugin<MetadataSto
 
   public MetadataStoragePlugin(
       MetadataStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> idProvider) {
     super(config, context, name, idProvider);
@@ -92,16 +92,15 @@ public class MetadataStoragePlugin extends MayBeDistFileSystemPlugin<MetadataSto
    * metadata-relocation is enabled.
    */
   @Override
-  public FileSystem createFS(String userName, OperatorContext operatorContext, boolean metadata)
-      throws IOException {
+  public FileSystem createFS(SupportsFsCreation.Builder builder) throws IOException {
     if (getContext()
         .getOptionManager()
         .getOption(ExecConstants.ENABLE_UNLIMITED_SPLITS_DISTRIBUTED_STORAGE_RELOCATION)) {
-      FileSystem f = super.createFS(userName, operatorContext, metadata);
+      FileSystem f = super.createFS(builder);
       Path configPath = this.getConfig().getPath();
       return new DistStorageMetadataPathRewritingFileSystem(f, configPath);
     } else {
-      return super.createFS(userName, operatorContext, metadata);
+      return super.createFS(builder);
     }
   }
 }

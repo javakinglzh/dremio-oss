@@ -51,14 +51,15 @@ public class NessieCommitsScanCreator implements ProducerOperator.Creator<Nessie
               config.getProps(),
               config.getSnapshotsScanOptions(),
               config.getSchemeVariate(),
-              config.getFsScheme()));
+              config.getFsScheme(),
+              config.getExcludedContentIDs()));
     }
 
     // Scan remaining commits for applicable snapshots
     RecordReader nessieCommitsRecordReader =
         config.isLeanSchema()
             ? new LeanNessieCommitsRecordReader(fec, context, config)
-            : new NessieCommitsRecordReader(fec, context, config);
+            : new NessieCommitsRecordReader(fec, context, config, plugin);
     recordReaders.add(nessieCommitsRecordReader);
 
     return new ScanOperator(

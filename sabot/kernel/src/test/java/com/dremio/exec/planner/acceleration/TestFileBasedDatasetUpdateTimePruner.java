@@ -96,7 +96,7 @@ public class TestFileBasedDatasetUpdateTimePruner extends DremioTest {
     cluster =
         RelOptCluster.create(
             new VolcanoPlanner(plannerSettings), new RexBuilder(JavaTypeFactoryImpl.INSTANCE));
-    cluster.setMetadataQuery(DremioRelMetadataQuery.QUERY_SUPPLIER);
+    cluster.setMetadataQuerySupplier(DremioRelMetadataQuery.QUERY_SUPPLIER);
   }
 
   @Test

@@ -15,11 +15,12 @@
  */
 package com.dremio.exec.catalog;
 
+import static com.dremio.common.concurrent.CloseableThreadPool.newCachedThreadPool;
+
 import com.dremio.catalog.exception.SourceAlreadyExistsException;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.VM;
-import com.dremio.common.concurrent.CloseableThreadPool;
-import com.dremio.common.config.SabotConfig;
+import com.dremio.common.concurrent.ContextMigratingExecutorService.ContextMigratingCloseableExecutorService;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.DremioCollectors;
 import com.dremio.concurrent.Runnables;
@@ -27,8 +28,7 @@ import com.dremio.config.DremioConfig;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.catalog.conf.ConnectionConf;
-import com.dremio.exec.server.JobResultInfoProvider;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SabotQueryContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.options.OptionManager;
 import com.dremio.service.coordinator.ClusterCoordinator.Role;
@@ -70,6 +70,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -86,12 +87,18 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
   private static final Logger logger = LoggerFactory.getLogger(PluginsManager.class);
   private static final String SOURCE_SECRET_MIGRATION_CONFIG_KEY =
       "SourceSecretMigrationLastCompleteTimeInMs";
-  protected final SabotContext sabotContext;
+  private static final long CATALOG_SYNC = TimeUnit.MINUTES.toMillis(3);
+
+  protected final CatalogSabotContext catalogSabotContext;
+  // Do not use this SabotQueryContext. This is only necessary for passing to MetadataSynchronizer
+  // and will be replaced by proper dependency injection in the future.
+  protected final SabotQueryContext sabotQueryContextDoNotUse;
   protected final OptionManager optionManager;
   private final DremioConfig config;
   protected final ConnectionReader reader;
   protected final SchedulerService scheduler;
-  protected final CloseableThreadPool executor = new CloseableThreadPool("source-management");
+  protected final ContextMigratingCloseableExecutorService executor =
+      new ContextMigratingCloseableExecutorService<>(newCachedThreadPool("source-management"));
   private final DatasetListingService datasetListing;
   private final ConcurrentHashMap<String, ManagedStoragePlugin> plugins = new ConcurrentHashMap<>();
   private final long startupWait;
@@ -101,12 +108,14 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
   protected final NamespaceService systemNamespace;
   private final Orphanage orphanage;
   protected final Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider;
-  private final Predicate<String> influxSourcePred;
+  private final Predicate<String> isInFluxSource;
   protected final ModifiableSchedulerService modifiableScheduler;
   private final Provider<LegacyKVStoreProvider> legacyKvStoreProvider;
+  private final NamespaceService.Factory namespaceServiceFactory;
 
   public PluginsManager(
-      SabotContext sabotContext,
+      CatalogSabotContext catalogSabotContext,
+      SabotQueryContext sabotQueryContext,
       NamespaceService systemNamespace,
       Orphanage orphanage,
       DatasetListingService datasetListingService,
@@ -117,10 +126,12 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
       ConnectionReader reader,
       CatalogServiceMonitor monitor,
       Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider,
-      Predicate<String> influxSourcePred,
+      Predicate<String> isInFluxSource,
       ModifiableSchedulerService modifiableScheduler,
-      Provider<LegacyKVStoreProvider> legacyKvStoreProvider) {
-    this.sabotContext = sabotContext;
+      Provider<LegacyKVStoreProvider> legacyKvStoreProvider,
+      NamespaceService.Factory namespaceServiceFactory) {
+    this.catalogSabotContext = catalogSabotContext;
+    this.sabotQueryContextDoNotUse = sabotQueryContext;
     this.optionManager = optionManager;
     this.config = config;
     this.reader = reader;
@@ -135,9 +146,10 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
             : optionManager.getOption(CatalogOptions.STARTUP_WAIT_MAX);
     this.monitor = monitor;
     this.broadcasterProvider = broadcasterProvider;
-    this.influxSourcePred = influxSourcePred;
+    this.isInFluxSource = isInFluxSource;
     this.modifiableScheduler = modifiableScheduler;
     this.legacyKvStoreProvider = legacyKvStoreProvider;
+    this.namespaceServiceFactory = namespaceServiceFactory;
   }
 
   ConnectionReader getReader() {
@@ -154,18 +166,19 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
     return plugins.values().stream()
         .filter(
             input ->
-                input.getPlugin() != null && input.getPlugin().isWrapperFor(VersionedPlugin.class))
-        .map(entry -> entry.getPlugin())
-        .map(storagePlugin -> storagePlugin.unwrap(VersionedPlugin.class));
+                input.getPlugin().isPresent()
+                    && input.getPlugin().get().isWrapperFor(VersionedPlugin.class))
+        .map(ManagedStoragePlugin::getPlugin)
+        .map(storagePlugin -> storagePlugin.get().unwrap(VersionedPlugin.class));
   }
 
-  /** Automatically synchronizing sources regularily */
+  /** Automatically synchronizing sources regularly */
   private final class Refresher implements Runnable {
 
     @Override
     public void run() {
       try {
-        synchronizeSources(influxSourcePred);
+        synchronizeSources(isInFluxSource);
       } catch (Exception ex) {
         logger.warn("Failure while synchronizing sources.");
       }
@@ -182,16 +195,22 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
   }
 
   /**
-   * Create a new managed storage plugin. Requires the PluginManager.writeLock() to be held.
+   * Create a new managed storage plugin.
    *
    * @param config The configuration to create.
-   * @return The newly created managed storage plugin. If a plugin with the provided name already
-   *     exists, does nothing and returns null.
+   * @param sourceRefreshOption refresh option for the source. It can be background
+   *     refresh(asynchronous refresh) or wait refresh (synchronous)
+   * @return Future that represents if the creating process is done. Future is expected to finish
+   *     when the refreshing the names of the datasets are done. There are several exception that
+   *     this async creation throws. it will be handled in CatalogServiceImpl
    * @throws Exception
    * @throws TimeoutException
    */
-  public ManagedStoragePlugin create(
-      SourceConfig config, String userName, NamespaceAttribute... attributes)
+  public CompletionStage<Void> create(
+      SourceConfig config,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
       throws TimeoutException, Exception {
     if (hasPlugin(config.getName())) {
       throw new SourceAlreadyExistsException(
@@ -199,8 +218,9 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
     }
 
     ManagedStoragePlugin plugin = newPlugin(config);
+    CompletionStage<Void> future;
     try {
-      plugin.createSource(config, userName, attributes);
+      future = plugin.createSource(config, userName, sourceRefreshOption, attributes);
     } catch (UserException e) {
       // The creation of Source can fail due to various reasons.
       // In case of failure, we need to cleanup the in-memory state of the source. Hence closing the
@@ -218,7 +238,7 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
     ManagedStoragePlugin existing = plugins.putIfAbsent(c(config.getName()), plugin);
 
     if (existing == null) {
-      return plugin;
+      return future;
     }
 
     // This means it  has been added by a concurrent thread doing create with the same name
@@ -239,8 +259,8 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
    * uri fields (24.x to 25.x). Encrypts any secret, including URIs. If the secret conforms to the
    * scheme of an encrypted secret, check to see if the secret was encrypted already or not.
    */
-  private void migrateSourceSecrets() throws NamespaceException {
-    final SecretsCreator secretsCreator = sabotContext.getSecretsCreator().get();
+  protected void migrateSourceSecrets() throws NamespaceException {
+    final SecretsCreator secretsCreator = catalogSabotContext.getSecretsCreator().get();
     // Short-circuit early if encryption is disabled via binding
     if (secretsCreator instanceof NoopSecretsCreator) {
       return;
@@ -367,15 +387,15 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
    */
   public void start() throws NamespaceException {
     // Encryption starts.
-    if ((sabotContext.isMaster()
-        || (this.config.isMasterlessEnabled() && sabotContext.isCoordinator()))) {
+    if ((catalogSabotContext.isMaster()
+        || (this.config.isMasterlessEnabled() && catalogSabotContext.isCoordinator()))) {
       migrateSourceSecrets();
     }
     // Encryption ends.
 
     // Migrate/update deprecated fields used in Sources.
-    if ((sabotContext.isMaster()
-        || (this.config.isMasterlessEnabled() && sabotContext.isCoordinator()))) {
+    if ((catalogSabotContext.isMaster()
+        || (this.config.isMasterlessEnabled() && catalogSabotContext.isCoordinator()))) {
       migrateLegacySourceFormat();
     }
 
@@ -438,11 +458,10 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
 
     // for coordinator, ensure catalog synchronization. Don't start this until the plugins manager
     // is started.
-    if (sabotContext.getRoles().contains(Role.COORDINATOR)) {
+    if (catalogSabotContext.getRoles().contains(Role.COORDINATOR)) {
       refresher =
           scheduler.schedule(
-              Schedule.Builder.everyMillis(CatalogServiceImpl.CATALOG_SYNC).build(),
-              Runnables.combo(new Refresher()));
+              Schedule.Builder.everyMillis(CATALOG_SYNC).build(), Runnables.combo(new Refresher()));
     }
 
     if (count > 0) {
@@ -452,15 +471,16 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
 
   private ManagedStoragePlugin newPlugin(SourceConfig config) {
     final boolean isVirtualMaster =
-        sabotContext.isMaster()
-            || (this.config.isMasterlessEnabled() && sabotContext.isCoordinator());
+        catalogSabotContext.isMaster()
+            || (this.config.isMasterlessEnabled() && catalogSabotContext.isCoordinator());
     return newManagedStoragePlugin(config, isVirtualMaster);
   }
 
   protected ManagedStoragePlugin newManagedStoragePlugin(
       SourceConfig config, boolean isVirtualMaster) {
     return new ManagedStoragePlugin(
-        sabotContext,
+        catalogSabotContext,
+        sabotQueryContextDoNotUse,
         executor,
         isVirtualMaster,
         modifiableScheduler,
@@ -472,7 +492,8 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
         reader,
         monitor.forPlugin(config.getName()),
         broadcasterProvider,
-        influxSourcePred);
+        isInFluxSource,
+        namespaceServiceFactory);
   }
 
   /**
@@ -546,7 +567,7 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
 
   @WithSpan
   public ManagedStoragePlugin getSynchronized(
-      SourceConfig pluginConfig, java.util.function.Predicate<String> influxSourcePred)
+      SourceConfig pluginConfig, java.util.function.Predicate<String> isInFluxSource)
       throws Exception {
     while (true) {
       ManagedStoragePlugin plugin = plugins.get(c(pluginConfig.getName()));
@@ -557,7 +578,7 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
       }
       // Try to create the plugin to synchronize.
       plugin = newPlugin(pluginConfig);
-      plugin.replacePluginWithLock(pluginConfig, createWaitMillis(), true);
+      plugin.replacePluginWithLockDeprecated(pluginConfig, createWaitMillis(), true);
 
       // If this is a coordinator and a plugin is missing, it's probably been deleted from the CHM
       // by a
@@ -566,8 +587,8 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
       // yet added it to the CHM.
       // So lets skip it and allow this to be picked up in the next refresher run.
       // For an executor, there should be no clashes with any mutation.
-      if (influxSourcePred.test(pluginConfig.getName())
-          || (sabotContext.isCoordinator()
+      if (isInFluxSource.test(pluginConfig.getName())
+          || (catalogSabotContext.isCoordinator()
               && !systemNamespace.exists(new NamespaceKey(pluginConfig.getName())))) {
         throw new ConcurrentModificationException(
             String.format(
@@ -578,7 +599,7 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
       // cannot be eliminated unless we
       // get a distributed lock just before the if check above. So in theory there is a race
       // possible if
-      // another thread managed to get a distributed lock, set the influxSources, get a reentrant
+      // another thread managed to get a distributed lock, set the inFluxSources, get a reentrant
       // write lock, creates/deletes a source
       // all between the above if condition and the following call. But we are avoiding locks in the
       // GetSources and Refresher thread
@@ -644,13 +665,13 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
     return plugins.get(c(name));
   }
 
-  protected Predicate<String> getInfluxSourcePred() {
-    return influxSourcePred;
+  protected Predicate<String> getIsInFluxSource() {
+    return isInFluxSource;
   }
 
   /** For each source, synchronize the sources definition to the namespace. */
   @VisibleForTesting
-  void synchronizeSources(java.util.function.Predicate<String> influxSourcePred) {
+  void synchronizeSources(java.util.function.Predicate<String> isInFluxSource) {
     // first collect up all the current source configs.
     final Map<String, SourceConfig> configs =
         plugins.values().stream()
@@ -664,12 +685,12 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
 
       try {
         // if an active modification is happening, don't synchronize this source now
-        if (influxSourcePred.test(config.getName())) {
+        if (isInFluxSource.test(config.getName())) {
           logger.warn(
               "Skipping synchronizing source {} since it's being modified", config.getName());
           continue;
         }
-        getSynchronized(config, influxSourcePred);
+        getSynchronized(config, isInFluxSource);
       } catch (Exception ex) {
         logger.warn("Failure updating source [{}] during scheduled updates.", config, ex);
       }
@@ -700,18 +721,6 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
     AutoCloseables.close(Iterables.concat(Collections.singleton(executor), plugins.values()));
   }
 
-  SabotConfig getSabotConfig() {
-    return sabotContext.getConfig();
-  }
-
-  OptionManager getOptionManager() {
-    return sabotContext.getOptionManager();
-  }
-
-  JobResultInfoProvider getJobResultInfoProvider() {
-    return sabotContext.getJobResultInfoProvider();
-  }
-
   /**
    * Certain sources do not contain any plain-text secrets based on source type. Hence, we want to
    * exit migration early before the need to validate all fields in the source config. Even if there
@@ -733,9 +742,5 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
         || ("GANDIVA_CACHE".equalsIgnoreCase(srcType))
         || ("ESYSFLIGHT".equalsIgnoreCase(srcType))
         || ("SYSTEMICEBERGTABLES".equalsIgnoreCase(srcType));
-  }
-
-  SabotContext getSabotContext() {
-    return sabotContext;
   }
 }

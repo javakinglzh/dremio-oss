@@ -18,16 +18,16 @@ import type {
   ResourceConfig,
   SonarV3Config,
   V3Config,
-} from "../_internal/types/Config.js";
-import { CatalogResource } from "../community/catalog/CatalogResource.js";
-import { RolesResource } from "../community/users/RolesResource.js";
-import { ScriptsResource } from "../community/scripts/ScriptsResource.js";
-import { EnginesResource } from "./engines/EnginesResource.js";
-import { ProjectsResource } from "./projects/ProjectsResource.js";
-import { UsersResource } from "./users/UsersResource.js";
-import { JobsResource } from "../community/jobs/JobsResource.js";
+} from "../_internal/types/Config.ts";
+import { ArcticResource } from "./arctic/ArcticResource.ts";
+import { EnterpriseCatalogResource } from "../enterprise/catalog/EnterpriseCatalogResource.ts";
+import { RolesResource } from "../enterprise/roles/RolesResource.ts";
+import { EnterpriseScriptsResource } from "../enterprise/scripts/EnterpriseScriptsResource.ts";
+import { EnginesResource } from "./engines/EnginesResource.ts";
+import { ProjectsResource } from "./projects/ProjectsResource.ts";
+import { CloudUsersResource } from "./users/CloudUsersResource.ts";
+import { JobsResource } from "../oss/jobs/JobsResource.ts";
 import moize from "moize";
-import { ReflectionsResource } from "../community/reflections/ReflectionsResource.js";
 
 /**
  * moize is required on these resources because they're recreated every time they're called
@@ -42,9 +42,13 @@ export const Resources = (
   config: (projectId: string) => ResourceConfig & SonarV3Config & V3Config,
 ) => ({
   //@ts-ignore
-  catalog: moize((projectId: string) => CatalogResource(config(projectId))) as (
+  arctic: moize((projectId: string) => ArcticResource(config(projectId))) as (
     projectId: string,
-  ) => ReturnType<typeof CatalogResource>,
+  ) => ReturnType<typeof ArcticResource>,
+  //@ts-ignore
+  catalog: moize((projectId: string) =>
+    EnterpriseCatalogResource(config(projectId)),
+  ) as (projectId: string) => ReturnType<typeof EnterpriseCatalogResource>,
 
   //@ts-ignore
   engines: moize((projectId: string) => EnginesResource(config(projectId))) as (
@@ -59,9 +63,9 @@ export const Resources = (
   projects: ProjectsResource(config(null as any)),
 
   //@ts-ignore
-  reflections: moize((projectId: string) =>
-    ReflectionsResource(config(projectId)),
-  ) as (projectId: string) => ReturnType<typeof ReflectionsResource>,
+  // reflections: moize((projectId: string) =>
+  //   ReflectionsResource(config(projectId)),
+  // ) as (projectId: string) => ReturnType<typeof ReflectionsResource>,
 
   //@ts-ignore
   roles: moize((projectId: string) => RolesResource(config(projectId))) as (
@@ -69,12 +73,12 @@ export const Resources = (
   ) => ReturnType<typeof RolesResource>,
 
   //@ts-ignore
-  scripts: moize((projectId: string) => ScriptsResource(config(projectId))) as (
-    projectId: string,
-  ) => ReturnType<typeof ScriptsResource>,
+  scripts: moize((projectId: string) =>
+    EnterpriseScriptsResource(config(projectId)),
+  ) as (projectId: string) => ReturnType<typeof EnterpriseScriptsResource>,
 
   //@ts-ignore
-  users: moize((projectId: string) => UsersResource(config(projectId))) as (
-    projectId: string,
-  ) => ReturnType<typeof UsersResource>,
+  users: moize((projectId: string) =>
+    CloudUsersResource(config(projectId)),
+  ) as (projectId: string) => ReturnType<typeof CloudUsersResource>,
 });

@@ -15,6 +15,8 @@
  */
 package com.dremio.services.pubsub.nats;
 
+import static com.dremio.services.pubsub.nats.NatsConnectionOptionsProvider.getOptions;
+
 import com.dremio.context.RequestContext;
 import com.dremio.services.pubsub.MessageAckStatus;
 import com.dremio.services.pubsub.MessageConsumer;
@@ -22,59 +24,59 @@ import com.dremio.services.pubsub.MessageContainerBase;
 import com.dremio.services.pubsub.MessageSubscriber;
 import com.dremio.services.pubsub.MessageSubscriberOptions;
 import com.dremio.services.pubsub.Subscription;
-import com.dremio.services.pubsub.Topic;
 import com.dremio.services.pubsub.nats.exceptions.NatsSubscriberException;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
 import io.nats.client.Connection;
+import io.nats.client.ConsumerContext;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.JetStreamManagement;
-import io.nats.client.JetStreamSubscription;
+import io.nats.client.MessageHandler;
 import io.nats.client.Nats;
-import io.nats.client.PullSubscribeOptions;
 import io.nats.client.api.AckPolicy;
 import io.nats.client.api.ConsumerConfiguration;
+import io.nats.client.api.ConsumerInfo;
 import java.io.IOException;
 import java.time.Duration;
-import java.util.List;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class NatsSubscriber<M extends Message> implements MessageSubscriber<M> {
+  private static final Logger logger = LoggerFactory.getLogger(NatsSubscriber.class);
   public static final Duration DEFAULT_ACK_WAIT_SECONDS = Duration.ofSeconds(10);
   public static final long DEFAULT_MAX_PENDING = 1000L;
-  private final Topic<M> subject;
   private final Subscription<M> subscription;
   private final String natsServerUrl;
   private final MessageConsumer<M> messageConsumer;
-  private final MessageSubscriberOptions options;
-  private final ScheduledExecutorService pullExecutorService;
+  private final MessageSubscriberOptions<M> options;
   private Connection natsConnection;
   private JetStream jetStream;
+  private JetStreamManagement jetStreamManagement;
+  private io.nats.client.MessageConsumer consumer;
 
   public NatsSubscriber(
-      Topic<M> subject,
       Subscription<M> subscription,
       String natsServerUrl,
       MessageConsumer<M> messageConsumer,
-      MessageSubscriberOptions options) {
-    this.subject = subject;
+      MessageSubscriberOptions<M> options) {
     this.subscription = subscription;
     this.natsServerUrl = natsServerUrl;
     this.messageConsumer = messageConsumer;
     this.options = options;
-    // TODO(DX-92825): may require more threads, pick the value based on performance tests
-    this.pullExecutorService = new ScheduledThreadPoolExecutor(1);
+    logger.info(
+        "Creating NatsSubscriber for subscription: {} and options: {}",
+        subscription.getName(),
+        options);
   }
 
   public void connect() {
     try {
-      this.natsConnection = Nats.connect(natsServerUrl);
-      JetStreamManagement jsm = natsConnection.jetStreamManagement();
-      this.jetStream = jsm.jetStream();
+      this.natsConnection = Nats.connect(getOptions(natsServerUrl));
+      this.jetStreamManagement = natsConnection.jetStreamManagement();
+      this.jetStream = natsConnection.jetStream();
     } catch (Exception e) {
       throw new NatsSubscriberException("Problem when connecting to NATS", e);
     }
@@ -86,45 +88,68 @@ public class NatsSubscriber<M extends Message> implements MessageSubscriber<M> {
    */
   @Override
   public void start() {
+    // Validate required input
+    String streamName =
+        options
+            .streamName()
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "The stream name is required for the NATS subscriber."));
+
     Duration ackWait = options.ackWait().orElse(DEFAULT_ACK_WAIT_SECONDS);
     long maxAckPending = options.maxAckPending().orElse(DEFAULT_MAX_PENDING);
+    String durableName = options.subscriberGroupName().orElseGet(this::generateRandomDurableName);
 
     // Build our subscription options. Durable is REQUIRED for pull based subscriptions
-    PullSubscribeOptions pullOptions =
-        PullSubscribeOptions.builder()
-            .durable("my-durable-name")
-            // this allows consumer to re-start and resume
-            // from the last known state.
-            .configuration(
-                ConsumerConfiguration.builder()
-                    .ackPolicy(AckPolicy.Explicit)
-                    .ackWait(ackWait.toMillis())
-                    .maxAckPending(maxAckPending)
-                    .build())
+    // this allows consumer to re-start and resume from the last known state.
+    ConsumerConfiguration consumerConfiguration =
+        ConsumerConfiguration.builder()
+            .durable(durableName)
+            .ackPolicy(AckPolicy.Explicit)
+            .ackWait(ackWait.toMillis())
+            .maxAckPending(maxAckPending)
             .build();
-    try {
-      // TODO(DX-95075): Consider changing to the StreamContext
-      JetStreamSubscription sub = jetStream.subscribe(subject.getName(), pullOptions);
-      pullExecutorService.scheduleAtFixedRate(
-          () -> pullMessagesFromNats(sub), 0, 5, TimeUnit.SECONDS);
 
+    try {
+      ConsumerInfo consumer =
+          jetStreamManagement.addOrUpdateConsumer(streamName, consumerConfiguration);
+      logger.info("Created consumer: {} for streamName: {}", consumer, streamName);
+
+    } catch (Exception e) {
+      logger.error("Problem when creating consumer", e);
+      throw new NatsSubscriberException("Problem when creating consumer", e);
+    }
+
+    try {
+      logger.info(
+          "Starting subscriber for ackWait: {}, maxAckPending: {}, streamName: {}, durableName: {}",
+          ackWait,
+          maxAckPending,
+          streamName,
+          durableName);
+      ConsumerContext consumerContext = jetStream.getConsumerContext(streamName, durableName);
+      this.consumer =
+          consumerContext.consume(new NatsMessageHandler<>(subscription, messageConsumer));
     } catch (IOException | JetStreamApiException e) {
-      throw new NatsSubscriberException("Problem when subscribe", e);
+      throw new NatsSubscriberException("Problem when consuming messages", e);
     }
   }
 
-  private void pullMessagesFromNats(JetStreamSubscription sub) {
-    // TODO(DX-94553): parameterize the batch size and maxWait or pick it base on perf tests
-    // ways of pulling: https://nats.io/blog/jetstream-java-client-05-pull-subscribe/
-    List<io.nats.client.Message> messages = sub.fetch(1000, Duration.ofSeconds(1)); //
+  static class NatsMessageHandler<M extends Message> implements MessageHandler {
+    private final Subscription<M> subscription;
+    private final MessageConsumer<M> messageConsumer;
 
-    for (io.nats.client.Message message : messages) {
+    public NatsMessageHandler(Subscription<M> subscription, MessageConsumer<M> messageConsumer) {
+      this.subscription = subscription;
+      this.messageConsumer = messageConsumer;
+    }
+
+    @Override
+    public void onMessage(io.nats.client.Message message) {
       RequestContext requestContext = RequestContext.current();
-      // TODO(DX-94554): next.getSID() is a id of a subscription, not a message
-      // if we want to have unique id for each message, it needs to be added explicitly
-
       // create a protobuf instance from bytes received from NATS
-      M protoMessage = null;
+      M protoMessage;
       try {
         protoMessage = subscription.getMessageParser().parseFrom(message.getData());
       } catch (InvalidProtocolBufferException e) {
@@ -135,6 +160,10 @@ public class NatsSubscriber<M extends Message> implements MessageSubscriber<M> {
           new NatsMessageContainer<>(message.getSID(), protoMessage, message, requestContext);
       messageConsumer.process(natsMessageContainer);
     }
+  }
+
+  private String generateRandomDurableName() {
+    return "random-durable-name-" + new Random().nextInt(Integer.MAX_VALUE);
   }
 
   private static final class NatsMessageContainer<M extends Message>
@@ -164,6 +193,12 @@ public class NatsSubscriber<M extends Message> implements MessageSubscriber<M> {
     }
 
     @Override
+    public CompletableFuture<MessageAckStatus> nackWithDelay(Duration redeliveryDelay) {
+      natsMessage.nakWithDelay(redeliveryDelay);
+      return CompletableFuture.completedFuture(MessageAckStatus.SUCCESSFUL);
+    }
+
+    @Override
     public String toString() {
       return "NatsMessageContainer{" + "natsMessage=" + natsMessage + '}';
     }
@@ -173,7 +208,7 @@ public class NatsSubscriber<M extends Message> implements MessageSubscriber<M> {
   public void close() {
     try {
       natsConnection.close();
-      pullExecutorService.shutdown();
+      consumer.stop();
     } catch (InterruptedException e) {
       throw new NatsSubscriberException("Problem when closing connection", e);
     }

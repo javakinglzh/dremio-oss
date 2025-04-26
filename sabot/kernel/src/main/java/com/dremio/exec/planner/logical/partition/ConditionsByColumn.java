@@ -167,7 +167,7 @@ class ConditionsByColumn extends SargPrunableEvaluator {
       case TIME:
         return literal.getValueAs(Integer.class);
       case BIGINT:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return literal.getValueAs(Long.class);
       case FLOAT4:
         return literal.getValueAs(Float.class);
@@ -223,7 +223,7 @@ class ConditionsByColumn extends SargPrunableEvaluator {
       case BIGINT:
         return partitionData.get(indexInPartitionSpec, Long.class);
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         // Divide by 1000 to convert microseconds to millis
         return partitionData.get(indexInPartitionSpec, Long.class) / 1000;
       case FLOAT4:

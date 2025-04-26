@@ -47,7 +47,7 @@ public class TestClusteredSingletonServerStop extends DremioTest {
   private static final int NUM_CHAINED_SCHEDULES = 5;
   private static final int TOTAL_SCHEDULES = NUM_NORMAL_SCHEDULES + NUM_CHAINED_SCHEDULES;
   private static final int ML = 3;
-  @Rule public final TestRule timeoutRule = TestTools.getTimeoutRule(1200, TimeUnit.SECONDS);
+  @Rule public final TestRule timeoutRule = TestTools.getTimeoutRule(1800, TimeUnit.SECONDS);
 
   @ClassRule
   public static final ZkTestServerRule zkServerResource = new ZkTestServerRule("/css/dremio");
@@ -58,7 +58,7 @@ public class TestClusteredSingletonServerStop extends DremioTest {
   @Before
   public void setup() throws Exception {
     for (int i = 0; i < NUM_TEST_CLIENTS; i++) {
-      testClients[i] = new TestClient(i, zkServerResource.getConnectionString());
+      testClients[i] = new TestClient(i, zkServerResource.getConnectionString(), true);
     }
   }
 
@@ -226,10 +226,13 @@ public class TestClusteredSingletonServerStop extends DremioTest {
       // stop server without loosing state
       zkServerResource.stopServer();
 
-      // wait for ZK Lost
-      cleanupLatch[idx].await();
+      // wait for session timeout
+      Thread.sleep(20000);
 
       zkServerResource.restartServer();
+
+      // wait for ZK Lost handling
+      cleanupLatch[idx].await();
 
       // wait for recovery to kick in post session expiration and schedules to start on singleton
       // instance 0

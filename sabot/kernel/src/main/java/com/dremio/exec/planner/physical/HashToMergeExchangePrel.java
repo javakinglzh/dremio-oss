@@ -54,7 +54,7 @@ public class HashToMergeExchangePrel extends ExchangePrel {
           "planner.op.hashmerge.receiver.limit_bytes", Long.MAX_VALUE, DEFAULT_LIMIT);
 
   private final List<DistributionField> distFields;
-  private int numEndPoints = 0;
+  private final int numEndPoints;
   private final RelCollation collation;
 
   public HashToMergeExchangePrel(
@@ -143,5 +143,9 @@ public class HashToMergeExchangePrel extends ExchangePrel {
   @Override
   public SelectionVectorMode getEncoding() {
     return SelectionVectorMode.NONE;
+  }
+
+  public int getNumEndPoints() {
+    return numEndPoints;
   }
 }

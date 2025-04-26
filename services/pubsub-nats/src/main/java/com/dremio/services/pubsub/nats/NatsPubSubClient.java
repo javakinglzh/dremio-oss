@@ -28,9 +28,15 @@ import com.dremio.services.pubsub.Topic;
 import com.dremio.services.pubsub.nats.management.NatsStreamManager;
 import com.dremio.services.pubsub.nats.management.StreamManager;
 import com.dremio.services.pubsub.nats.reflection.ClassToInstanceUtil;
+import com.dremio.services.pubsub.nats.utils.DefaultConfigProvider;
+import com.dremio.services.pubsub.nats.utils.PropertyLoader;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.protobuf.Message;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class NatsPubSubClient implements PubSubClient, Closeable {
+  private static final Logger logger = LoggerFactory.getLogger(NatsPubSubClient.class);
 
   private final String natsServerUrl;
 
@@ -42,11 +48,17 @@ public class NatsPubSubClient implements PubSubClient, Closeable {
    *
    * <p>kubectl get service returns: dremio-nats ClusterIP 10.96.42.199 <none> 4222/TCP
    */
-  // TODO(DX-94555): inject the URL from the environment
   public NatsPubSubClient() {
-    this("nats://dremio-nats:4222");
+    PropertyLoader propertyLoader = new PropertyLoader(new DefaultConfigProvider());
+    String natsServiceName =
+        propertyLoader.getConfigValue("services.nats.service-name", "dremio-nats");
+    String natsServicePort = propertyLoader.getConfigValue("services.nats.service-port", "4222");
+
+    this.natsServerUrl = "nats://" + natsServiceName + ":" + natsServicePort;
+    logger.info("Constructed natsServerUrl: {}", natsServerUrl);
   }
 
+  @VisibleForTesting
   public NatsPubSubClient(String natsServerUrl) {
     this.natsServerUrl = natsServerUrl;
   }
@@ -84,12 +96,11 @@ public class NatsPubSubClient implements PubSubClient, Closeable {
   public <M extends Message> MessageSubscriber<M> getSubscriber(
       Class<? extends Subscription<M>> subscriptionClass,
       MessageConsumer<M> messageConsumer,
-      MessageSubscriberOptions options) {
+      MessageSubscriberOptions<M> options) {
     Subscription<M> subscription = ClassToInstanceUtil.toSubscriptionInstance(subscriptionClass);
-    Topic<M> subject = ClassToInstanceUtil.toTopicInstance(subscription.getTopicClass());
 
     NatsSubscriber<M> natsSubscriber =
-        new NatsSubscriber<>(subject, subscription, natsServerUrl, messageConsumer, options);
+        new NatsSubscriber<>(subscription, natsServerUrl, messageConsumer, options);
     natsSubscriber.connect();
     return natsSubscriber;
   }

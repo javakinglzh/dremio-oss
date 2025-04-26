@@ -19,7 +19,6 @@ import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
 
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
-import com.dremio.common.utils.protos.AttemptId;
 import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.observer.AbstractAttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObservers;
@@ -91,7 +90,6 @@ public class QueryVersionUtils {
       final List<String> pathContext,
       final Map<String, VersionContext> sourceVersionMapping,
       Optional<UserSession> inputUserSession) {
-    final UserBitShared.QueryId queryId = new AttemptId().toQueryId();
     final UserSession userSession =
         userSessionForVersionValidation(
             sabotContext.getOptionValidatorListing(),
@@ -100,7 +98,7 @@ public class QueryVersionUtils {
             sourceVersionMapping,
             inputUserSession);
 
-    return new QueryContext(userSession, sabotContext, queryId);
+    return new QueryContext(userSession, sabotContext, QueryVersionUtils.class.getSimpleName());
   }
 
   private static UserSession userSessionForVersionValidation(

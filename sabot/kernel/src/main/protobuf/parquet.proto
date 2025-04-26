@@ -51,6 +51,7 @@ message ParquetDatasetSplitScanXAttr {
   optional bool is_dry_run = 8;
   optional bool write_success_event = 9;
   optional int64 row_index_offset = 10;
+  optional int64 fileGroupIndex = 11; // file group index, used in auto clustering
 }
 
 message ParquetDatasetXAttr {
@@ -65,4 +66,5 @@ message ParquetBlockBasedSplitXAttr {
   optional int64 length = 3;
   optional int64 fileLength = 4;
   optional int64 lastModificationTime = 5;
+  optional int64 fileGroupIndex = 6; // file group index, used in auto clustering
 }

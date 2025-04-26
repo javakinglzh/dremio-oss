@@ -23,9 +23,48 @@ export default class SourceIcon extends Component {
     style: PropTypes.object,
   };
 
+  extractSvgFromSrc = (src) => {
+    const startSvgTag = "<svg ";
+    const endSvgTag = "</svg>";
+    const startPos = src.indexOf(startSvgTag);
+    const endPos = src.indexOf(endSvgTag) + endSvgTag.length;
+    return src.substring(startPos, endPos);
+  };
+
+  isSvgSafe = (src) => {
+    // - does not include any of '<script ', '<foreignObject', TODO?: 'http://', 'https://'
+    const srcUpper = src.toUpperCase();
+    return (
+      !srcUpper.includes("<SCRIPT") && !srcUpper.includes("<FOREIGNOBJECT")
+    );
+  };
+
+  renderARPConnector(src) {
+    const iconStyle = { ...styles.iconStyle, ...(this.props.style || {}) };
+    // svg icon can be an inline svg/xml;
+    // example:
+    // <?xml version="1.0" encoding="UTF-8" standalone="no"?><!-- Copyright ...--><svg version="1.1" xmlns="http://www.w3.org/2000/svg"><text x="10" y="34" style="color:#ff0000">FakeSVG</text></svg>"
+    const svgPart = this.extractSvgFromSrc(src);
+    if (!this.isSvgSafe(svgPart)) {
+      console.warn("Source icon SVG code is unsafe");
+      return null;
+    }
+    return (
+      <div
+        style={iconStyle}
+        dangerouslySetInnerHTML={{ __html: svgPart }}
+      ></div>
+    );
+  }
+
   render() {
-    const { style, dremioIcon } = this.props;
+    const { style, dremioIcon, src } = this.props;
     const iconStyle = { ...styles.iconStyle, ...style };
+
+    // ARP Connectors use inline-svg, check the optional src property here
+    if (src && src.includes("<svg")) {
+      return this.renderARPConnector(src);
+    }
 
     // ADX icon has a <linearGradient> property so we need to handle it through <img>
     // NETEZZA is a png and needs to be handled separately

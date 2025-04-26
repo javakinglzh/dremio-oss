@@ -272,6 +272,7 @@ export class DatasetSettings extends PureComponent {
           activeTab={this.getActiveTab()}
           tabs={this.getTabs()}
           showSingleTab
+          orientation="vertical"
         />
         <ViewStateWrapper viewState={viewState} style={styles.wrap}>
           {this.renderContent()}

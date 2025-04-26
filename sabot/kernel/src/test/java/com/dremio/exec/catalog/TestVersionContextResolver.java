@@ -29,6 +29,7 @@ import com.dremio.exec.store.ReferenceConflictException;
 import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.UnAuthenticatedException;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -60,7 +61,7 @@ public class TestVersionContextResolver {
     final VersionContext versionContext = VersionContext.ofBranch("testBranch");
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(pluginRetriever.getPlugin(sourceName, false)).thenReturn(managedStoragePlugin);
-    when(managedStoragePlugin.getPlugin()).thenReturn(storagePlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
     when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(storagePlugin.unwrap(VersionedPlugin.class)).thenReturn(storagePlugin);
     doThrow(new ReferenceNotFoundException())
@@ -80,7 +81,7 @@ public class TestVersionContextResolver {
     final VersionContext versionContext = VersionContext.ofBranch("testBranch");
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(pluginRetriever.getPlugin(sourceName, false)).thenReturn(managedStoragePlugin);
-    when(managedStoragePlugin.getPlugin()).thenReturn(storagePlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
     when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(storagePlugin.unwrap(VersionedPlugin.class)).thenReturn(storagePlugin);
     doThrow(new ReferenceConflictException())
@@ -100,7 +101,7 @@ public class TestVersionContextResolver {
     final VersionContext versionContext = VersionContext.ofBranch("testBranch");
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(pluginRetriever.getPlugin(sourceName, false)).thenReturn(managedStoragePlugin);
-    when(managedStoragePlugin.getPlugin()).thenReturn(storagePlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
     when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(storagePlugin.unwrap(VersionedPlugin.class)).thenReturn(storagePlugin);
     doThrow(new NoDefaultBranchException())
@@ -120,7 +121,7 @@ public class TestVersionContextResolver {
     final VersionContext versionContext = VersionContext.ofBranch("testBranch");
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(pluginRetriever.getPlugin(sourceName, false)).thenReturn(managedStoragePlugin);
-    when(managedStoragePlugin.getPlugin()).thenReturn(storagePlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
     when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(storagePlugin.unwrap(VersionedPlugin.class)).thenReturn(storagePlugin);
     doThrow(new ConnectionRefusedException())
@@ -140,7 +141,7 @@ public class TestVersionContextResolver {
     final VersionContext versionContext = VersionContext.ofBranch("testBranch");
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(pluginRetriever.getPlugin(sourceName, false)).thenReturn(managedStoragePlugin);
-    when(managedStoragePlugin.getPlugin()).thenReturn(storagePlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
     when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(storagePlugin.unwrap(VersionedPlugin.class)).thenReturn(storagePlugin);
     doThrow(new UnAuthenticatedException())

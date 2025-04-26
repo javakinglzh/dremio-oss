@@ -18,13 +18,17 @@ package com.dremio.dac.service.datasets;
 import com.dremio.dac.proto.model.dataset.NameDatasetRef;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetVersion;
 import com.dremio.datastore.api.Document;
+import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.google.common.base.Functions;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -77,7 +81,8 @@ final class VersionList {
   /** Constructs {@link VersionList} with possibly multiple candidate linked lists. */
   static VersionList build(
       Collection<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
-          allVersions) {
+          allVersions,
+      @Nullable DatasetVersion headVersion) {
     // Allocate linked list nodes.
     ImmutableMap<NameDatasetRef, VersionListNode> nodesByRef =
         allVersions.stream()
@@ -89,14 +94,19 @@ final class VersionList {
                             .setDatasetVersion(node.document.getKey().getVersion().getVersion()),
                     Functions.identity()));
 
-    // Set next and previous in the list nodes.
+    // Set next and previous in the list nodes. This forms possibly disjoint graph of
+    // nodes where each node can have multiple "previous" nodes and a single "next" one.
+    // Under normal conditions, the forks in the graph come from "preview" versions, they are
+    // created from currently loaded version of a view. They may be saved by the user to become
+    // the head of the list. Preview versions that are not saved, remain dangling. Similarly,
+    // versions that get replaced by a preview version become dangling.
     for (VersionListNode node : nodesByRef.values()) {
       NameDatasetRef previousVersion = node.document.getValue().getPreviousVersion();
       if (previousVersion != null) {
         VersionListNode next = nodesByRef.get(previousVersion);
         node.next = next;
         if (next != null) {
-          next.previous = node;
+          next.previous.add(node);
         }
       }
     }
@@ -109,12 +119,15 @@ final class VersionList {
     ImmutableSet.Builder<DatasetVersionMutator.VersionDatasetKey> unusableKeysBuilder =
         ImmutableSet.builder();
     nodesByRef.values().stream()
-        .filter(n -> n.previous == null)
+        // Either the version does not have predecessors or it is the current head pointed
+        // at by the dataset.
+        .filter(n -> n.previous.isEmpty() || n.document.getKey().getVersion().equals(headVersion))
         .forEach(
             head -> {
               ImmutableList<
                       Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
-                  list = buildLinkedList(head, allVersions.size(), unusableKeysBuilder);
+                  list =
+                      buildLinkedList(head, headVersion, allVersions.size(), unusableKeysBuilder);
               if (!list.isEmpty()) {
                 linkedListsBuilder.add(list);
               }
@@ -127,9 +140,12 @@ final class VersionList {
           Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
       buildLinkedList(
           VersionListNode headNode,
+          @Nullable DatasetVersion headVersion,
           int limit,
           ImmutableSet.Builder<DatasetVersionMutator.VersionDatasetKey> unusableKeysBuilder) {
-    Preconditions.checkArgument(headNode.previous == null, "Passed headNode is not a head node.");
+    Preconditions.checkArgument(
+        headNode.previous.isEmpty() || headNode.document.getKey().getVersion().equals(headVersion),
+        "Passed headNode is not a head node.");
 
     // Traverse the list from the head. Defend against loops in the list.
     ImmutableList.Builder<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
@@ -157,7 +173,7 @@ final class VersionList {
   /** Dataset version linked list node. */
   private static final class VersionListNode {
     private final Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> document;
-    private VersionListNode previous;
+    private final List<VersionListNode> previous = new ArrayList<>();
     private VersionListNode next;
 
     private VersionListNode(

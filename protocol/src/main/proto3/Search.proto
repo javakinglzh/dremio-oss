@@ -55,6 +55,21 @@ message SearchQuery {
     int64 value = 2;
   }
 
+  message GreaterThanOrEqual {
+    string field = 1;
+    int64 value = 2;
+  }
+
+  message LessThan {
+    string field = 1;
+    int64 value = 2;
+  }
+
+  message LessThanOrEqual {
+    string field = 1;
+    int64 value = 2;
+  }
+
   // a catalog search query has one of the clauses
   oneof query {
     Equals equals = 1;
@@ -62,6 +77,9 @@ message SearchQuery {
     Or or = 3;
     Like like = 4;
     GreaterThan greater_than = 5;
+    GreaterThanOrEqual greater_than_or_equal = 6;
+    LessThan less_than = 7;
+    LessThanOrEqual less_than_or_equal = 8;
     // TODO(DX-9909): add support for NOT and != operators
   }
 }

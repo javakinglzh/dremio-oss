@@ -206,7 +206,7 @@ public class SpoolingRawBatchBuffer
 
     @Override
     public boolean isEmpty() {
-      return buffer.size() == 0;
+      return buffer.isEmpty();
     }
 
     @Override
@@ -231,6 +231,11 @@ public class SpoolingRawBatchBuffer
           }
         }
       }
+    }
+
+    @Override
+    public long readableBytesSize() {
+      return 0;
     }
   }
 
@@ -519,6 +524,10 @@ public class SpoolingRawBatchBuffer
           }
         }
       }
+    }
+
+    public long getByteCount() {
+      return batch == null ? 0 : batch.getByteCount();
     }
   }
 }

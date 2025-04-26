@@ -16,8 +16,8 @@
 package com.dremio.dac.resource;
 
 import static com.dremio.exec.ExecConstants.NESSIE_SOURCE_API;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.exceptions.UserException;
@@ -27,7 +27,6 @@ import com.dremio.exec.store.CatalogService;
 import com.dremio.options.OptionManager;
 import com.dremio.plugins.dataplane.store.DataplanePlugin;
 import com.dremio.plugins.s3.store.S3StoragePlugin;
-import com.dremio.services.nessie.proxy.ProxyV2TreeResource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -58,7 +57,7 @@ public class TestNessieSourceResource {
   public void testNessieSourceNotFound() {
     when(catalogService.getSource(sourceName)).thenThrow(userException);
     when(optionManager.getOption(NESSIE_SOURCE_API)).thenReturn(true);
-    assertThatThrownBy(() -> nessieSourceResource.handle(sourceName))
+    assertThatThrownBy(() -> nessieSourceResource.api(sourceName))
         .isInstanceOf(SourceNotFoundException.class);
   }
 
@@ -67,15 +66,14 @@ public class TestNessieSourceResource {
     when(catalogService.getSource(sourceName)).thenReturn(dataplanePlugin);
     when(dataplanePlugin.getNessieApi()).thenReturn(nessieApiV2);
     when(optionManager.getOption(NESSIE_SOURCE_API)).thenReturn(true);
-    ProxyV2TreeResource expected = nessieSourceResource.handle(sourceName);
-    assertTrue(expected instanceof ProxyV2TreeResource);
+    assertThatCode(() -> nessieSourceResource.api(sourceName)).doesNotThrowAnyException();
   }
 
   @Test
   public void testNessieSourceNotAcceptable() {
     when(catalogService.getSource(sourceName)).thenReturn(s3StoragePlugin);
     when(optionManager.getOption(NESSIE_SOURCE_API)).thenReturn(true);
-    assertThatThrownBy(() -> nessieSourceResource.handle(sourceName))
+    assertThatThrownBy(() -> nessieSourceResource.api(sourceName))
         .isInstanceOf(NessieSourceNotValidException.class);
   }
 }

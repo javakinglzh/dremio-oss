@@ -26,6 +26,8 @@ public interface ProjectConfigStore extends Service {
   // save the project config of the coordinator
   void put(ProjectConfig projectConfig);
 
+  void patch(ProjectConfig projectConfig);
+
   /** NO_OP implementation */
   public static final ProjectConfigStore NO_OP =
       new ProjectConfigStore() {
@@ -42,5 +44,8 @@ public interface ProjectConfigStore extends Service {
 
         @Override
         public void put(ProjectConfig projectConfig) {}
+
+        @Override
+        public void patch(ProjectConfig projectConfig) {}
       };
 }

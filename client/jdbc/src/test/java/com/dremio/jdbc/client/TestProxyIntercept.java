@@ -15,7 +15,6 @@
  */
 package com.dremio.jdbc.client;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.BaseTestQuery;
@@ -27,19 +26,11 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.Properties;
 import org.junit.Assert;
-import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class TestProxyIntercept extends BaseTestQuery {
   private static final String SOCKS_PROXY_USERNAME = "testUser";
   private static final String SOCKS_PROXY_PASSWORD = "testPassword";
-
-  @BeforeClass
-  public static void setup() throws Exception {
-    // Skip since ProxyServer does not work with the bouncy castle fips library
-    // The published driver is not from the MapR build anyway
-    assumeNonMaprProfile();
-  }
 
   private static Properties newProxyProperties(DremioSocks5ProxyServer proxy) {
     Properties properties = JdbcAssert.getDefaultProperties();

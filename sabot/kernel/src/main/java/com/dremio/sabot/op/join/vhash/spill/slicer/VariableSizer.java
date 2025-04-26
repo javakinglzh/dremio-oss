@@ -50,15 +50,21 @@ class VariableSizer implements Sizer {
 
   @Override
   public int getDataLengthFromIndex(int startIndex, int numberOfEntries) {
-
-    final long startOffset =
-        incoming.getOffsetBuffer().getInt((long) startIndex * OFFSET_SIZE_BYTES);
-    final long endOffset =
-        incoming
+    return (incoming
             .getOffsetBuffer()
-            .getInt((long) (startIndex + numberOfEntries) * OFFSET_SIZE_BYTES);
+            .getInt((long) (startIndex + numberOfEntries) * OFFSET_SIZE_BYTES)
+        - incoming.getOffsetBuffer().getInt((long) startIndex * OFFSET_SIZE_BYTES));
+  }
 
-    return (int) (endOffset - startOffset);
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    for (int index = 0; index < recordCount; index++) {
+      rowLengthAccumulator.setInt(
+          index * 4L,
+          rowLengthAccumulator.getInt(index * 4L)
+              + ((incoming.getOffsetBuffer().getInt((long) (index + 1) * OFFSET_SIZE_BYTES))
+                  - (incoming.getOffsetBuffer().getInt((long) (index) * OFFSET_SIZE_BYTES))));
+    }
   }
 
   @Override

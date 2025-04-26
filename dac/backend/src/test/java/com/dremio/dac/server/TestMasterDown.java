@@ -25,7 +25,7 @@ import com.dremio.config.DremioConfig;
 import com.dremio.dac.daemon.DACDaemon;
 import com.dremio.dac.daemon.ServerHealthMonitor;
 import com.dremio.dac.daemon.ZkServer;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.job.JobsUI;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.sources.SourceUI;
@@ -241,7 +241,7 @@ public class TestMasterDown extends BaseClientUtils {
     expectSuccess(
         (currentApiV2.path("space/DG/folder/").request(JSON).header(authHeader, authToken))
             .buildPost(Entity.json("{\"name\": \"" + folderName + "\"}")),
-        Folder.class);
+        FolderModel.class);
   }
 
   @Ignore("DX-61484")

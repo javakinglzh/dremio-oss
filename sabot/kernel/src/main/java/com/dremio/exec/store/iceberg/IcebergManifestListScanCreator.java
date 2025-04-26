@@ -44,8 +44,13 @@ public class IcebergManifestListScanCreator
     FileSystem fs;
     try {
       fs =
-          plugin.createFSWithAsyncOptions(
-              config.getLocation(), config.getProps().getUserName(), context);
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .withAsyncOptions(true)
+                  .filePath(config.getLocation())
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context)
+                  .datasetFromTablePaths(config.getReferencedTables()));
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
@@ -54,7 +59,7 @@ public class IcebergManifestListScanCreator
     try {
       splitXAttr =
           LegacyProtobufSerializer.parseFrom(
-              IcebergProtobuf.IcebergDatasetSplitXAttr.PARSER,
+              IcebergProtobuf.IcebergDatasetSplitXAttr.parser(),
               splits.get(0).getDatasetSplitInfo().getExtendedProperty());
     } catch (InvalidProtocolBufferException e) {
       throw new RuntimeException("Could not deserialize split info", e);

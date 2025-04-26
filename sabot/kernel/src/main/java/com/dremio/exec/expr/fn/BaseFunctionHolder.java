@@ -305,15 +305,9 @@ public abstract class BaseFunctionHolder extends AbstractFunctionHolder {
 
     JVar[] internalVars = new JVar[workspaceJVars.length];
     for (int i = 0; i < workspaceJVars.length; i++) {
-      if (decConstInputOnly) {
-        internalVars[i] =
-            sub.decl(
-                g.getModel()._ref(workspaceVars[i].type), workspaceVars[i].name, workspaceJVars[i]);
-      } else {
-        internalVars[i] =
-            sub.decl(
-                g.getModel()._ref(workspaceVars[i].type), workspaceVars[i].name, workspaceJVars[i]);
-      }
+      internalVars[i] =
+          sub.decl(
+              g.getModel()._ref(workspaceVars[i].type), workspaceVars[i].name, workspaceJVars[i]);
     }
 
     Preconditions.checkNotNull(body);

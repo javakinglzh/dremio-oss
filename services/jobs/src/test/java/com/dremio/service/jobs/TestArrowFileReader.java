@@ -38,14 +38,13 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.exec.store.RecordWriter.OutputEntryListener;
 import com.dremio.exec.store.RecordWriter.WriteStatsListener;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
-import com.dremio.exec.store.dfs.easy.EasyFormatPlugin;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.easy.arrow.ArrowFileFormat;
 import com.dremio.exec.store.easy.arrow.ArrowFileMetadata;
 import com.dremio.exec.store.easy.arrow.ArrowFileReader;
 import com.dremio.exec.store.easy.arrow.ArrowFormatPluginConfig;
 import com.dremio.exec.store.easy.arrow.ArrowRecordWriter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.test.AllocatorRule;
 import com.dremio.test.DremioTest;
@@ -564,11 +563,9 @@ public class TestArrowFileReader extends DremioTest {
     when(writerConf.getLocation()).thenReturn(dateGenFolder.getRoot().toString());
     when(writerConf.getProps()).thenReturn(OpProps.prototype());
 
-    final EasyFormatPlugin formatPlugin = mock(EasyFormatPlugin.class);
-    final FileSystemPlugin fsPlugin = mock(FileSystemPlugin.class);
-    when(writerConf.getFormatPlugin()).thenReturn(formatPlugin);
-    when(formatPlugin.getFsPlugin()).thenReturn(fsPlugin);
-    when(fsPlugin.createFS(notNull(), notNull())).thenReturn(HadoopFileSystem.getLocal(FS_CONF));
+    final SupportsFsCreation fsCreator = mock(SupportsFsCreation.class);
+    when(writerConf.getFileSystemCreator()).thenReturn(fsCreator);
+    when(fsCreator.createFS(notNull())).thenReturn(HadoopFileSystem.getLocal(FS_CONF));
 
     ArrowRecordWriter writer =
         new ArrowRecordWriter(opContext, writerConf, new ArrowFormatPluginConfig());

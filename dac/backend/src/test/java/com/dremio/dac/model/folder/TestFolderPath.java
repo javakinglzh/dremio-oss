@@ -47,13 +47,14 @@ public class TestFolderPath {
 
   @Test
   public void testParseUrlPath() {
-    FolderPath folderPath = (FolderPath) Folder.parseUrlPath("/space/s1/folder/f1/f2");
+    FolderPath folderPath = (FolderPath) FolderModel.parseUrlPath("/space/s1/folder/f1/f2");
     Assert.assertEquals("s1.f1.f2", folderPath.toPathString());
   }
 
   @Test
   public void testParseSourceUrlPath() {
-    SourceFolderPath folderPath = (SourceFolderPath) Folder.parseUrlPath("/source/s1/folder/f1/f2");
+    SourceFolderPath folderPath =
+        (SourceFolderPath) FolderModel.parseUrlPath("/source/s1/folder/f1/f2");
     Assert.assertEquals("s1.f1.f2", folderPath.toPathString());
   }
 

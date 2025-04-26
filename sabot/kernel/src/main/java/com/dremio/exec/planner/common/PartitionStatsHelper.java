@@ -40,7 +40,7 @@ public class PartitionStatsHelper {
       try {
         icebergDatasetXAttr =
             LegacyProtobufSerializer.parseFrom(
-                IcebergProtobuf.IcebergDatasetXAttr.PARSER, byteBuffer);
+                IcebergProtobuf.IcebergDatasetXAttr.parser(), byteBuffer);
       } catch (InvalidProtocolBufferException e) {
         throw new RuntimeException(e);
       }

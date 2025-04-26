@@ -101,7 +101,7 @@ public class SplitGeneratingDatafileProcessor implements ManifestEntryProcessor 
 
   public SplitGeneratingDatafileProcessor(
       OperatorContext context,
-      SupportsInternalIcebergTable plugin,
+      SupportsIcebergRootPointer plugin,
       OpProps props,
       TableFunctionContext functionContext) {
     this.context = context;
@@ -342,7 +342,7 @@ public class SplitGeneratingDatafileProcessor implements ManifestEntryProcessor 
       try {
         icebergDatasetXAttr =
             LegacyProtobufSerializer.parseFrom(
-                IcebergProtobuf.IcebergDatasetXAttr.PARSER, inputColIds.get(0));
+                IcebergProtobuf.IcebergDatasetXAttr.parser(), inputColIds.get(0));
       } catch (InvalidProtocolBufferException ie) {
         throw new RuntimeException("Could not deserialize Iceberg dataset info", ie);
       } catch (Exception e) {

@@ -84,7 +84,7 @@ public class ConsistentTypeUtil {
             }
           }
         }
-        // fall through
+      // fall through
       case LEAST_RESTRICTIVE:
         return typeFactory.leastRestrictive(types);
       default:

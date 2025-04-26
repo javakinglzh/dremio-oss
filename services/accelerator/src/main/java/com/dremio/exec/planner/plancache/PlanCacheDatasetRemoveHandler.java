@@ -29,8 +29,6 @@ public class PlanCacheDatasetRemoveHandler implements DatasetRemovedHandler {
 
   @Override
   public void handle(DatasetRemovedEvent event) {
-    try (PlanCacheInvalidationHelper helper = planCacheInvalidationHelper.get()) {
-      helper.invalidateReflectionAssociatedPlanCache(event.getDatasetId());
-    }
+    planCacheInvalidationHelper.get().invalidateReflectionAssociatedPlanCache(event.getDatasetId());
   }
 }

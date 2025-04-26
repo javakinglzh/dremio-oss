@@ -34,7 +34,7 @@ import Modal from "components/Modals/Modal";
 import ViewStateWrapper from "components/ViewStateWrapper";
 import FormUnsavedWarningHOC from "components/Modals/FormUnsavedWarningHOC";
 
-import SelectSourceType from "@inject/pages/HomePage/components/modals/AddSourceModal/SelectSourceType";
+import SelectSourceType from "#oss/pages/HomePage/components/modals/AddSourceModal/SelectSourceType";
 import ConfigurableSourceForm from "pages/HomePage/components/modals/ConfigurableSourceForm";
 import { isCME } from "dyn-load/utils/versionUtils";
 import { loadGrant } from "dyn-load/actions/resources/grant";
@@ -161,8 +161,20 @@ export class AddSourceModal extends Component {
           sourceType: combinedConfig.sourceType,
         });
       },
-      () => {
-        this.setState({ didSourceTypeLoadFail: true });
+      (e) => {
+        return e
+          .json()
+          .then((error) => {
+            return this.setState({
+              didSourceTypeLoadFail: true,
+              errorMessage: error?.errorMessage,
+            });
+          })
+          .catch(() => {
+            return this.setState({
+              didSourceTypeLoadFail: true,
+            });
+          });
       },
     );
   }
@@ -332,7 +344,10 @@ export class AddSourceModal extends Component {
         hide={!iconDisabled && this.hide}
         iconDisabled={iconDisabled}
         className={
-          !this.state.isTypeSelected ? classes["add-source-modal"] : ""
+          !this.state.isTypeSelected &&
+          !this.props.location.state.selectedSourceType
+            ? classes["add-source-modal"]
+            : ""
         }
       >
         <ViewStateWrapper
@@ -340,14 +355,16 @@ export class AddSourceModal extends Component {
           hideChildrenWhenFailed={false}
           onDismissError={onDismissError}
         >
-          {!this.state.isTypeSelected ? (
-            <SelectSourceType
-              isExternalSource={isExternalSource}
-              sourceTypes={this.state.sourceTypes}
-              isDataPlaneSource={isDataPlaneSource}
-              onSelectSource={this.handleSelectSource}
-            />
-          ) : (
+          {!this.state.isTypeSelected &&
+            !this.props.location.state.selectedSourceType && (
+              <SelectSourceType
+                isExternalSource={isExternalSource}
+                sourceTypes={this.state.sourceTypes}
+                isDataPlaneSource={isDataPlaneSource}
+                onSelectSource={this.handleSelectSource}
+              />
+            )}
+          {this.state.isTypeSelected && (
             <ConfigurableSourceForm
               hideCancel={hideCancel}
               confirmText={confirmText}

@@ -94,7 +94,9 @@ public class TestEqualityDeleteFileReader extends BaseTestEqualityDeleteFilter {
 
   @Before
   public void beforeTest() throws Exception {
-    context = testContext.getNewOperatorContext(getTestAllocator(), null, DEFAULT_BATCH_SIZE, null);
+    context =
+        (OperatorContextImpl)
+            testContext.getNewOperatorContext(getTestAllocator(), null, DEFAULT_BATCH_SIZE, null);
     testCloseables.add(context);
     FileSystem fs = HadoopFileSystem.get(Path.of("/"), new Configuration(), context.getStats());
     factory =

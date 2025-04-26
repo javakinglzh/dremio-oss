@@ -23,6 +23,7 @@ import { loadSearchData } from "actions/search";
 import { getSearchResult } from "selectors/resources";
 import { Popover } from "#oss/components/Popover";
 import SearchDatasetsComponent from "@inject/components/DatasetList/SearchDatasetsComponent"; // Hidden on non-software
+import { withTreeConfigContext } from "#oss/components/Tree/treeConfigContext";
 
 import { compose } from "redux";
 import DatasetList from "./DatasetList";
@@ -167,6 +168,7 @@ class SearchDatasetsPopover extends PureComponent {
           listClass={"search_draggable-row"}
         >
           <DatasetList
+            showSummaryOverlay
             dragType={dragType}
             data={searchData}
             changeSelectedNode={changeSelectedNode}
@@ -180,6 +182,9 @@ class SearchDatasetsPopover extends PureComponent {
             isStarredLimitReached={isStarredLimitReached}
             starredItems={starredItems}
             isExpandable
+            openDetailsPanel={
+              this.props.treeConfigContext?.handleDatasetDetails
+            }
           />
         </Popover>
       </div>
@@ -231,4 +236,5 @@ const mapStateToProps = (state) => ({
 export default compose(
   connect(mapStateToProps, { loadSearchData }),
   injectIntl,
+  withTreeConfigContext,
 )(SearchDatasetsPopover);

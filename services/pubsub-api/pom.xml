@@ -30,8 +30,8 @@
 
   <dependencies>
     <dependency>
-      <groupId>com.dremio</groupId>
-      <artifactId>dremio-common</artifactId>
+      <groupId>com.dremio.common</groupId>
+      <artifactId>dremio-common-core</artifactId>
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>

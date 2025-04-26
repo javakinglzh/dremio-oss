@@ -189,10 +189,6 @@ export function constructFullPathAndEncode(pathParts) {
   return constructFullPath(pathParts, false, true);
 }
 
-export function constructResourcePath(fullPath, type = "dataset") {
-  return `/${type}/${fullPath}`;
-}
-
 /**
  * Returns a path to a home space as a **string** if use creates a new vds or {@see fullPath} as
  * a **string**
@@ -256,8 +252,8 @@ export function navigateToExploreDefaultIfNecessary(
 
 export function getSourceNameFromUrl(sourceUrl) {
   const url = sourceUrl && rmProjectBase(sourceUrl);
-  const [, , sourceName] = (url || "").split("/");
-  return decodeURIComponent(sourceName);
+  const [, entityType, sourceName] = (url || "").split("/");
+  return entityType === "source" ? decodeURIComponent(sourceName) : "";
 }
 
 export function constructLinkWithRefInfo(baseUrl, versionContext, resourceId) {

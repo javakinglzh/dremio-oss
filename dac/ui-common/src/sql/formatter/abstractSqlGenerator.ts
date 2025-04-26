@@ -70,8 +70,6 @@ const RULE_TYPES: { [K in RuleName]: RuleType } = {
   sqlDropTable: RuleType.Command,
   sqlTruncateTable: RuleType.Command,
   sqlRefreshReflection: RuleType.Command,
-  sqlLoadMaterialization: RuleType.Command,
-  sqlCompactMaterialization: RuleType.Command,
   sqlAnalyzeTableStatistics: RuleType.Command,
   sqlRefreshDataset: RuleType.Command,
   sqlAccel: RuleType.Command,
@@ -174,6 +172,7 @@ const RULE_TYPES: { [K in RuleName]: RuleType } = {
   builtinFunctionCall: RuleType.Function,
   timestampAddFunctionCall: RuleType.Function,
   timestampDiffFunctionCall: RuleType.Function,
+  tryConvertFromFunctionCall: RuleType.Function,
   matchRecognizeFunctionCall: RuleType.Function,
   namedFunctionCall: RuleType.Function,
   namedRoutineCall: RuleType.Function,
@@ -385,6 +384,7 @@ const RULE_TYPES: { [K in RuleName]: RuleType } = {
   withinGroup: RuleType.Other,
   getTableKeys: RuleType.Other,
   tableKey: RuleType.Other,
+  tableWithVersionContextCommaList: RuleType.Other,
 };
 
 // These are tokens that are not considered part of commands (even when directly

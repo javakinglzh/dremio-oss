@@ -22,6 +22,7 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.create
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropTableQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.getLastSnapshotQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableAtQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectStarOnSnapshotQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectStarQueryWithSpecifier;
@@ -207,6 +208,14 @@ public abstract class ITDataplanePluginVacuumTestSetup extends ITDataplanePlugin
 
       List<List<String>> result = runSqlWithResults(getLastSnapshotQuery(table));
       return result.stream().flatMap(List::stream).findFirst().get();
+    } catch (Exception e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  protected void newSnapshotAtBranch(List<String> table, String refName) {
+    try {
+      runSQL(insertTableAtQuery(table, refName));
     } catch (Exception e) {
       throw new RuntimeException(e);
     }

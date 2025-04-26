@@ -18,19 +18,20 @@ package com.dremio.exec.store.easy.json;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.logical.FormatPluginConfig;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.proto.UserBitShared.CoreOperatorType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.EasyCoercionReader;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.FormatMatcher;
 import com.dremio.exec.store.dfs.easy.EasyFormatPlugin;
 import com.dremio.exec.store.dfs.easy.EasySubScan;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.dfs.easy.ExtendedEasyReaderProperties;
 import com.dremio.exec.store.easy.json.JSONFormatPlugin.JSONFormatConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.store.easy.proto.EasyProtobuf.EasyDatasetSplitXAttr;
@@ -48,26 +49,26 @@ public class JSONFormatPlugin extends EasyFormatPlugin<JSONFormatConfig> {
   private static final boolean IS_COMPRESSIBLE = true;
   private static final String DEFAULT_NAME = "json";
 
-  public JSONFormatPlugin(String name, SabotContext context, FileSystemPlugin<?> fsPlugin) {
-    this(name, context, new JSONFormatConfig(), fsPlugin);
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
+  public JSONFormatPlugin(
+      String name, PluginSabotContext context, SupportsFsCreation supportsFsCreation) {
+    this(name, context, new JSONFormatConfig(), supportsFsCreation);
   }
 
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
   public JSONFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       JSONFormatConfig formatPluginConfig,
-      FileSystemPlugin<?> fsPlugin) {
+      SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         formatPluginConfig,
-        true,
-        false,
         false,
         IS_COMPRESSIBLE,
         formatPluginConfig.getExtensions(),
-        DEFAULT_NAME,
-        fsPlugin);
+        DEFAULT_NAME);
   }
 
   @Override
@@ -81,7 +82,7 @@ public class JSONFormatPlugin extends EasyFormatPlugin<JSONFormatConfig> {
         context,
         splitAttributes.getPath(),
         splitAttributes.getLength(),
-        getFsPlugin().getCompressionCodecFactory(),
+        HadoopCompressionCodecFactory.DEFAULT,
         dfs,
         columns);
   }
@@ -99,7 +100,7 @@ public class JSONFormatPlugin extends EasyFormatPlugin<JSONFormatConfig> {
         context,
         splitAttributes.getPath(),
         splitAttributes.getLength(),
-        getFsPlugin().getCompressionCodecFactory(),
+        HadoopCompressionCodecFactory.DEFAULT,
         dfs,
         columns,
         properties,
@@ -197,11 +198,6 @@ public class JSONFormatPlugin extends EasyFormatPlugin<JSONFormatConfig> {
   @Override
   public int getWriterOperatorType() {
     return CoreOperatorType.JSON_WRITER_VALUE;
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return true;
   }
 
   @Override

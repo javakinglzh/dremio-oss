@@ -49,7 +49,6 @@ public class ServerData {
   private final boolean allowDownload;
   private final boolean allowFormatting;
   private final boolean useNewDatasetNavigation;
-  private final boolean showNewJobsTables;
   private final boolean asyncDownloadEnabled;
   private final boolean nextgenSearchUIEnabled;
   private final boolean appearancePickerEnabled;
@@ -82,7 +81,6 @@ public class ServerData {
     this.allowDownload = builder.allowDownload;
     this.allowFormatting = builder.allowFormatting;
     this.useNewDatasetNavigation = builder.useNewDatasetNavigation;
-    this.showNewJobsTables = builder.showNewJobsTables;
     this.asyncDownloadEnabled = builder.asyncDownloadEnabled;
     this.nextgenSearchUIEnabled = builder.nextgenSearchUIEnabled;
     this.appearancePickerEnabled = builder.appearancePickerEnabled;
@@ -204,10 +202,6 @@ public class ServerData {
     return useNewDatasetNavigation;
   }
 
-  public boolean isShowNewJobsTables() {
-    return showNewJobsTables;
-  }
-
   public boolean isAsyncDownloadEnabled() {
     return asyncDownloadEnabled;
   }
@@ -249,7 +243,6 @@ public class ServerData {
     private boolean allowDownload;
     private boolean allowFormatting;
     private boolean useNewDatasetNavigation;
-    private boolean showNewJobsTables;
     private boolean asyncDownloadEnabled;
     private boolean nextgenSearchUIEnabled;
     private boolean appearancePickerEnabled;
@@ -284,7 +277,6 @@ public class ServerData {
       this.allowDownload = builder.allowDownload;
       this.allowFormatting = builder.allowFormatting;
       this.useNewDatasetNavigation = builder.useNewDatasetNavigation;
-      this.showNewJobsTables = builder.showNewJobsTables;
       this.asyncDownloadEnabled = builder.asyncDownloadEnabled;
       this.nextgenSearchUIEnabled = builder.nextgenSearchUIEnabled;
       this.appearancePickerEnabled = builder.appearancePickerEnabled;
@@ -423,11 +415,6 @@ public class ServerData {
 
     public Builder setUseNewDatasetNavigation(boolean useNewDatasetNavigation) {
       this.useNewDatasetNavigation = useNewDatasetNavigation;
-      return this;
-    }
-
-    public Builder setShowNewJobsTables(boolean showNewJobsTables) {
-      this.showNewJobsTables = showNewJobsTables;
       return this;
     }
 

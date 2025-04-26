@@ -15,7 +15,6 @@
  */
 package com.dremio.plugins.s3.store;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static org.junit.Assert.assertEquals;
 
 import com.dremio.BaseTestQuery;
@@ -67,7 +66,6 @@ public class TestS3Compat extends BaseTestQuery {
 
   @Test
   public void s3Compat() throws Exception {
-    assumeNonMaprProfile();
     try (FileSystem fs = new S3FileSystem()) {
       Configuration config = new Configuration();
       S3PluginConfig s3 = new S3PluginConfig();

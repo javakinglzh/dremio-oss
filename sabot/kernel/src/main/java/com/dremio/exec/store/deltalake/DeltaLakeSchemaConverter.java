@@ -142,7 +142,7 @@ public final class DeltaLakeSchemaConverter {
                 case NAME:
                   return entry.getKey().equals(SCHEMA_STRING_FIELDS_COLUMN_MAPPING_PHYSICAL_NAME);
                 case ID:
-                  // fallthrough to preserve physical name for partitions and stats mapping
+                // fallthrough to preserve physical name for partitions and stats mapping
                 default:
                   // fallback to return all metadata entries
                   return true;

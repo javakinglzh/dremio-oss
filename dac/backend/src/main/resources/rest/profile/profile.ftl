@@ -31,7 +31,9 @@
   "planText": "${model.getPlanText()}",
   "fragmentProfileSize": ${model.getFragmentProfilesSize()},
   "fragmentProfiles":  ${model.getFragmentsJSON()?no_esc},
-  "operatorProfiles":   ${model.getOperatorProfilesJSON()?no_esc}
+  "operatorProfiles":   ${model.getOperatorProfilesJSON()?no_esc},
+  <#-- Do not remove "state". Ref : DX-98143 -->
+  "state": "${model.getStateName()}"
 }
 </div>
   <h3>Query and Planning</h3>
@@ -78,6 +80,10 @@
         </#if>
         <#if model.getPlanCacheUsed() != 0 >
           <dt>Cached plan was used</dt>
+          <dd> </dd>
+        </#if>
+        <#if model.getResultsCacheUsed() >
+          <dt>Cached result was used</dt>
           <dd> </dd>
         </#if>
       </dl>
@@ -414,11 +420,17 @@
           Dataset: ${model.accelerationDetails.getReflectionDatasetPath(layout.layoutId)}${model.accelerationDetails.getReflectionDatasetVersion(layout.layoutId)}<br>
           Last Refresh from Table: <#if model.accelerationDetails.getRefreshChainStartTime(layout.layoutId)?? > ${model.accelerationDetails.getRefreshChainStartTime(layout.layoutId)?number_to_datetime?iso_local}<br></#if>
           </#if>
+          <#if layout.isStale?has_content && layout.isStale>
+          Stale: yes<br>
+          </#if>
           <#if layout.snowflake?has_content && layout.snowflake>
           Snowflake: yes<br>
           </#if>
           <#if layout.defaultReflection?has_content && layout.defaultReflection>
-            Default Reflection: yes<br>
+            Default Match: yes<br>
+          </#if>
+          <#if layout.reflectionMode?has_content >
+            Reflection Mode: ${layout.getReflectionMode()}<br>
           </#if>
           <#if layout.dimensionsList?has_content >
           Dimensions:
@@ -491,7 +503,7 @@
           </p>
           </#if>
 
-          <p>Normalized Materialization Plans:
+          <p>Normalized Materialization Targets:
             <#list layout.getNormalizedPlansList() as planNorm>
             <#if planNorm?has_content >
               <p><pre>${planNorm}</pre></p>

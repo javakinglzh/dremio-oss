@@ -29,6 +29,7 @@ import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -40,14 +41,17 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Int;
 import org.apache.arrow.vector.types.pojo.ArrowType.Interval;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeBinary;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeList;
+import org.apache.arrow.vector.types.pojo.ArrowType.LargeListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeUtf8;
 import org.apache.arrow.vector.types.pojo.ArrowType.Map;
 import org.apache.arrow.vector.types.pojo.ArrowType.Null;
+import org.apache.arrow.vector.types.pojo.ArrowType.RunEndEncoded;
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct;
 import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.iceberg.PartitionField;
 import org.apache.iceberg.Schema;
@@ -111,21 +115,6 @@ public final class SchemaConverter {
   public Field fromIcebergColumn(NestedField field) {
     try {
       CompleteType fieldType = fromIcebergType(field.type());
-      return fieldType == null ? null : fieldType.toField(field.name());
-    } catch (Exception e) {
-      String msg = "Type conversion error for column " + field.name();
-      if (tableName != null) {
-        msg = msg + " in table " + tableName;
-      }
-      throw UserException.unsupportedError(e).message(msg).buildSilently();
-    }
-  }
-
-  public Field fromIcebergColumnRetainNullable(NestedField field) {
-    // Currently nullability retention is only used for Map Fields. Every field should be retaining
-    // nullability.
-    try {
-      CompleteType fieldType = fromIcebergType(field.type());
       return fieldType == null ? null : fieldType.toField(field.name(), field.isOptional());
     } catch (UnsupportedOperationException | UserException e) {
       String msg = "Type conversion error for column " + field.name();
@@ -162,12 +151,13 @@ public final class SchemaConverter {
         MapType mapType = (MapType) nestedType;
         List<Field> keyValueFields = Lists.newArrayList();
         for (Types.NestedField nestedField : mapType.fields()) {
-          Field field = fromIcebergColumnRetainNullable(nestedField);
+          Field field = fromIcebergColumn(nestedField);
           if (field == null) {
             return null;
           }
           keyValueFields.add(field);
         }
+        // the inner struct of a map is always required
         return new CompleteType(
             CompleteType.MAP.getType(),
             CompleteType.struct(keyValueFields).toField(MapVector.DATA_VECTOR_NAME, false));
@@ -184,7 +174,7 @@ public final class SchemaConverter {
         && nestedType.asMapType().keyType().isPrimitiveType();
   }
 
-  public CompleteType fromIcebergPrimitiveType(PrimitiveType type) {
+  public static CompleteType fromIcebergPrimitiveType(PrimitiveType type) {
     switch (type.typeId()) {
       case BOOLEAN:
         return CompleteType.BIT;
@@ -259,7 +249,7 @@ public final class SchemaConverter {
           icebergField.type().isPrimitiveType()
               ? toIcebergType(CompleteType.fromField(field), null, new UnboundedFieldIdBroker())
               : icebergField.type();
-      return NestedField.optional(icebergField.fieldId(), field.getName(), type);
+      return NestedField.of(icebergField.fieldId(), field.isNullable(), field.getName(), type);
     } catch (Exception e) {
       String msg = "Type conversion error for column " + field.getName();
       if (tableName != null) {
@@ -279,8 +269,9 @@ public final class SchemaConverter {
         fullName = field.getName();
       }
       int columnId = fieldIdBroker.get(fullName);
-      return NestedField.optional(
+      return NestedField.of(
           columnId,
+          field.isNullable(),
           field.getName(),
           toIcebergType(CompleteType.fromField(field), fullName, fieldIdBroker));
     } catch (Exception e) {
@@ -318,7 +309,16 @@ public final class SchemaConverter {
             NestedField inner =
                 toIcebergColumn(
                     completeType.getOnlyChild(), fieldIdBroker, fullName + ".list.element");
-            return ListType.ofOptional(inner.fieldId(), inner.type());
+            if (inner.isOptional()) {
+              return ListType.ofOptional(inner.fieldId(), inner.type());
+            } else {
+              return ListType.ofRequired(inner.fieldId(), inner.type());
+            }
+          }
+
+          @Override
+          public Type visit(ArrowType.ListView list) {
+            throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
           }
 
           @Override
@@ -341,7 +341,11 @@ public final class SchemaConverter {
             Field valueField = struct.getChildren().get(1);
             NestedField value =
                 toIcebergColumn(valueField, fieldIdBroker, fullName + "." + valueField.getName());
-            return MapType.ofOptional(key.fieldId(), value.fieldId(), key.type(), value.type());
+            if (value.isOptional()) {
+              return MapType.ofOptional(key.fieldId(), value.fieldId(), key.type(), value.type());
+            } else {
+              return MapType.ofRequired(key.fieldId(), value.fieldId(), key.type(), value.type());
+            }
           }
 
           @Override
@@ -367,8 +371,18 @@ public final class SchemaConverter {
           }
 
           @Override
+          public Type visit(Utf8View utf8) {
+            throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+          }
+
+          @Override
           public Type visit(Binary binary) {
             return BinaryType.get();
+          }
+
+          @Override
+          public Type visit(BinaryView binary) {
+            throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
           }
 
           @Override
@@ -383,6 +397,16 @@ public final class SchemaConverter {
 
           @Override
           public Type visit(LargeList largeList) {
+            throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+          }
+
+          @Override
+          public Type visit(LargeListView largeListView) {
+            throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
+          }
+
+          @Override
+          public Type visit(RunEndEncoded param) {
             throw new UnsupportedOperationException("Unsupported arrow type : " + arrowType);
           }
 

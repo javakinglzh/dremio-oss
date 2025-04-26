@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.common;
 
+import static com.dremio.exec.planner.common.ScanRelBase.SNAPSHOT;
 import static com.dremio.exec.planner.common.ScanRelBase.getRowTypeFromProjectedColumns;
 import static java.lang.Math.max;
 import static org.apache.calcite.sql.type.SqlTypeName.DECIMAL;
@@ -1516,6 +1517,22 @@ public final class MoreRelOptUtil {
     return projects;
   }
 
+  public static RelDataType fieldType(
+      RelDataType type, RelDataTypeFactory typeFactory, ImmutableBitSet selectedColumns) {
+    List<String> newFieldNames = new ArrayList<>();
+    List<RelDataType> newFieldTypes = new ArrayList<>();
+    List<RelDataTypeField> fieldList = type.getFieldList();
+    for (int i = 0; i < type.getFieldCount(); i++) {
+      if (selectedColumns.get(i)) {
+        RelDataTypeField field = fieldList.get(i);
+        newFieldNames.add(field.getName());
+        newFieldTypes.add(field.getType());
+      }
+    }
+
+    return typeFactory.createStructType(newFieldTypes, newFieldNames);
+  }
+
   public static boolean isNegative(RexLiteral literal) {
     Double d = literal.getValueAs(Double.class);
     return d < 0;
@@ -2358,5 +2375,109 @@ public final class MoreRelOptUtil {
     public boolean nest() {
       return true;
     }
+  }
+
+  /**
+   * Returns sha256 hash of input expression in hexadecimal string form with 64 length. snapshot
+   * property on scan nodes are excluded from the hash.
+   */
+  public static String sha256HashCode(RelNode relNode) {
+    Hasher hasher = Hashing.sha256().newHasher();
+    hashWithoutSnapshotIds(relNode, hasher);
+    return hasher.hash().toString();
+  }
+
+  public static void hashWithoutSnapshotIds(RelNode relNode, Hasher hasher) {
+    final boolean[] inScan = {false};
+
+    relNode.explain(
+        new RelWriter() {
+          @Override
+          public void explain(RelNode rel, List<Pair<String, Object>> valueList) {
+            for (Pair<String, Object> pair : valueList) {
+              item(pair.left, pair.right);
+            }
+            done(relNode);
+          }
+
+          @Override
+          public SqlExplainLevel getDetailLevel() {
+            return SqlExplainLevel.EXPPLAN_ATTRIBUTES;
+          }
+
+          @Override
+          public RelWriter input(String term, RelNode input) {
+            hasher.putString(term, StandardCharsets.UTF_8);
+            if (input instanceof ScanRelBase) {
+              inScan[0] = true;
+            }
+            input.explain(this);
+            inScan[0] = false;
+            return this;
+          }
+
+          @Override
+          public RelWriter item(String term, Object value) {
+            if (value instanceof RelNode) {
+              input(term, (RelNode) value);
+            } else {
+              if (inScan[0] && SNAPSHOT.equals(term)) {
+                return this;
+              }
+              hasher
+                  .putString(term, StandardCharsets.UTF_8)
+                  .putString(value.toString(), StandardCharsets.UTF_8);
+            }
+            return this;
+          }
+
+          @Override
+          public RelWriter itemIf(String term, Object value, boolean condition) {
+            if (condition) {
+              return item(term, value);
+            } else {
+              return this;
+            }
+          }
+
+          @Override
+          public RelWriter done(RelNode node) {
+            hasher.putString(node.getClass().toString(), StandardCharsets.UTF_8);
+            return this;
+          }
+
+          @Override
+          public boolean nest() {
+            return true;
+          }
+        });
+  }
+
+  public static RexNode createEquiJoinConditionINDF(
+      final RelNode left,
+      final List<Integer> leftKeys,
+      final RelNode right,
+      final List<Integer> rightKeys,
+      final RexBuilder rexBuilder) {
+    final List<RelDataType> leftTypes = RelOptUtil.getFieldTypeList(left.getRowType());
+    final List<RelDataType> rightTypes = RelOptUtil.getFieldTypeList(right.getRowType());
+    return RexUtil.composeConjunction(
+        rexBuilder,
+        new AbstractList<RexNode>() {
+          @Override
+          public RexNode get(int index) {
+            final int leftKey = leftKeys.get(index);
+            final int rightKey = rightKeys.get(index);
+            return rexBuilder.makeCall(
+                SqlStdOperatorTable.IS_NOT_DISTINCT_FROM,
+                rexBuilder.makeInputRef(leftTypes.get(leftKey), leftKey),
+                rexBuilder.makeInputRef(rightTypes.get(rightKey), leftTypes.size() + rightKey));
+          }
+
+          @Override
+          public int size() {
+            return leftKeys.size();
+          }
+        });
   }
 }

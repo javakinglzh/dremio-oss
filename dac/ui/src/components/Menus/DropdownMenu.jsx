@@ -54,6 +54,7 @@ const DropdownMenu = (props) => {
     selectClass,
     closeOnSelect,
     disabledHandledByParent,
+    menuLabel,
   } = props;
 
   const togglerStyle = isButton
@@ -132,6 +133,7 @@ const DropdownMenu = (props) => {
               )}
               key="toggler"
               title={textTooltip}
+              {...(menuLabel && { "aria-label": menuLabel })}
             >
               {!groupDropdownProps &&
                 (customItemRenderer || selectedItemRenderer())}
@@ -230,6 +232,7 @@ DropdownMenu.propTypes = {
   closeOnSelect: PropTypes.bool,
   selectClass: PropTypes.string,
   disabledHandledByParent: PropTypes.bool,
+  menuLabel: PropTypes.string,
 };
 
 export default DropdownMenu;

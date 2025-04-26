@@ -33,7 +33,7 @@ enum ReflectionState {
   ACTIVE = 1;
   REFRESH = 2;
   REFRESHING = 3;
-  METADATA_REFRESH = 4;
+  METADATA_REFRESH = 4 [deprecated = true];
   FAILED = 5;
   DEPRECATE = 6;
   UPDATE = 7;
@@ -64,17 +64,18 @@ message ReflectionEntry {
   optional string tag = 22;
   optional string goalVersion = 23;
   optional int32 shallowDatasetHash = 24 [deprecated = true];
-  optional bool arrowCachingEnabled = 25 [default = false]; // true if boost columns are enabled for caching
+  optional bool arrowCachingEnabled = 25 [default = false, deprecated = true]; // true if boost columns are enabled for caching
   optional ReflectionGoalHash reflection_goal_hash = 26;
   optional bool snapshotBased = 27 [default = false]; // true if the refresh was snapshot based incremental
   optional int64 refresh_pending_begin = 28; // Start of REFRESH_PENDING
   optional Failure lastFailure = 29;
   optional int32 expandedPlanDatasetHash = 30;
   repeated RefreshPolicyType refreshPolicyType = 31;
-  optional ReflectionEstimationInfo reflectionEstimationInfo = 32;
+  optional LegacyReflectionEstimationInfo legacy_reflection_estimation_info = 32; //deprecated, moved to ReflectionRecommendationInfo
+  repeated string legacy_plan_fragment_ids = 33; //deprecated, moved to ReflectionRecommendationInfo
 }
 
-message ReflectionEstimationInfo {
+message LegacyReflectionEstimationInfo {
   optional int64 created_at = 1;
   optional double averageQuerySavingsFactor = 2;
   optional double averageQueryImprovementInMs = 3;

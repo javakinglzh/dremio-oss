@@ -371,7 +371,7 @@ public class FieldReadDefinition {
         return new WriteHolders.IntWriteHolder(name);
       case TIME:
         return new WriteHolders.TimeWriteHolder(name, path, formatterAndType);
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return new WriteHolders.TimestampWriteHolder(name, path, formatterAndType);
       case VARBINARY:
         return new WriteHolders.VarBinaryWriteHolder(name, buffer);

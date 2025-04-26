@@ -81,7 +81,7 @@ public class Retryer implements ExponentialBackoff {
     if (!retryable || (!infiniteRetries && attemptNo == maxRetries)) {
       throw new OperationFailedAfterRetriesException(e);
     }
-    final StackTraceElement caller = Thread.currentThread().getStackTrace()[2];
+    final StackTraceElement caller = Thread.currentThread().getStackTrace()[3];
     logger.warn(
         "Retry attempt {} for the failure at {}:{}:{}, Error - {}",
         attemptNo,

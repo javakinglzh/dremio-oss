@@ -84,6 +84,7 @@ public class AlterTablePropertiesHandler extends SimpleDirectHandler {
     TableMutationOptions tableMutationOptions =
         TableMutationOptions.newBuilder().setResolvedVersionContext(resolvedVersionContext).build();
     if (mode == UNSET) {
+      IcebergUtils.validateTablePropertiesCanBeUnset(tableProperties.keySet());
       catalog.updateTableProperties(
           path,
           table.getDatasetConfig(),

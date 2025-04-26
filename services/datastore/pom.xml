@@ -54,17 +54,20 @@
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-core</artifactId>
-      <version>${lucene.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-analyzers-common</artifactId>
-      <version>${lucene.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.lucene</groupId>
       <artifactId>lucene-queries</artifactId>
-      <version>${lucene.version}</version>
+    </dependency>
+    <dependency>
+      <!-- needed for loading old index segments after upgrades -->
+      <groupId>org.apache.lucene</groupId>
+      <artifactId>lucene-backward-codecs</artifactId>
+      <scope>runtime</scope>
     </dependency>
     <dependency>
       <groupId>cz.jirutka.rsql</groupId>
@@ -253,7 +256,7 @@
             <phase>generate-test-sources</phase>
             <configuration>
               <protoModules>
-                <protoModules>
+                <protoModule>
                   <source>src/test/protostuff</source>
                   <outputDir>${project.build.directory}/generated-test-sources/protostuff</outputDir>
                   <output>java_bean</output>
@@ -273,7 +276,7 @@
                     </property>
                     <property/>
                   </options>
-                </protoModules>
+                </protoModule>
               </protoModules>
             </configuration>
           </execution>

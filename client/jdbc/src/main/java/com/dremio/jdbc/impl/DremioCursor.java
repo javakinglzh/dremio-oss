@@ -43,7 +43,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.calcite.avatica.AvaticaStatement;
 import org.apache.calcite.avatica.ColumnMetaData;
@@ -95,9 +94,7 @@ class DremioCursor implements Cursor {
     // received all the data from the server.
     volatile boolean completed = false;
 
-    /** Whether throttling of incoming data is active. */
-    private final AtomicBoolean throttled = new AtomicBoolean(false);
-
+    private final Object throttleLock = new Object();
     private volatile ConnectionThrottle throttle;
 
     private volatile boolean closed = false;
@@ -140,13 +137,22 @@ class DremioCursor implements Cursor {
      * @param throttle the "throttlable" object to throttle
      * @return true if actually started (wasn't throttling already)
      */
-    private boolean startThrottlingIfNot(ConnectionThrottle throttle) {
-      final boolean started = throttled.compareAndSet(false, true);
-      if (started) {
-        this.throttle = throttle;
-        throttle.setAutoRead(false);
+    @VisibleForTesting
+    boolean startThrottlingIfNot(ConnectionThrottle throttle) {
+      if (throttle == null) {
+        throw new IllegalStateException("New throttle cannot be null.");
       }
-      return started;
+
+      synchronized (throttleLock) {
+        // If we're already throttling, don't start again
+        if (this.throttle != null) {
+          return false;
+        }
+        // Start throttling
+        this.throttle = throttle;
+        this.throttle.setAutoRead(false);
+        return true;
+      }
     }
 
     /**
@@ -154,13 +160,18 @@ class DremioCursor implements Cursor {
      *
      * @return true if actually stopped (was throttling)
      */
-    private boolean stopThrottlingIfSo() {
-      final boolean stopped = throttled.compareAndSet(true, false);
-      if (stopped) {
+    @VisibleForTesting
+    boolean stopThrottlingIfSo() {
+      synchronized (throttleLock) {
+        // If we're not throttling, don't stop
+        if (throttle == null) {
+          return false;
+        }
+        // Stop throttling
         throttle.setAutoRead(true);
         throttle = null;
+        return true;
       }
-      return stopped;
     }
 
     public void awaitFirstMessage() throws TimeoutException, InterruptedException {

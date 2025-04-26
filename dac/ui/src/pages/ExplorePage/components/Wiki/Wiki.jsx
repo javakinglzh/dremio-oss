@@ -74,7 +74,6 @@ export class WikiView extends PureComponent {
     addNotification: PropTypes.func,
     dataset: PropTypes.instanceOf(Immutable.Map),
     intl: PropTypes.object.isRequired,
-    overlay: PropTypes.bool,
     isPanel: PropTypes.bool,
     hideSqlEditorIcon: PropTypes.bool,
     hideGoToButton: PropTypes.bool,
@@ -200,7 +199,7 @@ export class WikiView extends PureComponent {
   };
 
   initFieldsOverlay = (dataset) => {
-    if ((this.props.overlay || this.props.isPanel) && dataset.get("fields")) {
+    if (this.props.isPanel && dataset.get("fields")) {
       this.setState({
         fields: dataset.get("fields"),
         origFields: dataset.get("fields"),
@@ -473,7 +472,7 @@ export class WikiView extends PureComponent {
   };
 
   searchColumns = (searchVal) => {
-    const { overlay, dataset, isPanel } = this.props;
+    const { dataset, isPanel } = this.props;
     const { origFields } = this.state;
     if (searchVal === "") {
       this.setState({
@@ -483,7 +482,7 @@ export class WikiView extends PureComponent {
       return;
     }
     let columnDetails = origFields;
-    if ((overlay || isPanel) && dataset?.get("fields")) {
+    if (isPanel && dataset?.get("fields")) {
       columnDetails = dataset?.get("fields");
     }
     const filteredColumns = columnDetails?.filter((column) =>
@@ -503,7 +502,6 @@ export class WikiView extends PureComponent {
       isEditAllowed,
       dataset,
       intl,
-      overlay,
       isPanel,
       hideSqlEditorIcon,
       hideGoToButton,
@@ -606,7 +604,6 @@ export class WikiView extends PureComponent {
         startSearch={startSearch}
         renderCollapseIcon={this.renderCollapseIcon}
         dataset={dataset}
-        overlay={overlay}
         searchTerm={searchTerm}
         isPanel={isPanel}
         hideSqlEditorIcon={hideSqlEditorIcon}

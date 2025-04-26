@@ -413,7 +413,7 @@ public class TestSimpleJsonInternalSchemaChange extends InternalSchemaTestBase {
         .isThrownBy(() -> testRunAndReturn(UserBitShared.QueryType.SQL, query2))
         .havingCause()
         .isInstanceOf(UserException.class)
-        .withMessageContaining("GandivaException: Failed to cast the string hello to int32_t");
+        .withMessageContaining("FUNCTION ERROR: Failed to cast the string");
   }
 
   // Internal schema does not work where we cannot promote a dataset

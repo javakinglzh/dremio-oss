@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.logical;
 
 import com.dremio.catalog.model.dataset.TableVersionContext;
+import com.dremio.exec.catalog.DatasetMetadataState;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.ops.DremioCatalogReader;
 import com.dremio.exec.planner.sql.DremioToRelContext;
@@ -115,6 +116,11 @@ public final class ConvertedViewTable implements DremioTable {
   @Override
   public TableType getJdbcTableType() {
     return unconvertedViewTable.getJdbcTableType();
+  }
+
+  @Override
+  public DatasetMetadataState getDatasetMetadataState() {
+    return unconvertedViewTable.getDatasetMetadataState();
   }
 
   public static ConvertedViewTable of(

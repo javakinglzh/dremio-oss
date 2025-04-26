@@ -15,7 +15,7 @@
  */
 package com.dremio.plugins.util;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import com.google.common.base.Preconditions;
 import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,43 +25,44 @@ public class CloseableResource<T> implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(CloseableResource.class);
   private T resource;
   private Consumer<T> closerFunc;
-  private AtomicInteger refCnt = new AtomicInteger(1);
+  private int refCnt = 1;
 
   public CloseableResource(T resource, Consumer<T> closerFunc) {
     this.resource = resource;
     this.closerFunc = closerFunc;
   }
 
-  public void incrementRef() {
-    refCnt.incrementAndGet();
-    if (logger.isDebugEnabled()) {
-      logger.debug(
-          "Class {} acquired the ref for {}:{}, Ref {}",
-          getCallingClass(),
-          resource.getClass().getSimpleName(),
-          System.identityHashCode(resource),
-          refCnt.get());
-    }
-  }
-
-  public T getResource() {
+  public synchronized T getResource() {
+    Preconditions.checkNotNull(resource);
+    ++refCnt;
+    logger.debug(
+        "Class {} acquired the ref for {}:{}, Ref {}",
+        getCallingClass(),
+        resource.getClass().getSimpleName(),
+        System.identityHashCode(resource),
+        refCnt);
     return resource;
   }
 
   @Override
-  public void close() throws Exception {
-    if (refCnt.decrementAndGet() == 0 && resource != null) {
+  public synchronized void close() throws Exception {
+    if (refCnt == 0) {
+      return;
+    }
+
+    if (--refCnt == 0 && resource != null) {
       logger.debug("Closing resource {}", resource.getClass().getSimpleName());
       closerFunc.accept(resource);
       resource = null;
     }
-    if (logger.isDebugEnabled() && resource != null) {
+
+    if (resource != null) {
       logger.debug(
           "Class {} released the ref for {}:{}, Current ref count:{}",
           getCallingClass(),
           resource.getClass().getSimpleName(),
           System.identityHashCode(resource),
-          refCnt.get());
+          refCnt);
     }
   }
 

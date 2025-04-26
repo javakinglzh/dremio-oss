@@ -162,7 +162,6 @@ public class DremioServlet implements Servlet {
         .setAllowDownload(options.getOption(UIOptions.ALLOW_DOWNLOAD))
         .setAllowFormatting(options.getOption(UIOptions.ALLOW_FORMATTING))
         .setUseNewDatasetNavigation(options.getOption(UIOptions.DATASET_NAVIGATION_CHECK))
-        .setShowNewJobsTables(options.getOption(UIOptions.JOBS_TABLES_UI_CHECK))
         .setAsyncDownloadEnabled(options.getOption(UIOptions.ASYNC_DOWNLOAD_CHECK))
         .setNextgenSearchUIEnabled(options.getOption(UIOptions.NEXTGEN_SEARCH_UI))
         .setAppearancePickerEnabled(options.getOption(UIOptions.APPEARANCE_PICKER));

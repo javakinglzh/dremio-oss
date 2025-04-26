@@ -54,7 +54,7 @@ class MainInfoItemNameAndTag extends Component {
   };
 
   render() {
-    const { item, intl, openDetailsPanel } = this.props;
+    const { item, intl, openDetailsPanel, sourceType = null } = this.props;
     const tagsFromItem = item.get("tags");
     const fullPath = constructFullPath(getFullPathListFromEntity(item));
     return (
@@ -63,6 +63,7 @@ class MainInfoItemNameAndTag extends Component {
           item={item}
           openDetailsPanel={openDetailsPanel}
           tagsLength={tagsFromItem?.size}
+          sourceType={sourceType}
         />
         {fullPath && (
           <CopyButton

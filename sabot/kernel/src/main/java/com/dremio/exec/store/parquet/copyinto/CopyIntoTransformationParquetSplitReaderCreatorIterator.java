@@ -44,6 +44,7 @@ import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf.ParquetDatasetSplitScanXAttr;
 import java.io.IOException;
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
@@ -232,6 +233,25 @@ public class CopyIntoTransformationParquetSplitReaderCreatorIterator
             .map(Property::getSourceColNames)
             .flatMap(Collection::stream)
             .collect(Collectors.toSet());
+
+    List<String> footerColNames =
+        footerSchema.getFields().stream()
+            .map(field -> field.getName().toLowerCase())
+            .collect(Collectors.toList());
+    List<String> nonExistentTransformationColNames =
+        sourceTransformationColNames.stream()
+            .filter(
+                transformationColName ->
+                    !footerColNames.contains(transformationColName.toLowerCase()))
+            .collect(Collectors.toList());
+    if (!nonExistentTransformationColNames.isEmpty()) {
+      throw UserException.validationError()
+          .message(
+              "Copy Into transformation select list contains invalid column names [%s]",
+              String.join(", ", nonExistentTransformationColNames))
+          .buildSilently();
+    }
+
     SchemaBuilder schemaBuilder = BatchSchema.newBuilder();
     footerSchema.getFields().stream()
         .filter(field -> sourceTransformationColNames.contains(field.getName().toLowerCase()))

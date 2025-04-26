@@ -53,6 +53,7 @@ const ExpandableText = (props) => {
     onClick,
     onToggle,
     text,
+    ariaLabel,
   } = props;
 
   const [expanded, setExpanded] = useState(defaultExpanded);
@@ -107,17 +108,36 @@ const ExpandableText = (props) => {
   const Icon = expanded ? Collapse : Expand;
   return (
     <Root className={rootClasses}>
-      <div className={labelContainerClasses} onClick={handleLabelClick}>
-        <div className="expandable-text-label-icon" onClick={handleIconClick}>
+      <div
+        className={labelContainerClasses}
+        onClick={handleLabelClick}
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.code === "Enter" || e.code === "Space") {
+            handleLabelClick();
+          }
+        }}
+        aria-label={ariaLabel}
+      >
+        <div
+          className="expandable-text-label-icon"
+          onClick={handleIconClick}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.code === "Enter" || e.code === "Space") {
+              handleIconClick();
+            }
+          }}
+          role="button"
+          aria-label={`${expanded ? "collapse view" : "expand view"}`}
+        >
           <Icon fontSize="small" />
         </div>
         <span className={labelClasses} title={text}>
           {label}
         </span>
       </div>
-      {expanded && (
-        <div className={collapsableContainerClasses}>{children}</div>
-      )}
+      {expanded && <ul className={collapsableContainerClasses}>{children}</ul>}
     </Root>
   );
 };
@@ -146,6 +166,7 @@ ExpandableText.propTypes = {
   ]).isRequired,
   open: Proptypes.oneOfType([Proptypes.bool, Proptypes.object]),
   text: Proptypes.string,
+  ariaLabel: Proptypes.string,
 };
 
 ExpandableText.defaultProps = {

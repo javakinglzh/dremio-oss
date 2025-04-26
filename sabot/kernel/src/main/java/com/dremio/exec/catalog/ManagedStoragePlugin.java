@@ -15,11 +15,16 @@
  */
 package com.dremio.exec.catalog;
 
-import static com.dremio.exec.ExecConstants.SOURCE_ASYNC_MODIFICATION_ENABLED;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_ASYNC_MODIFICATION_ENABLED;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_ASYNC_MODIFICATION_TIMEOUT_MINUTES;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_ASYNC_MODIFICATION_WAIT_SECONDS;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES;
 import static com.dremio.service.namespace.source.proto.SourceChangeState.SOURCE_CHANGE_STATE_CREATING;
 import static com.dremio.service.namespace.source.proto.SourceChangeState.SOURCE_CHANGE_STATE_NONE;
 import static com.dremio.service.namespace.source.proto.SourceChangeState.SOURCE_CHANGE_STATE_UPDATING;
 
+import com.dremio.catalog.exception.SourceBadStateException;
+import com.dremio.catalog.exception.SourceMalfunctionException;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.VM;
 import com.dremio.common.concurrent.AutoCloseableLock;
@@ -43,14 +48,13 @@ import com.dremio.connector.metadata.options.AlterMetadataOption;
 import com.dremio.datastore.DatastoreException;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.exec.catalog.CatalogInternalRPC.UpdateLastRefreshDateRequest;
-import com.dremio.exec.catalog.CatalogServiceImpl.UpdateType;
 import com.dremio.exec.catalog.DatasetCatalog.UpdateStatus;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SupportsGlobalKeys;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SabotQueryContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.MissingPluginConf;
@@ -71,6 +75,7 @@ import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.SourceState.Message;
 import com.dremio.service.namespace.SourceState.SourceStatus;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.source.SourceNamespaceService;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
 import com.dremio.service.namespace.source.proto.SourceChangeState;
@@ -85,9 +90,12 @@ import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.telemetry.api.metrics.Metrics;
 import com.dremio.telemetry.api.metrics.SimpleCounter;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Defaults;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.base.Strings;
+import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
@@ -95,6 +103,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import io.protostuff.LinkedBuffer;
 import io.protostuff.ProtostuffIOUtil;
+import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.security.AccessControlException;
 import java.util.Comparator;
@@ -120,24 +129,22 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 import javax.inject.Provider;
+import org.apache.commons.lang3.reflect.FieldUtils;
 
 /**
  * Manages the Dremio system state related to a StoragePlugin.
  *
  * <p>Also owns the SourceMetadataManager, the task driver responsible for maintaining metadata
- * freshness.
- *
- * <p>Locking model: exposes a readLock (using the inner plugin) and a writeLock (changing the inner
- * plugin). The locking model is exposed externally so that CatalogServiceImpl can get locks as
- * necessary during modifications.
+ * freshness for this source.
  */
 public class ManagedStoragePlugin implements AutoCloseable {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ManagedStoragePlugin.class);
-
   private final String name;
-  private final SabotContext context;
+  private final CatalogSabotContext context;
+  private final NamespaceService.Factory namespaceServiceFactory;
   private final ConnectionReader reader;
   private final NamespaceKey sourceKey;
   private final Executor executor;
@@ -152,6 +159,24 @@ public class ManagedStoragePlugin implements AutoCloseable {
   /** A write lock that must be acquired before starting, stopping or replacing the plugin. */
   private final ReentrantReadWriteLock.WriteLock writeLock;
 
+  /**
+   * This is the same lock as readLock & writeLock above. It is included as an instance variable
+   * because it is very useful during debugging.
+   */
+  @SuppressWarnings("FieldCanBeLocal")
+  private final ReentrantReadWriteLock rwLock;
+
+  /**
+   * Parallel calls to refreshState could accumulate and get stuck on slow/synchronized getState
+   * calls. Only let one refreshState happen at a time.
+   */
+  private final Lock refreshStateLock = new ReentrantLock();
+
+  /**
+   * "In flux" sources are those where this node has obtained the distributed lock for the source.
+   */
+  private final Predicate<String> isInFluxSource;
+
   private final PermissionCheckCache permissionsCache;
   private final SourceMetadataManager metadataManager;
   private final OptionManager options;
@@ -159,25 +184,20 @@ public class ManagedStoragePlugin implements AutoCloseable {
   private final Orphanage orphanage;
 
   protected volatile SourceConfig sourceConfig;
-  private volatile StoragePlugin plugin;
+  private volatile @Nullable StoragePlugin plugin;
   private volatile MetadataPolicy metadataPolicy;
   private volatile StoragePluginId pluginId;
   private volatile ConnectionConf<?, ?> conf;
   private volatile Stopwatch startup = Stopwatch.createUnstarted();
   private volatile SourceState state = SourceState.badState("Source not yet started.");
   private final Thread fixFailedThread;
-  private final Predicate<String> influxSourcePred;
   private volatile boolean closed = false;
 
-  /** Included in instance variables because it is very useful during debugging. */
-  private final ReentrantReadWriteLock rwlock;
-
-  private final Lock refreshStateLock = new ReentrantLock();
-
   public ManagedStoragePlugin(
-      SabotContext context,
+      CatalogSabotContext catalogSabotContext,
+      SabotQueryContext sabotQueryContext,
       Executor executor,
-      boolean isMaster,
+      boolean isVirtualMaster,
       ModifiableSchedulerService modifiableScheduler,
       NamespaceService systemUserNamespaceService,
       Orphanage orphanage,
@@ -187,12 +207,14 @@ public class ManagedStoragePlugin implements AutoCloseable {
       ConnectionReader reader,
       CatalogServiceMonitor monitor,
       Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider,
-      Predicate<String> influxSourcePred) {
-    this.rwlock = new ReentrantReadWriteLock(true);
+      Predicate<String> isInFluxSource,
+      NamespaceService.Factory namespaceServiceFactory) {
+    this.rwLock = new ReentrantReadWriteLock(true);
+    this.readLock = rwLock.readLock();
+    this.writeLock = rwLock.writeLock();
+
+    this.context = catalogSabotContext;
     this.executor = executor;
-    this.readLock = rwlock.readLock();
-    this.writeLock = rwlock.writeLock();
-    this.context = context;
     this.sourceConfig = sourceConfig;
     this.sourceKey = new NamespaceKey(sourceConfig.getName());
     this.name = sourceConfig.getName();
@@ -203,7 +225,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
     this.conf =
         this.reader.getConnectionConf(sourceConfig); // must use decorated reader (this.reader)
     this.plugin =
-        resolveConnectionConf(conf).newPlugin(context, sourceConfig.getName(), this::getId);
+        resolveConnectionConf(conf)
+            .newPlugin(catalogSabotContext, sourceConfig.getName(), this::getId);
     this.metadataPolicy =
         sourceConfig.getMetadataPolicy() == null
             ? CatalogService.NEVER_REFRESH_POLICY
@@ -212,7 +235,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         new PermissionCheckCache(
             this::getPlugin, getAuthTtlMsProvider(options, sourceConfig), 2500);
 
-    this.influxSourcePred = influxSourcePred;
+    this.isInFluxSource = isInFluxSource;
 
     fixFailedThread = new FixFailedToStart();
     // leaks this so do last.
@@ -220,13 +243,15 @@ public class ManagedStoragePlugin implements AutoCloseable {
         createSourceMetadataManager(
             sourceKey,
             modifiableScheduler,
-            isMaster,
+            isVirtualMaster,
             sourceDataStore,
             new MetadataBridge(),
             options,
             monitor,
             broadcasterProvider,
-            context.getClusterCoordinator());
+            catalogSabotContext.getClusterCoordinator(),
+            sabotQueryContext);
+    this.namespaceServiceFactory = namespaceServiceFactory;
   }
 
   private ConnectionConf<?, ?> resolveConnectionConf(ConnectionConf<?, ?> connectionConf) {
@@ -239,31 +264,33 @@ public class ManagedStoragePlugin implements AutoCloseable {
   protected SourceMetadataManager createSourceMetadataManager(
       NamespaceKey sourceName,
       ModifiableSchedulerService modifiableScheduler,
-      boolean isMaster,
+      boolean isVirtualMaster,
       LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore,
       final ManagedStoragePlugin.MetadataBridge bridge,
       final OptionManager options,
       final CatalogServiceMonitor monitor,
       final Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider,
-      final ClusterCoordinator clusterCoordinator) {
+      final ClusterCoordinator clusterCoordinator,
+      final SabotQueryContext sabotQueryContext) {
     return new SourceMetadataManager(
         sourceName,
         modifiableScheduler,
-        isMaster,
+        isVirtualMaster,
         sourceDataStore,
         bridge,
         options,
         monitor,
         broadcasterProvider,
-        clusterCoordinator);
+        clusterCoordinator,
+        sabotQueryContext);
   }
 
   protected PermissionCheckCache getPermissionsCache() {
     return permissionsCache;
   }
 
-  protected StoragePlugin getPlugin() {
-    return plugin;
+  protected Optional<StoragePlugin> getPlugin() {
+    return Optional.ofNullable(plugin);
   }
 
   protected MetadataPolicy getMetadataPolicy() {
@@ -272,6 +299,20 @@ public class ManagedStoragePlugin implements AutoCloseable {
 
   protected AutoCloseableLock readLock() {
     return AutoCloseableLock.lockAndWrap(readLock, true);
+  }
+
+  private AutoCloseableLock tryReadLock() {
+    // if the plugin was closed, we should always fail.
+    if (closed) {
+      throw new StoragePluginChanging(name + ": Plugin was closed.");
+    }
+
+    boolean locked = readLock.tryLock();
+    if (!locked) {
+      throw new StoragePluginChanging(name + ": Plugin is actively undergoing changes.");
+    }
+
+    return AutoCloseableLock.ofAlreadyOpen(readLock, true);
   }
 
   @VisibleForTesting
@@ -287,7 +328,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
     if (VM.isDebugEnabled()) {
       return TimeUnit.DAYS.toMillis(365);
     }
-    return context.getOptionManager().getOption(CatalogOptions.STORAGE_PLUGIN_CREATE_MAX);
+    return options.getOption(CatalogOptions.STORAGE_PLUGIN_CREATE_MAX);
   }
 
   /**
@@ -297,7 +338,6 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * creation time or version.
    *
    * @param targetConfig target source config
-   * @return managed storage plugin
    * @throws Exception if synchronization fails
    */
   @WithSpan("synchronize-source")
@@ -387,23 +427,11 @@ public class ManagedStoragePlugin implements AutoCloseable {
       // name, so replace the plugin regardless of the checks
 
       // in-memory storage plugin is older than the one persisted or differs in tag alone, update
-      replacePlugin(targetConfig, createWaitMillis(), false);
-    }
-  }
-
-  private void setSourceChangeState(SourceConfig config, boolean create) {
-    if (create) {
-      config.setSourceChangeState(SOURCE_CHANGE_STATE_CREATING);
-    } else {
-      config.setSourceChangeState(SOURCE_CHANGE_STATE_UPDATING);
+      replacePluginDeprecated(targetConfig, createWaitMillis(), false);
     }
   }
 
   private void addDefaults(SourceConfig config) {
-    if (config.getCtime() == null) {
-      config.setCtime(System.currentTimeMillis());
-    }
-
     if (config.getMetadataPolicy() == null) {
       config.setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY);
     }
@@ -444,20 +472,57 @@ public class ManagedStoragePlugin implements AutoCloseable {
     }
   }
 
-  void createSource(SourceConfig config, String userName, NamespaceAttribute... attributes)
-      throws TimeoutException, Exception {
-    createOrUpdateSource(true, config, userName, attributes);
+  CompletionStage<Void> createSource(
+      SourceConfig config, String userName, NamespaceAttribute... attributes)
+      throws NamespaceException, SourceMalfunctionException {
+    return createSource(
+        config, userName, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION, attributes);
   }
 
-  void updateSource(SourceConfig config, String userName, NamespaceAttribute... attributes)
-      throws ConcurrentModificationException, NamespaceException {
-    createOrUpdateSource(false, config, userName, attributes);
+  CompletionStage<Void> createSource(
+      SourceConfig config,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
+      throws NamespaceException, SourceMalfunctionException {
+    if (options.getOption(SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES)) {
+      return createOrUpdateSource(true, config, userName, sourceRefreshOption, attributes);
+    } else {
+      return createOrUpdateSourceDeprecated(
+          true, config, userName, sourceRefreshOption, attributes);
+    }
   }
 
-  private void createOrUpdateSource(
-      final boolean create, SourceConfig config, String userName, NamespaceAttribute... attributes)
-      throws ConcurrentModificationException, NamespaceException {
-    final NamespaceService userNamespace = context.getNamespaceService(userName);
+  CompletionStage<Void> updateSource(
+      SourceConfig config, String userName, NamespaceAttribute... attributes)
+      throws ConcurrentModificationException, NamespaceException, SourceMalfunctionException {
+    return updateSource(
+        config, userName, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION, attributes);
+  }
+
+  CompletionStage<Void> updateSource(
+      SourceConfig config,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
+      throws ConcurrentModificationException, NamespaceException, SourceMalfunctionException {
+    if (options.getOption(SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES)) {
+      return createOrUpdateSource(false, config, userName, sourceRefreshOption, attributes);
+    } else {
+      return createOrUpdateSourceDeprecated(
+          false, config, userName, sourceRefreshOption, attributes);
+    }
+  }
+
+  @Deprecated
+  CompletionStage<Void> createOrUpdateSourceDeprecated(
+      final boolean create,
+      SourceConfig config,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
+      throws ConcurrentModificationException, NamespaceException, SourceMalfunctionException {
+    final NamespaceService userNamespace = namespaceServiceFactory.get(userName);
     boolean createOrUpdateSucceeded = false;
 
     if (logger.isTraceEnabled()) {
@@ -471,7 +536,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
     }
     // VersionedPlugin  is a source that does not save datasets in Namespace. So they never need to
     // be refreshed
-    if (this.plugin != null && this.plugin.isWrapperFor(VersionedPlugin.class)) {
+
+    if (getPlugin().isPresent() && getPlugin().get().isWrapperFor(VersionedPlugin.class)) {
       config.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
     }
 
@@ -482,7 +548,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
     addGlobalKeys(config);
     encryptSecrets(config);
     validateAccelerationSettings(config);
-    setSourceChangeState(config, create);
+    config.setSourceChangeState(
+        create ? SOURCE_CHANGE_STATE_CREATING : SOURCE_CHANGE_STATE_UPDATING);
 
     if (!create) {
       updateConfig(userNamespace, config, attributes);
@@ -502,11 +569,11 @@ public class ManagedStoragePlugin implements AutoCloseable {
 
         if (create) {
           // this isn't really a replace.
-          replacePlugin(config, createWaitMillis(), true);
+          replacePluginDeprecated(config, createWaitMillis(), true);
           oldMetadataIsBad = false;
           refreshDatasetNames = true;
         } else {
-          boolean metadataStillGood = replacePlugin(config, createWaitMillis(), false);
+          boolean metadataStillGood = replacePluginDeprecated(config, createWaitMillis(), false);
           oldMetadataIsBad = !metadataStillGood;
           refreshDatasetNames = !metadataStillGood;
         }
@@ -536,7 +603,6 @@ public class ManagedStoragePlugin implements AutoCloseable {
         // This increments the version in the config object as well.
         try {
           userNamespace.addOrUpdateSource(config.getKey(), config, attributes);
-
         } catch (AccessControlException | ConcurrentModificationException | DatastoreException e) {
           logger.trace(
               "Saving to namespace store failed, reverting the in-memory source config to the original version...");
@@ -551,69 +617,264 @@ public class ManagedStoragePlugin implements AutoCloseable {
       // now that we're outside the plugin lock, we should refresh the dataset names. Note that this
       // could possibly get
       // run on a different config if two source updates are racing to this lock.
-      if (options.getOption(SOURCE_ASYNC_MODIFICATION_ENABLED)) {
+      return startAsyncSourceCreateUpdate(
+          config,
+          originalConfigCopy,
+          create,
+          userNamespace,
+          refreshDatasetNames ? List.of(SourceNameRefreshAction.newRefreshAllAction()) : null,
+          sourceRefreshOption,
+          stopwatchForPlugin,
+          attributes);
+    } catch (Exception e) {
+      postSourceModify(config, originalConfigCopy, e, createOrUpdateSucceeded, create);
+      return CompletableFuture.runAsync(() -> {});
+    }
+  }
+
+  CompletionStage<Void> createOrUpdateSource(
+      final boolean create,
+      SourceConfig config,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
+      throws ConcurrentModificationException, NamespaceException, SourceMalfunctionException {
+    final NamespaceService userNamespace = namespaceServiceFactory.get(userName);
+    boolean createOrUpdateSucceeded = false;
+
+    if (logger.isTraceEnabled()) {
+      logger.trace(
+          "{} source [{}].",
+          create ? "Creating" : "Updating",
+          config.getName(),
+          new RuntimeException("Nothing wrong, just show stack trace for debug."));
+    } else if (logger.isDebugEnabled()) {
+      logger.debug("{} source [{}].", create ? "Creating" : "Updating", config.getName());
+    }
+    // VersionedPlugin  is a source that does not save datasets in Namespace. So they never need to
+    // be refreshed
+    if (getPlugin().isPresent() && getPlugin().get().isWrapperFor(VersionedPlugin.class)) {
+      config.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
+    }
+
+    final SourceConfig originalConfigCopy = ProtostuffUtil.copy(sourceConfig);
+
+    // Preprocessing on the config before creation
+    addDefaults(config);
+    addGlobalKeys(config);
+    encryptSecrets(config);
+    validateAccelerationSettings(config);
+    config.setSourceChangeState(
+        create ? SOURCE_CHANGE_STATE_CREATING : SOURCE_CHANGE_STATE_UPDATING);
+
+    if (!create) {
+      updateConfig(userNamespace, config, attributes);
+    } else {
+      migrateLegacyFormat(config);
+    }
+
+    try {
+      final Stopwatch stopwatchForPlugin = Stopwatch.createStarted();
+
+      List<SourceNameRefreshAction> nameRefreshActions;
+
+      // **** Start Local Update **** //
+      try (AutoCloseableLock writeLock = writeLock()) {
+
+        if (create) {
+          // this isn't really a replace.
+          replacePlugin(config, createWaitMillis(), true);
+          nameRefreshActions = Lists.newArrayList(SourceNameRefreshAction.newRefreshAllAction());
+        } else {
+          nameRefreshActions = replacePlugin(config, createWaitMillis(), false);
+        }
+
+        // Now let's create the plugin in the system namespace.
+        // This increments the version in the config object as well.
+        try {
+          userNamespace.addOrUpdateSource(config.getKey(), config, attributes);
+        } catch (AccessControlException | ConcurrentModificationException | DatastoreException e) {
+          logger.trace(
+              "Saving to namespace store failed, reverting the in-memory source config to the original version...");
+          setLocals(originalConfigCopy, true);
+          throw e;
+        }
+      }
+
+      // ***** Complete Local Update **** //
+      createOrUpdateSucceeded = true;
+
+      // now that we're outside the plugin lock, we should refresh the dataset names. Note that this
+      // could possibly get
+      // run on a different config if two source updates are racing to this lock.
+      return startAsyncSourceCreateUpdate(
+          config,
+          originalConfigCopy,
+          create,
+          userNamespace,
+          nameRefreshActions,
+          sourceRefreshOption,
+          stopwatchForPlugin,
+          attributes);
+    } catch (Exception e) {
+      postSourceModify(config, originalConfigCopy, e, createOrUpdateSucceeded, create);
+      return CompletableFuture.runAsync(() -> {});
+    }
+  }
+
+  private CompletableFuture<Void> startAsyncSourceCreateUpdate(
+      SourceConfig config,
+      SourceConfig originalConfigCopy,
+      boolean create,
+      NamespaceService userNamespace,
+      List<SourceNameRefreshAction> nameRefreshActions,
+      SourceRefreshOption sourceRefreshOption,
+      Stopwatch stopwatchForPlugin,
+      NamespaceAttribute... attributes) {
+    // When the flag is off, we are passing Runnable::run for running the code in the same thread,
+    // which effectively makes the code run synchronously.
+    CompletableFuture<Void> future =
         CompletableFuture.runAsync(
-                () -> refreshNames(config.getName(), refreshDatasetNames), executor)
+                () -> {
+                  refreshNames(config.getName(), nameRefreshActions);
+                },
+                options.getOption(SOURCE_ASYNC_MODIFICATION_ENABLED) ? executor : Runnable::run)
             .whenComplete(
                 (res, ex) -> {
                   try {
-                    userNamespace.addOrUpdateSource(
-                        config.getKey(),
-                        config.setSourceChangeState(SOURCE_CHANGE_STATE_NONE),
-                        attributes);
-                  } catch (NamespaceException e) {
-                    throw new RuntimeException(e);
+                    // Update source change state to none in namespace and in-memory.
+                    try (AutoCloseableLock writeLock = writeLock()) {
+                      userNamespace.addOrUpdateSource(
+                          config.getKey(),
+                          config.setSourceChangeState(SOURCE_CHANGE_STATE_NONE),
+                          attributes);
+                      replacePlugin(config, createWaitMillis(), false);
+                    }
+                  } catch (Exception e) {
+                    logger.error("Error while updating source change state", e);
+                    if (ex == null) {
+                      ex = e;
+                    } else {
+                      ex.addSuppressed(e);
+                    }
+                  } finally {
+                    postSourceModify(config, originalConfigCopy, ex, true, create);
+                    logCompletion(config.getName(), stopwatchForPlugin);
                   }
-                  logCompletion(config.getName(), stopwatchForPlugin);
                 });
-      } else {
-        refreshNames(config.getName(), refreshDatasetNames);
-        logCompletion(config.getName(), stopwatchForPlugin);
-        userNamespace.addOrUpdateSource(
-            config.getKey(), config.setSourceChangeState(SOURCE_CHANGE_STATE_NONE), attributes);
-      }
 
-    } catch (ConcurrentModificationException ex) {
-      throw UserException.concurrentModificationError(ex)
+    // Most sources require very little time to get names of their children (tables/views), spent
+    // SOURCE_ASYNC_MODIFICATION_WAIT_SECONDS to let them complete before this method returns. If
+    // successful, the source is ready for use. Otherwise, the source completes initialization
+    // asynchronously.
+    waitAsyncSourceModification(
+        future,
+        options.getOption(SOURCE_ASYNC_MODIFICATION_WAIT_SECONDS),
+        TimeUnit.SECONDS,
+        create,
+        true);
+
+    // if it is synchronous path or if the feature flag is turned off, we wait.
+    // or if nameRefreshActions are empty, do synchronous path
+    if (sourceRefreshOption == SourceRefreshOption.WAIT_FOR_DATASETS_CREATION
+        || !options.getOption(SOURCE_ASYNC_MODIFICATION_ENABLED)) {
+      waitAsyncSourceModification(
+          future,
+          options.getOption(SOURCE_ASYNC_MODIFICATION_TIMEOUT_MINUTES),
+          TimeUnit.MINUTES,
+          create,
+          false);
+    }
+    // Make sure the future cannot be completed by the caller.
+    return future.copy();
+  }
+
+  private void waitAsyncSourceModification(
+      CompletableFuture<Void> future,
+      long timeout,
+      TimeUnit timeUnit,
+      boolean create,
+      boolean ignoreTimeoutException) {
+    try {
+      future.get(timeout, timeUnit);
+    } catch (InterruptedException e) {
+      logAsyncWaitFailure(create, e);
+      Thread.currentThread().interrupt();
+      throw new RuntimeException(e);
+    } catch (TimeoutException te) {
+      // Does not finish within given time.
+      if (!ignoreTimeoutException) {
+        logAsyncWaitFailure(create, te);
+        throw new RuntimeException(te);
+      }
+    } catch (Exception e) {
+      logAsyncWaitFailure(create, e);
+      Throwables.throwIfUnchecked(e);
+      throw new RuntimeException(e);
+    }
+  }
+
+  private void logAsyncWaitFailure(boolean create, Exception e) {
+    logger.error(
+        String.format(
+            "error while waiting async source %s. Error: %s", create ? "creation" : "update", e));
+  }
+
+  /** Delete encrypted secrets found in the old config but not in the new config. */
+  private void cleanupSecretsIfNeeded(
+      SourceConfig config,
+      SourceConfig originalConfigCopy,
+      boolean createOrUpdateSucceeded,
+      boolean create) {
+    if (create) {
+      // Cleanup any secrets if the source creation fails
+      if (!createOrUpdateSucceeded) {
+        cleanupSecrets(config);
+      }
+    } else {
+      // Cleanup stale secrets after source update.
+      if (createOrUpdateSucceeded) {
+        cleanupSecretsAfterUpdate(config, originalConfigCopy);
+      } else {
+        cleanupSecretsAfterUpdate(originalConfigCopy, config);
+      }
+    }
+  }
+
+  private void postSourceModify(
+      SourceConfig config,
+      SourceConfig originalConfigCopy,
+      Throwable t,
+      boolean createOrUpdateSucceed,
+      boolean create) {
+    cleanupSecretsIfNeeded(config, originalConfigCopy, createOrUpdateSucceed, create);
+    if (t instanceof ConcurrentModificationException) {
+      throw UserException.concurrentModificationError(t)
           .message(
               "Source update failed due to a concurrent update. Please try again [%s].",
               config.getName())
           .build(logger);
-    } catch (AccessControlException ex) {
-      throw UserException.permissionError(ex)
-          .message("Update privileges on source [%s] failed: %s", config.getName(), ex.getMessage())
+    } else if (t instanceof AccessControlException) {
+      throw UserException.permissionError(t)
+          .message("Update privileges on source [%s] failed: %s", config.getName(), t.getMessage())
           .build(logger);
-    } catch (InvalidNamespaceNameException ex) {
-      throw UserException.validationError(ex)
+    } else if (t instanceof InvalidNamespaceNameException) {
+      throw UserException.validationError(t)
           .message(
               String.format(
                   "Failure creating/updating this source [%s]: %s",
-                  config.getName(), ex.getMessage()))
+                  config.getName(), t.getMessage()))
           .build(logger);
-    } catch (Exception ex) {
+    } else if (t instanceof Exception) { // Any exception other than the ones listed above.
       String suggestedUserAction = getState().getSuggestedUserAction();
       if (suggestedUserAction == null || suggestedUserAction.isEmpty()) {
         // If no user action was suggested, fall back to a basic message.
         suggestedUserAction =
             String.format(
                 "Failure creating/updating this source [%s]: %s.",
-                config.getName(), ex.getMessage());
+                config.getName(), t.getMessage());
       }
-      throw UserException.validationError(ex).message(suggestedUserAction).build(logger);
-    } finally {
-      if (create) {
-        // Cleanup any secrets if the source creation fails
-        if (!createOrUpdateSucceeded) {
-          cleanupSecrets(config);
-        }
-      } else {
-        // Cleanup stale secrets after source update.
-        if (createOrUpdateSucceeded) {
-          cleanupSecretsAfterUpdate(config, originalConfigCopy);
-        } else {
-          cleanupSecretsAfterUpdate(originalConfigCopy, config);
-        }
-      }
+      throw UserException.validationError(t).message(suggestedUserAction).build(logger);
     }
   }
 
@@ -626,21 +887,44 @@ public class ManagedStoragePlugin implements AutoCloseable {
     createdSourcesCounter.increment();
   }
 
-  private void refreshNames(String name, boolean refreshDatasetNames) {
-    if (refreshDatasetNames) {
-      if (!keepStaleMetadata()) {
-        logger.debug("Refreshing names in source [{}]", name);
-        try {
-          refresh(UpdateType.NAMES, null);
-        } catch (NamespaceException e) {
-          throw UserException.validationError(e)
-              .message(
-                  String.format("Failure refreshing this source [%s]: %s", name, e.getMessage()))
-              .buildSilently();
+  private void refreshNames(String name, List<SourceNameRefreshAction> actions) {
+    if (actions == null || actions.isEmpty()) {
+      return;
+    }
+
+    if (keepStaleMetadata()) {
+      logger.debug("Not refreshing names in source [{}]", name);
+      return;
+    }
+
+    logger.debug("Refreshing names in source [{}]", name);
+    try {
+      for (SourceNameRefreshAction action : actions) {
+        switch (action.getAction()) {
+          case DELETE_FOLDERS:
+            logger.debug(
+                "Delete entities in source [{}] with prefixes {}", name, action.getFolders());
+            deleteSourceChildren(sourceConfig, action.getFolders());
+            break;
+          case DELETE_ALL:
+            logger.debug("Delete all entities in source [{}]", name);
+            deleteSourceChildren(sourceConfig, null);
+            break;
+          case REFRESH_FOLDERS:
+            logger.debug(
+                "Refresh entities in source [{}] with with prefixes {}", name, action.getFolders());
+            refresh(SourceUpdateType.ofNamesInFolders(action.getFolders()), null);
+            break;
+          case REFRESH_ALL:
+            logger.debug("Refresh all entities names in source [{}]", name);
+            refresh(SourceUpdateType.NAMES, null);
+            break;
         }
-      } else {
-        logger.debug("Not refreshing names in source [{}]", name);
       }
+    } catch (NamespaceException e) {
+      throw UserException.validationError(e)
+          .message(String.format("Failure refreshing source [%s]: %s", name, e.getMessage()))
+          .buildSilently();
     }
   }
 
@@ -656,11 +940,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         "Source added [{}], took {} milliseconds", name, stopwatch.elapsed(TimeUnit.MILLISECONDS));
   }
 
-  void validateAccelerationSettings(SourceConfig config) {}
-
-  OptionManager getOptionManager() {
-    return context.getOptionManager();
-  }
+  void validateAccelerationSettings(SourceConfig config) throws SourceMalfunctionException {}
 
   private void addGlobalKeys(SourceConfig config) {
     final ConnectionConf<?, ?> connectionConf = config.getConnectionConf(reader);
@@ -732,9 +1012,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
   }
 
   private boolean keepStaleMetadata() {
-    return context
-        .getOptionManager()
-        .getOption(CatalogOptions.STORAGE_PLUGIN_KEEP_METADATA_ON_REPLACE);
+    return options.getOption(CatalogOptions.STORAGE_PLUGIN_KEEP_METADATA_ON_REPLACE);
   }
 
   /** Given we know the source configs are the same, check if the tags are as well. */
@@ -820,7 +1098,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         .withFallback(DatasetRetrievalOptions.DEFAULT);
   }
 
-  public StoragePluginRulesFactory getRulesFactory()
+  public Optional<StoragePluginRulesFactory> getRulesFactory()
       throws InstantiationException,
           IllegalAccessException,
           InvocationTargetException,
@@ -831,16 +1109,21 @@ public class ManagedStoragePlugin implements AutoCloseable {
     // source.
 
     // grab local to avoid changes under us later.
-    final StoragePlugin plugin = this.plugin;
-    if (plugin == null) {
-      return null;
+    Optional<StoragePlugin> optionalStoragePlugin = getPlugin();
+    if (optionalStoragePlugin.isEmpty()) {
+      return Optional.empty();
     }
 
-    if (plugin.getRulesFactoryClass() != null) {
-      return plugin.getRulesFactoryClass().getDeclaredConstructor().newInstance();
+    if (optionalStoragePlugin.get().getRulesFactoryClass() != null) {
+      return Optional.of(
+          optionalStoragePlugin
+              .get()
+              .getRulesFactoryClass()
+              .getDeclaredConstructor()
+              .newInstance());
     }
 
-    return null;
+    return Optional.empty();
   }
 
   /**
@@ -872,19 +1155,23 @@ public class ManagedStoragePlugin implements AutoCloseable {
             try {
               startup = Stopwatch.createStarted();
               logger.debug("Starting: {}", sourceConfig.getName());
-              plugin.start();
+              if (getPlugin().isPresent()) {
+                getPlugin().get().start();
+              } else {
+                throw new SourceMalfunctionException(this.name);
+              }
               setLocals(config, false);
               startup.stop();
               if (state.getStatus() == SourceStatus.bad) {
                 // Check the state here and throw exception so that we close the partially started
                 // plugin properly in the
                 // exception handling code
-                throw new Exception(state.toString());
+                throw new SourceBadStateException(state.toString());
               }
 
               return state;
             } catch (Throwable e) {
-              if (config.getType() != MissingPluginConf.TYPE) {
+              if (!MissingPluginConf.TYPE.equals(config.getType())) {
                 logger.warn("Error starting new source: {}", sourceConfig.getName(), e);
               }
               // TODO: Throwables.gerRootCause(e)
@@ -893,9 +1180,11 @@ public class ManagedStoragePlugin implements AutoCloseable {
               try {
                 // failed to startup, make sure to close.
                 if (closeMetaDataManager) {
-                  AutoCloseables.close(metadataManager, plugin);
+                  AutoCloseables.close(metadataManager, getPlugin().get());
                 } else {
-                  plugin.close();
+                  if (getPlugin().isPresent()) {
+                    getPlugin().get().close();
+                  }
                 }
                 plugin = null;
               } catch (Exception ex) {
@@ -968,7 +1257,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
   public boolean alterDataset(
       final NamespaceKey key,
       final DatasetConfig datasetConfig,
-      final Map<String, AttributeValue> attributes) {
+      final Map<String, AttributeValue> attributes)
+      throws SourceMalfunctionException {
     return alterDatasetInternal(
         key,
         datasetConfig,
@@ -991,7 +1281,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
       final DatasetConfig datasetConfig,
       final String columnToChange,
       final String attributeName,
-      final AttributeValue attributeValue) {
+      final AttributeValue attributeValue)
+      throws SourceMalfunctionException {
     return alterDatasetInternal(
         key,
         datasetConfig,
@@ -1008,8 +1299,12 @@ public class ManagedStoragePlugin implements AutoCloseable {
   private boolean alterDatasetInternal(
       final NamespaceKey key,
       final DatasetConfig datasetConfig,
-      AlterMetadataCallback pluginCallback) {
-    if (!(plugin instanceof SupportsAlteringDatasetMetadata)) {
+      AlterMetadataCallback pluginCallback)
+      throws SourceMalfunctionException {
+    if (getPlugin().isEmpty()) {
+      throw new SourceMalfunctionException(this.name);
+    }
+    if (!(getPlugin().get() instanceof SupportsAlteringDatasetMetadata)) {
       throw UserException.unsupportedError()
           .message("Source [%s] doesn't support modifying options", this.name)
           .buildSilently();
@@ -1025,7 +1320,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
           .buildSilently();
     }
 
-    if (!handle.isPresent()) {
+    if (handle.isEmpty()) {
       throw UserException.validationError()
           .message("Unable to find requested dataset.")
           .buildSilently();
@@ -1043,7 +1338,9 @@ public class ManagedStoragePlugin implements AutoCloseable {
     try (AutoCloseableLock l = readLock()) {
       newDatasetMetadata =
           pluginCallback.apply(
-              (SupportsAlteringDatasetMetadata) plugin, handle.get(), oldDatasetMetadata);
+              (SupportsAlteringDatasetMetadata) getPlugin().get(),
+              handle.get(),
+              oldDatasetMetadata);
     } catch (ConnectorException e) {
       throw UserException.validationError(e).buildSilently();
     }
@@ -1195,10 +1492,20 @@ public class ManagedStoragePlugin implements AutoCloseable {
   }
 
   public static boolean isComplete(DatasetConfig config) {
+    return config != null && config.getType() == DatasetType.VIRTUAL_DATASET
+        ? isCompleteVirtualDataset(config)
+        : isCompletePhysicalDataset(config);
+  }
+
+  private static boolean isCompletePhysicalDataset(DatasetConfig config) {
     return config != null
         && DatasetHelper.getSchemaBytes(config) != null
         && config.getReadDefinition() != null
         && config.getReadDefinition().getSplitVersion() != null;
+  }
+
+  private static boolean isCompleteVirtualDataset(DatasetConfig config) {
+    return !MetadataObjectsUtils.isShallowView(config);
   }
 
   public static enum MetadataAccessType {
@@ -1212,7 +1519,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
       NamespaceKey key,
       DatasetConfig datasetConfig,
       String userName,
-      final MetadataRequestOptions options) {
+      final MetadataRequestOptions options)
+      throws SourceMalfunctionException {
     if (SystemUser.isSystemUserName(userName)) {
       return;
     }
@@ -1229,16 +1537,22 @@ public class ManagedStoragePlugin implements AutoCloseable {
   }
 
   /** Gets the current state of the metadata maintained by {@link SourceMetadataManager}. */
-  public DatasetMetadataState getDatasetMetadataState(DatasetConfig datasetConfig) {
+  public DatasetMetadataState getDatasetMetadataState(DatasetConfig datasetConfig)
+      throws SourceMalfunctionException {
     try (AutoCloseableLock l = readLock()) {
       checkState();
       boolean isComplete = isComplete(datasetConfig);
-      return isComplete
-          ? DatasetMetadataState.builder()
-              .from(metadataManager.getDatasetMetadataState(datasetConfig, plugin))
-              .setIsComplete(true)
-              .build()
-          : DatasetMetadataState.builder().setIsComplete(false).setIsExpired(true).build();
+      if (isComplete) {
+        if (getPlugin().isEmpty()) {
+          throw new SourceMalfunctionException(this.name);
+        }
+        return DatasetMetadataState.builder()
+            .from(metadataManager.getDatasetMetadataState(datasetConfig, getPlugin().get()))
+            .setIsComplete(true)
+            .build();
+      }
+
+      return DatasetMetadataState.builder().setIsComplete(false).setIsExpired(true).build();
     }
   }
 
@@ -1346,17 +1660,18 @@ public class ManagedStoragePlugin implements AutoCloseable {
   private CompletionStage<Boolean> checkValidityAsync(
       DatasetConfig datasetConfig, MetadataRequestOptions options) {
     // For Iceberg tables, check the validity async
-    MetadataIOPool metadataIOPool = context.getMetadataIOPool();
     BiFunction<SupportsIcebergRootPointer, DatasetConfig, CompletionStage<Boolean>>
         asyncIcebergValidityCheck =
             (plugin, dataset) ->
-                metadataIOPool.execute(
-                    new MetadataIOPool.MetadataTask<>(
-                        "iceberg_validity_check_async",
-                        new EntityPath(dataset.getFullPathList()),
-                        () ->
-                            plugin.isIcebergMetadataValid(
-                                dataset, new NamespaceKey(dataset.getFullPathList()))));
+                context
+                    .getMetadataIOPool()
+                    .execute(
+                        new MetadataIOPool.MetadataTask<>(
+                            "iceberg_validity_check_async",
+                            new EntityPath(dataset.getFullPathList()),
+                            () ->
+                                plugin.isIcebergMetadataValid(
+                                    dataset, new NamespaceKey(dataset.getFullPathList()))));
     return metadataManager.isStillValid(
         options, datasetConfig, this.unwrap(StoragePlugin.class), asyncIcebergValidityCheck);
   }
@@ -1369,7 +1684,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
       throw UserException.validationError(e)
           .message("Storage plugin was changing during refresh attempt.")
           .build(logger);
-    } catch (ConnectorException | NamespaceException e) {
+    } catch (ConnectorException | NamespaceException | SourceMalfunctionException e) {
       throw UserException.validationError(e)
           .message("Unable to refresh dataset. %s", e.getMessage())
           .build(logger);
@@ -1388,24 +1703,36 @@ public class ManagedStoragePlugin implements AutoCloseable {
       throw UserException.validationError(e)
           .message("Storage plugin was changing during dataset update attempt.")
           .build(logger);
-    } catch (ConnectorException e) {
+    } catch (ConnectorException | SourceMalfunctionException e) {
       throw UserException.validationError(e).message("Unable to update dataset.").build(logger);
     }
   }
 
-  public DatasetConfig getUpdatedDatasetConfig(DatasetConfig oldConfig, BatchSchema newSchema) {
+  public DatasetConfig getUpdatedDatasetConfig(DatasetConfig oldConfig, BatchSchema newSchema)
+      throws SourceMalfunctionException {
     try (AutoCloseableLock l = readLock()) {
       checkState();
-      return plugin.createDatasetConfigFromSchema(oldConfig, newSchema);
+      if (getPlugin().isEmpty()) {
+        throw new SourceMalfunctionException(this.name);
+      }
+      return getPlugin().get().createDatasetConfigFromSchema(oldConfig, newSchema);
     }
   }
 
-  public ViewTable getView(NamespaceKey key, final MetadataRequestOptions options) {
+  public Optional<ViewTable> getView(NamespaceKey key, final MetadataRequestOptions options)
+      throws SourceMalfunctionException {
     try (AutoCloseableLock l = readLock()) {
       checkState();
-      // TODO: move views to namespace and out of filesystem.
-      return plugin.getView(key.getPathComponents(), options.getSchemaConfig());
+      if (getPlugin().isEmpty()) {
+        throw new SourceMalfunctionException(this.name);
+      }
+      Optional<SupportsReadingViews> viewEnabledPlugin =
+          PluginUtil.getStoragePluginIfWrapperFor(this, SupportsReadingViews.class);
+      if (viewEnabledPlugin.isPresent()) {
+        return viewEnabledPlugin.get().getView(key.getPathComponents(), options.getSchemaConfig());
+      }
     }
+    return Optional.empty();
   }
 
   @WithSpan("get-dataset-handle")
@@ -1425,8 +1752,9 @@ public class ManagedStoragePlugin implements AutoCloseable {
       Span.current()
           .setAttribute(
               "dremio.dataset.path", PathUtils.constructFullPath(entityPath.getComponents()));
-      return plugin.getDatasetHandle(
-          entityPath, retrievalOptions.asGetDatasetOptions(datasetConfig));
+      return getPlugin()
+          .get()
+          .getDatasetHandle(entityPath, retrievalOptions.asGetDatasetOptions(datasetConfig));
     }
   }
 
@@ -1436,12 +1764,13 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * @param config new {@link SourceConfig} to store in this instance
    * @param runAsync whether to run parts of initPlugin asynchronously
    */
-  private void setLocals(SourceConfig config, boolean runAsync) {
-    if (getPlugin() == null) {
+  private void setLocals(SourceConfig config, boolean runAsync) throws SourceMalfunctionException {
+    if (getPlugin().isEmpty()) {
       return;
     }
     initPlugin(config, runAsync);
-    this.pluginId = new StoragePluginId(sourceConfig, conf, getPlugin().getSourceCapabilities());
+    this.pluginId =
+        new StoragePluginId(sourceConfig, conf, getPlugin().get().getSourceCapabilities());
   }
 
   /**
@@ -1450,8 +1779,9 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * @param config the original source configuration, must be not-null
    * @param pluginId the id of the plugin before startup
    */
-  private void resetLocals(SourceConfig config, StoragePluginId pluginId) {
-    if (getPlugin() == null) {
+  private void resetLocals(SourceConfig config, StoragePluginId pluginId)
+      throws SourceMalfunctionException {
+    if (getPlugin().isEmpty()) {
       return;
     }
     initPlugin(config, true);
@@ -1466,7 +1796,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
    *     call already then this is expected to be false not to consume another thread from the pool
    *     or to create a race.
    */
-  private void initPlugin(SourceConfig config, boolean runAsync) {
+  private void initPlugin(SourceConfig config, boolean runAsync) throws SourceMalfunctionException {
     this.sourceConfig = config;
     this.metadataPolicy =
         config.getMetadataPolicy() == null
@@ -1475,12 +1805,16 @@ public class ManagedStoragePlugin implements AutoCloseable {
 
     this.conf = config.getConnectionConf(reader);
 
+    if (getPlugin().isEmpty()) {
+      throw new SourceMalfunctionException(this.name);
+    }
+
     if (runAsync && options.getOption(CatalogOptions.ENABLE_ASYNC_GET_STATE)) {
       // StoragePlugin.getState may not resolve quickly due to long connection
       // timeouts, limit the call time.
       long timeoutSeconds = options.getOption(CatalogOptions.GET_STATE_TIMEOUT_SECONDS);
       CompletableFuture<SourceState> stateFuture =
-          CompletableFuture.supplyAsync(() -> getPlugin().getState(), executor);
+          CompletableFuture.supplyAsync(() -> getPlugin().get().getState(), executor);
       try {
         this.state = stateFuture.get(timeoutSeconds, TimeUnit.SECONDS);
       } catch (ExecutionException | InterruptedException | TimeoutException e) {
@@ -1491,36 +1825,47 @@ public class ManagedStoragePlugin implements AutoCloseable {
         throw new RuntimeException(e);
       }
     } else {
-      this.state = getPlugin().getState();
+      this.state = getPlugin().get().getState();
     }
   }
 
   /** Update the cached state of the plugin. */
+  @SuppressWarnings(
+      "resource") // We are using AutoCloseableLock in try-with-resources, we're just testing it in
+  // a guard clause first
   public CompletableFuture<SourceState> refreshState() throws Exception {
     return CompletableFuture.supplyAsync(
         () -> {
           try {
-            Optional<AutoCloseableLock> refreshLock =
+            Optional<AutoCloseableLock> localRefreshStateLock =
                 AutoCloseableLock.of(this.refreshStateLock, true).tryOpen(0, TimeUnit.SECONDS);
-            if (!refreshLock.isPresent()) {
+            if (localRefreshStateLock.isEmpty()) {
+              logger.debug(
+                  "Source [{}] state is not refreshed. Refresh state lock status: {}",
+                  name,
+                  ((ReentrantLock) this.refreshStateLock).toString());
               return state;
             }
-            try (AutoCloseableLock rl = refreshLock.get()) {
+            try (AutoCloseableLock refL = localRefreshStateLock.get()) {
               while (true) {
-                if (plugin == null) {
-                  Optional<AutoCloseableLock> writeLock =
+                if (getPlugin().isEmpty()) {
+                  Optional<AutoCloseableLock> localWriteLock =
                       AutoCloseableLock.of(this.writeLock, true).tryOpen(5, TimeUnit.SECONDS);
-                  if (!writeLock.isPresent()) {
+                  if (localWriteLock.isEmpty()) {
+                    logger.debug(
+                        "Source [{}] state is not refreshed. Write lock status: {}",
+                        name,
+                        this.writeLock.toString());
                     return state;
                   }
 
-                  try (AutoCloseableLock l = writeLock.get()) {
-                    if (plugin != null) {
+                  try (AutoCloseableLock wL = localWriteLock.get()) {
+                    if (getPlugin().isPresent()) {
                       // while waiting for write lock, someone else started things, start this loop
                       // over.
                       continue;
                     }
-                    plugin =
+                    this.plugin =
                         resolveConnectionConf(conf)
                             .newPlugin(context, sourceConfig.getName(), this::getId);
                     return newStartSupplier(sourceConfig, false).get();
@@ -1528,16 +1873,20 @@ public class ManagedStoragePlugin implements AutoCloseable {
                 }
 
                 // the plugin is not null.
-                Optional<AutoCloseableLock> readLock =
+                Optional<AutoCloseableLock> localReadLock =
                     AutoCloseableLock.of(this.readLock, true).tryOpen(1, TimeUnit.SECONDS);
-                if (!readLock.isPresent()) {
+                if (localReadLock.isEmpty()) {
+                  logger.debug(
+                      name,
+                      "Source [{}] state is not refreshed. Read lock status: {}",
+                      this.readLock.toString());
                   return state;
                 }
 
-                try (Closeable a = readLock.get()) {
-                  final SourceState state = plugin.getState();
-                  this.state = state;
-                  return state;
+                try (Closeable rL = localReadLock.get()) {
+                  final SourceState newState = getPlugin().get().getState();
+                  this.state = newState;
+                  return newState;
                 }
               }
             }
@@ -1545,11 +1894,11 @@ public class ManagedStoragePlugin implements AutoCloseable {
             logger.debug("Failed to start plugin while trying to refresh state, error:", ex);
             if (ex.getCause() instanceof DeletedException) {
               logger.debug(String.format("[%s] is deleted", name), ex.getCause());
-              SourceState state =
+              SourceState newBadState =
                   SourceState.badState(
                       SourceState.DELETED.getSuggestedUserAction(), ex.getCause().getMessage());
-              this.state = state;
-              return state;
+              this.state = newBadState;
+              return newBadState;
             }
             this.state = SourceState.NOT_AVAILABLE;
             return SourceState.NOT_AVAILABLE;
@@ -1558,7 +1907,18 @@ public class ManagedStoragePlugin implements AutoCloseable {
         executor);
   }
 
-  boolean replacePluginWithLock(
+  /**
+   * @deprecated use {@link #replacePluginWithLock(SourceConfig, long, boolean)} instead
+   */
+  @Deprecated
+  boolean replacePluginWithLockDeprecated(
+      SourceConfig config, final long waitMillis, boolean skipEqualityCheck) throws Exception {
+    try (Closeable write = writeLock()) {
+      return replacePluginDeprecated(config, waitMillis, skipEqualityCheck);
+    }
+  }
+
+  List<SourceNameRefreshAction> replacePluginWithLock(
       SourceConfig config, final long waitMillis, boolean skipEqualityCheck) throws Exception {
     try (Closeable write = writeLock()) {
       return replacePlugin(config, waitMillis, skipEqualityCheck);
@@ -1583,16 +1943,17 @@ public class ManagedStoragePlugin implements AutoCloseable {
   }
 
   /**
-   * Replace the plugin instance with one defined by the new SourceConfig. Do the minimal changes
-   * necessary. Starts the new plugin.
-   *
+   * @deprecated use {@link #replacePlugin(SourceConfig, long, boolean)} instead
+   *     <p>Replace the plugin instance with one defined by the new SourceConfig. Do the minimal
+   *     changes necessary. Starts the new plugin.
    * @param config
    * @param waitMillis
    * @return Whether metadata was maintained. Metdata will be maintained if the connection did not
    *     change or was changed with only non-metadata impacting changes.
    * @throws Exception
    */
-  private boolean replacePlugin(
+  @Deprecated
+  private boolean replacePluginDeprecated(
       SourceConfig config, final long waitMillis, boolean skipEqualityCheck) throws Exception {
     Preconditions.checkState(
         writeLock.isHeldByCurrentThread(),
@@ -1603,7 +1964,9 @@ public class ManagedStoragePlugin implements AutoCloseable {
     /* if the plugin startup had failed earlier (plugin is null) and
      * we are here to replace the plugin, we should not return here.
      */
-    if (!skipEqualityCheck && existingConnectionConf.equals(newConnectionConf) && plugin != null) {
+    if (!skipEqualityCheck
+        && existingConnectionConf.equals(newConnectionConf)
+        && getPlugin().isPresent()) {
       // we just need to update external settings.
       setLocals(config, true);
       return true;
@@ -1619,16 +1982,18 @@ public class ManagedStoragePlugin implements AutoCloseable {
 
     // hold the old plugin until we successfully replace it.
     final SourceConfig oldConfig = sourceConfig;
-    final StoragePlugin oldPlugin = plugin;
+    Optional<StoragePlugin> oldPlugin = getPlugin();
     final StoragePluginId oldPluginId = pluginId;
     this.plugin =
         resolveConnectionConf(newConnectionConf)
-            .newPlugin(context, sourceKey.getRoot(), this::getId, influxSourcePred);
+            .newPlugin(context, sourceKey.getRoot(), this::getId, isInFluxSource);
     try {
       logger.trace("Starting new plugin for [{}]", config.getName());
       startAsync(config, false).get(waitMillis, TimeUnit.MILLISECONDS);
       try {
-        AutoCloseables.close(oldPlugin);
+        if (oldPlugin.isPresent()) {
+          AutoCloseables.close(oldPlugin.get());
+        }
       } catch (Exception ex) {
         logger.warn("Failure while retiring old plugin [{}].", sourceKey, ex);
       }
@@ -1639,7 +2004,88 @@ public class ManagedStoragePlugin implements AutoCloseable {
       return existingConnectionConf.equalsIgnoringNotMetadataImpacting(newConnectionConf);
     } catch (Exception ex) {
       // the update failed, go back to previous state.
-      this.plugin = oldPlugin;
+      this.plugin = oldPlugin.orElse(null);
+      try {
+        resetLocals(oldConfig, oldPluginId);
+      } catch (Exception e) {
+        ex.addSuppressed(e);
+      }
+      throw ex;
+    }
+  }
+
+  /**
+   * Replace the plugin instance with one defined by the new SourceConfig. Do the minimal changes
+   * necessary. Starts the new plugin.
+   *
+   * @param config
+   * @param waitMillis
+   * @param skipEqualityCheck
+   * @return A list of {@link SourceNameRefreshAction}s should be executed to refresh names in the
+   *     source.
+   * @throws Exception
+   */
+  private List<SourceNameRefreshAction> replacePlugin(
+      SourceConfig config, final long waitMillis, boolean skipEqualityCheck) throws Exception {
+    Preconditions.checkState(
+        writeLock.isHeldByCurrentThread(),
+        "You must hold the plugin write lock before replacing plugin.");
+
+    final ConnectionConf<?, ?> existingConnectionConf = this.conf;
+    final ConnectionConf<?, ?> newConnectionConf = reader.getConnectionConf(config);
+    /* if the plugin startup had failed earlier (plugin is null) and
+     * we are here to replace the plugin, we should not return here.
+     */
+    if (!skipEqualityCheck
+        && existingConnectionConf.equals(newConnectionConf)
+        && getPlugin().isPresent()) {
+      // we just need to update external settings.
+      setLocals(config, true);
+      return Lists.newArrayList();
+    }
+
+    /*
+     * we are here if
+     * (1) current plugin is null OR
+     * (2) current plugin is non-null but new and existing
+     *     connection configurations don't match.
+     */
+    this.state = SourceState.NOT_AVAILABLE;
+    boolean isMetadataImpactingChange = isSourceConfigMetadataImpacting(config);
+
+    // hold the old plugin until we successfully replace it.
+    final SourceConfig oldConfig = sourceConfig;
+    Optional<StoragePlugin> oldPlugin = getPlugin();
+    final StoragePluginId oldPluginId = pluginId;
+    this.plugin =
+        resolveConnectionConf(newConnectionConf)
+            .newPlugin(context, sourceKey.getRoot(), this::getId, isInFluxSource);
+    try {
+      logger.trace("Starting new plugin for [{}]", config.getName());
+      startAsync(config, false).get(waitMillis, TimeUnit.MILLISECONDS);
+      try {
+        if (oldPlugin.isPresent()) {
+          AutoCloseables.close(oldPlugin.get());
+        }
+      } catch (Exception ex) {
+        logger.warn("Failure while retiring old plugin [{}].", sourceKey, ex);
+      }
+
+      // if we replaced the plugin successfully, clear the permission cache
+      getPermissionsCache().clear();
+
+      // this is a metadata impacting change
+      if (isMetadataImpactingChange) {
+        return Lists.newArrayList(
+            SourceNameRefreshAction.newDeleteAllAction(),
+            SourceNameRefreshAction.newRefreshAllAction());
+      }
+
+      // Defer to plugin ConnectionConf to determine name refresh actions
+      return existingConnectionConf.getNameRefreshActionsForNewConf(name, newConnectionConf);
+    } catch (Exception ex) {
+      // the update failed, go back to previous state.
+      this.plugin = oldPlugin.orElse(null);
       try {
         resetLocals(oldConfig, oldPluginId);
       } catch (Exception e) {
@@ -1650,10 +2096,49 @@ public class ManagedStoragePlugin implements AutoCloseable {
   }
 
   boolean isSourceConfigMetadataImpacting(SourceConfig config) {
-    final ConnectionConf<?, ?> newConnectionConf = reader.getConnectionConf(config);
     try (AutoCloseableLock l = readLock()) {
-      return !conf.equalsIgnoringNotMetadataImpacting(newConnectionConf);
+      ConnectionConf<?, ?> existingConnectionConf = conf.clone();
+      ConnectionConf<?, ?> newConnectionConf = reader.getConnectionConf(config);
+
+      return isSourceConfigMetadataImpacting(existingConnectionConf, newConnectionConf);
     }
+  }
+
+  private boolean isSourceConfigMetadataImpacting(
+      ConnectionConf existingConfig, ConnectionConf newConfig) {
+    ConnectionConf<?, ?> existingConnectionConfWithoutAllowedDbs;
+    ConnectionConf<?, ?> newConnectionConfWithoutAllowedDbs;
+
+    if (options.getOption(SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES)) {
+      existingConnectionConfWithoutAllowedDbs = removeAllowedDatabases(existingConfig);
+      newConnectionConfWithoutAllowedDbs = removeAllowedDatabases(newConfig);
+    } else {
+      existingConnectionConfWithoutAllowedDbs = existingConfig;
+      newConnectionConfWithoutAllowedDbs = newConfig;
+    }
+
+    return !existingConnectionConfWithoutAllowedDbs.equalsIgnoringNotMetadataImpacting(
+        newConnectionConfWithoutAllowedDbs);
+  }
+
+  // This method is temporarily needed since it has to be behind a support option.
+  // Once the support option is permanently enabled and ready for removal, we can
+  // simply add "@NotMetadataImpacting" annotation to "allowedDatabases" field.
+  private ConnectionConf<?, ?> removeAllowedDatabases(ConnectionConf<?, ?> connectionConf) {
+    ConnectionConf<?, ?> confCopy = connectionConf.clone();
+
+    try {
+      for (Field field : FieldUtils.getAllFields(confCopy.getClass())) {
+        if (field.getName().equals("allowedDatabases")) {
+          field.set(confCopy, Defaults.defaultValue(field.getType()));
+          break;
+        }
+      }
+    } catch (IllegalAccessException e) {
+      throw Throwables.propagate(e);
+    }
+
+    return confCopy;
   }
 
   @Override
@@ -1699,7 +2184,10 @@ public class ManagedStoragePlugin implements AutoCloseable {
       try {
         closed = true;
         state = SourceState.badState("Source is being shutdown.");
-        AutoCloseables.close(metadataManager, plugin);
+        metadataManager.close();
+        if (getPlugin().isPresent()) {
+          getPlugin().get().close();
+        }
       } finally {
         runUnderLock.accept(this);
       }
@@ -1711,9 +2199,41 @@ public class ManagedStoragePlugin implements AutoCloseable {
     metadataManager.deleteServiceSet();
   }
 
-  boolean refresh(UpdateType updateType, MetadataPolicy policy) throws NamespaceException {
+  private void deleteSourceChildren(SourceConfig config, List<List<String>> prefixes)
+      throws NamespaceException {
+
+    // TODO: expensive call on non-master coordinators (sends as many RPC requests as entries that
+    // we delete)
+    SourceNamespaceService.DeleteCallback deleteCallback =
+        (DatasetConfig datasetConfig) -> {
+          CatalogUtil.addIcebergMetadataOrphan(datasetConfig, orphanage);
+        };
+
+    if (prefixes == null) {
+      if (!keepStaleMetadata()) {
+        systemUserNamespaceService.deleteSourceChildren(
+            config.getKey(), config.getTag(), deleteCallback);
+      } else {
+        logger.info(
+            "Old metadata data may be bad, but preserving descendants of source [{}] because '{}' is enabled",
+            config.getName(),
+            CatalogOptions.STORAGE_PLUGIN_KEEP_METADATA_ON_REPLACE.getOptionName());
+      }
+    } else {
+      for (List<String> prefix : prefixes) {
+        systemUserNamespaceService.deleteSourceChildIfExists(
+            new NamespaceKey(prefix), null, true, deleteCallback);
+      }
+    }
+  }
+
+  boolean refresh(SourceUpdateType sourceUpdateType, MetadataPolicy policy) {
     checkState();
-    return metadataManager.refresh(updateType, policy, true);
+    return getSourceMetadataManager().refresh(sourceUpdateType, policy, true);
+  }
+
+  SourceMetadataManager getSourceMetadataManager() {
+    return metadataManager;
   }
 
   @SuppressWarnings("unchecked")
@@ -1724,12 +2244,12 @@ public class ManagedStoragePlugin implements AutoCloseable {
   @SuppressWarnings("unchecked")
   public <T extends StoragePlugin> T unwrap(Class<T> clazz, boolean skipStateCheck) {
     try (AutoCloseableLock l = readLock()) {
-      if (!skipStateCheck) {
+      if (getPlugin().isEmpty() || !skipStateCheck) {
         checkState();
       }
 
-      if (clazz.isAssignableFrom(plugin.getClass())) {
-        return (T) plugin;
+      if (clazz.isAssignableFrom(getPlugin().get().getClass())) {
+        return (T) getPlugin().get();
       }
     }
     return null;
@@ -1757,24 +2277,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
     void run() throws EX;
   }
 
-  private AutoCloseableLock tryReadLock() {
-
-    // if the plugin was closed, we should always fail.
-    if (closed) {
-      throw new StoragePluginChanging(name + ": Plugin was closed.");
-    }
-
-    boolean locked = readLock.tryLock();
-    if (!locked) {
-      throw new StoragePluginChanging(name + ": Plugin is actively undergoing changes.");
-    }
-
-    return AutoCloseableLock.ofAlreadyOpen(readLock, true);
-  }
-
-  @SuppressWarnings("serial")
-  class StoragePluginChanging extends RuntimeException {
-
+  static class StoragePluginChanging extends RuntimeException {
     public StoragePluginChanging(String message) {
       super(message);
     }
@@ -1830,15 +2333,12 @@ public class ManagedStoragePlugin implements AutoCloseable {
       return new Iterator<I>() {
         @Override
         public boolean hasNext() {
-          return SafeRunner.this.doSafe(
-              () -> {
-                return innerIterator.hasNext();
-              });
+          return SafeRunner.this.doSafe(innerIterator::hasNext);
         }
 
         @Override
         public I next() {
-          return doSafe(() -> innerIterator.next());
+          return doSafe(innerIterator::next);
         }
       };
     }
@@ -1849,19 +2349,12 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * ManagedStoragePlugin so the manager can't cause problems with plugin locking.
    */
   class MetadataBridge {
-    SourceMetadata getMetadata() {
+    Optional<SourceMetadata> getMetadata() {
       try (AutoCloseableLock read = tryReadLock()) {
-        if (plugin == null) {
-          return null;
+        if (getPlugin().isPresent()) {
+          return Optional.of(getPlugin().get());
         }
-
-        // note that we don't protect the methods inside this. This could possibly cause a weird
-        // metadata exception if
-        // the source is changing while a dataset is being refreshed. This was previously possible
-        // with an inline
-        // refresh but not a background refresh. With this pattern, it can also happen with a
-        // background refresh.
-        return plugin;
+        return Optional.empty();
       }
     }
 

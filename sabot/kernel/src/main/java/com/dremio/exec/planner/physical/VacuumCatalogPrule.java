@@ -55,10 +55,11 @@ public class VacuumCatalogPrule extends Prule {
             vacuumOptions,
             storagePluginId,
             costEstimates,
-            vacuumCatalogDRel.getUser(),
+            vacuumCatalogDRel.getUserName(),
             vacuumCatalogDRel.getFsScheme(),
             vacuumCatalogDRel.getSchemeVariate(),
-            context);
+            context,
+            vacuumCatalogDRel.getExcludedContentIDs());
 
     return planGenerator.buildPlan();
   }

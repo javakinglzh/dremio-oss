@@ -17,3 +17,14 @@
 .icon-primary {
   color: var(--icon--primary);
 }
+
+.icon-warning {
+  color: var(--fill--warning--solid);
+}
+
+.icon-primary-with-hover {
+  @extend .icon-primary;
+  &:hover {
+    color: var(--icon--hover);
+  }
+}

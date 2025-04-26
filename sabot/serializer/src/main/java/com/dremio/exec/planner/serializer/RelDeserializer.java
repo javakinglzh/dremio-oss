@@ -20,20 +20,22 @@ import com.dremio.exec.planner.serializer.RelNodeSerde.RelFromProto;
 import com.dremio.exec.planner.serializer.RelNodeSerde.TableRetriever;
 import com.dremio.exec.planner.sql.DremioToRelContext;
 import com.dremio.plan.serialization.PRelDataType;
+import com.dremio.plan.serialization.PRelDataTypeField;
 import com.dremio.plan.serialization.PRelList;
+import com.dremio.plan.serialization.PRexLiteral;
 import com.dremio.plan.serialization.PRexNode;
 import com.dremio.plan.serialization.PRexWindowBound;
-import com.dremio.plan.serialization.PSqlOperator;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable.ToRelContext;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexWindowBound;
-import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.tools.RelBuilder;
 import org.apache.calcite.tools.RelBuilderFactory;
 
@@ -85,6 +87,11 @@ class RelDeserializer implements RelFromProto {
   }
 
   @Override
+  public RexLiteral toRex(PRexLiteral literal) {
+    return rexDeserializer.convertLiteral(literal);
+  }
+
+  @Override
   public RexWindowBound toRex(PRexWindowBound pRexWindowBound) {
     Preconditions.checkNotNull(pRexWindowBound);
     return rexDeserializer.convert(pRexWindowBound);
@@ -96,11 +103,6 @@ class RelDeserializer implements RelFromProto {
   }
 
   @Override
-  public SqlOperator toOp(PSqlOperator op) {
-    return sqlOperatorSerde.fromProto(op);
-  }
-
-  @Override
   public ToRelContext toRelContext() {
     return DremioToRelContext.createSerializationContext(cluster);
   }
@@ -109,6 +111,25 @@ class RelDeserializer implements RelFromProto {
   public RelDataType toRelDataType(PRelDataType type) {
     TypeSerde s = new TypeSerde(cluster.getTypeFactory());
     return s.fromProto(type);
+  }
+
+  @Override
+  public RelDataType toRowType(List<PRelDataTypeField> fields) {
+    return builder()
+        .getTypeFactory()
+        .createStructType(
+            fields.stream()
+                .map(PRelDataTypeField::getType)
+                .map(this::toRelDataType)
+                .collect(ImmutableList.toImmutableList()),
+            fields.stream()
+                .map(PRelDataTypeField::getName)
+                .collect(ImmutableList.toImmutableList()));
+  }
+
+  @Override
+  public RexLiteral toRexLiteral(PRexLiteral literal) {
+    return rexDeserializer.convertLiteral(literal);
   }
 
   @Override
@@ -129,6 +150,11 @@ class RelDeserializer implements RelFromProto {
   @Override
   public RelOptCluster cluster() {
     return cluster;
+  }
+
+  @Override
+  public SqlOperatorSerde sqlOperatorSerde() {
+    return sqlOperatorSerde;
   }
 
   public static RelNode deserialize(

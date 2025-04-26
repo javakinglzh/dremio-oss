@@ -13,12 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useIntl } from "react-intl";
 import { Skeleton } from "dremio-ui-lib/components";
 import { Avatar, Tooltip } from "dremio-ui-lib/components";
 import * as classes from "./RenderStat.module.less";
 import { nameToInitials } from "#oss/exports/utilities/nameToInitials";
+import { ErrorBoundary } from "react-error-boundary";
+import { DremioUserByUsernameContainer } from "#oss/exports/components/DremioUserByUsernameContainer";
 
 const RenderData = ({
   data,
@@ -30,10 +32,18 @@ const RenderData = ({
   if (showAvatar) {
     const initials = nameToInitials(data);
     return (
-      <>
-        <Avatar initials={initials} />
-        <span className={classes["data"]}>{data}</span>
-      </>
+      <ErrorBoundary
+        fallback={
+          <>
+            <Avatar initials={initials} />
+            <span className={classes["data"]}>{data}</span>
+          </>
+        }
+      >
+        <Suspense fallback={null}>
+          <DremioUserByUsernameContainer id={data} throwOnError />
+        </Suspense>
+      </ErrorBoundary>
     );
   } else {
     return data;
@@ -59,7 +69,7 @@ const RenderStat = ({
     <dl>
       <div className={classes["summary-stats"]}>
         <dt>{formatMessage({ id: title })}</dt>
-        {showTooltip ? (
+        {!showAvatar && showTooltip ? (
           <Tooltip content={data} interactive>
             <dd className={wrapContent ? classes["data-container"] : ""}>
               {data || data === 0 ? (

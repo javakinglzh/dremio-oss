@@ -21,48 +21,61 @@ import com.dremio.options.TypeValidators;
 /** Options for {@link InProcessPubSubClient}. */
 @Options
 public final class InProcessPubSubClientOptions {
-  /** Parallelism of the executor, must be 2 or greater. One thread is used for queue processing. */
-  public static final TypeValidators.LongValidator PARALLELISM =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.parallelism", 2);
-
   /** How often to poll from the message queue in absence of any publishing events. */
-  public static final TypeValidators.LongValidator QUEUE_POLL_MILLIS =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.queue_poll_millis", 10);
+  public static final TypeValidators.PositiveLongValidator QUEUE_POLL_MILLIS =
+      new TypeValidators.PositiveLongValidator("pubsub.inprocess.queue_poll_millis", 100, 10);
 
   /** How long to wait for executor service to terminate. */
-  public static final TypeValidators.LongValidator TERMINATION_TIMEOUT_MILLIS =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.termination_timeout_millis", 100);
+  public static final TypeValidators.PositiveLongValidator TERMINATION_TIMEOUT_MILLIS =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.termination_timeout_millis", 10_000, 100);
 
   /**
    * Maximum number of messages to poll in one pass. If nothing is published, with the queue poll
    * interval this defines the maximum rate of processing.
    */
-  public static final TypeValidators.LongValidator MAX_MESSAGES_TO_POLL =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.max_messages_to_poll", 50);
+  public static final TypeValidators.PositiveLongValidator MAX_MESSAGES_TO_POLL =
+      new TypeValidators.PositiveLongValidator("pubsub.inprocess.max_messages_to_poll", 100, 50);
 
-  /** Maximum number of messages that could be processed/queued to executor at most. */
-  public static final TypeValidators.LongValidator MAX_MESSAGES_IN_PROCESSING =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.max_messages_in_processing", 50);
+  /**
+   * When publishing messages, they are put in a blocking queue, this option is the timeout for the
+   * offer call to the queue. The timed out messages are dropped to prevent breaking critical code
+   * paths.
+   */
+  public static final TypeValidators.PositiveLongValidator PUBLISH_TIMEOUT_MILLISECONDS =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.publish_timeout_milliseconds", 100_000, 5000);
+
+  /**
+   * This is maximum number of runnables in-progress in the executor service. The current executor
+   * service is a cached pool that spawns a thread whenever there is a runnable to run. So,
+   * effectively, this is a limit on maximum number of threads.
+   */
+  public static final TypeValidators.PositiveLongValidator MAX_MESSAGES_IN_PROCESSING =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.max_messages_in_processing", 500, 100);
 
   /** Maximum number of redelivery attempts. */
-  public static final TypeValidators.LongValidator MAX_REDELIVERY_ATTEMPTS =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.max_redelivery_attempts", 5);
+  public static final TypeValidators.PositiveLongValidator MAX_REDELIVERY_ATTEMPTS =
+      new TypeValidators.PositiveLongValidator("pubsub.inprocess.max_redelivery_attempts", 10, 5);
 
   /** Maximum number of messages in a topic queue before it starts blocking publishing. */
-  public static final TypeValidators.LongValidator MAX_MESSAGES_IN_QUEUE =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.max_messages_in_queue", 10_000);
+  public static final TypeValidators.PositiveLongValidator MAX_MESSAGES_IN_QUEUE =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.max_messages_in_queue", 100_000, 10_000);
 
   /** Maximum number of messages in the redelivery queue before it starts blocking. */
-  public static final TypeValidators.LongValidator MAX_REDELIVERY_MESSAGES =
-      new TypeValidators.LongValidator("dremio.pubsub.inprocess.max_redelivery_messages", 1_000);
+  public static final TypeValidators.PositiveLongValidator MAX_REDELIVERY_MESSAGES =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.max_redelivery_messages", 10_000, 1_000);
 
   /** Minimum delay in seconds for redelivery. */
-  public static final TypeValidators.LongValidator MIN_DELAY_FOR_REDELIVERY_SECONDS =
-      new TypeValidators.LongValidator(
-          "dremio.pubsub.inprocess.min_delay_for_redelivery_seconds", 10);
+  public static final TypeValidators.PositiveLongValidator MIN_DELAY_FOR_REDELIVERY_SECONDS =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.min_delay_for_redelivery_seconds", 60, 10);
 
   /** Maximum delay in seconds for redelivery. */
-  public static final TypeValidators.LongValidator MAX_DELAY_FOR_REDELIVERY_SECONDS =
-      new TypeValidators.LongValidator(
-          "dremio.pubsub.inprocess.max_delay_for_redelivery_seconds", 60);
+  public static final TypeValidators.PositiveLongValidator MAX_DELAY_FOR_REDELIVERY_SECONDS =
+      new TypeValidators.PositiveLongValidator(
+          "pubsub.inprocess.max_delay_for_redelivery_seconds", 600, 60);
 }

@@ -14,16 +14,74 @@
  * limitations under the License.
  */
 
-import { type FC } from "react";
-import type { CatalogReference } from "@dremio/dremio-js/interfaces";
-import { CatalogObjectBadState } from "dremio-ui-common/catalog/CatalogObjectBadState.js";
-import { useTreeItemLevel } from "../Tree";
+import { useContext, type FC } from "react";
+import type {
+  CatalogReference,
+  Problem,
+  SourceCatalogObject,
+} from "@dremio/dremio-js/oss";
+import { useQuery } from "@tanstack/react-query";
+import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
+import { catalogByPath } from "@inject/queries/catalog";
+import { OpenDetailsButton } from "./CatalogTreeItems/components/OpenDetailsButton";
+import { AddToQueryButton } from "./CatalogTreeItems/components/AddToQueryButton";
+import { StarredButton } from "@inject/exports/components/CatalogTree/CatalogTreeItems/components/StarredButton";
+import { SectionMessageErrorFromProblem } from "../SectionMessageErrorFromProblem";
+import { renderExpandedIcon, useTreeItem } from "../Tree";
+import { CatalogObjectBadState } from "./CatalogObjectBadState";
+import { PathPrefixContext } from "./prefixContext";
 
-// TODO: styling
 export const FailedCatalogTreeItem: FC<{
   catalogReference: CatalogReference;
-}> = (props) => (
-  <div aria-level={useTreeItemLevel()} role="treeitem">
-    <CatalogObjectBadState catalogReference={props.catalogReference} />
-  </div>
-);
+  error?: Error | Problem;
+}> = (props) => {
+  // catalogObject is only needed to get the correct Source type (e.g. Nessie)
+  const catalogObject = useQuery({
+    ...catalogByPath(getSonarContext().getSelectedProjectId?.())(
+      props.catalogReference.path,
+    ),
+    enabled: props.catalogReference.type === "SOURCE",
+  }).data?.unwrapOr(undefined) as SourceCatalogObject | undefined;
+
+  const pathPrefix = useContext(PathPrefixContext);
+
+  const treeItemProps = useTreeItem(
+    (pathPrefix ? `${pathPrefix}-` : "") + props.catalogReference.id,
+  );
+
+  return (
+    <>
+      <div {...treeItemProps} aria-label={props.catalogReference.name}>
+        <div className="flex flex-row items-center h-full position-relative overflow-hidden">
+          {props.error ? (
+            renderExpandedIcon(treeItemProps.isExpanded)
+          ) : (
+            <div className="ml-3" />
+          )}
+          <CatalogObjectBadState
+            catalogObject={
+              catalogObject ?? {
+                name: props.catalogReference.name,
+                catalogReference: { ...props.catalogReference },
+              }
+            }
+          />
+        </div>
+        <div className="ml-auto catalog-treeitem__actions">
+          <OpenDetailsButton catalogReference={props.catalogReference} />
+          <AddToQueryButton catalogReference={props.catalogReference} />
+          <StarredButton catalogReference={props.catalogReference} />
+        </div>
+      </div>
+      {treeItemProps.isExpanded && !!props.error && (
+        <SectionMessageErrorFromProblem
+          problem={
+            "title" in props.error
+              ? props.error
+              : ((props.error as Error).cause as Problem)
+          }
+        />
+      )}
+    </>
+  );
+};

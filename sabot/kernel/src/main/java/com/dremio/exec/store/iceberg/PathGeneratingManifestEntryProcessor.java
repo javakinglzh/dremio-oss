@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import static com.dremio.exec.store.SystemSchemas.SYSTEM_COLUMNS;
 import static com.dremio.exec.store.iceberg.IcebergPartitionData.getPartitionColumnClass;
 import static com.dremio.exec.store.iceberg.IcebergSerDe.deserializedJsonAsSchema;
 import static com.dremio.exec.store.iceberg.IcebergUtils.getValueFromByteBuffer;
@@ -32,6 +33,7 @@ import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.store.SystemSchemas;
+import com.dremio.exec.store.SystemSchemas.SystemColumn;
 import com.dremio.exec.vector.OptionalVarBinaryVectorHolder;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf;
@@ -57,6 +59,7 @@ import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.complex.impl.NullableStructWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.calcite.util.Pair;
 import org.apache.iceberg.ContentFile;
 import org.apache.iceberg.DremioManifestReaderUtils.ManifestEntryWrapper;
 import org.apache.iceberg.FileContent;
@@ -187,6 +190,8 @@ public class PathGeneratingManifestEntryProcessor implements ManifestEntryProces
         partColToKeyMap.put(
             icebergPartitionSpec.schema().findField(partitionField.sourceId()).name().toLowerCase(),
             i);
+      } else {
+        partColToKeyMap.put(icebergPartitionSpec.fields().get(i).name().toLowerCase(), i);
       }
     }
   }
@@ -323,7 +328,7 @@ public class PathGeneratingManifestEntryProcessor implements ManifestEntryProces
       try {
         icebergDatasetXAttr =
             LegacyProtobufSerializer.parseFrom(
-                IcebergProtobuf.IcebergDatasetXAttr.PARSER, inputColIds.get(row));
+                IcebergProtobuf.IcebergDatasetXAttr.parser(), inputColIds.get(row));
       } catch (InvalidProtocolBufferException ie) {
         throw new RuntimeException("Could not deserialize Iceberg dataset info", ie);
       } catch (Exception e) {
@@ -334,6 +339,23 @@ public class PathGeneratingManifestEntryProcessor implements ManifestEntryProces
     } else {
       return colToIDMap;
     }
+  }
+
+  private Pair<Integer, Type> getColumnIdTypeByName(String columnName, Schema fileSchema) {
+    // system column
+    SystemColumn systemColumn = SYSTEM_COLUMNS.get(columnName);
+    if (systemColumn != null) {
+      return new Pair<>(systemColumn.getId(), systemColumn.toIcebergType());
+    }
+
+    // user column
+    Preconditions.checkArgument(colToIDMap.containsKey(columnName));
+    int key = colToIDMap.get(columnName);
+    Types.NestedField icebergField = fileSchema.findField(key);
+    if (icebergField == null) {
+      return new Pair<>(key, null);
+    }
+    return new Pair<>(key, icebergField.type());
   }
 
   private Map<String, Object> getColumnStats(
@@ -355,14 +377,18 @@ public class PathGeneratingManifestEntryProcessor implements ManifestEntryProces
         continue;
       }
 
-      Preconditions.checkArgument(colToIDMap.containsKey(colName));
-      int key = colToIDMap.get(colName);
-      Types.NestedField icebergField = fileSchema.findField(key);
-      if (icebergField == null) {
-        requiredStats.put(fieldName, null);
-        continue;
+      int key = -1;
+      Type fieldType = null;
+
+      if (Set.of("max", "min").contains(suffix)) {
+        Pair<Integer, Type> idTypePair = getColumnIdTypeByName(colName, fileSchema);
+        key = idTypePair.left;
+        fieldType = idTypePair.right;
+        if (fieldType == null) {
+          requiredStats.put(fieldName, null);
+          continue;
+        }
       }
-      Type fieldType = icebergField.type();
 
       Object value = null;
 

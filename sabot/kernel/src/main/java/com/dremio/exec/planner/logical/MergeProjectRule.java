@@ -67,20 +67,12 @@ public class MergeProjectRule extends RelOptRule {
     // of building a RexProgram.
     final Permutation topPermutation = topProject.getPermutation();
     if (topPermutation != null) {
-      if (topPermutation.isIdentity()) {
-        // Let ProjectRemoveRule handle this.
-        return;
-      }
       final Permutation bottomPermutation = bottomProject.getPermutation();
       if (bottomPermutation != null) {
-        if (bottomPermutation.isIdentity()) {
-          // Let ProjectRemoveRule handle this.
-          return;
-        }
         final Permutation product = topPermutation.product(bottomPermutation);
         relBuilder.push(bottomProject.getInput());
         List<RexNode> exprs = relBuilder.fields(product);
-        relBuilder.project(exprs, topProject.getRowType().getFieldNames());
+        relBuilder.project(exprs, topProject.getRowType().getFieldNames(), true);
 
         if (FlattenVisitors.count(exprs) == uniqueFlattens) {
           call.transformTo(relBuilder.build());

@@ -21,12 +21,13 @@ import static com.dremio.plugins.gcs.GCSOptions.ASYNC_READS;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.exec.catalog.CreateTableOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.DirectorySupportLackingFileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
@@ -50,7 +51,10 @@ public class GoogleStoragePlugin extends DirectorySupportLackingFileSystemPlugin
   public static final String GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE_DEFAULT = "8388608";
 
   public GoogleStoragePlugin(
-      GCSConf config, SabotContext context, String name, Provider<StoragePluginId> idProvider) {
+      GCSConf config,
+      PluginSabotContext context,
+      String name,
+      Provider<StoragePluginId> idProvider) {
     super(config, context, name, idProvider);
   }
 
@@ -129,11 +133,16 @@ public class GoogleStoragePlugin extends DirectorySupportLackingFileSystemPlugin
       IcebergTableProps icebergProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     final String containerName = getAndCheckContainerName(tableSchemaPath);
     final CreateTableEntry entry =
         super.createNewTable(
-            tableSchemaPath, config, icebergProps, writerOptions, storageOptions, isResultsTable);
+            tableSchemaPath,
+            config,
+            icebergProps,
+            writerOptions,
+            storageOptions,
+            createTableOptions);
 
     final GoogleBucketFileSystem fs = getSystemUserFS().unwrap(GoogleBucketFileSystem.class);
 

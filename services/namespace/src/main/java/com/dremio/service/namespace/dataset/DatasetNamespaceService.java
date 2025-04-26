@@ -21,10 +21,12 @@ import com.dremio.service.namespace.DatasetMetadataSaver;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.NamespaceType;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.proto.EntityId;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -66,9 +68,10 @@ public interface DatasetNamespaceService {
    * Returns {@link DatasetConfig configuration} corresponding to given path.
    *
    * @param datasetPath path whose config will be returned
-   * @throws NamespaceException if a namespace or a dataset cannot be found for the given key
+   * @throws NamespaceNotFoundException if a namespace or a dataset cannot be found for the given
+   *     key
    */
-  DatasetConfig getDataset(NamespaceKey datasetPath) throws NamespaceException;
+  DatasetConfig getDataset(NamespaceKey datasetPath) throws NamespaceNotFoundException;
 
   /**
    * Returns {@link DatasetMetadata} corresponding to given path.
@@ -89,7 +92,7 @@ public interface DatasetNamespaceService {
 
   //// LIST or COUNT datasets under folder/space/home/source
   //// Note: use sparingly!
-  Iterable<NamespaceKey> getAllDatasets(final NamespaceKey parent) throws NamespaceException;
+  Iterable<NamespaceKey> getAllDatasets(final NamespaceKey parent);
 
   int getAllDatasetsCount(NamespaceKey path) throws NamespaceException;
 
@@ -121,4 +124,37 @@ public interface DatasetNamespaceService {
   //// DELETE
   void deleteDataset(NamespaceKey datasetPath, String version, NamespaceAttribute... attributes)
       throws NamespaceException;
+
+  /**
+   * Get count of datasets depending on given dataset
+   *
+   * @param path path of dataset
+   * @return count of all descendants.
+   */
+  int getDownstreamsCount(NamespaceKey path);
+
+  /**
+   * Get list of datasets depending on given dataset
+   *
+   * @param path path of saved dataset
+   * @return downstream datasets.
+   * @throws NamespaceException
+   */
+  List<DatasetConfig> getAllDownstreams(NamespaceKey path) throws NamespaceException;
+
+  /**
+   * Get list of upstream PDSs for the given dataset
+   *
+   * @param path path of dataset
+   * @return the keys of the PDSs that this dataset transitively depends on
+   */
+  List<NamespaceKey> getUpstreamPhysicalDatasets(NamespaceKey path);
+
+  /**
+   * Get list of upstream sources for the given dataset
+   *
+   * @param path path of dataset
+   * @return the names of the sources containing PDSs that this dataset transitively depends on
+   */
+  List<String> getUpstreamSources(NamespaceKey path);
 }

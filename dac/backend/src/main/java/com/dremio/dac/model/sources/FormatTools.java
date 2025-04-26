@@ -39,6 +39,7 @@ import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.FormatPlugin;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.FileSystemUtils;
@@ -173,10 +174,12 @@ public class FormatTools {
   }
 
   private FileFormat detectFileFormat(NamespaceKey key) {
-    final FileSystemPlugin<?> plugin = getPlugin(key);
+    final FileSystemPlugin<?> plugin = getFileSystemPlugin(key);
     FileSystem fs;
     try {
-      fs = plugin.createFS(securityContext.getUserPrincipal().getName());
+      fs =
+          plugin.createFS(
+              SupportsFsCreation.builder().userName(securityContext.getUserPrincipal().getName()));
     } catch (IOException ex) {
       throw UserException.ioExceptionError(ex)
           .message("Unable to read file with selected format.")
@@ -294,10 +297,12 @@ public class FormatTools {
   public JobDataFragment previewData(
       FileFormat format, NamespacePath namespacePath, boolean useFormatLocation) {
     final NamespaceKey key = namespacePath.toNamespaceKey();
-    final FileSystemPlugin<?> plugin = getPlugin(key);
+    final FileSystemPlugin<?> plugin = getFileSystemPlugin(key);
     FileSystem fs;
     try {
-      fs = plugin.createFS(securityContext.getUserPrincipal().getName());
+      fs =
+          plugin.createFS(
+              SupportsFsCreation.builder().userName(securityContext.getUserPrincipal().getName()));
     } catch (IOException ex) {
       throw new IllegalStateException("No files detected or unable to read data.", ex);
     }
@@ -470,7 +475,7 @@ public class FormatTools {
     }
   }
 
-  private FileSystemPlugin<?> getPlugin(NamespaceKey key) {
+  private FileSystemPlugin<?> getFileSystemPlugin(NamespaceKey key) {
     StoragePlugin plugin = catalogService.getSource(key.getRoot());
     if (plugin instanceof FileSystemPlugin) {
       return (FileSystemPlugin<?>) plugin;

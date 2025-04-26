@@ -15,6 +15,7 @@
  */
 package com.dremio.service.grpc;
 
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,6 +29,17 @@ import java.util.Map;
  * https://github.com/grpc/proposal/blob/master/A6-client-retries.md#retry-policy
  */
 public class DefaultGrpcServiceConfigProvider {
+
+  public static final List<String> SERVICE_NAMES =
+      ImmutableList.of(
+          "dremio.job.JobsService",
+          "dremio.catalog.InformationSchemaService",
+          "dremio.job.Chronicle",
+          "dremio.maestroservice.MaestroService");
+
+  public static Map<String, Object> getDefaultGrpcServiceConfig() {
+    return getDefaultGrpcServiceConfig(SERVICE_NAMES);
+  }
 
   /**
    * Gets the default service configuration for given list of service names

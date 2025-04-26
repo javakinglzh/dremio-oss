@@ -22,6 +22,8 @@ import com.dremio.dac.annotations.Secured;
 import com.dremio.dac.model.sources.SourceUI;
 import com.dremio.dac.model.sources.Sources;
 import com.dremio.dac.service.source.SourceService;
+import com.dremio.exec.catalog.ConnectionReader;
+import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.BoundedDatasetCount;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
@@ -48,11 +50,19 @@ import javax.ws.rs.core.MediaType;
 public class SourcesResource {
   private final NamespaceService namespaceService;
   private final SourceService sourceService;
+  private final ConnectionReader connectionReader;
+  private final CatalogService catalogService;
 
   @Inject
-  public SourcesResource(NamespaceService namespaceService, SourceService sourceService) {
+  public SourcesResource(
+      NamespaceService namespaceService,
+      SourceService sourceService,
+      ConnectionReader connectionReader,
+      CatalogService catalogService) {
     this.namespaceService = namespaceService;
     this.sourceService = sourceService;
+    this.connectionReader = connectionReader;
+    this.catalogService = catalogService;
   }
 
   @GET
@@ -73,9 +83,10 @@ public class SourcesResource {
         source.setDatasetCountBounded(datasetCount.isCountBound() || datasetCount.isTimeBound());
       }
 
-      SourceState state = sourceService.getStateForSource(sourceConfig);
+      SourceState state = catalogService.getSourceState(sourceConfig.getName());
       source.setState(state);
       source.setSourceChangeState(sourceConfig.getSourceChangeState());
+      source.setLastModifiedAt(sourceConfig.getLastModifiedAt());
 
       sources.add(source);
     }
@@ -102,10 +113,10 @@ public class SourcesResource {
   public MetadataImpactingResponse isMetadataImpacating(SourceUI sourceUI) {
     final SourceConfig sourceConfig = sourceUI.asSourceConfig();
     return new MetadataImpactingResponse(
-        sourceService.isSourceConfigMetadataImpacting(sourceConfig));
+        catalogService.isSourceConfigMetadataImpacting(sourceConfig));
   }
 
   protected SourceUI newSource(SourceConfig sourceConfig) throws Exception {
-    return SourceUI.get(sourceConfig, sourceService.getConnectionReader());
+    return SourceUI.get(sourceConfig, connectionReader);
   }
 }

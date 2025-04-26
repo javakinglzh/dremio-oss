@@ -298,7 +298,7 @@ public class IcebergPartitionData implements StructLike, Serializable {
       case TIME:
       case TIMETZ:
       case TIMESTAMPTZ:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case INTERVAL:
       case INTERVALYEAR:
       case INTERVALDAY:

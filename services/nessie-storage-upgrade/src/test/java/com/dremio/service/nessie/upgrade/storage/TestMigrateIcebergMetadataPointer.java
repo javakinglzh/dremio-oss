@@ -15,14 +15,34 @@
  */
 package com.dremio.service.nessie.upgrade.storage;
 
+import static com.dremio.legacy.org.projectnessie.versioned.CommitMetaSerializer.METADATA_SERIALIZER;
 import static com.dremio.test.DremioTest.CLASSPATH_SCAN_RESULT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.InstanceOfAssertFactories.type;
-import static org.projectnessie.versioned.CommitMetaSerializer.METADATA_SERIALIZER;
-import static org.projectnessie.versioned.VersionStore.KeyRestrictions.NO_KEY_RESTRICTIONS;
 
-import com.dremio.common.SuppressForbidden;
 import com.dremio.datastore.LocalKVStoreProvider;
+import com.dremio.legacy.org.projectnessie.model.CommitMeta;
+import com.dremio.legacy.org.projectnessie.model.ContentKey;
+import com.dremio.legacy.org.projectnessie.model.IcebergTable;
+import com.dremio.legacy.org.projectnessie.nessie.relocated.protobuf.ByteString;
+import com.dremio.legacy.org.projectnessie.server.store.proto.ObjectTypes;
+import com.dremio.legacy.org.projectnessie.versioned.BranchName;
+import com.dremio.legacy.org.projectnessie.versioned.Hash;
+import com.dremio.legacy.org.projectnessie.versioned.ImmutablePut;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceConflictException;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceNotFoundException;
+import com.dremio.legacy.org.projectnessie.versioned.VersionStore;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.ContentId;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyWithBytes;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.spi.DatabaseAdapterUtil;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.persist.serialize.AdapterTypes;
+import com.dremio.legacy.org.projectnessie.versioned.persist.store.PersistVersionStore;
+import com.dremio.service.embedded.catalog.EmbeddedContent;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedUnversionedStore;
 import com.dremio.service.nessie.DatastoreDatabaseAdapterFactory;
 import com.dremio.service.nessie.ImmutableDatastoreDbConfig;
@@ -31,34 +51,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.projectnessie.model.CommitMeta;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.nessie.relocated.protobuf.ByteString;
-import org.projectnessie.server.store.proto.ObjectTypes;
-import org.projectnessie.versioned.BranchName;
-import org.projectnessie.versioned.ContentResult;
-import org.projectnessie.versioned.Hash;
-import org.projectnessie.versioned.ImmutablePut;
-import org.projectnessie.versioned.ReferenceConflictException;
-import org.projectnessie.versioned.ReferenceNotFoundException;
-import org.projectnessie.versioned.VersionStore;
-import org.projectnessie.versioned.persist.adapter.ContentId;
-import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
-import org.projectnessie.versioned.persist.adapter.ImmutableCommitParams;
-import org.projectnessie.versioned.persist.adapter.KeyWithBytes;
-import org.projectnessie.versioned.persist.adapter.spi.DatabaseAdapterUtil;
-import org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.persist.serialize.AdapterTypes;
-import org.projectnessie.versioned.persist.store.PersistVersionStore;
 
 /**
  * Unit tests for {@link MigrateToUnversionedStore} covering the migration of legacy on-reference
@@ -108,7 +107,6 @@ class TestMigrateIcebergMetadataPointer {
     }
   }
 
-  @SuppressForbidden // This method has to use Nessie's relocated ByteString to interface with
   // Nessie Database Adapters.
   private void commitLegacyData(ContentKey key, ContentId contentId)
       throws ReferenceNotFoundException, ReferenceConflictException {
@@ -117,8 +115,6 @@ class TestMigrateIcebergMetadataPointer {
     commit(key, contentId, refState);
   }
 
-  @SuppressForbidden // This method has to use Nessie's relocated ByteString to interface with
-  // Nessie Database Adapters.
   private void commitGlobalStateData(ContentKey key, ContentId contentId)
       throws ReferenceNotFoundException, ReferenceConflictException {
 
@@ -148,8 +144,6 @@ class TestMigrateIcebergMetadataPointer {
     commit(key, contentId, refState);
   }
 
-  @SuppressForbidden // This method has to use Nessie's relocated ByteString to interface with
-  // Nessie Database Adapters.
   private void commit(ContentKey key, ContentId contentId, ByteString refState)
       throws ReferenceNotFoundException, ReferenceConflictException {
     adapter.commit(
@@ -192,16 +186,17 @@ class TestMigrateIcebergMetadataPointer {
 
     task.upgrade(storeProvider, 1);
 
-    Map<ContentKey, ContentResult> tables =
-        unversionedStore.getValues(BranchName.of("main"), keys, false);
-
-    assertThat(tables.keySet()).containsExactlyInAnyOrder(keys.toArray(new ContentKey[0]));
-    assertThat(tables)
+    assertThat(unversionedStore.getEntries(Integer.MAX_VALUE).keySet())
+        .containsExactlyInAnyOrderElementsOf(
+            keys.stream()
+                .map(k -> EmbeddedContentKey.of(k.getElements()))
+                .collect(Collectors.toList()));
+    assertThat(keys)
         .allSatisfy(
-            (k, v) -> {
-              assertThat(v.content())
-                  .isInstanceOf(IcebergTable.class)
-                  .extracting("metadataLocation")
+            key -> {
+              assertThat(unversionedStore.getValue(EmbeddedContentKey.of(key.getElements())))
+                  .isInstanceOf(EmbeddedContent.class)
+                  .extracting("location")
                   .isEqualTo("test-metadata-location"); // encoded in LEGACY_REF_STATE_BASE64
             });
   }
@@ -237,16 +232,17 @@ class TestMigrateIcebergMetadataPointer {
 
     task.upgrade(storeProvider, 1);
 
-    Map<ContentKey, ContentResult> tables =
-        unversionedStore.getValues(BranchName.of("main"), keys, false);
-
-    assertThat(tables.keySet()).containsExactlyInAnyOrderElementsOf(keys);
-    assertThat(tables)
+    assertThat(unversionedStore.getEntries(Integer.MAX_VALUE).keySet())
+        .containsExactlyInAnyOrderElementsOf(
+            keys.stream()
+                .map(k -> EmbeddedContentKey.of(k.getElements()))
+                .collect(Collectors.toList()));
+    assertThat(keys)
         .allSatisfy(
-            (k, v) -> {
-              assertThat(v.content())
-                  .isInstanceOf(IcebergTable.class)
-                  .extracting("metadataLocation")
+            key -> {
+              assertThat(unversionedStore.getValue(EmbeddedContentKey.of(key.getElements())))
+                  .isInstanceOf(EmbeddedContent.class)
+                  .extracting("location")
                   .isEqualTo("test-metadata-location"); // encoded in LEGACY_REF_STATE_BASE64
             });
   }
@@ -255,11 +251,7 @@ class TestMigrateIcebergMetadataPointer {
   void testEmptyUpgrade() throws Exception {
     task.upgrade(storeProvider, 10);
 
-    assertThat(
-            unversionedStore
-                .getKeys(BranchName.of("main"), null, false, NO_KEY_RESTRICTIONS)
-                .hasNext())
-        .isFalse();
+    assertThat(unversionedStore.getEntries(Integer.MAX_VALUE)).isEmpty();
   }
 
   @Test
@@ -283,7 +275,7 @@ class TestMigrateIcebergMetadataPointer {
 
     task.upgrade(storeProvider, 1);
 
-    assertThat(unversionedStore.getValue(BranchName.of("main"), key1, false)).isNull();
+    assertThat(unversionedStore.getValue(EmbeddedContentKey.of(key1.getElements()))).isNull();
   }
 
   @Test
@@ -308,10 +300,9 @@ class TestMigrateIcebergMetadataPointer {
 
     task.upgrade(storeProvider, 5);
 
-    assertThat(unversionedStore.getValue(BranchName.of("main"), key1, false))
-        .extracting(ContentResult::content)
-        .asInstanceOf(type(IcebergTable.class))
-        .extracting(IcebergTable::getMetadataLocation)
+    assertThat(unversionedStore.getValue(EmbeddedContentKey.of(key1.getElements())))
+        .asInstanceOf(type(EmbeddedContent.class))
+        .extracting(EmbeddedContent::location)
         .isEqualTo("metadata1");
   }
 }

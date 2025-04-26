@@ -46,26 +46,38 @@ public interface SourceCatalog {
    * then reveals a bad state, will also result in exception.
    *
    * @param config Configuration for the source.
+   * @param sourceRefreshOption refresh option for the source. It can be background
+   *     refresh(asynchronous refresh) or wait refresh (synchronous)
    * @param attributes Optional namespace attributes to pass to namespace entity creation
    */
-  void createSource(SourceConfig config, NamespaceAttribute... attributes);
+  void createSource(
+      SourceConfig config,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes);
 
   /**
    * Update an existing source with the given config. The config version must be the same as the
    * currently active source. If it isn't, this call will fail with an exception.
    *
    * @param config Configuration for the source.
+   * @param sourceRefreshOption refresh option for the source. It can be background
+   *     refresh(asynchronous refresh) or wait refresh (synchronous)
    * @param attributes Optional namespace attributes to pass to namespace entity creation
    */
-  void updateSource(SourceConfig config, NamespaceAttribute... attributes);
+  void updateSource(
+      SourceConfig config,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes);
 
   /**
    * Delete a source with the provided config. If the source doesn't exist or the config doesn't
    * match, the method with throw an exception.
    *
-   * @param config
+   * @param config Configuration for the source.
+   * @param sourceRefreshOption refresh option for the source. It can be background
+   *     refresh(asynchronous refresh) or wait refresh (synchronous)
    */
-  void deleteSource(SourceConfig config);
+  void deleteSource(SourceConfig config, SourceRefreshOption sourceRefreshOption);
 
   /**
    * Invalidates all cache entries across permission related caches associated with the given

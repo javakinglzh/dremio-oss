@@ -32,8 +32,8 @@ import org.apache.calcite.tools.RelBuilder;
 
 public class PushProjectIntoScanRule extends RelOptRule {
 
-  public static final RelOptRule INSTANCE = new PushProjectIntoScanRule(true);
-  public static final RelOptRule PUSH_ONLY_FIELD_ACCESS_INSTANCE =
+  public static final PushProjectIntoScanRule INSTANCE = new PushProjectIntoScanRule(true);
+  public static final PushProjectIntoScanRule PUSH_ONLY_FIELD_ACCESS_INSTANCE =
       new PushProjectIntoScanRule(false);
   private final boolean pushItemOperator;
 
@@ -46,28 +46,32 @@ public class PushProjectIntoScanRule extends RelOptRule {
 
   @Override
   public void onMatch(RelOptRuleCall call) {
-    final Project proj = call.rel(0);
-    final ScanCrel scan = call.rel(1);
+    RelNode output = pushProjectIntoScan(call.rel(0), call.rel(1));
+    if (output != null) {
+      call.transformTo(output);
+    }
+  }
 
+  public RelNode pushProjectIntoScan(LogicalProject project, ScanCrel scan) {
     ProjectPushInfo columnInfo =
-        PrelUtil.getColumns(scan.getRowType(), proj.getProjects(), pushItemOperator);
+        PrelUtil.getColumns(scan.getRowType(), project.getProjects(), pushItemOperator);
 
     // get TableBase, either wrapped in RelOptTable, or TranslatableTable. TableBase table =
     // scan.getTable().unwrap(TableBase.class);
     if (columnInfo == null || columnInfo.isStarQuery()) {
-      return;
+      return null;
     }
 
     ScanCrel newScan = scan.cloneWithProject(columnInfo.columns);
 
     List<RexNode> newProjects = Lists.newArrayList();
-    for (RexNode n : proj.getProjects()) {
+    for (RexNode n : project.getProjects()) {
       newProjects.add(n.accept(columnInfo.getInputRewriter()));
     }
 
-    final RelBuilder relBuilder = relBuilderFactory.create(proj.getCluster(), null);
+    final RelBuilder relBuilder = relBuilderFactory.create(project.getCluster(), null);
     relBuilder.push(newScan);
-    relBuilder.project(newProjects, proj.getRowType().getFieldNames());
+    relBuilder.project(newProjects, project.getRowType().getFieldNames());
     final RelNode newProj = relBuilder.build();
 
     if (newProj instanceof Project
@@ -76,14 +80,14 @@ public class PushProjectIntoScanRule extends RelOptRule {
             .getRowType()
             .getFullTypeString()
             .equals(newProj.getRowType().getFullTypeString())) {
-      call.transformTo(newScan);
+      return newScan;
     } else {
       if (newScan.getProjectedColumns().equals(scan.getProjectedColumns())) {
         // no point in doing a pushdown that doesn't change anything.
-        return;
+        return null;
       }
 
-      call.transformTo(newProj);
+      return newProj;
     }
   }
 }

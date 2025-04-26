@@ -25,6 +25,7 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.create
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.joinedTableKey;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tablePathWithFolders;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.vacuumTableQuery;
@@ -770,6 +771,12 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
     tableManifestLists.forEach(
         manifestListFile -> getDataplaneStorage().deleteObject(PRIMARY_BUCKET, manifestListFile));
 
+    assertDoesNotThrow(
+        () ->
+            runSQL(
+                String.format(
+                    "VACUUM CATALOG %s EXCLUDE (%s.%s)",
+                    DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
     assertThatThrownBy(() -> runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME));
 
     cleanupSilently(table);
@@ -785,6 +792,12 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
     tableManifestFiles.forEach(
         manifestFile -> getDataplaneStorage().deleteObject(PRIMARY_BUCKET, manifestFile));
 
+    assertDoesNotThrow(
+        () ->
+            runSQL(
+                String.format(
+                    "VACUUM CATALOG %s EXCLUDE (%s.%s)",
+                    DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
     assertThatThrownBy(() -> runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME));
   }
 
@@ -804,5 +817,81 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
     tables.forEach(t -> assertThat(snapshots(t, "main")).hasSize(1));
 
     tables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testExcludeTables() throws Exception {
+    final int numOfTables = 5;
+    final int numOfSnapshots = 5;
+    final List<String> excludedTable = createTable();
+    List<List<String>> tables =
+        IntStream.range(0, numOfTables).mapToObj(i -> createTable()).collect(Collectors.toList());
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshot(excludedTable);
+              tables.forEach(this::newSnapshot);
+            });
+    final List<String> excludedTableSnapshots = snapshots(excludedTable, "main");
+
+    runSQL(
+        String.format(
+            "VACUUM CATALOG %s EXCLUDE (%s.%s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(excludedTable)));
+
+    tables.forEach(t -> assertDoesNotThrow(() -> selectQuery(t, "BRANCH main")));
+    assertDoesNotThrow(() -> selectQuery(excludedTable, "BRANCH main"));
+    assertThat(snapshots(excludedTable, "main")).isEqualTo(excludedTableSnapshots);
+    tables.forEach(t -> assertThat(snapshots(t, "main")).hasSize(1));
+
+    tables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testExcludeTablesMultipleBranches() throws Exception {
+    final int numOfSnapshots = 5;
+    String branch1 = "diffbranch1";
+    runSQL(createBranchAtBranchQuery(branch1, "main"));
+
+    useBranchQuery("main");
+    final List<String> table1 = createTable();
+    final List<String> table2 = createTable();
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshot(table1);
+              newSnapshot(table2);
+            });
+
+    createTableAtBranch(table1, branch1);
+    createTableAtBranch(table2, branch1);
+
+    useBranchQuery(branch1);
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshotAtBranch(table1, branch1);
+              newSnapshotAtBranch(table2, branch1);
+            });
+    final List<String> excludedTable1Snaps = snapshots(table1, branch1);
+    assertThat(excludedTable1Snaps.size()).isGreaterThan(1);
+
+    useBranchQuery("main");
+    runSQL(
+        String.format(
+            "VACUUM CATALOG %s EXCLUDE (%s.%s AT BRANCH %s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table1), branch1));
+
+    assertDoesNotThrow(() -> selectQuery(table1, "BRANCH main"));
+    assertDoesNotThrow(() -> selectQuery(table2, "BRANCH main"));
+    assertDoesNotThrow(() -> selectQuery(table1, "BRANCH " + branch1));
+    assertDoesNotThrow(() -> selectQuery(table2, "BRANCH " + branch1));
+    assertThat(snapshots(table1, branch1)).isEqualTo(excludedTable1Snaps);
+    assertThat(snapshots(table1, "main").size()).isEqualTo(1);
+    assertThat(snapshots(table2, "main").size()).isEqualTo(1);
+    assertThat(snapshots(table2, branch1).size()).isEqualTo(1);
+
+    cleanupSilently(table1);
+    cleanupSilently(table2);
   }
 }

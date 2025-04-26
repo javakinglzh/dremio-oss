@@ -34,7 +34,8 @@ import org.apache.arrow.memory.patch.ArrowByteBufAllocator;
 
 /** Fabric server that accepts connection. */
 class FabricServer extends BasicServer<RpcType, FabricConnection> {
-  private final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(this.getClass());
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(FabricServer.class);
 
   private final FabricMessageHandler handler;
   private final ConnectionManagerRegistry connectionRegistry;
@@ -91,7 +92,8 @@ class FabricServer extends BasicServer<RpcType, FabricConnection> {
   @Override
   protected ServerHandshakeHandler<FabricHandshake> newHandshakeHandler(
       final FabricConnection connection) {
-    return new ServerHandshakeHandler<FabricHandshake>(RpcType.HANDSHAKE, FabricHandshake.PARSER) {
+    return new ServerHandshakeHandler<FabricHandshake>(
+        RpcType.HANDSHAKE, FabricHandshake.parser()) {
 
       @Override
       public MessageLite getHandshakeResponse(FabricHandshake inbound) throws Exception {

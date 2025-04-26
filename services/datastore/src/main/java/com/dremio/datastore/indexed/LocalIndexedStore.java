@@ -18,6 +18,7 @@ package com.dremio.datastore.indexed;
 import com.dremio.datastore.CoreIndexedStore;
 import com.dremio.datastore.LocalKVStore;
 import com.dremio.datastore.SearchTypes.SearchQuery;
+import com.dremio.datastore.StoreBuilderHelper;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.FindByCondition;
 import com.dremio.datastore.api.IndexedStore;
@@ -29,8 +30,9 @@ public class LocalIndexedStore<K, V> extends LocalKVStore<K, V> implements Index
 
   private final CoreIndexedStore<K, V> coreIndexedStore;
 
-  public LocalIndexedStore(CoreIndexedStore<K, V> coreIndexedStore) {
-    super(coreIndexedStore);
+  public LocalIndexedStore(
+      CoreIndexedStore<K, V> coreIndexedStore, StoreBuilderHelper<K, V> helper) {
+    super(coreIndexedStore, helper);
     this.coreIndexedStore = coreIndexedStore;
   }
 

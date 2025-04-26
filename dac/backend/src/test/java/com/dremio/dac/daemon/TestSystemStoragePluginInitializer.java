@@ -84,7 +84,6 @@ import com.dremio.test.TemporarySystemProperties;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import java.util.EnumSet;
-import java.util.concurrent.ExecutorService;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocatorFactory;
 import org.junit.After;
@@ -100,6 +99,9 @@ public class TestSystemStoragePluginInitializer {
   private static final long RESERVATION = 0;
   private static final long MAX_ALLOCATION = Long.MAX_VALUE;
   private static final int TIMEOUT = 0;
+
+  private final CloseableThreadPool executor =
+      new CloseableThreadPool("test-system-storage-plugin-initializer");
 
   private ConnectionReader reader;
 
@@ -173,7 +175,6 @@ public class TestSystemStoragePluginInitializer {
           @Override
           public void close() throws Exception {}
         };
-    when(sabotContext.getNamespaceServiceFactory()).thenReturn(namespaceServiceFactory);
     when(sabotContext.getNamespaceService(anyString())).thenReturn(namespaceService);
     when(sabotContext.getOrphanageFactory()).thenReturn(orphanageFactory);
     when(sabotContext.getViewCreatorFactoryProvider()).thenReturn(() -> viewCreatorFactory);
@@ -264,7 +265,8 @@ public class TestSystemStoragePluginInitializer {
                     () -> optionManager),
             () -> new VersionedDatasetAdapterFactory(),
             () -> new CatalogStatusEventsImpl(),
-            () -> mock(ExecutorService.class));
+            () -> executor,
+            () -> namespaceServiceFactory);
     catalogService.start();
   }
 
@@ -277,7 +279,8 @@ public class TestSystemStoragePluginInitializer {
         clusterCoordinator,
         allocator,
         storeProvider,
-        kvStoreProvider);
+        kvStoreProvider,
+        executor);
   }
 
   @Test

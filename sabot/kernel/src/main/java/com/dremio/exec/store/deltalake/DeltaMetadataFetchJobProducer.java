@@ -16,7 +16,7 @@
 
 package com.dremio.exec.store.deltalake;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 
@@ -29,14 +29,14 @@ import com.dremio.io.file.Path;
 public class DeltaMetadataFetchJobProducer {
 
   private final FileSystem fs;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final Path metadataDir;
   private final DeltaVersion startVersion;
   private long version;
   private int subparts;
 
   DeltaMetadataFetchJobProducer(
-      SabotContext context, FileSystem fs, Path metadataDir, DeltaVersion version) {
+      PluginSabotContext context, FileSystem fs, Path metadataDir, DeltaVersion version) {
     this.fs = fs;
     this.context = context;
     this.metadataDir = metadataDir;

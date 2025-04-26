@@ -434,7 +434,7 @@ public class MergeOnReadRecordWriter implements RecordWriter {
             .withStaticIcebergColumnIDMap(icebergPositionalDeleteFileColumnIDMap)
             .withBatchSchema(ColumnUtils.DELETE_FILE_SCHEMA)
             .withParquetFileNameSuffix(DELETE_FILE_SUFFIX)
-            .withBlockSize(
+            .withTargetFileSize(
                 context
                     .getOptions()
                     .getOption(ExecConstants.PARQUET_DELETE_FILE_BLOCK_SIZE_VALIDATOR),

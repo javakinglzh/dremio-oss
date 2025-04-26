@@ -17,6 +17,7 @@ package com.dremio.dac.server;
 
 import static org.junit.Assume.assumeFalse;
 
+import javax.ws.rs.core.Response;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -32,5 +33,26 @@ public class LivenessServiceTest extends BaseTestServer {
   @Test
   public void testMetricsEndpointIsUp() {
     expectSuccess(getBuilder(getHttpClient().getMetricsEndpoint()).buildGet());
+  }
+
+  @Test
+  public void testMetricTraceMethodIsDisabled() {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getMetricsEndpoint()).build("TRACE"));
+  }
+
+  @Test
+  public void testTraceMethodIsDisabledOnLivenessServer() {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getLivenessRoot()).build("TRACE"));
+  }
+
+  @Test
+  public void testOptionsMethodIsDisabledOnLivenessServe() {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getLivenessRoot()).build("OPTIONS"));
   }
 }

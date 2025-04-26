@@ -22,8 +22,8 @@ import static com.dremio.exec.hive.HiveTestUtilities.logVersion;
 import static com.dremio.exec.hive.HiveTestUtilities.pingHive;
 
 import com.dremio.BaseTestQuery;
-import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.hive.HiveTestBase;
 import com.dremio.exec.impersonation.hive.BaseTestHiveImpersonation;
@@ -153,7 +153,9 @@ public final class HiveTestDataGenerator {
     sc.setType(conf.getType());
     sc.setConfig(conf.toBytesString());
     sc.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_PREFETCH_QUERIED);
-    catalogService.getSystemUserCatalog().createSource(sc);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(sc, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   /**
@@ -199,7 +201,9 @@ public final class HiveTestDataGenerator {
     conf.propertyList = updated;
     conf.secretPropertyList = updatedSecretPropertyList;
     newSC.setConfig(conf.toBytesString());
-    catalogService.getSystemUserCatalog().updateSource(newSC);
+    catalogService
+        .getSystemUserCatalog()
+        .updateSource(newSC, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   /** Delete the Hive test plugin from registry. */
@@ -209,7 +213,9 @@ public final class HiveTestDataGenerator {
       // test setup couldn't add a hive plugin successfully - we have nothing to delete
       return;
     }
-    catalogService.getSystemUserCatalog().deleteSource(msp.getId().getConfig());
+    catalogService
+        .getSystemUserCatalog()
+        .deleteSource(msp.getId().getConfig(), SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   public void executeDDL(String query) throws IOException {
@@ -643,8 +649,6 @@ public final class HiveTestDataGenerator {
       createTimestampToStringTable(hiveDriver, "timestamptostring");
       createDoubleToStringTable(hiveDriver, "doubletostring");
 
-      createFieldSizeLimitTables(hiveDriver, "field_size_limit_test");
-
       createParquetSchemaChangeTestTable(hiveDriver, "parqschematest_table");
       createParquetDecimalSchemaChangeTestTable(hiveDriver, "parqdecunion_table");
       createParquetDecimalSchemaChangeFilterTestTable(hiveDriver, "parqdecimalschemachange_table");
@@ -958,52 +962,6 @@ public final class HiveTestDataGenerator {
     executeQuery(hiveDriver, insert1);
     executeQuery(hiveDriver, insert2);
     executeQuery(hiveDriver, insert3);
-  }
-
-  private void createFieldSizeLimitTables(final Driver hiveDriver, final String table)
-      throws Exception {
-    final int unsupportedCellSize =
-        Math.toIntExact(ExecConstants.LIMIT_FIELD_SIZE_BYTES.getDefault().getNumVal()) + 1;
-    String createOrcTableCmd =
-        "CREATE TABLE "
-            + table
-            + "_orc"
-            + " (col1 string, col2 varchar("
-            + Integer.toString(unsupportedCellSize)
-            + "), col3 binary) STORED AS ORC";
-    String createTextTableCmd =
-        "CREATE TABLE "
-            + table
-            + " (col1 string, col2 varchar("
-            + Integer.toString(unsupportedCellSize)
-            + "), col3 binary)";
-
-    String stringVal = StringUtils.repeat("a", unsupportedCellSize);
-    String insertStrData =
-        "INSERT INTO TABLE "
-            + table
-            + " VALUES('"
-            + stringVal
-            + "', '"
-            + stringVal
-            + "', '"
-            + stringVal
-            + "')";
-    String insertStrDataInOrc =
-        "INSERT INTO TABLE "
-            + table
-            + "_orc"
-            + " VALUES('"
-            + stringVal
-            + "', '"
-            + stringVal
-            + "', '"
-            + stringVal
-            + "')";
-    executeQuery(hiveDriver, createTextTableCmd);
-    executeQuery(hiveDriver, createOrcTableCmd);
-    executeQuery(hiveDriver, insertStrData);
-    executeQuery(hiveDriver, insertStrDataInOrc);
   }
 
   private void createParquetSchemaChangeTestTable(final Driver hiveDriver, final String table)

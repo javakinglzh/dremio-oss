@@ -24,6 +24,9 @@ import static java.util.Arrays.asList;
 import static java.util.Collections.unmodifiableList;
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.dac.annotations.RestResource;
@@ -86,12 +89,15 @@ import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.errors.DatasetVersionNotFoundException;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.CatalogUser;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.catalog.SupportsMutatingViews;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.parser.ParserUtil;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
+import com.dremio.exec.store.iceberg.SupportsIcebergRestApi;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.job.proto.SessionId;
@@ -108,11 +114,13 @@ import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
 import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
+import com.dremio.service.users.SystemUser;
 import com.dremio.service.users.UserNotFoundException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
@@ -128,6 +136,7 @@ import java.util.Set;
 import java.util.TreeSet;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
+import javax.ws.rs.BadRequestException;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DefaultValue;
 import javax.ws.rs.GET;
@@ -713,6 +722,8 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
           UserNotFoundException,
           NamespaceException,
           DatasetNotFoundException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException,
           IOException {
     if (asDatasetPath == null) {
       asDatasetPath = datasetPath;
@@ -720,13 +731,6 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
     // check if source is versioned
     final Catalog catalog = datasetService.getCatalog();
     final boolean versioned = isVersionedPlugin(asDatasetPath, catalog);
-    // check if versioned view is enabled
-    final boolean versionedViewEnabled = datasetService.checkIfVersionedViewEnabled();
-    if (versioned && !versionedViewEnabled) {
-      throw UserException.unsupportedError()
-          .message("Versioned view is not enabled")
-          .buildSilently();
-    }
     // Gets the latest version of the view from DatasetVersion store
     final VirtualDatasetUI vds = getDatasetConfig(versioned);
     if (vds != null && branchName == null && versioned) {
@@ -745,9 +749,13 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       }
     }
 
-    final DatasetUI savedDataset = save(vds, asDatasetPath, savedTag, branchName, versioned);
-    return new DatasetUIWithHistory(
-        savedDataset, tool.getHistory(asDatasetPath, savedDataset.getDatasetVersion()));
+    try {
+      final DatasetUI savedDataset = save(vds, asDatasetPath, savedTag, branchName, versioned);
+      return new DatasetUIWithHistory(
+          savedDataset, tool.getHistory(asDatasetPath, savedDataset.getDatasetVersion()));
+    } catch (CatalogUnsupportedOperationException e) {
+      throw new BadRequestException(e.getMessage());
+    }
   }
 
   protected void setReference(VirtualDatasetUI vds, String reference) {
@@ -766,6 +774,16 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
     return CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, catalog);
   }
 
+  protected boolean doesSourceSupportMutatingViews(DatasetPath datasetPath, Catalog catalog) {
+    NamespaceKey namespaceKey = new NamespaceKey(datasetPath.toPathList());
+    return CatalogUtil.supportsInterface(namespaceKey, catalog, SupportsMutatingViews.class);
+  }
+
+  protected boolean doesSourceSupportIcebergRestApi(DatasetPath datasetPath, Catalog catalog) {
+    NamespaceKey namespaceKey = new NamespaceKey(datasetPath.toPathList());
+    return CatalogUtil.supportsInterface(namespaceKey, catalog, SupportsIcebergRestApi.class);
+  }
+
   public DatasetUI save(
       VirtualDatasetUI vds,
       DatasetPath asDatasetPath,
@@ -776,7 +794,10 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       throws DatasetNotFoundException,
           UserNotFoundException,
           NamespaceException,
-          DatasetVersionNotFoundException {
+          DatasetVersionNotFoundException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityNotFoundException,
+          CatalogEntityAlreadyExistsException {
     checkSaveNonVersionedView(branchName, isVersionedSource);
     String queryString = vds.getSql();
     ParserUtil.validateViewQuery(queryString);
@@ -823,12 +844,20 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
         }
         vds.setPreviousVersion(rewrittenPrev);
       }
+      boolean doesSourceSupportsMutatingViews =
+          doesSourceSupportMutatingViews(asDatasetPath, datasetService.getCatalog());
+      boolean doesSourceSupportsIcebergRestAPI =
+          doesSourceSupportIcebergRestApi(asDatasetPath, datasetService.getCatalog());
       if (!isVersionedSource) {
-        datasetService.put(vds, attributes);
+        if (doesSourceSupportsMutatingViews && doesSourceSupportsIcebergRestAPI) {
+          datasetService.putWithSupportsMutatingViews(vds, asDatasetPath, savedTag);
+        } else {
+          datasetService.put(vds, attributes);
+        }
+
       } else {
         datasetService.putWithVersionedSource(vds, asDatasetPath, branchName, savedTag);
       }
-
       vds.setPreviousVersion(prevDataset);
       vds.setDatasetVersionOrigin(DatasetVersionOrigin.SAVE);
       tool.rewriteHistory(vds, asDatasetPath);
@@ -861,21 +890,33 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
   /**
    * @return true if pathList is an ancestor (parent or grandparent) of the virtual dataset
    */
-  private static boolean isAncestor(VirtualDatasetUI vds, List<String> pathList) {
-    List<ParentDataset> parents = vds.getParentsList();
+  private boolean isAncestor(VirtualDatasetUI vds, List<String> pathList) {
+    return isAncestor(vds.getParentsList(), pathList);
+  }
+
+  private boolean isAncestor(List<ParentDataset> parents, List<String> pathList) {
     if (parents != null) {
       for (ParentDataset parent : parents) {
         if (pathList.equals(parent.getDatasetPathList())) {
           return true;
         }
-      }
-    }
 
-    List<ParentDataset> grandParents = vds.getGrandParentsList();
-    if (grandParents != null) {
-      for (ParentDataset parent : grandParents) {
-        if (pathList.equals(parent.getDatasetPathList())) {
-          return true;
+        if (parent.getType() == DatasetType.VIRTUAL_DATASET) {
+          try {
+            VirtualDataset parentVds =
+                datasetService
+                    .getCatalog()
+                    .resolveCatalog(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
+                    .getDataset(new NamespaceKey(parent.getDatasetPathList()))
+                    .getVirtualDataset();
+            if (isAncestor(parentVds.getParentsList(), pathList)) {
+              return true;
+            }
+          } catch (NamespaceException e) {
+            // ignore
+          } catch (DatasetVersionNotFoundException e) {
+            // ignore
+          }
         }
       }
     }
@@ -1032,13 +1073,19 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       throws DatasetVersionNotFoundException,
           UserNotFoundException,
           DatasetNotFoundException,
+          CatalogEntityNotFoundException,
+          CatalogEntityAlreadyExistsException,
           NamespaceException {
     final CompletionListener completionListener = new CompletionListener();
     Transformer.DatasetAndData datasetAndData = reapplyDataset(completionListener);
     completionListener.awaitUnchecked();
-    DatasetUI savedDataset = save(datasetAndData.getDataset(), asDatasetPath, null, null, false);
-    return new DatasetUIWithHistory(
-        savedDataset, tool.getHistory(asDatasetPath, datasetAndData.getDataset().getVersion()));
+    try {
+      DatasetUI savedDataset = save(datasetAndData.getDataset(), asDatasetPath, null, null, false);
+      return new DatasetUIWithHistory(
+          savedDataset, tool.getHistory(asDatasetPath, datasetAndData.getDataset().getVersion()));
+    } catch (CatalogUnsupportedOperationException e) {
+      throw new BadRequestException(e.getMessage());
+    }
   }
 
   // a partial duplicate of gethistory

@@ -134,7 +134,7 @@ public class UnlimitedSplitsMetadataProvider {
     tableUuid = config.getPhysicalDataset().getIcebergMetadata().getTableUuid();
     partitionCols =
         Optional.ofNullable(config.getReadDefinition().getPartitionColumnsList())
-            .orElse(Collections.EMPTY_LIST);
+            .orElse(Collections.emptyList());
     metadataExists = true;
     logger.info("Table metadata found for {}, at {}", tableNSKey.getSchemaPath(), tableLocation);
   }

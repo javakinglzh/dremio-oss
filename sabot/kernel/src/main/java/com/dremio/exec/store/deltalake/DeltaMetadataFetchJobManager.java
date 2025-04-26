@@ -18,7 +18,7 @@ package com.dremio.exec.store.deltalake;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.connector.metadata.options.TimeTravelOption;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -59,7 +59,7 @@ public class DeltaMetadataFetchJobManager {
   private static final Logger logger = LoggerFactory.getLogger(DeltaMetadataFetchJobManager.class);
 
   private final FileSystem fs;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final String selectionRoot;
   private final DeltaVersion startVersion;
 
@@ -71,7 +71,7 @@ public class DeltaMetadataFetchJobManager {
   private final BatchReader batchReader;
 
   public DeltaMetadataFetchJobManager(
-      SabotContext context,
+      PluginSabotContext context,
       FileSystem fs,
       FileSelection fileSelection,
       TimeTravelOption.TimeTravelRequest travelRequest) {
@@ -79,7 +79,7 @@ public class DeltaMetadataFetchJobManager {
   }
 
   public DeltaMetadataFetchJobManager(
-      SabotContext context,
+      PluginSabotContext context,
       FileSystem fs,
       String selectionRoot,
       TimeTravelOption.TimeTravelRequest travelRequest) {

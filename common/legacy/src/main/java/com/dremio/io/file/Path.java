@@ -15,7 +15,10 @@
  */
 package com.dremio.io.file;
 
-import static com.dremio.io.file.UriSchemes.ADL_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_ABFSS_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_ABFS_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_WASBS_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_WASB_SCHEME;
 import static com.dremio.io.file.UriSchemes.FILE_SCHEME;
 import static com.dremio.io.file.UriSchemes.GCS_SCHEME;
 import static com.dremio.io.file.UriSchemes.S3A_SCHEME;
@@ -47,15 +50,13 @@ public final class Path implements Comparable<Path> {
   public static final Set<String> S3_FILE_SYSTEM = ImmutableSet.of(S3A_SCHEME, S3_SCHEME, "s3n");
   public static final Set<String> GCS_FILE_SYSTEM = ImmutableSet.of(GCS_SCHEME);
   public static final Set<String> AZURE_FILE_SYSTEM =
-      ImmutableSet.of("wasbs", "wasb", "abfs", "abfss");
-  public static final Set<String> ADLS_FILE_SYSTEM = ImmutableSet.of(ADL_SCHEME);
+      ImmutableSet.of(AZURE_WASBS_SCHEME, AZURE_WASB_SCHEME, AZURE_ABFS_SCHEME, AZURE_ABFSS_SCHEME);
 
   public static final Set<Object> validSchemes =
       ImmutableSet.builder()
           .addAll(S3_FILE_SYSTEM)
           .addAll(GCS_FILE_SYSTEM)
           .addAll(AZURE_FILE_SYSTEM)
-          .addAll(ADLS_FILE_SYSTEM)
           .addAll(
               Arrays.stream(UriSchemes.class.getFields())
                   .map(
@@ -464,8 +465,6 @@ public final class Path implements Comparable<Path> {
     } else if (GCS_FILE_SYSTEM.contains(scheme)) {
       String authority = (pathUri.getAuthority() != null) ? pathUri.getAuthority() : "";
       return SEPARATOR + authority + pathUri.getPath();
-    } else if (ADLS_FILE_SYSTEM.contains(scheme)) {
-      return Path.withoutSchemeAndAuthority(path).toString();
     } else if (FILE_SCHEME.equals(scheme)) {
       return pathUri.getPath();
     } else {

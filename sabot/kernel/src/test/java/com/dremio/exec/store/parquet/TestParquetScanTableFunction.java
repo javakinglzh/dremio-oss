@@ -427,9 +427,9 @@ public class TestParquetScanTableFunction extends BaseTestParquetScanTableFuncti
 
   private TableFunctionConfig getTableFunctionConfig() {
     TableFunctionContext functionContext = mock(TableFunctionContext.class);
-    BatchSchema fullSchema = new BatchSchema(Collections.EMPTY_LIST);
+    BatchSchema fullSchema = new BatchSchema(Collections.emptyList());
     when(functionContext.getFullSchema()).thenReturn(fullSchema);
-    when(functionContext.getColumns()).thenReturn(Collections.EMPTY_LIST);
+    when(functionContext.getColumns()).thenReturn(Collections.emptyList());
 
     return new TableFunctionConfig(
         TableFunctionConfig.FunctionType.DATA_FILE_SCAN, false, functionContext);

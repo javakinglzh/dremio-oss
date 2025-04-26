@@ -25,6 +25,11 @@
 
   <logger name="com.dremio" level="${dremio.test.log.level:-warn}" />
 
+  <logger name="com.dremio.testcontainers" level="DEBUG"/>
+  <logger name="org.testcontainers" level="INFO"/>
+  <logger name="com.github.dockerjava" level="WARN"/>
+  <logger name="com.github.dockerjava.zerodep.shaded.org.apache.hc.client5.http.wire" level="OFF"/>
+
   <root>
     <level value="error" />
     <appender-ref ref="STDOUT" />

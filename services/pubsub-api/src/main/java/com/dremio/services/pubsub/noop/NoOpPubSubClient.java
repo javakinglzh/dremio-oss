@@ -43,7 +43,7 @@ public final class NoOpPubSubClient implements PubSubClient {
   public <M extends Message> MessageSubscriber<M> getSubscriber(
       Class<? extends Subscription<M>> subscriptionClass,
       MessageConsumer<M> messageConsumer,
-      MessageSubscriberOptions options) {
+      MessageSubscriberOptions<M> options) {
     return new NoOpMessageSubscriber<>();
   }
 }

@@ -17,13 +17,15 @@
 import { IconButton, TooltipPlacement, Button } from "dremio-ui-lib/components";
 import { Link } from "react-router";
 import { useIntl } from "react-intl";
-import { useDispatch } from "react-redux";
 // @ts-ignore
 import * as sqlPaths from "dremio-ui-common/paths/sqlEditor.js";
 // @ts-ignore
 import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
 import { expandExploreSql } from "#oss/actions/explore/ui";
 import Immutable from "immutable";
+import { store } from "#oss/store/store";
+
+type VersionCtx = { type: string; value: string };
 
 type QueryDatasetProps = {
   fullPath: Immutable.Map<any, any>;
@@ -34,7 +36,43 @@ type QueryDatasetProps = {
   tooltipPortal?: boolean;
   isButton?: boolean;
   buttonClassName?: string;
-  versionContext?: { type: string; value: string };
+  versionContext?: VersionCtx;
+};
+
+// Moving this to a hook for now, may want to separate the redux action out
+export const useQueryDataset = ({
+  fullPath,
+  shouldExpandEditor,
+  resourceId,
+  versionContext,
+}: Pick<QueryDatasetProps, "shouldExpandEditor" | "resourceId"> & {
+  fullPath: string[] | undefined;
+  versionContext?: VersionCtx;
+}) => {
+  const projectId = getSonarContext()?.getSelectedProjectId?.();
+  const newQueryLink = sqlPaths.sqlEditor.link({ projectId });
+  const stringifiedFullPath = JSON.stringify(fullPath);
+  const versionedDataset = versionContext
+    ? `&versionContext=${JSON.stringify(versionContext)}`
+    : "";
+
+  const newQueryUrlParams = `?context="${encodeURIComponent(
+    resourceId,
+  )}"&queryPath=${encodeURIComponent(stringifiedFullPath)}${versionedDataset}`;
+
+  const handleClick = (e?: any) => {
+    if (e) e.stopPropagation();
+    if (shouldExpandEditor) {
+      store.dispatch(expandExploreSql());
+    }
+  };
+
+  const newLocation = {
+    pathname: newQueryLink,
+    search: newQueryUrlParams,
+  };
+
+  return { newLocation, handleClick };
 };
 
 // Icon
@@ -49,24 +87,14 @@ const QueryDataset = ({
   buttonClassName,
   versionContext,
 }: QueryDatasetProps) => {
-  const dispatch = useDispatch();
-  const projectId = getSonarContext()?.getSelectedProjectId?.();
-  const newQueryLink = sqlPaths.sqlEditor.link({ projectId });
-  const stringifiedFullPath = JSON.stringify(fullPath?.toJS?.());
-  const versionedDataset = versionContext
-    ? `&versionContext=${JSON.stringify(versionContext)}`
-    : "";
-
-  const newQueryUrlParams = `?context="${encodeURIComponent(
-    resourceId,
-  )}"&queryPath=${encodeURIComponent(stringifiedFullPath)}${versionedDataset}`;
   const { formatMessage } = useIntl();
-  const handleClick = (e: any) => {
-    e.stopPropagation();
-    if (shouldExpandEditor) {
-      dispatch(expandExploreSql());
-    }
-  };
+
+  const { newLocation, handleClick } = useQueryDataset({
+    fullPath: fullPath?.toJS?.(),
+    shouldExpandEditor,
+    resourceId,
+    versionContext,
+  });
 
   return isButton ? (
     <Button
@@ -74,10 +102,7 @@ const QueryDataset = ({
       variant="secondary"
       as={Link}
       onClick={handleClick}
-      to={{
-        pathname: newQueryLink,
-        search: newQueryUrlParams,
-      }}
+      to={newLocation}
       className={buttonClassName}
     >
       <dremio-icon class={className} name="navigation-bar/sql-runner" />
@@ -87,10 +112,7 @@ const QueryDataset = ({
     <IconButton
       as={Link}
       onClick={handleClick}
-      to={{
-        pathname: newQueryLink,
-        search: newQueryUrlParams,
-      }}
+      to={newLocation}
       tooltip={formatMessage({ id: "Query.Dataset" })}
       tooltipPlacement={tooltipPlacement}
       tooltipPortal={tooltipPortal}

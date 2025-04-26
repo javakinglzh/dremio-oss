@@ -16,8 +16,13 @@
 package com.dremio.exec.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.dremio.exec.proto.UserBitShared;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -51,7 +56,7 @@ public class UtilitiesTest {
     assertEquals(workloadType, Utilities.getByClientType(clientInfo));
   }
 
-  private static Stream<Arguments> testHumanReadableWorkloadName() {
+  private static Stream<Arguments> testGetWorkloadTypeForWlmRules() {
     return Stream.of(
         Arguments.of(UserBitShared.WorkloadType.UNKNOWN, "Other"),
         Arguments.of(UserBitShared.WorkloadType.DDL, "DDL"),
@@ -68,8 +73,35 @@ public class UtilitiesTest {
 
   @ParameterizedTest(name = "WorkloadType: {0}, Human Readable Name: {1}")
   @MethodSource
-  public void testHumanReadableWorkloadName(
+  public void testGetWorkloadTypeForWlmRules(
       UserBitShared.WorkloadType workloadType, String humanReadableName) {
-    assertEquals(humanReadableName, Utilities.getHumanReadableWorkloadType(workloadType));
+    assertEquals(humanReadableName, Utilities.getWorkloadTypeForWlmRules(workloadType));
+  }
+
+  private static Stream<Arguments> testSplitList() {
+    return Stream.of(
+        Arguments.of(1, 1),
+        Arguments.of(2, 1),
+        Arguments.of(2, 2),
+        Arguments.of(3, 2),
+        Arguments.of(4, 3),
+        Arguments.of(5, 5),
+        Arguments.of(101, 2),
+        Arguments.of(101, 3));
+  }
+
+  @ParameterizedTest(name = "List size: {0} split count {1}")
+  @MethodSource
+  public void testSplitList(Integer listSize, Integer splitCount) {
+    List<Integer> listToSplit = IntStream.range(0, listSize).boxed().collect(Collectors.toList());
+    List<List<Integer>> result = Utilities.splitList(listToSplit, splitCount);
+    int listMinimalSize = Math.max(1, listSize / splitCount);
+    assertEquals(result.size(), splitCount);
+    for (List<Integer> l : result) {
+      assertTrue(l.size() >= listMinimalSize);
+    }
+    List<Integer> gathered = result.stream().flatMap(List::stream).collect(Collectors.toList());
+    Collections.sort(gathered);
+    assertEquals(listToSplit, gathered);
   }
 }

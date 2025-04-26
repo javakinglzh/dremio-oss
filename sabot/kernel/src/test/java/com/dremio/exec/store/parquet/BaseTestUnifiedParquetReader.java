@@ -30,6 +30,7 @@ import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.BaseTestOperator;
+import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorContextImpl;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf;
 import com.dremio.sabot.op.scan.OutputMutator;
@@ -51,7 +52,7 @@ import org.junit.Before;
 
 public class BaseTestUnifiedParquetReader extends BaseTestOperator {
 
-  protected OperatorContextImpl context;
+  protected OperatorContext context;
   protected FileSystem fs;
   protected static final List<AutoCloseable> classCloseables = new ArrayList<>();
 
@@ -60,7 +61,9 @@ public class BaseTestUnifiedParquetReader extends BaseTestOperator {
   @Before
   public void beforeTest() throws Exception {
     context = testContext.getNewOperatorContext(getTestAllocator(), null, getBatchSize(), null);
-    testCloseables.add(context);
+    if (context instanceof OperatorContextImpl) {
+      testCloseables.add((OperatorContextImpl) context);
+    }
     fs = HadoopFileSystem.get(Path.of("/"), new Configuration(), context.getStats());
   }
 

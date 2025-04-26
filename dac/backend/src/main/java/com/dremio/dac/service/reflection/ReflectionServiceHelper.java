@@ -16,7 +16,6 @@
 package com.dremio.dac.service.reflection;
 
 import static com.dremio.exec.catalog.CatalogOptions.REFLECTION_VERSIONED_SOURCE_ENABLED;
-import static com.dremio.service.reflection.ReflectionOptions.REFLECTION_SCHEDULE_POLICY_ENABLED;
 
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.dac.api.Reflection;
@@ -29,11 +28,13 @@ import com.dremio.service.namespace.dataset.proto.RefreshMethod;
 import com.dremio.service.namespace.physicaldataset.proto.AccelerationSettingsDescriptor;
 import com.dremio.service.namespace.proto.RefreshPolicyType;
 import com.dremio.service.namespace.source.proto.SourceConfig;
+import com.dremio.service.reflection.ChangeCause;
 import com.dremio.service.reflection.IncrementalUpdateServiceUtils;
 import com.dremio.service.reflection.ReflectionAdministrationService;
 import com.dremio.service.reflection.ReflectionSettings;
 import com.dremio.service.reflection.ReflectionStatus;
 import com.dremio.service.reflection.ReflectionStatusService;
+import com.dremio.service.reflection.ReflectionUtils;
 import com.dremio.service.reflection.analysis.ReflectionSuggester.ReflectionSuggestionType;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationMetrics;
@@ -96,7 +97,7 @@ public class ReflectionServiceHelper {
     return getReflectionAdministrationService().getGoal(id).get();
   }
 
-  public ReflectionGoal updateReflection(ReflectionGoal goal) {
+  public ReflectionGoal updateReflection(ReflectionGoal goal, ChangeCause changeCause) {
     isVersionedSourceEnabled(goal.getDatasetId());
     Optional<ReflectionGoal> existingGoal =
         getReflectionAdministrationService().getGoal(goal.getId());
@@ -105,7 +106,7 @@ public class ReflectionServiceHelper {
       throw new ReflectionNotFound(goal.getId().getId());
     }
 
-    getReflectionAdministrationService().update(goal);
+    getReflectionAdministrationService().update(goal, changeCause);
 
     return getReflectionAdministrationService().getGoal(goal.getId()).get();
   }
@@ -114,12 +115,12 @@ public class ReflectionServiceHelper {
     return getReflectionAdministrationService().getRecommendedReflections(id, type);
   }
 
-  public void removeReflection(String id) {
+  public void removeReflection(String id, ChangeCause changeCause) {
     Optional<ReflectionGoal> goal =
         getReflectionAdministrationService().getGoal(new ReflectionId(id));
 
     if (goal.isPresent()) {
-      getReflectionAdministrationService().remove(goal.get());
+      getReflectionAdministrationService().remove(goal.get(), changeCause);
     } else {
       throw new ReflectionNotFound(id);
     }
@@ -166,14 +167,6 @@ public class ReflectionServiceHelper {
     return total;
   }
 
-  public void setSubstitutionEnabled(boolean enabled) {
-    getReflectionAdministrationService().setSubstitutionEnabled(enabled);
-  }
-
-  public boolean isSubstitutionEnabled() {
-    return getReflectionAdministrationService().isSubstitutionEnabled();
-  }
-
   public ReflectionSettings getReflectionSettings() {
     return getReflectionAdministrationService().getReflectionSettings();
   }
@@ -196,7 +189,11 @@ public class ReflectionServiceHelper {
     final String goalId = goal.getId().getId();
     Pair<Long, Long> currentSize = getCurrentSize(goalId);
     return new Reflection(
-        goal, getStatusForReflection(goalId), currentSize.left, getTotalSize(goalId));
+        goal,
+        getStatusForReflection(goalId),
+        currentSize.left,
+        getTotalSize(goalId),
+        ReflectionUtils.REFLECTION_MODE_PROVIDER.getReflectionMode(goal));
   }
 
   public boolean doesDatasetHaveReflection(String datasetId) {
@@ -214,10 +211,6 @@ public class ReflectionServiceHelper {
   public boolean isIncrementalRefreshBySnapshotEnabled(DatasetConfig datasetConfig) {
     return IncrementalUpdateServiceUtils.isIncrementalRefreshBySnapshotEnabled(
         datasetConfig, optionManager);
-  }
-
-  public boolean isRefreshSchedulePolicyEnabled() {
-    return optionManager.getOption(REFLECTION_SCHEDULE_POLICY_ENABLED);
   }
 
   public OptionManager getOptionManager() {

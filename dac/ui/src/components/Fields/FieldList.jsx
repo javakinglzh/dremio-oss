@@ -20,6 +20,7 @@ import PropTypes from "prop-types";
 
 import { formatMessage } from "../../utils/locale";
 import { IconButton } from "dremio-ui-lib";
+import { Button } from "dremio-ui-lib/components";
 
 import * as classes from "./FieldList.module.less";
 
@@ -35,16 +36,17 @@ export class AddButton extends Component {
   render() {
     const { addItem, children } = this.props;
     return (
-      <div
+      <Button
         aria-label="Add"
         key="addItem"
         data-qa="add-engine-button"
         className={classes["addField__action"]}
         onClick={addItem}
+        variant="tertiary"
       >
-        <dremio-icon name="interface/add" alt="+" class="margin-right--half" />
+        <dremio-icon name="interface/add" alt="+" />
         {children}
-      </div>
+      </Button>
     );
   }
 }

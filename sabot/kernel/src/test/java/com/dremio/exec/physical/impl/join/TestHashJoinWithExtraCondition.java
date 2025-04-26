@@ -245,7 +245,7 @@ public class TestHashJoinWithExtraCondition extends PlanTestBase {
         .sqlQuery(sql)
         .unOrdered()
         .baselineColumns("key", "cnt")
-        .baselineValues(0L, 11L)
+        .baselineValues(0, 11L)
         .go();
     testPlanMatchingPatterns(
         sql,
@@ -281,7 +281,7 @@ public class TestHashJoinWithExtraCondition extends PlanTestBase {
         .sqlQuery(sql)
         .unOrdered()
         .baselineColumns("key", "cnt")
-        .baselineValues(0L, 11L)
+        .baselineValues(0, 11L)
         .go();
     testPlanMatchingPatterns(
         sql,
@@ -318,8 +318,8 @@ public class TestHashJoinWithExtraCondition extends PlanTestBase {
         .sqlQuery(sql)
         .unOrdered()
         .baselineColumns("key", "cnt")
-        .baselineValues(0L, 7L)
-        .baselineValues(1L, 1L)
+        .baselineValues(0, 7L)
+        .baselineValues(1, 1L)
         .baselineValues(null, 1L)
         .go();
     testPlanMatchingPatterns(

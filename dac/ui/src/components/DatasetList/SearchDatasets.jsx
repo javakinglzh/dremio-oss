@@ -91,6 +91,7 @@ class SearchDatasets extends PureComponent {
           showParents
           isExpandable={isExpandable}
           showAddIcon={this.props.showAddIcon}
+          showSummaryOverlay={false}
         />
       </div>
     );

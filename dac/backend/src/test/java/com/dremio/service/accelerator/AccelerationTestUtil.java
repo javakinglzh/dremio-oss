@@ -33,6 +33,7 @@ import com.dremio.dac.proto.model.acceleration.LayoutContainerApiDescriptor;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.server.test.SampleDataPopulator;
 import com.dremio.dac.service.source.SourceService;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.InternalFileConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
@@ -102,7 +103,8 @@ public abstract class AccelerationTestUtil extends BaseTestServer {
             SchemaMutability.ALL,
             CatalogService.DEFAULT_METADATA_POLICY,
             true,
-            null));
+            null),
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     final NamespaceService nsService = getNamespaceService();
     final SpaceConfig config = new SpaceConfig().setName(TEST_SPACE);
@@ -210,7 +212,6 @@ public abstract class AccelerationTestUtil extends BaseTestServer {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(

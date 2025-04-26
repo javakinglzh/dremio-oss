@@ -535,6 +535,9 @@ public class HiveORCVectorizedReader extends HiveAbstractReader {
         offset = toRead;
       }
 
+      outputMutator.getContainer().setAllCount(outputIdx);
+      checkForRowSizeOverLimit(outputIdx);
+
       return outputIdx;
     } catch (Throwable t) {
       throw createExceptionWithContext("Failed to read data from ORC file", t);

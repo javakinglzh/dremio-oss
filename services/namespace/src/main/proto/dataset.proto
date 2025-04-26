@@ -68,19 +68,19 @@ message VirtualDataset {
   repeated ParentDataset parents = 4;
   // context
   repeated string context = 5;
-  repeated FieldOrigin fieldOrigins = 6;
+  repeated FieldOrigin fieldOrigins = 6 [deprecated = true];
   // list of all parents of parents.
-  repeated ParentDataset grandParents = 7;
-
+  repeated ParentDataset grandParents = 7 [deprecated = true];
   // list of field names that are NOT nullable (NOT NULL)
-  repeated string required_fields = 8; // DEPRECATED
-
+  repeated string required_fields = 8 [deprecated = true];
   // The fields of the dataset from a View perspective. This is generated from the view's rowType
-  repeated ViewFieldType calcite_fields = 9; // DEPRECATED
+  repeated ViewFieldType calcite_fields = 9 [deprecated = true];
   optional bool default_reflection_enabled = 10;
   optional IcebergViewAttributes iceberg_view_attributes = 11;
   // One of the ancestor views changed source and/or fields, this view needs update
   optional bool schema_outdated = 12;
+  // The immediate (first level) origin(s) for each field in the dataset
+  repeated FieldOrigin field_upstreams = 13;
 }
 
 enum SortOrder {
@@ -112,6 +112,7 @@ message DatasetField {
 message IcebergViewAttributes {
  optional string view_spec_version = 1;
  optional string view_dialect = 2;
+ optional string metadata_location = 3;
 }
 
 message AccelerationSettings {

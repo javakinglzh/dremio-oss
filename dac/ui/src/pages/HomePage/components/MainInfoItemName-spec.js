@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { browserHistory } from "react-router";
 import { shallow } from "enzyme";
 import Immutable from "immutable";
 import { MainInfoItemName } from "./MainInfoItemName";
@@ -56,35 +57,29 @@ describe("MainInfoItemName", () => {
       datasetConfig: { fullPathList: [] },
     }),
   };
-  const context = {
-    location: { pathname: "foo" },
-  };
 
   it("renders <div>", () => {
-    const wrapper = shallow(<MainInfoItemName {...commonProps} />, { context });
+    const wrapper = shallow(<MainInfoItemName {...commonProps} />);
     expect(wrapper.type()).to.eql("div");
   });
 
   it("should render Link to href", () => {
-    const wrapper = shallow(<MainInfoItemName {...commonProps} />, { context });
+    const wrapper = shallow(<MainInfoItemName {...commonProps} />);
     expect(wrapper.find("Link").props().to).to.eql("/href");
   });
 
   it("should render color only for all clickable items", () => {
-    const wrapper1 = shallow(<MainInfoItemName {...queryableFolderProps} />, {
-      context,
-    });
-    const wrapper2 = shallow(<MainInfoItemName {...commonProps} />, {
-      context,
-    });
+    const wrapper1 = shallow(<MainInfoItemName {...queryableFolderProps} />);
+    const wrapper2 = shallow(<MainInfoItemName {...commonProps} />);
     expect(wrapper1.find("Link").props().style.color).to.eql(undefined);
     expect(wrapper2.find("Link").props().style.color).to.eql(undefined);
   });
 
   it("should render modal href for non-queryable file", () => {
-    const wrapper = shallow(<MainInfoItemName {...fileProps} />, { context });
+    const location = browserHistory.getCurrentLocation();
+    const wrapper = shallow(<MainInfoItemName {...fileProps} />);
     expect(wrapper.find("Link").props().to).to.eql({
-      ...context.location,
+      ...location,
       state: {
         modal: "DatasetSettingsModal",
         tab: "format",
@@ -100,14 +95,13 @@ describe("MainInfoItemName", () => {
   });
 
   it("should render name as text", () => {
-    const wrapper = shallow(<MainInfoItemName {...commonProps} />, { context });
+    const wrapper = shallow(<MainInfoItemName {...commonProps} />);
     expect(wrapper.find("EllipsedText").props().text).to.eql("foo");
   });
 
   it("should render dremio-icon type depending on fileType", () => {
     const wrapper = shallow(
       <MainInfoItemName item={commonProps.item.set("fileType", "dataset")} />,
-      { context },
     );
     expect(wrapper.find("dremio-icon").props().name).to.eql(
       "entities/dataset-view",

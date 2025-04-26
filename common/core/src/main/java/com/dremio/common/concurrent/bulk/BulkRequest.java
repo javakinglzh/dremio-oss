@@ -17,6 +17,9 @@ package com.dremio.common.concurrent.bulk;
 
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.MultimapBuilder;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -147,8 +150,7 @@ public final class BulkRequest<KEY> {
    * reverse key mapping to produce a BulkResponse in the original request key space.
    *
    * @param bulkFunction The bulk function to call with the transformed request.
-   * @param keyTransformer The key transformation function. This must be a one-to-one (bijective)
-   *     function.
+   * @param keyTransformer The key transformation function.
    * @return The BulkResponse in the original (caller's) key space.
    * @param <VAL> Type of the response values.
    * @param <KEY2> Type of the transformed keys accepted by the provided BulkFunction.
@@ -156,8 +158,10 @@ public final class BulkRequest<KEY> {
   public <VAL, KEY2> BulkResponse<KEY, VAL> bulkTransformAndHandleRequests(
       BulkFunction<KEY2, VAL> bulkFunction, Function<KEY, KEY2> keyTransformer) {
 
-    // transform request keys, and keep a reverse mapping from transformed keys to original keys
-    Map<KEY2, KEY> reverseKeyLookup = new HashMap<>();
+    // Transform request keys, and keep a reverse mapping from transformed keys to original keys. We
+    // use a MultiMap since it's possible for two distinct keys to transform to the same value.
+    Multimap<KEY2, KEY> reverseKeyLookup =
+        MultimapBuilder.hashKeys(size()).arrayListValues().build();
     // The key transformation could be non-trivial, so we record and add to final response below
     Map<KEY, Long> keyTransformationTime = new HashMap<>();
     BulkRequest.Builder<KEY2> requestBuilder = BulkRequest.builder(size());
@@ -175,10 +179,13 @@ public final class BulkRequest<KEY> {
     BulkResponse<KEY2, VAL> responses = bulkFunction.apply(transformedRequest);
     responses.forEach(
         response -> {
-          KEY originalKey = reverseKeyLookup.get(response.key());
-          MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
-          CompletionStage<VAL> asyncVal = addElapsedTime(response, elapsedNanos);
-          responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+          Collection<KEY> originalKeys = reverseKeyLookup.get(response.key());
+          originalKeys.forEach(
+              originalKey -> {
+                MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
+                CompletionStage<VAL> asyncVal = addElapsedTime(response, elapsedNanos);
+                responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+              });
         });
     return responseBuilder.build();
   }
@@ -191,8 +198,7 @@ public final class BulkRequest<KEY> {
    * key space.
    *
    * @param bulkFunction The bulk function to call with the transformed request.
-   * @param keyTransformer The key transformation function. This must be a one-to-one (bijective)
-   *     function.
+   * @param keyTransformer The key transformation function.
    * @param valueTransformer The value transformation function. This transforms response values from
    *     the value returned by the provided BulkFunction to the value to be returned by this call.
    * @return The BulkResponse in the original (caller's) key space.
@@ -205,8 +211,10 @@ public final class BulkRequest<KEY> {
       Function<KEY, KEY2> keyTransformer,
       ValueTransformer<KEY2, VAL2, KEY, VAL> valueTransformer) {
 
-    // transform request keys, and keep a reverse mapping from transformed keys to original keys
-    Map<KEY2, KEY> reverseKeyLookup = new HashMap<>();
+    // Transform request keys, and keep a reverse mapping from transformed keys to original keys. We
+    // use a MultiMap since it's possible for two distinct keys to transform to the same value.
+    Multimap<KEY2, KEY> reverseKeyLookup =
+        MultimapBuilder.hashKeys(size()).arrayListValues().build();
     // The key transformation could be non-trivial, so we record and add to final response below
     Map<KEY, Long> keyTransformationTime = new HashMap<>();
     BulkRequest.Builder<KEY2> requestBuilder = BulkRequest.builder(size());
@@ -224,12 +232,15 @@ public final class BulkRequest<KEY> {
     BulkResponse<KEY2, VAL2> responses = bulkFunction.apply(transformedRequest);
     responses.forEach(
         response -> {
-          KEY originalKey = reverseKeyLookup.get(response.key());
-          MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
-          BulkResponse.Response<KEY, VAL> transformedResponse =
-              response.transform(reverseKeyLookup::get, valueTransformer);
-          CompletionStage<VAL> asyncVal = addElapsedTime(transformedResponse, elapsedNanos);
-          responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+          Collection<KEY> originalKeys = reverseKeyLookup.get(response.key());
+          originalKeys.forEach(
+              originalKey -> {
+                MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
+                BulkResponse.Response<KEY, VAL> transformedResponse =
+                    response.transform(ignored -> originalKey, valueTransformer);
+                CompletionStage<VAL> asyncVal = addElapsedTime(transformedResponse, elapsedNanos);
+                responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+              });
         });
     return responseBuilder.build();
   }
@@ -239,8 +250,10 @@ public final class BulkRequest<KEY> {
       Function<KEY, KEY2> keyTransformer,
       ValueTransformer<KEY2, VAL2, KEY, CompletionStage<VAL>> valueTransformer) {
 
-    // transform request keys, and keep a reverse mapping from transformed keys to original keys
-    Map<KEY2, KEY> reverseKeyLookup = new HashMap<>();
+    // Transform request keys, and keep a reverse mapping from transformed keys to original keys. We
+    // use a MultiMap since it's possible for two distinct keys to transform to the same value.
+    Multimap<KEY2, KEY> reverseKeyLookup =
+        MultimapBuilder.hashKeys(size()).arrayListValues().build();
     // The key transformation could be non-trivial, so we record and add to final response below
     Map<KEY, Long> keyTransformationTime = new HashMap<>();
     BulkRequest.Builder<KEY2> requestBuilder = BulkRequest.builder(size());
@@ -258,12 +271,15 @@ public final class BulkRequest<KEY> {
     BulkResponse<KEY2, VAL2> responses = bulkFunction.apply(transformedRequest);
     responses.forEach(
         response -> {
-          KEY originalKey = reverseKeyLookup.get(response.key());
-          MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
-          BulkResponse.Response<KEY, VAL> transformedResponse =
-              response.transformAsync(reverseKeyLookup::get, valueTransformer);
-          CompletionStage<VAL> asyncVal = addElapsedTime(transformedResponse, elapsedNanos);
-          responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+          Collection<KEY> originalKeys = reverseKeyLookup.get(response.key());
+          originalKeys.forEach(
+              originalKey -> {
+                MutableLong elapsedNanos = new MutableLong(keyTransformationTime.get(originalKey));
+                BulkResponse.Response<KEY, VAL> transformedResponse =
+                    response.transformAsync(ignored -> originalKey, valueTransformer);
+                CompletionStage<VAL> asyncVal = addElapsedTime(transformedResponse, elapsedNanos);
+                responseBuilder.add(originalKey, asyncVal, elapsedNanos);
+              });
         });
     return responseBuilder.build();
   }
@@ -335,7 +351,7 @@ public final class BulkRequest<KEY> {
   private static <KEY, KEY2, VAL> void transformKeys(
       Map<KEY, Long> keys,
       Function<KEY, KEY2> keyTransformer,
-      Map<KEY2, KEY> reverseKeyLookup,
+      Multimap<KEY2, KEY> reverseKeyLookup,
       Map<KEY, Long> keyTransformationTime,
       BulkRequest.Builder<KEY2> requestBuilder,
       BulkResponse.Builder<KEY, VAL> responseBuilder) {

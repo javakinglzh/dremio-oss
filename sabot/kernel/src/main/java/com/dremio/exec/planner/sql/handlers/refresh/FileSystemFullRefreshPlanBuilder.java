@@ -33,6 +33,7 @@ import com.dremio.exec.store.PartitionChunkListingImpl;
 import com.dremio.exec.store.SplitsPointer;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.metadatarefresh.RefreshExecTableMetadata;
 import com.dremio.io.file.Path;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -40,7 +41,6 @@ import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dirlist.proto.DirListInputSplitProto;
 import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.FileType;
-import com.dremio.service.users.SystemUser;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Optional;
@@ -81,7 +81,11 @@ public class FileSystemFullRefreshPlanBuilder extends AbstractRefreshPlanBuilder
     try {
       this.isFileDataset =
           this.plugin
-              .createFS(datasetPath.toString(), SystemUser.SYSTEM_USERNAME, null)
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(datasetPath.toString())
+                      .withSystemUserName()
+                      .dataset(tableNSKey.getPathComponents()))
               .isFile(datasetPath);
     } catch (IOException e) {
       throw new IllegalArgumentException("Failed to parse datasetPath to File.", e);

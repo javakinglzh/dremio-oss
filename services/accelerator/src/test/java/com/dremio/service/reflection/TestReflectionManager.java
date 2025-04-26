@@ -15,6 +15,7 @@
  */
 package com.dremio.service.reflection;
 
+import static com.dremio.service.reflection.ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS;
 import static com.dremio.service.reflection.proto.ReflectionState.ACTIVE;
 import static com.dremio.service.reflection.proto.ReflectionState.REFRESH;
 import static com.dremio.service.reflection.proto.ReflectionState.REFRESHING;
@@ -23,7 +24,6 @@ import static java.util.Collections.singletonList;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
@@ -45,11 +45,13 @@ import com.dremio.common.config.SabotConfig;
 import com.dremio.common.types.MinorType;
 import com.dremio.exec.catalog.CachingCatalog;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.CatalogAccessListener;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.planner.plancache.PlanCacheInvalidationHelper;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.store.CatalogService;
+import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
 import com.dremio.io.file.Path;
@@ -62,6 +64,7 @@ import com.dremio.service.job.DeleteJobCountsRequest;
 import com.dremio.service.job.JobDetails;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobProtobuf;
+import com.dremio.service.job.proto.JobProtobuf.JobState;
 import com.dremio.service.job.proto.JobSubmission;
 import com.dremio.service.jobs.JobNotFoundException;
 import com.dremio.service.jobs.JobsService;
@@ -74,6 +77,8 @@ import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.RefreshMethod;
 import com.dremio.service.namespace.space.proto.FolderConfig;
+import com.dremio.service.reflection.descriptor.DescriptorHelper;
+import com.dremio.service.reflection.descriptor.MaterializationCache;
 import com.dremio.service.reflection.materialization.AccelerationStoragePlugin;
 import com.dremio.service.reflection.materialization.AccelerationStoragePluginConfig;
 import com.dremio.service.reflection.proto.ExternalReflection;
@@ -100,8 +105,8 @@ import com.dremio.service.reflection.store.MaterializationStore;
 import com.dremio.service.reflection.store.ReflectionEntriesStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.dremio.service.reflection.store.RefreshRequestsStore;
+import com.dremio.test.ClearInlineMocksRule;
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Function;
 import com.google.common.base.Supplier;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
@@ -115,10 +120,12 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.iceberg.ManageSnapshots;
 import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.Table;
+import org.junit.ClassRule;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.MockedStatic;
@@ -126,6 +133,10 @@ import org.mockito.Mockito;
 
 /** Test Reflection Manager */
 public class TestReflectionManager {
+
+  @ClassRule
+  public static final ClearInlineMocksRule CLEAR_INLINE_MOCKS = new ClearInlineMocksRule();
+
   @Test
   public void handleGoalWithNoEntry() {
     ReflectionId reflectionId = new ReflectionId("r_id");
@@ -136,7 +147,6 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setName(reflectionGoalName)
             .setTag(tag)
             .setType(ReflectionType.EXTERNAL)
@@ -164,8 +174,7 @@ public class TestReflectionManager {
                 .setState(REFRESH)
                 .setGoalVersion(tag)
                 .setType(ReflectionType.EXTERNAL)
-                .setName(reflectionGoalName)
-                .setArrowCachingEnabled(true));
+                .setName(reflectionGoalName));
     verifyNoMoreInteractions(subject.reflectionStore);
   }
 
@@ -178,16 +187,11 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setName(reflectionGoalName)
             .setType(ReflectionType.EXTERNAL)
-            .setDatasetId(dataSetId)
-            .setArrowCachingEnabled(true);
+            .setDatasetId(dataSetId);
     ReflectionEntry reflectionEntry =
-        new ReflectionEntry()
-            .setArrowCachingEnabled(true)
-            .setId(reflectionId)
-            .setReflectionGoalHash(reflectionGoalHash);
+        new ReflectionEntry().setId(reflectionId).setReflectionGoalHash(reflectionGoalHash);
 
     Subject subject = new Subject();
 
@@ -213,7 +217,6 @@ public class TestReflectionManager {
     String dataSetId = "dataSetId";
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setId(reflectionId)
             .setName(reflectionGoalName)
@@ -221,7 +224,6 @@ public class TestReflectionManager {
             .setType(ReflectionType.EXTERNAL);
     ReflectionEntry reflectionEntry =
         new ReflectionEntry()
-            .setArrowCachingEnabled(false)
             .setId(reflectionId)
             .setName("oldName")
             .setGoalVersion("old_tag")
@@ -246,7 +248,6 @@ public class TestReflectionManager {
 
     verifyNoMoreInteractions(subject.reflectionStore);
     assertEquals(ReflectionState.ACTIVE, reflectionEntry.getState());
-    assertEquals(true, reflectionEntry.getArrowCachingEnabled());
     assertEquals(reflectionGoalName, reflectionEntry.getName());
     assertEquals(goalTag, reflectionEntry.getGoalVersion());
   }
@@ -261,7 +262,6 @@ public class TestReflectionManager {
     String dataSetId = "dataSetId";
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setId(reflectionId)
             .setName(reflectionGoalName)
@@ -270,7 +270,6 @@ public class TestReflectionManager {
             .setType(ReflectionType.EXTERNAL);
     ReflectionEntry reflectionEntry =
         new ReflectionEntry()
-            .setArrowCachingEnabled(false)
             .setId(reflectionId)
             .setName("oldName")
             .setGoalVersion("old_tag")
@@ -295,7 +294,6 @@ public class TestReflectionManager {
     verifyNoMoreInteractions(subject.reflectionStore);
     assertEquals(ReflectionState.UPDATE, reflectionEntry.getState());
     assertEquals(Integer.valueOf(0), reflectionEntry.getNumFailures());
-    assertEquals(true, reflectionEntry.getArrowCachingEnabled());
     assertEquals(reflectionGoalName, reflectionEntry.getName());
     assertEquals(goalTag, reflectionEntry.getGoalVersion());
   }
@@ -309,7 +307,6 @@ public class TestReflectionManager {
     String dataSetId = "dataSetId";
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setId(reflectionId)
             .setName(reflectionGoalName)
@@ -317,7 +314,6 @@ public class TestReflectionManager {
             .setType(ReflectionType.EXTERNAL);
     ReflectionEntry reflectionEntry =
         new ReflectionEntry()
-            .setArrowCachingEnabled(false)
             .setId(reflectionId)
             .setGoalVersion("old tag")
             .setReflectionGoalHash(new ReflectionGoalHash("xxx"))
@@ -344,7 +340,6 @@ public class TestReflectionManager {
     verifyNoMoreInteractions(subject.reflectionStore);
 
     // Ensure the entry is updated appropriately
-    assertEquals(true, reflectionEntry.getArrowCachingEnabled());
     assertEquals(goalTag, reflectionEntry.getGoalVersion());
     assertEquals(reflectionGoalName, reflectionEntry.getName());
     assertEquals(reflectionGoalHash, reflectionEntry.getReflectionGoalHash());
@@ -360,7 +355,6 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setType(ReflectionType.EXTERNAL)
             .setState(ReflectionGoalState.ENABLED);
@@ -369,10 +363,9 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setReflectionGoalHash(reflectionGoalHash)
-            .setArrowCachingEnabled(false)
             .setState(ReflectionState.ACTIVE);
 
-    Materialization materialization = new Materialization().setArrowCachingEnabled(false);
+    Materialization materialization = new Materialization();
 
     DatasetConfig datasetConfig = new DatasetConfig();
 
@@ -428,8 +421,6 @@ public class TestReflectionManager {
     verifyNoMoreInteractions(subject.reflectionStore);
     verifyNoMoreInteractions(subject.refreshStartHandler);
     assertEquals(reflectionGoalHash, reflectionEntry.getReflectionGoalHash());
-    assertEquals(true, reflectionEntry.getArrowCachingEnabled());
-    assertEquals(true, materialization.getArrowCachingEnabled());
     assertEquals(ReflectionState.ACTIVE, reflectionEntry.getState());
   }
 
@@ -443,7 +434,6 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setType(ReflectionType.EXTERNAL)
             .setState(ReflectionGoalState.ENABLED);
@@ -452,14 +442,10 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setReflectionGoalHash(reflectionGoalHash)
-            .setArrowCachingEnabled(false)
             .setState(ReflectionState.ACTIVE);
 
     Materialization materialization =
-        new Materialization()
-            .setId(materializationId)
-            .setReflectionId(reflectionId)
-            .setArrowCachingEnabled(false);
+        new Materialization().setId(materializationId).setReflectionId(reflectionId);
 
     DatasetConfig datasetConfig = new DatasetConfig();
     final Catalog catalog = mock(Catalog.class);
@@ -497,16 +483,9 @@ public class TestReflectionManager {
     when(subject.reflectionGoalChecker.calculateReflectionGoalVersion(reflectionGoal))
         .thenReturn(reflectionGoalHash);
 
-    when(subject.refreshStartHandler.startJob(any(), anyLong(), any()))
-        .thenReturn(materializationJobId);
+    when(subject.refreshStartHandler.startJob(any(), anyLong())).thenReturn(materializationJobId);
 
-    ClusterCoordinator clusterCoordinator = mock(ClusterCoordinator.class);
-    when(clusterCoordinator.getExecutorEndpoints()).thenReturn(singletonList(null));
-    when(subject.sabotContext.getClusterCoordinator()).thenReturn(clusterCoordinator);
-
-    SoftwareCoordinatorModeInfo softwareCoordinatorModeInfo = new SoftwareCoordinatorModeInfo();
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> softwareCoordinatorModeInfo);
+    when(subject.clusterCoordinator.getExecutorEndpoints()).thenReturn(singletonList(null));
 
     when(subject.userStore.getAllNotDeleted()).thenReturn(singletonList(reflectionGoal));
     when(subject.userStore.getDeletedBefore(anyLong())).thenReturn(emptyList());
@@ -522,17 +501,14 @@ public class TestReflectionManager {
     verify(subject.reflectionStore, times(2)).save(reflectionEntry);
 
     verify(subject.reflectionGoalChecker).checkHash(reflectionGoal, reflectionEntry);
-    verify(subject.descriptorCache).invalidate(materialization);
+    verify(subject.descriptorCache).invalidate(materialization.getId());
 
     verify(subject.refreshStartHandler)
-        .startJob(
-            any(), anyLong(), any()); // Mockito does not support using a mix of any matchers....
+        .startJob(any(), anyLong()); // Mockito does not support using a mix of any matchers....
 
     verifyNoMoreInteractions(subject.reflectionStore);
     verifyNoMoreInteractions(subject.refreshStartHandler);
     assertEquals(reflectionGoalHash, reflectionEntry.getReflectionGoalHash());
-    assertEquals(true, reflectionEntry.getArrowCachingEnabled());
-    assertEquals(false, materialization.getArrowCachingEnabled());
     assertEquals(0, reflectionEntry.getNumFailures().intValue());
     assertEquals(ReflectionState.REFRESHING, reflectionEntry.getState());
     assertEquals(MaterializationState.DEPRECATED, materialization.getState());
@@ -548,7 +524,6 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setType(ReflectionType.EXTERNAL)
             .setState(ReflectionGoalState.ENABLED);
@@ -557,14 +532,10 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setReflectionGoalHash(reflectionGoalHash)
-            .setArrowCachingEnabled(false)
             .setState(ReflectionState.ACTIVE);
 
     Materialization materialization =
-        new Materialization()
-            .setId(materializationId)
-            .setReflectionId(reflectionId)
-            .setArrowCachingEnabled(false);
+        new Materialization().setId(materializationId).setReflectionId(reflectionId);
 
     DatasetConfig datasetConfig = new DatasetConfig();
     final Catalog catalog = mock(Catalog.class);
@@ -602,16 +573,7 @@ public class TestReflectionManager {
     when(subject.reflectionGoalChecker.calculateReflectionGoalVersion(reflectionGoal))
         .thenReturn(reflectionGoalHash);
 
-    when(subject.refreshStartHandler.startJob(any(), anyLong(), any()))
-        .thenReturn(materializationJobId);
-
-    ClusterCoordinator clusterCoordinator = mock(ClusterCoordinator.class);
-    when(clusterCoordinator.getExecutorEndpoints()).thenReturn(singletonList(null));
-    when(subject.sabotContext.getClusterCoordinator()).thenReturn(clusterCoordinator);
-
-    SoftwareCoordinatorModeInfo softwareCoordinatorModeInfo = new SoftwareCoordinatorModeInfo();
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> softwareCoordinatorModeInfo);
+    when(subject.refreshStartHandler.startJob(any(), anyLong())).thenReturn(materializationJobId);
 
     when(subject.userStore.getAllNotDeleted()).thenReturn(singletonList(reflectionGoal));
     when(subject.userStore.getDeletedBefore(anyLong())).thenReturn(emptyList());
@@ -635,23 +597,19 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
-            .setType(ReflectionType.EXTERNAL)
-            .setState(ReflectionGoalState.ENABLED);
+            .setType(ReflectionType.RAW)
+            .setState(ReflectionGoalState.ENABLED)
+            .setDetails(new ReflectionDetails().setDisplayFieldList(Collections.emptyList()));
 
     ReflectionEntry reflectionEntry =
         new ReflectionEntry()
             .setId(reflectionId)
             .setReflectionGoalHash(reflectionGoalHash)
-            .setArrowCachingEnabled(false)
             .setState(ReflectionState.ACTIVE);
 
     Materialization materialization =
-        new Materialization()
-            .setId(materializationId)
-            .setReflectionId(reflectionId)
-            .setArrowCachingEnabled(false);
+        new Materialization().setId(materializationId).setReflectionId(reflectionId);
 
     DatasetConfig datasetConfig = new DatasetConfig();
     final Catalog catalog = mock(Catalog.class);
@@ -689,16 +647,7 @@ public class TestReflectionManager {
     when(subject.reflectionGoalChecker.calculateReflectionGoalVersion(reflectionGoal))
         .thenReturn(reflectionGoalHash);
 
-    when(subject.refreshStartHandler.startJob(any(), anyLong(), any()))
-        .thenReturn(materializationJobId);
-
-    ClusterCoordinator clusterCoordinator = mock(ClusterCoordinator.class);
-    when(clusterCoordinator.getExecutorEndpoints()).thenReturn(singletonList(null));
-    when(subject.sabotContext.getClusterCoordinator()).thenReturn(clusterCoordinator);
-
-    SoftwareCoordinatorModeInfo softwareCoordinatorModeInfo = new SoftwareCoordinatorModeInfo();
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> softwareCoordinatorModeInfo);
+    when(subject.refreshStartHandler.startJob(any(), anyLong())).thenReturn(materializationJobId);
 
     when(subject.userStore.getAllNotDeleted()).thenReturn(singletonList(reflectionGoal));
     when(subject.userStore.getDeletedBefore(anyLong())).thenReturn(emptyList());
@@ -724,7 +673,6 @@ public class TestReflectionManager {
         new Materialization()
             .setId(new MaterializationId("r1-m1"))
             .setReflectionId(existingReflectionId)
-            .setArrowCachingEnabled(false)
             .setReflectionGoalVersion("test")
             .setState(MaterializationState.DELETED)
             .setModifiedAt(System.currentTimeMillis() - TimeUnit.HOURS.toMillis(4));
@@ -735,7 +683,6 @@ public class TestReflectionManager {
         new Materialization()
             .setId(new MaterializationId("r2-m1"))
             .setReflectionId(deletedReflectionId)
-            .setArrowCachingEnabled(false)
             .setReflectionGoalVersion("test")
             .setState(MaterializationState.DONE);
 
@@ -743,7 +690,6 @@ public class TestReflectionManager {
         new Materialization()
             .setId(new MaterializationId("r2-m2"))
             .setReflectionId(deletedReflectionId)
-            .setArrowCachingEnabled(false)
             .setReflectionGoalVersion("test")
             .setState(MaterializationState.DEPRECATED)
             .setModifiedAt(0L);
@@ -752,7 +698,6 @@ public class TestReflectionManager {
         new Materialization()
             .setId(new MaterializationId("r2-m3"))
             .setReflectionId(deletedReflectionId)
-            .setArrowCachingEnabled(false)
             .setReflectionGoalVersion("test")
             .setState(MaterializationState.DELETED);
 
@@ -768,9 +713,6 @@ public class TestReflectionManager {
         .thenReturn(TimeUnit.HOURS.toSeconds(4));
     when(subject.optionManager.getOption(ReflectionOptions.REFLECTION_DELETION_NUM_ENTRIES))
         .thenReturn(3L);
-    when(subject.optionManager.getOption(
-            ReflectionOptions.SKIP_DROP_TABLE_JOB_FOR_INCREMENTAL_REFRESH))
-        .thenReturn(true);
 
     when(subject.userStore.getAllNotDeleted()).thenReturn(emptyList());
     when(subject.externalReflectionStore.getExternalReflections()).thenReturn(emptyList());
@@ -826,9 +768,9 @@ public class TestReflectionManager {
             .setId(materializationId)
             .setReflectionId(reflectionId)
             .setState(MaterializationState.RUNNING)
-            .setIsIcebergDataset(true)
             .setBasePath("/base/path")
-            .setPreviousIcebergSnapshot(1L);
+            .setPreviousIcebergSnapshot(1L)
+            .setInitRefreshSubmit(System.currentTimeMillis());
 
     ReflectionEntry entry =
         new ReflectionEntry()
@@ -924,9 +866,9 @@ public class TestReflectionManager {
             .setId(materializationId)
             .setReflectionId(reflectionId)
             .setState(MaterializationState.RUNNING)
-            .setIsIcebergDataset(true)
             .setBasePath("/base/path")
-            .setPreviousIcebergSnapshot(1L);
+            .setPreviousIcebergSnapshot(1L)
+            .setInitRefreshSubmit(System.currentTimeMillis());
 
     ReflectionEntry entry =
         new ReflectionEntry()
@@ -981,9 +923,13 @@ public class TestReflectionManager {
   public void testStartRefreshForIcebergReflection() {
     ReflectionId reflectionId = new ReflectionId("r_id");
 
-    ReflectionEntry reflectionEntry = new ReflectionEntry().setId(reflectionId).setState(REFRESH);
+    ReflectionEntry reflectionEntry =
+        new ReflectionEntry()
+            .setId(reflectionId)
+            .setState(REFRESH)
+            .setRefreshMethod(RefreshMethod.INCREMENTAL);
 
-    Refresh refresh = new Refresh().setIsIcebergRefresh(true).setBasePath("/basepath");
+    Refresh refresh = new Refresh().setBasePath("/basepath");
 
     JobId jobId = new JobId().setId("jobid");
 
@@ -993,18 +939,13 @@ public class TestReflectionManager {
     Snapshot snapshot = mock(Snapshot.class);
     long snapshotId = new Random().nextLong();
 
-    CoordinatorModeInfo coordinatorModeInfo = mock(CoordinatorModeInfo.class);
-
     Subject subject = new Subject();
 
     when(subject.materializationStore.getRefreshesByReflectionId(reflectionId))
         .thenReturn(FluentIterable.from(Collections.singletonList(refresh)));
     when(subject.accelerationPlugin.getIcebergModel()).thenReturn(icebergModel);
     when(subject.accelerationPlugin.getIcebergFileSelection(anyString())).thenReturn(fileSelection);
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> coordinatorModeInfo);
-    when(subject.refreshStartHandler.startJob(eq(reflectionEntry), anyLong(), eq(snapshotId)))
-        .thenReturn(jobId);
+    when(subject.refreshStartHandler.startJob(eq(reflectionEntry), anyLong())).thenReturn(jobId);
     when(icebergModel.getIcebergTable(any())).thenReturn(icebergTable);
     when(icebergTable.currentSnapshot()).thenReturn(snapshot);
     when(snapshot.snapshotId()).thenReturn(snapshotId);
@@ -1023,42 +964,7 @@ public class TestReflectionManager {
         subject.dependencyResolutionContext);
 
     assertEquals(REFRESHING, reflectionEntry.getState());
-    verify(icebergTable, times(1)).currentSnapshot();
-    verify(subject.refreshStartHandler, times(1))
-        .startJob(eq(reflectionEntry), anyLong(), eq(snapshotId));
-  }
-
-  @Test
-  public void testStartRefreshForNonIcebergReflection() {
-    ReflectionId reflectionId = new ReflectionId("r_id");
-
-    ReflectionEntry reflectionEntry = new ReflectionEntry().setId(reflectionId).setState(REFRESH);
-
-    Refresh refresh = new Refresh().setIsIcebergRefresh(false);
-
-    JobId jobId = new JobId().setId("jobid");
-
-    CoordinatorModeInfo coordinatorModeInfo = mock(CoordinatorModeInfo.class);
-
-    Subject subject = new Subject();
-
-    when(subject.materializationStore.getRefreshesByReflectionId(reflectionId))
-        .thenReturn(FluentIterable.from(Collections.singletonList(refresh)));
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> coordinatorModeInfo);
-    when(subject.refreshStartHandler.startJob(eq(reflectionEntry), anyLong(), any()))
-        .thenReturn(jobId);
-
-    // Test
-    subject.reflectionManager.handleEntry(
-        reflectionEntry,
-        0,
-        new ReflectionManager.EntryCounts(),
-        subject.dependencyResolutionContext);
-
-    assertEquals(REFRESHING, reflectionEntry.getState());
-    verify(subject.refreshStartHandler, times(1))
-        .startJob(eq(reflectionEntry), anyLong(), eq(null));
+    verify(subject.refreshStartHandler, times(1)).startJob(eq(reflectionEntry), anyLong());
   }
 
   @Test
@@ -1123,7 +1029,7 @@ public class TestReflectionManager {
             subject.materializationStore,
             subject.materializationPlanStore,
             subject.dependencyManager,
-            subject.expansionHelper,
+            subject.descriptorHelper,
             Path.of("."),
             subject.allocator,
             subject.catalogService,
@@ -1281,8 +1187,7 @@ public class TestReflectionManager {
   }
 
   @Test
-  public void testRefreshDoneHandlerLastRefreshDuration()
-      throws DependencyGraph.DependencyException, NamespaceException {
+  public void testRefreshDoneHandlerLastRefreshDuration() throws JobNotFoundException {
     ReflectionId reflectionId = new ReflectionId("r_id");
     MaterializationId materializationId = new MaterializationId("m_id");
 
@@ -1292,44 +1197,21 @@ public class TestReflectionManager {
             .setReflectionId(reflectionId)
             .setInitRefreshSubmit(System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(1))
             .setState(MaterializationState.RUNNING)
-            .setIsIcebergDataset(false);
+            .setBasePath("m_id_0")
+            .setInitRefreshSubmit(System.currentTimeMillis());
 
     ReflectionEntry entry =
         new ReflectionEntry()
             .setId(reflectionId)
+            .setName("r_name")
+            .setType(ReflectionType.RAW)
+            .setDatasetId("d_id")
             .setState(ReflectionState.REFRESHING)
             .setRefreshJobId(new JobId().setId("j_id"));
-
-    final AccelerationSettings testSettings =
-        new AccelerationSettings().setMethod(RefreshMethod.FULL);
-
-    RefreshDecision refreshDecision =
-        new RefreshDecision()
-            .setInitialRefresh(false)
-            .setAccelerationSettings(testSettings)
-            .setSeriesId(0L)
-            .setLogicalPlan(io.protostuff.ByteString.EMPTY);
-
-    JobProtobuf.ExtraInfo extraInfo =
-        JobProtobuf.ExtraInfo.newBuilder()
-            .setName(RefreshDecision.class.getName())
-            .setData(
-                ByteString.copyFrom(RefreshHandler.ABSTRACT_SERIALIZER.serialize(refreshDecision)))
-            .build();
-
-    JobProtobuf.JobInfo jobInfo =
-        JobProtobuf.JobInfo.newBuilder()
-            .setJobId(JobProtobuf.JobId.newBuilder().setId("m_job_id").build())
-            .setSql("sql")
-            .setDatasetVersion("version")
-            .setQueryType(JobProtobuf.QueryType.ACCELERATOR_CREATE)
-            .build();
 
     JobProtobuf.JobAttempt jobAttempt =
         JobProtobuf.JobAttempt.newBuilder()
             .setState(JobProtobuf.JobState.COMPLETED)
-            .setInfo(jobInfo)
-            .addExtraInfo(extraInfo)
             .setStats(JobProtobuf.JobStats.newBuilder().setOutputRecords(4L).build())
             .setAttemptId("1be6174f-8e89-9244-643a-565b81142700")
             .build();
@@ -1342,57 +1224,17 @@ public class TestReflectionManager {
             .build();
 
     Subject subject = new Subject();
-    RefreshDoneHandler handler =
-        new RefreshDoneHandler(
-            entry,
-            m,
-            job,
-            subject.jobsService,
-            subject.materializationStore,
-            subject.materializationPlanStore,
-            subject.dependencyManager,
-            subject.expansionHelper,
-            Path.of("."),
-            subject.allocator,
-            subject.catalogService,
-            subject.dependencyResolutionContext,
-            subject.sabotConfig);
 
-    com.dremio.service.reflection.proto.JobDetails jobd =
-        new com.dremio.service.reflection.proto.JobDetails();
-    jobd.setOutputRecords(4L);
+    when(subject.materializationStore.getLastMaterialization(any())).thenReturn(m);
+    when(subject.jobsService.getJobDetails(any())).thenReturn(job);
 
-    when(subject.dependencyManager.getOldestDependentMaterialization(any()))
-        .thenReturn(Optional.of(System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(30)));
-
-    when(subject.dependencyManager.getGracePeriod(any(), any()))
-        .thenReturn(Optional.of(Long.MAX_VALUE));
-
-    when(subject.materializationStore.getRefreshes(any()))
-        .thenReturn(FluentIterable.from(ImmutableList.<Refresh>of()));
-
-    try (MockedStatic<ReflectionUtils> mocked = Mockito.mockStatic(ReflectionUtils.class)) {
-      mocked.when(() -> ReflectionUtils.computeJobDetails(any())).thenReturn(jobd);
-      mocked
-          .when(() -> ReflectionUtils.computeMetrics(any(), any(), any(), any()))
-          .thenReturn(null);
-      mocked
-          .when(
-              () ->
-                  ReflectionUtils.createRefresh(
-                      any(),
-                      any(),
-                      anyLong(),
-                      anyInt(),
-                      any(),
-                      any(),
-                      any(),
-                      any(),
-                      anyBoolean(),
-                      any()))
-          .thenReturn(null);
-      handler.handle();
-    }
+    ReflectionManager reflectionManager = subject.newReflectionManager();
+    when(reflectionManager.getAccelerationPlugin()).thenReturn(subject.accelerationPlugin);
+    AccelerationStoragePluginConfig pluginConfig =
+        Mockito.mock(AccelerationStoragePluginConfig.class);
+    when(pluginConfig.getPath()).thenReturn(Path.of("."));
+    when(subject.accelerationPlugin.getConfig()).thenReturn(pluginConfig);
+    reflectionManager.handleRefreshingEntry(entry, subject.dependencyResolutionContext);
 
     assertEquals(
         m.getLastRefreshFinished() - m.getInitRefreshSubmit(),
@@ -1415,8 +1257,7 @@ public class TestReflectionManager {
             .setReflectionId(reflectionId)
             .setInitRefreshSubmit(System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(1))
             .setBasePath("abc")
-            .setState(MaterializationState.RUNNING)
-            .setIsIcebergDataset(true);
+            .setState(MaterializationState.RUNNING);
 
     ReflectionEntry entry =
         new ReflectionEntry()
@@ -1432,7 +1273,6 @@ public class TestReflectionManager {
             .setInitialRefresh(false)
             .setAccelerationSettings(testSettings)
             .setSeriesId(0L)
-            .setLogicalPlan(io.protostuff.ByteString.EMPTY)
             .setOutputUpdateId(
                 new UpdateId()
                     .setStringUpdateId("12345")
@@ -1480,7 +1320,7 @@ public class TestReflectionManager {
             subject.materializationStore,
             subject.materializationPlanStore,
             subject.dependencyManager,
-            subject.expansionHelper,
+            subject.descriptorHelper,
             Path.of("."),
             subject.allocator,
             subject.catalogService,
@@ -1543,6 +1383,12 @@ public class TestReflectionManager {
     when(dremioTable.getPath()).thenReturn(new NamespaceKey("Nessie.Table"));
     when(catalog.getTable(datasetId)).thenReturn(dremioTable);
 
+    MetadataRequestOptions metadataOptions = mock(MetadataRequestOptions.class);
+    SchemaConfig schemaConfig = mock(SchemaConfig.class);
+    when(catalog.getMetadataRequestOptions()).thenReturn(metadataOptions);
+    when(metadataOptions.getSchemaConfig()).thenReturn(schemaConfig);
+    when(schemaConfig.getCatalogAccessListener()).thenReturn(CatalogAccessListener.NO_OP);
+
     Subject subject = new Subject();
     when(subject.contextFactory.create()).thenReturn(subject.dependencyResolutionContext);
     when(subject.externalReflectionStore.getExternalReflections()).thenReturn(emptyList());
@@ -1574,7 +1420,8 @@ public class TestReflectionManager {
             .setId(new ReflectionId("reflectionId"))
             .setDatasetId(datasetId)
             .setType(ReflectionType.RAW)
-            .setState(ReflectionGoalState.DISABLED);
+            .setState(ReflectionGoalState.DISABLED)
+            .setDetails(new ReflectionDetails().setDisplayFieldList(ImmutableList.of()));
 
     ExternalReflection externalReflection =
         new ExternalReflection()
@@ -1587,6 +1434,12 @@ public class TestReflectionManager {
     final DremioTable dremioTable = mock(DremioTable.class);
     when(dremioTable.getPath()).thenReturn(new NamespaceKey("Nessie.Table"));
     when(catalog.getTable(datasetId)).thenReturn(null);
+
+    MetadataRequestOptions metadataOptions = mock(MetadataRequestOptions.class);
+    SchemaConfig schemaConfig = mock(SchemaConfig.class);
+    when(catalog.getMetadataRequestOptions()).thenReturn(metadataOptions);
+    when(metadataOptions.getSchemaConfig()).thenReturn(schemaConfig);
+    when(schemaConfig.getCatalogAccessListener()).thenReturn(CatalogAccessListener.NO_OP);
 
     Subject subject = new Subject();
     when(subject.contextFactory.create()).thenReturn(subject.dependencyResolutionContext);
@@ -1645,7 +1498,6 @@ public class TestReflectionManager {
             .setId(materializationId)
             .setReflectionId(reflectionId)
             .setState(MaterializationState.RUNNING)
-            .setIsIcebergDataset(true)
             .setBasePath("/base/path")
             .setPreviousIcebergSnapshot(1L)
             .setExpiration(Long.MAX_VALUE)
@@ -1712,7 +1564,6 @@ public class TestReflectionManager {
     ReflectionGoal reflectionGoal =
         new ReflectionGoal()
             .setId(reflectionId)
-            .setArrowCachingEnabled(true)
             .setDatasetId(dataSetId)
             .setType(ReflectionType.RAW)
             .setDetails(new ReflectionDetails())
@@ -1790,14 +1641,7 @@ public class TestReflectionManager {
     when(subject.reflectionManager.refreshPendingHelper(
             entry, noDependencyRefreshPeriodMs, subject.dependencyResolutionContext))
         .thenReturn(true);
-    ClusterCoordinator clusterCoordinator = mock(ClusterCoordinator.class);
-    when(clusterCoordinator.getExecutorEndpoints()).thenReturn(singletonList(null));
-    when(subject.sabotContext.getClusterCoordinator()).thenReturn(clusterCoordinator);
-    SoftwareCoordinatorModeInfo softwareCoordinatorModeInfo = new SoftwareCoordinatorModeInfo();
-    when(subject.sabotContext.getCoordinatorModeInfoProvider())
-        .thenReturn(() -> softwareCoordinatorModeInfo);
-    when(subject.refreshStartHandler.startJob(eq(entry), anyLong(), any()))
-        .thenThrow(expectedException);
+    when(subject.refreshStartHandler.startJob(eq(entry), anyLong())).thenThrow(expectedException);
 
     subject.reflectionManager.handleEntry(
         entry,
@@ -1807,15 +1651,165 @@ public class TestReflectionManager {
     assertFalse(
         "Reflection refresh should have failed", entry.getLastFailure().getMessage().isEmpty());
   }
+
+  @Test
+  public void testHandleUpdatedReflectionEntry() {
+    ReflectionId reflectionId = new ReflectionId("r_id");
+
+    ReflectionEntry entry =
+        new ReflectionEntry()
+            .setId(reflectionId)
+            .setState(ReflectionState.UPDATE)
+            .setType(ReflectionType.RAW);
+
+    MaterializationId materializationId = new MaterializationId("m_id");
+    Materialization m =
+        new Materialization()
+            .setId(materializationId)
+            .setReflectionId(reflectionId)
+            .setState(MaterializationState.DONE)
+            .setIsIcebergDataset(true)
+            .setBasePath("/base/path")
+            .setPreviousIcebergSnapshot(1L)
+            .setExpiration(Long.MAX_VALUE)
+            .setSeriesOrdinal(1);
+
+    JobId materializationJobId = new JobId("m_job_id");
+
+    long noDependencyRefreshPeriodMs = 5555L;
+    Subject subject = new Subject();
+    when(subject.materializationStore.getAllDone(entry.getId()))
+        .thenReturn(FluentIterable.from(Collections.singletonList(m)));
+    when(subject.refreshStartHandler.startJob(eq(entry), anyLong()))
+        .thenReturn(materializationJobId);
+
+    subject.reflectionManager.handleEntry(
+        entry,
+        noDependencyRefreshPeriodMs,
+        new ReflectionManager.EntryCounts(),
+        subject.dependencyResolutionContext);
+
+    verify(subject.materializationStore, times(1)).save(any(Materialization.class));
+    assertEquals(MaterializationState.DEPRECATED, m.getState());
+
+    verify(subject.reflectionStore, times(1)).save(any(ReflectionEntry.class));
+    assertEquals(ReflectionState.REFRESHING, entry.getState());
+  }
+
+  @Test
+  public void testCanceledRefreshJob() throws Exception {
+    long noDependencyRefreshPeriodMs = 5555L;
+    ReflectionId reflectionId = new ReflectionId("r_id");
+    JobId jobId = new JobId().setId("m_job_id");
+
+    ReflectionEntry entry =
+        new ReflectionEntry()
+            .setId(reflectionId)
+            .setState(ReflectionState.REFRESHING)
+            .setType(ReflectionType.RAW)
+            .setNumFailures(0)
+            .setRefreshJobId(jobId);
+
+    Materialization m =
+        new Materialization()
+            .setReflectionId(reflectionId)
+            .setId(new MaterializationId("m_id"))
+            .setInitRefreshSubmit(System.currentTimeMillis());
+
+    RefreshDecision refreshDecision = new RefreshDecision().setInitialRefresh(true);
+
+    JobProtobuf.ExtraInfo extraInfo =
+        JobProtobuf.ExtraInfo.newBuilder()
+            .setName(RefreshDecision.class.getName())
+            .setData(
+                ByteString.copyFrom(RefreshHandler.ABSTRACT_SERIALIZER.serialize(refreshDecision)))
+            .build();
+    JobProtobuf.JobInfo jobInfo =
+        JobProtobuf.JobInfo.newBuilder()
+            .setJobId(JobProtobuf.JobId.newBuilder().setId("m_job_id").build())
+            .setSql("sql")
+            .setDatasetVersion("version")
+            .setQueryType(JobProtobuf.QueryType.ACCELERATOR_CREATE)
+            .build();
+    JobProtobuf.JobAttempt jobAttempt =
+        JobProtobuf.JobAttempt.newBuilder()
+            .setState(JobState.CANCELED)
+            .setInfo(jobInfo)
+            .addExtraInfo(extraInfo)
+            .build();
+    JobDetails job =
+        JobDetails.newBuilder()
+            .setJobId(JobProtobuf.JobId.newBuilder().setId(jobId.getId()).build())
+            .setCompleted(true)
+            .addAttempts(jobAttempt)
+            .build();
+
+    Subject subject = new Subject();
+
+    when(subject.materializationStore.getLastMaterialization(reflectionId)).thenReturn(m);
+    when(subject.jobsService.getJobDetails(any())).thenReturn(job);
+    when(subject.catalogService.getSource(ReflectionServiceImpl.ACCELERATOR_STORAGEPLUGIN_NAME))
+        .thenReturn(subject.accelerationPlugin);
+    AccelerationStoragePluginConfig pluginConfig =
+        Mockito.mock(AccelerationStoragePluginConfig.class);
+    when(pluginConfig.getPath()).thenReturn(Path.of("."));
+    when(subject.accelerationPlugin.getConfig()).thenReturn(pluginConfig);
+    when(subject.optionManager.getOption(ReflectionOptions.BACKOFF_RETRY_POLICY)).thenReturn(true);
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
+
+    subject.reflectionManager.handleEntry(
+        entry,
+        noDependencyRefreshPeriodMs,
+        new ReflectionManager.EntryCounts(),
+        subject.dependencyResolutionContext);
+
+    assertEquals(MaterializationState.CANCELED, m.getState());
+    assertEquals(ACTIVE, entry.getState());
+    assertEquals(1, entry.getNumFailures().intValue());
+  }
+
+  @Test
+  public void testExceptionHandlingOfHandleEntries() {
+    ReflectionId reflectionId = new ReflectionId("r_id");
+    JobId jobId = new JobId().setId("m_job_id");
+
+    ReflectionEntry entry =
+        new ReflectionEntry()
+            .setId(reflectionId)
+            .setState(ReflectionState.REFRESHING)
+            .setType(ReflectionType.RAW)
+            .setNumFailures(0)
+            .setRefreshJobId(jobId);
+
+    Subject subject = new Subject();
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
+    when(subject.reflectionStore.find())
+        .thenReturn(FluentIterable.from(Collections.singletonList(entry)));
+
+    // test
+    // expect NPE to be thrown from handleEntry
+    subject.reflectionManager.handleEntries(null);
+
+    assertEquals(ACTIVE, entry.getState());
+    assertEquals(1, entry.getNumFailures().intValue());
+  }
 }
 
 class Subject {
-  @VisibleForTesting SabotContext sabotContext = Mockito.mock(SabotContext.class);
+
   @VisibleForTesting JobsService jobsService = Mockito.mock(JobsService.class);
   @VisibleForTesting NamespaceService namespaceService = Mockito.mock(NamespaceService.class);
   @VisibleForTesting CatalogService catalogService = Mockito.mock(CatalogService.class);
   @VisibleForTesting OptionManager optionManager = Mockito.mock(OptionManager.class);
   @VisibleForTesting ReflectionGoalsStore userStore = Mockito.mock(ReflectionGoalsStore.class);
+  @VisibleForTesting ClusterCoordinator clusterCoordinator = Mockito.mock(ClusterCoordinator.class);
+
+  @VisibleForTesting
+  Provider<CoordinatorModeInfo> coordinatorModeInfoProvider = SoftwareCoordinatorModeInfo::new;
+
+  @VisibleForTesting
+  CoordinationProtos.NodeEndpoint nodeEndpoint =
+      Mockito.mock(CoordinationProtos.NodeEndpoint.class);
 
   @VisibleForTesting
   ReflectionEntriesStore reflectionStore = Mockito.mock(ReflectionEntriesStore.class);
@@ -1833,8 +1827,7 @@ class Subject {
   @VisibleForTesting DependencyManager dependencyManager = Mockito.mock(DependencyManager.class);
 
   @VisibleForTesting
-  ReflectionServiceImpl.DescriptorCache descriptorCache =
-      Mockito.mock(ReflectionServiceImpl.DescriptorCache.class);
+  MaterializationCache descriptorCache = Mockito.mock(MaterializationCache.class);
 
   @VisibleForTesting Set<ReflectionId> reflectionsToUpdate = Sets.newHashSet();
 
@@ -1846,9 +1839,7 @@ class Subject {
   ReflectionManager.WakeUpCallback wakeUpCacheRefresherCallback =
       Mockito.mock(ReflectionManager.WakeUpCallback.class);
 
-  @VisibleForTesting
-  Function<Catalog, ReflectionServiceImpl.ExpansionHelper> expansionHelper =
-      Mockito.mock(Function.class);
+  @VisibleForTesting DescriptorHelper descriptorHelper = Mockito.mock(DescriptorHelper.class);
 
   @VisibleForTesting
   Supplier<PlanCacheInvalidationHelper> planCacheInvalidationHelper = Mockito.mock(Supplier.class);
@@ -1877,7 +1868,6 @@ class Subject {
   @VisibleForTesting ReflectionManager reflectionManager;
 
   public Subject() {
-    when(sabotContext.getConfig()).thenReturn(sabotConfig);
     reflectionManager = newReflectionManager();
   }
 
@@ -1885,7 +1875,6 @@ class Subject {
   ReflectionManager newReflectionManager() {
     return spy(
         new ReflectionManager(
-            sabotContext,
             jobsService,
             catalogService,
             namespaceService,
@@ -1898,12 +1887,16 @@ class Subject {
             dependencyManager,
             descriptorCache,
             wakeUpCallback,
-            expansionHelper,
+            descriptorHelper,
             allocator,
             reflectionGoalChecker,
             refreshStartHandler,
             contextFactory,
             datasetEventHub,
-            wakeUpCacheRefresherCallback));
+            wakeUpCacheRefresherCallback,
+            nodeEndpoint,
+            clusterCoordinator,
+            coordinatorModeInfoProvider,
+            sabotConfig));
   }
 }

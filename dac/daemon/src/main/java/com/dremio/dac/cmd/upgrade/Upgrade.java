@@ -266,6 +266,7 @@ public class Upgrade {
               legacyKVStoreProvider,
               lpPersistence,
               connectionReader,
+              dacConfig.getConfig(),
               classpathScan);
 
       for (UpgradeTask task : tasksToRun) {

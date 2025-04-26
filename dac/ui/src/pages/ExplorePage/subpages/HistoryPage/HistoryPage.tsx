@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import Immutable from "immutable";
 import { connect } from "react-redux";
 import { compose } from "redux";
 import {
@@ -30,9 +31,11 @@ import {
 } from "#oss/utils/nessieUtils";
 import TableHistoryContent from "#oss/pages/NessieHomePage/components/TableDetailsPage/components/TableHistoryContent/TableHistoryContent";
 import { fetchDefaultReferenceIfNeeded as fetchDefaultReferenceAction } from "#oss/actions/nessie/nessie";
+import { getDataset } from "#oss/selectors/explore";
 import { useEffect, useMemo } from "react";
 import { rmProjectBase } from "dremio-ui-common/utilities/projectBase.js";
 import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
+import { getDatasetReferenceFromId } from "dremio-ui-common/utilities/datasetReference.js";
 import * as commonPaths from "dremio-ui-common/paths/common.js";
 
 import "./HistoryPage.less";
@@ -90,11 +93,15 @@ function HistoryPage({
 }
 
 const mapStateToProps = (state: any, { location }: WithRouterProps) => {
-  const [sourceName, namespaceString] = getTableAndNamespace(
-    rmProjectBase(location.pathname),
+  const [sourceName] = getTableAndNamespace(rmProjectBase(location.pathname));
+  const datasetReference = getDatasetReferenceFromId(
+    getDataset(state, location.query.version).get("id"),
   );
-  const namespace = (namespaceString || "").split(".");
-  const tableName = namespace.pop();
+
+  // tableKey will always have at least two elements: [sourceName, ...path, tableName]
+  const namespace = datasetReference?.tableKey.slice(1, -1);
+  const tableName = encodeURIComponent(datasetReference?.tableKey.at(-1) ?? "");
+
   const sources = getSortedSources(state);
   const source = getSourceByName(sourceName, sources)?.toJS();
   return {

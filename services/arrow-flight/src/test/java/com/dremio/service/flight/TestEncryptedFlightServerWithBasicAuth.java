@@ -21,7 +21,7 @@ import org.junit.BeforeClass;
 /** Test encrypted Flight Server with basic auth handler. */
 public class TestEncryptedFlightServerWithBasicAuth extends AbstractTestEncryptedFlightServer {
   @BeforeClass
-  public static void setup() throws Exception {
+  public static void setupDefaultTestCluster() throws Exception {
     setupBaseFlightQueryTest(
         true,
         true,

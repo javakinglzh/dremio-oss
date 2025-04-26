@@ -33,30 +33,25 @@ import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
-import com.dremio.connector.metadata.options.MaxLeafFieldCount;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
-import com.dremio.exec.catalog.CurrentSchemaOption;
-import com.dremio.exec.catalog.FileConfigOption;
-import com.dremio.exec.catalog.SortColumnsOption;
+import com.dremio.exec.catalog.CreateTableOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.planner.logical.ViewTable;
-import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.dfs.MayBeDistFileSystemPlugin;
-import com.dremio.exec.store.dfs.PreviousDatasetInfo;
 import com.dremio.exec.store.file.proto.FileProtobuf.FileUpdateKey;
 import com.dremio.exec.store.iceberg.IcebergExecutionDatasetAccessor;
 import com.dremio.exec.store.iceberg.IcebergFormatConfig;
 import com.dremio.exec.store.iceberg.IcebergFormatPlugin;
 import com.dremio.exec.store.iceberg.IcebergPathSanitizer;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.TableSchemaProvider;
 import com.dremio.exec.store.iceberg.TableSnapshotProvider;
 import com.dremio.exec.store.iceberg.TimeTravelProcessors;
@@ -64,21 +59,14 @@ import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import com.dremio.exec.store.iceberg.model.IcebergCommandType;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
 import com.dremio.exec.store.iceberg.model.IcebergTableLoader;
-import com.dremio.exec.store.parquet.ParquetFormatConfig;
-import com.dremio.exec.store.parquet.ParquetFormatDatasetAccessor;
-import com.dremio.exec.store.parquet.ParquetFormatPlugin;
-import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.io.file.UriSchemes;
-import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.service.DirectProvider;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.capabilities.BooleanCapabilityValue;
 import com.dremio.service.namespace.capabilities.CapabilityValue;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
-import com.dremio.service.namespace.dataset.proto.DatasetType;
-import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
 import com.dremio.service.reflection.proto.MaterializationState;
@@ -103,7 +91,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import javax.inject.Provider;
 import org.apache.iceberg.Table;
 
@@ -139,21 +126,20 @@ public class AccelerationStoragePlugin
   private static final FileUpdateKey EMPTY = FileUpdateKey.getDefaultInstance();
   private MaterializationStore materializationStore;
   private MaterializationPlanStore materializationPlanStore;
-  private ParquetFormatPlugin parquetFormatPlugin;
   private IcebergFormatPlugin icebergFormatPlugin;
 
   public AccelerationStoragePlugin(
       AccelerationStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       String name,
       Provider<StoragePluginId> idProvider) {
-    super(config, context, name, idProvider);
+    super(config, pluginSabotContext, name, idProvider);
   }
 
   // Constructor exclusively for AccelerationStoragePluginTests
   protected AccelerationStoragePlugin(
       AccelerationStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> idProvider,
       MaterializationStore matStore,
@@ -187,29 +173,21 @@ public class AccelerationStoragePlugin
     materializationPlanStore =
         new MaterializationPlanStore(
             DirectProvider.<LegacyKVStoreProvider>wrap(getContext().getKVStoreProvider()));
-    parquetFormatPlugin =
-        (ParquetFormatPlugin) formatCreator.getFormatPluginByConfig(new ParquetFormatConfig());
     icebergFormatPlugin =
         (IcebergFormatPlugin) formatCreator.getFormatPluginByConfig(new IcebergFormatConfig());
   }
 
   @Override
-  public FileSystem createFS(String userName, OperatorContext operatorContext, boolean metadata)
-      throws IOException {
-    FileSystem fs = new AccelerationFileSystem(super.createFS(userName, operatorContext, metadata));
+  public FileSystem createFS(SupportsFsCreation.Builder builder) throws IOException {
+    FileSystem fs = new AccelerationFileSystem(super.createFS(builder));
     if (fs.isPdfs()) {
       // Logging to help with debugging DX-54664
       IllegalStateException exception =
           new IllegalStateException(
-              "AccelerationStoragePlugin does not support PDFS.  User: " + userName);
+              "AccelerationStoragePlugin does not support PDFS.  User: " + builder.userName());
       logger.error(exception.getMessage(), exception);
     }
     return fs;
-  }
-
-  @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    return null;
   }
 
   /**
@@ -298,131 +276,45 @@ public class AccelerationStoragePlugin
       return Optional.empty();
     }
 
-    final String selectionRoot =
-        getConfig().getPath().resolve(refreshes.first().get().getReflectionId().getId()).toString();
-
-    BatchSchema currentSchema = CurrentSchemaOption.getSchema(options);
-    FileConfig fileConfig = FileConfigOption.getFileConfig(options);
-    List<String> sortColumns = SortColumnsOption.getSortColumns(options);
-    Integer fieldCount = MaxLeafFieldCount.getCount(options);
-
-    boolean icebergDataset = isUsingIcebergDataset(materialization);
-    final FileSelection selection =
-        getFileSelection(datasetPath.getName(), refreshes, selectionRoot, icebergDataset);
-
-    final PreviousDatasetInfo pdi =
-        new PreviousDatasetInfo(fileConfig, currentSchema, sortColumns, null, null, true);
-    if (!icebergDataset) {
-      FileDatasetHandle.checkMaxFiles(
-          datasetPath.getName(),
-          selection.getFileAttributesList().size(),
-          parquetFormatPlugin.getMaxFilesLimit());
+    if (!materialization.getIsIcebergDataset()) {
+      throw UserException.validationError()
+          .message(
+              String.format(
+                  "Unable to get file selection for non-iceberg materialization %s.",
+                  materialization.getId().getId()))
+          .build(logger);
     }
-    return getDatasetHandle(datasetPath, fieldCount, icebergDataset, selection, pdi);
-  }
 
-  private Boolean isUsingIcebergDataset(Materialization materialization) {
-    Boolean isIcebergDataset = materialization.getIsIcebergDataset();
-    return isIcebergDataset != null && isIcebergDataset;
+    final FileSelection selection = getIcebergFileSelection(refreshes);
+
+    return getDatasetHandle(datasetPath, selection);
   }
 
   private Optional<DatasetHandle> getDatasetHandle(
-      EntityPath datasetPath,
-      Integer fieldCount,
-      boolean icebergDataset,
-      FileSelection selection,
-      PreviousDatasetInfo pdi) {
-    if (icebergDataset) {
-      final Supplier<Table> tableSupplier =
-          Suppliers.memoize(
-              () -> {
-                final IcebergModel icebergModel = getIcebergModel();
-                final IcebergTableLoader icebergTableLoader =
-                    icebergModel.getIcebergTableLoader(
-                        icebergModel.getTableIdentifier(selection.getSelectionRoot()));
-                return icebergTableLoader.getIcebergTable();
-              });
+      EntityPath datasetPath, FileSelection selection) {
+    final Supplier<Table> tableSupplier =
+        Suppliers.memoize(
+            () -> {
+              final IcebergModel icebergModel = getIcebergModel();
+              final IcebergTableLoader icebergTableLoader =
+                  icebergModel.getIcebergTableLoader(
+                      icebergModel.getTableIdentifier(selection.getSelectionRoot()));
+              return icebergTableLoader.getIcebergTable();
+            });
 
-      // TODO: create a DX!
-      final TableSnapshotProvider tableSnapshotProvider =
-          TimeTravelProcessors.getTableSnapshotProvider(null, null);
-      final TableSchemaProvider tableSchemaProvider =
-          TimeTravelProcessors.getTableSchemaProvider(null);
-      return Optional.of(
-          new IcebergExecutionDatasetAccessor(
-              datasetPath,
-              tableSupplier,
-              getFsConfCopy(),
-              icebergFormatPlugin,
-              getSystemUserFS(),
-              tableSnapshotProvider,
-              this,
-              tableSchemaProvider));
-    } else {
-      return Optional.of(
-          new ParquetFormatDatasetAccessor(
-              DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER,
-              getSystemUserFS(),
-              selection,
-              this,
-              new NamespaceKey(datasetPath.getComponents()),
-              EMPTY,
-              parquetFormatPlugin,
-              pdi,
-              fieldCount,
-              getContext()));
-    }
-  }
-
-  private FileSelection getFileSelection(
-      String datasetName,
-      FluentIterable<Refresh> refreshes,
-      String selectionRoot,
-      boolean icebergDataset) {
-    return icebergDataset
-        ? getIcebergFileSelection(refreshes)
-        : getParquetFileSelection(datasetName, refreshes, selectionRoot);
-  }
-
-  private FileSelection getParquetFileSelection(
-      String datasetName, FluentIterable<Refresh> refreshes, String selectionRoot) {
-    FileSelection selection;
-    List<Refresh> refreshList = refreshes.toList();
-    List<FileSelection> fileSelections =
-        refreshList.stream()
-            .map(
-                refresh -> {
-                  try {
-                    FileSelection currentRefreshSelection =
-                        FileSelection.create(
-                            datasetName,
-                            getSystemUserFS(),
-                            resolveTablePathToValidPath(refresh.getPath()),
-                            parquetFormatPlugin.getMaxFilesLimit());
-                    if (currentRefreshSelection != null) {
-                      return currentRefreshSelection;
-                    }
-                    throw new IllegalStateException(
-                        "Unable to retrieve selection for path." + refresh.getPath());
-                  } catch (IOException e) {
-                    throw Throwables.propagate(e);
-                  }
-                })
-            .collect(Collectors.toList());
-
-    ImmutableList<FileAttributes> allStatus =
-        fileSelections.stream()
-            .flatMap(
-                fileSelection -> {
-                  try {
-                    return fileSelection.minusDirectories().getFileAttributesList().stream();
-                  } catch (IOException e) {
-                    throw Throwables.propagate(e);
-                  }
-                })
-            .collect(ImmutableList.toImmutableList());
-    selection = FileSelection.createFromExpanded(allStatus, selectionRoot);
-    return selection;
+    // TODO: create a DX!
+    final TableSnapshotProvider tableSnapshotProvider =
+        TimeTravelProcessors.getTableSnapshotProvider(null, null);
+    final TableSchemaProvider tableSchemaProvider =
+        TimeTravelProcessors.getTableSchemaProvider(null);
+    return Optional.of(
+        new IcebergExecutionDatasetAccessor(
+            datasetPath,
+            tableSupplier,
+            icebergFormatPlugin,
+            getSystemUserFS(),
+            tableSnapshotProvider,
+            tableSchemaProvider));
   }
 
   private FileSelection getIcebergFileSelection(FluentIterable<Refresh> refreshes) {
@@ -594,11 +486,10 @@ public class AccelerationStoragePlugin
         if (!deletedPaths.contains(tableSchemaPath)) {
           deletedPaths.add(tableSchemaPath);
           logger.debug("deleting refresh {}", tableSchemaPath);
-          boolean isLayered = r.getIsIcebergRefresh() != null && r.getIsIcebergRefresh();
           TableMutationOptions tableMutationOptions =
               TableMutationOptions.newBuilder()
-                  .setIsLayered(isLayered)
-                  .setShouldDeleteCatalogEntry(isLayered)
+                  .setIsLayered(true)
+                  .setShouldDeleteCatalogEntry(true)
                   .build();
           fileSystemPluginDropTable(tableSchemaPath, schemaConfig, tableMutationOptions);
         }
@@ -631,7 +522,7 @@ public class AccelerationStoragePlugin
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     // If the source operation is OPTIMIZE or VACUUM, this is an incremental reflection. Thus, the
     // table path needs to be corrected
     // to point towards the physical location of the materialization (series ordinal 0).
@@ -657,7 +548,12 @@ public class AccelerationStoragePlugin
       }
     }
     return super.createNewTable(
-        tableSchemaPath, config, icebergTableProps, writerOptions, storageOptions, isResultsTable);
+        tableSchemaPath,
+        config,
+        icebergTableProps,
+        writerOptions,
+        storageOptions,
+        createTableOptions);
   }
 
   @Override

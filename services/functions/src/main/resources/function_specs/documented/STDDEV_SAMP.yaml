@@ -38,7 +38,7 @@ signatures:
         type: CHARACTERS
       - description: "Can be cumulative ('PARTITION BY column1 ORDER BY column2 RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW')\
          \ or sliding  ('PARTITION BY column1 ORDER BY column2 ROWS BETWEEN ? PRECEDING AND ? FOLLOWING') window frame.\
-         \ In order to use window frames effectively, it's essential to have the data within the window arranged in a specific way.\
+         \ In order to use window frames effectively, it's essential to have the data within the window arranged in a specific way.\ 
          \ Consequently, including the ORDER BY clause inside the OVER clause becomes necessary for proper window frame syntax."
         kind: OPTIONAL
         name: window_frame

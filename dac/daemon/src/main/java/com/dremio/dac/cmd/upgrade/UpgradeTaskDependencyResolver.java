@@ -21,10 +21,12 @@ import com.google.common.collect.Maps;
 import java.util.List;
 import java.util.Map;
 
-/** To sort UpgrateTasks based on dependencies - topological sort */
+/** To sort UpgradeTasks based on dependencies - topological sort */
 public final class UpgradeTaskDependencyResolver {
 
-  private Map<String, UpgradeTask> uuidToTask = Maps.newHashMap();
+  // Use TreeMap to facilitate retrieving values ordered by key, to make the topologically sort
+  // stable even when upgrade task list is shuffled
+  private final Map<String, UpgradeTask> uuidToTask = Maps.newTreeMap();
 
   UpgradeTaskDependencyResolver(List<? extends UpgradeTask> fullList) {
     for (UpgradeTask task : fullList) {

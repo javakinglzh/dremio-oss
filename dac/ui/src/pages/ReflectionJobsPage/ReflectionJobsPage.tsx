@@ -50,6 +50,7 @@ type ReflectionJobsPageProps = {
   loadNextPage: () => void;
   pagesRequested: number;
   loading: boolean;
+  runningJobs: any;
 } & WithRouterProps;
 
 export const ReflectionJobsPage = withRouter(
@@ -60,6 +61,7 @@ export const ReflectionJobsPage = withRouter(
     loading,
     location,
     params,
+    runningJobs,
   }: ReflectionJobsPageProps) => {
     const curJobs = jobs ?? loadingSkeletonRows;
     const scrolledRef: any = useRef();
@@ -78,10 +80,10 @@ export const ReflectionJobsPage = withRouter(
         const data = curJobs?.[rowIndex];
         return {
           id: data?.id || rowIndex,
-          data: data ? data : null,
+          data: data ? runningJobs?.get(data.id) || data : null,
         };
       },
-      [curJobs],
+      [runningJobs, curJobs],
     );
 
     useLayoutEffect(() => {

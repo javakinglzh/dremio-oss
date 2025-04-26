@@ -189,7 +189,6 @@ public class HiveConfFactory {
     trySetDefault(userPropertyNames, hiveConf, FS_S3_IMPL, FS_S3_IMPL_DEFAULT);
     trySetDefault(userPropertyNames, hiveConf, FS_S3N_IMPL, FS_S3_IMPL_DEFAULT);
 
-    FileSystemConfUtil.ADL_PROPS.forEach(hiveConf::set);
     FileSystemConfUtil.WASB_PROPS.forEach(hiveConf::set);
     FileSystemConfUtil.ABFS_PROPS.forEach(hiveConf::set);
   }

@@ -45,6 +45,7 @@ import com.dremio.dac.service.errors.NewDatasetQueryException;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
 import com.dremio.dac.service.search.SearchContainer;
 import com.dremio.datastore.SearchTypes.SortOrder;
+import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DatasetCatalog;
 import com.dremio.exec.catalog.DremioTable;
@@ -58,18 +59,18 @@ import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
-import com.dremio.service.users.User;
-import com.dremio.service.users.UserService;
 import com.google.common.base.Preconditions;
 import java.security.AccessControlException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import javax.annotation.Nullable;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.GET;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.POST;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -95,11 +96,11 @@ public class DatasetsResource extends BaseResourceWithAllocator {
   private final CatalogServiceHelper catalogServiceHelper;
   private final CollaborationHelper collaborationService;
   private final ReflectionServiceHelper reflectionServiceHelper;
-  private final UserService userService;
   private final OptionManager optionManager;
 
   @Inject
   public DatasetsResource(
+      Catalog userCatalog,
       DatasetVersionMutator datasetService,
       JobsService jobsService,
       QueryExecutor executor,
@@ -109,7 +110,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
       BufferAllocatorFactory allocatorFactory,
       CollaborationHelper collaborationService,
       ReflectionServiceHelper reflectionServiceHelper,
-      UserService userService,
       OptionManager optionManager) {
     this(
         datasetService,
@@ -119,7 +119,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
         allocatorFactory,
         collaborationService,
         reflectionServiceHelper,
-        userService,
         optionManager);
   }
 
@@ -131,7 +130,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
       BufferAllocatorFactory allocatorFactory,
       CollaborationHelper collaborationService,
       ReflectionServiceHelper reflectionServiceHelper,
-      UserService userService,
       OptionManager optionManager) {
     super(allocatorFactory);
     this.datasetService = datasetService;
@@ -140,12 +138,15 @@ public class DatasetsResource extends BaseResourceWithAllocator {
     this.catalogServiceHelper = catalogServiceHelper;
     this.collaborationService = collaborationService;
     this.reflectionServiceHelper = reflectionServiceHelper;
-    this.userService = userService;
     this.optionManager = optionManager;
   }
 
   protected OptionManager getOptionManager() {
     return optionManager;
+  }
+
+  protected CatalogServiceHelper getCatalogServiceHelper() {
+    return catalogServiceHelper;
   }
 
   private DremioTable getTable(DatasetPath datasetPath, Map<String, VersionContextReq> references) {
@@ -172,8 +173,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
         datasetService.getDescendantsCount(namespaceKey),
         references,
         Collections.emptyList(),
-        null,
-        null,
         null);
   }
 
@@ -473,19 +472,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
             datasetPath.getRoot().getName(), refType, refValue));
   }
 
-  protected User getUser(String username, String entityId) {
-    User user = null;
-    if (username != null) {
-      try {
-        user = userService.getUser(username);
-        // TODO: Investigate if we can leverage a more specific exception.
-      } catch (Exception e) {
-        // ignore
-      }
-    }
-    return user;
-  }
-
   private DatasetSummary getEnhancedDatasetSummary(
       DatasetPath datasetPath, Map<String, VersionContextReq> references)
       throws NamespaceException, DatasetNotFoundException {
@@ -505,12 +491,6 @@ public class DatasetsResource extends BaseResourceWithAllocator {
       tags = collaborationService.getTags(entityId);
     }
 
-    // TODO: DX-61580 Add last modified user to DatasetConfig
-    // For now, using the owner as the last modified user. The code is messy. Will be improved in
-    // the follow-up story.
-    User owner = getUser(datasetConfig.getOwner(), entityId);
-    User lastModifyingUser =
-        getUser(datasetConfig.getOwner(), entityId); // datasetConfig.getLastUser();
     Boolean hasReflection;
     try {
       hasReflection = reflectionServiceHelper.doesDatasetHaveReflection(entityId);
@@ -526,9 +506,7 @@ public class DatasetsResource extends BaseResourceWithAllocator {
         datasetService.getDescendantsCount(namespaceKey),
         references,
         tags.isPresent() ? tags.get().getTags() : Collections.emptyList(),
-        hasReflection,
-        owner,
-        lastModifyingUser);
+        hasReflection);
   }
 
   protected DatasetSummary newDatasetSummary(
@@ -537,19 +515,20 @@ public class DatasetsResource extends BaseResourceWithAllocator {
       int descendants,
       Map<String, VersionContextReq> references,
       List<String> tags,
-      Boolean hasReflection,
-      User owner,
-      User lastModifyingUser)
+      Boolean hasReflection)
       throws NamespaceException {
+
+    @Nullable
+    NameSpaceContainer rootContainer =
+        catalogServiceHelper.getRootContainer(datasetConfig.getFullPathList());
+    if (rootContainer == null) {
+      throw new NotFoundException(
+          String.format("The system could not find [%s]", datasetConfig.getFullPathList().get(0)));
+    }
+    NameSpaceContainer.Type containerType = rootContainer.getType();
+
     return DatasetSummary.newInstance(
-        datasetConfig,
-        jobCount,
-        descendants,
-        references,
-        tags,
-        hasReflection,
-        owner,
-        lastModifyingUser);
+        datasetConfig, jobCount, descendants, references, tags, hasReflection, containerType);
   }
 
   protected String getTableDefinition(

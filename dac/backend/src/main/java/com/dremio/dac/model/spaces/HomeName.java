@@ -15,23 +15,26 @@
  */
 package com.dremio.dac.model.spaces;
 
+import static com.dremio.service.namespace.NamespaceUtils.HOME_PREFIX;
+import static com.dremio.service.namespace.NamespaceUtils.getHomeSpaceUserName;
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
+
 import com.dremio.dac.model.common.RootEntity;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
 /** Home space names start with a reserved letter @followed by user name. */
 public final class HomeName extends RootEntity {
 
-  public static final String HOME_PREFIX = "@";
   public static final String HOME_URL = "home";
 
-  public static final HomeName getUserHomePath(final String userName) {
+  public static HomeName getUserHomePath(final String userName) {
     return new HomeName(HOME_PREFIX + userName);
   }
 
   @JsonCreator
   public HomeName(String name) {
     super(name);
-    if (!name.startsWith(HOME_PREFIX)) {
+    if (!isHomeSpace(name)) {
       throw new IllegalArgumentException("Invalid home name: " + name);
     }
   }
@@ -47,6 +50,6 @@ public final class HomeName extends RootEntity {
   }
 
   public String getUserName() {
-    return this.getName().substring(1);
+    return getHomeSpaceUserName(this.getName());
   }
 }

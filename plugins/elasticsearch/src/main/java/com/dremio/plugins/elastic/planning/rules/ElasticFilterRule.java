@@ -52,16 +52,12 @@ public final class ElasticFilterRule extends RelOptRule {
 
   @Override
   public boolean matches(RelOptRuleCall call) {
-    final FilterPrel filter = call.rel(0);
     final ElasticsearchIntermediatePrel intermediatePrel = call.rel(1);
 
-    if (intermediatePrel.hasTerminalPrel()
-        || intermediatePrel.contains(ElasticsearchFilter.class)) {
-      return false;
-    }
+    return !intermediatePrel.hasTerminalPrel()
+        && !intermediatePrel.contains(ElasticsearchFilter.class);
 
     // more checking will be done in onmatch.
-    return true;
   }
 
   @Override
@@ -129,35 +125,40 @@ public final class ElasticFilterRule extends RelOptRule {
    */
   class FilterConverterVisitor extends ElasticRuleRelVisitor {
 
-    protected final RexBuilder rexBuilder;
+    private final RexBuilder rexBuilder;
 
     FilterConverterVisitor(RexBuilder rexBuilder, RexNode condition, RelNode input) {
       super(input);
       this.rexBuilder = rexBuilder;
-      this.filterExprs = condition;
+      this.setFilterExprs(condition);
     }
 
     @Override
     public void processFilter(ElasticsearchFilter filter) {
-      filterExprs =
-          rexBuilder.makeCall(SqlStdOperatorTable.AND, filterExprs, filter.getCondition());
+      setFilterExprs(
+          getRexBuilder()
+              .makeCall(SqlStdOperatorTable.AND, getFilterExprs(), filter.getCondition()));
     }
 
     @Override
     public void processProject(ElasticsearchProject project) {
-      filterExprs = pushPastProject(filterExprs, project);
-      if (projectExprs == null) {
-        projectExprs = project.getProjects();
-        projectDataType = project.getRowType();
+      setFilterExprs(pushPastProject(getFilterExprs(), project));
+      if (getProjectExprs() == null) {
+        setProjectExprs(project.getProjects());
+        setProjectDataType(project.getRowType());
       } else {
-        projectExprs = RelOptUtil.pushPastProject(projectExprs, project);
+        setProjectExprs(RelOptUtil.pushPastProject(getProjectExprs(), project));
         // projectDataType should not be set here, since we want to keep the top project's row type.
       }
     }
 
     @Override
     public void processSample(ElasticsearchSample node) {
-      parents.add((ElasticsearchPrel) node);
+      getParents().add((ElasticsearchPrel) node);
+    }
+
+    protected RexBuilder getRexBuilder() {
+      return rexBuilder;
     }
   }
 

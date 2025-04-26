@@ -70,8 +70,8 @@ public final class Column {
     this.IS_NULLABLE = "YES";
 
     switch (sqlTypeName) {
-        // 1. SqlTypeName enumerators whose names (currently) match SQL's values
-        //    for DATA_TYPE (those which have been seen in tests and verified):
+      // 1. SqlTypeName enumerators whose names (currently) match SQL's values
+      //    for DATA_TYPE (those which have been seen in tests and verified):
       case BOOLEAN:
       case TINYINT:
       case SMALLINT:
@@ -84,18 +84,18 @@ public final class Column {
       case DATE:
       case TIME:
       case TIMESTAMP:
-        //   INTERVAL_YEAR_MONTH - Not identical; see below.
-        //   INTERVAL_DAY_TIME   - Not identical; see below.
-        //   CHAR                - Not identical; see below.
-        //   VARCHAR             - Not identical; see below.
+      //   INTERVAL_YEAR_MONTH - Not identical; see below.
+      //   INTERVAL_DAY_TIME   - Not identical; see below.
+      //   CHAR                - Not identical; see below.
+      //   VARCHAR             - Not identical; see below.
       case BINARY:
-        //   VARBINARY           - Not identical; see below.
-        // TODO(DRILL-3253): Update these once we have test plugin supporting
-        // all needed types:
-        //   NULL        - Not seen/explicitly addressed.
-        //   ANY         -  " "
-        //   SYMBOL      -  " "
-        //   MULTISET    -  " "
+      //   VARBINARY           - Not identical; see below.
+      // TODO(DRILL-3253): Update these once we have test plugin supporting
+      // all needed types:
+      //   NULL        - Not seen/explicitly addressed.
+      //   ANY         -  " "
+      //   SYMBOL      -  " "
+      //   MULTISET    -  " "
       case ARRAY:
       case MAP:
       case ROW:
@@ -106,8 +106,8 @@ public final class Column {
         //   COLUMN_LIST -  " "
         this.DATA_TYPE = sqlTypeName.name();
         break;
-        // 2.  SqlTypeName enumerators whose names (currently) do not match SQL's
-        //     values for DATA_TYPE:
+      // 2.  SqlTypeName enumerators whose names (currently) do not match SQL's
+      //     values for DATA_TYPE:
       case CHAR:
         this.DATA_TYPE = "CHARACTER";
         break;
@@ -136,7 +136,7 @@ public final class Column {
       case INTERVAL_DAY_SECOND:
         this.DATA_TYPE = "INTERVAL DAY TO SECOND";
         break;
-        // 3:  SqlTypeName enumerators not yet seen and confirmed or handled.
+      // 3:  SqlTypeName enumerators not yet seen and confirmed or handled.
       default:
         logger.warn("Type not handled explicitly (code needs review): " + sqlTypeName);
         this.DATA_TYPE = sqlTypeName.toString();

@@ -20,6 +20,7 @@ import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.context.RequestContext;
 import com.dremio.context.UserContext;
+import com.dremio.exec.catalog.PluginFolder;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.store.ChangeInfo;
 import com.dremio.exec.store.ReferenceInfo;
@@ -202,9 +203,24 @@ public class UsernameAwareNessieClientImpl implements NessieClient {
   }
 
   @Override
-  public void createNamespace(List<String> namespacePathList, VersionContext version) {
-    getRequestContextWithUsernameContext()
-        .run(() -> nessieClient.createNamespace(namespacePathList, version));
+  public Stream<List<String>> listEntriesChangedBetween(
+      String fromCommitHash, String toCommitHash) {
+    return callWithUsernameContext(
+        () -> nessieClient.listEntriesChangedBetween(fromCommitHash, toCommitHash));
+  }
+
+  @Override
+  public Optional<PluginFolder> createNamespace(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri) {
+    return callWithUsernameContext(
+        () -> nessieClient.createNamespace(namespacePathList, version, storageUri));
+  }
+
+  @Override
+  public Optional<PluginFolder> updateNamespace(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri) {
+    return callWithUsernameContext(
+        () -> nessieClient.updateNamespace(namespacePathList, version, storageUri));
   }
 
   @Override

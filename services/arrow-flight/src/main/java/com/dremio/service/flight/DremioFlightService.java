@@ -20,12 +20,13 @@ import static com.dremio.config.DremioConfig.FLIGHT_USE_SESSION_SERVICE;
 import com.dremio.common.AutoCloseables;
 import com.dremio.config.DremioConfig;
 import com.dremio.exec.rpc.ssl.SSLConfigurator;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.work.protector.UserWorker;
 import com.dremio.options.OptionManager;
+import com.dremio.options.OptionValidatorListing;
 import com.dremio.service.Service;
 import com.dremio.service.flight.impl.FlightWorkManager.RunQueryResponseHandlerFactory;
 import com.dremio.service.tokens.TokenManager;
+import com.dremio.service.users.UserService;
 import com.dremio.service.usersessions.UserSessionService;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.ssl.SSLConfig;
@@ -77,7 +78,6 @@ public class DremioFlightService implements Service {
   private final Provider<DremioConfig> configProvider;
   private final Provider<BufferAllocator> bufferAllocator;
   private final Provider<UserWorker> userWorkerProvider;
-  private final Provider<SabotContext> sabotContextProvider;
   private final Provider<TokenManager> tokenManagerProvider;
   private final Provider<OptionManager> optionManagerProvider;
   private final Provider<UserSessionService> userSessionServiceProvider;
@@ -85,6 +85,8 @@ public class DremioFlightService implements Service {
   private final Provider<FlightRequestContextDecorator> requestContextDecoratorProvider;
   private final Provider<CredentialsService> credentialsServiceProvider;
   private final RunQueryResponseHandlerFactory runQueryResponseHandlerFactory;
+  private final Provider<OptionValidatorListing> optionValidatorListingProvider;
+  private final Provider<UserService> userServiceProvider;
 
   private DremioFlightSessionsManager dremioFlightSessionsManager;
 
@@ -95,25 +97,27 @@ public class DremioFlightService implements Service {
       Provider<DremioConfig> configProvider,
       Provider<BufferAllocator> bufferAllocator,
       Provider<UserWorker> userWorkerProvider,
-      Provider<SabotContext> sabotContextProvider,
       Provider<TokenManager> tokenManagerProvider,
       Provider<OptionManager> optionManagerProvider,
       Provider<UserSessionService> userSessionServiceProvider,
       Provider<DremioFlightAuthProvider> authProvider,
       Provider<FlightRequestContextDecorator> requestContextDecoratorProvider,
-      Provider<CredentialsService> credentialsServiceProvider) {
+      Provider<CredentialsService> credentialsServiceProvider,
+      Provider<OptionValidatorListing> optionValidatorListingProvider,
+      Provider<UserService> userServiceProvider) {
     this(
         configProvider,
         bufferAllocator,
         userWorkerProvider,
-        sabotContextProvider,
         tokenManagerProvider,
         optionManagerProvider,
         userSessionServiceProvider,
         authProvider,
         requestContextDecoratorProvider,
         credentialsServiceProvider,
-        RunQueryResponseHandlerFactory.DEFAULT);
+        RunQueryResponseHandlerFactory.DEFAULT,
+        optionValidatorListingProvider,
+        userServiceProvider);
   }
 
   @VisibleForTesting
@@ -121,17 +125,17 @@ public class DremioFlightService implements Service {
       Provider<DremioConfig> configProvider,
       Provider<BufferAllocator> bufferAllocator,
       Provider<UserWorker> userWorkerProvider,
-      Provider<SabotContext> sabotContextProvider,
       Provider<TokenManager> tokenManagerProvider,
       Provider<OptionManager> optionManagerProvider,
       Provider<UserSessionService> userSessionServiceProvider,
       Provider<DremioFlightAuthProvider> authProvider,
       Provider<FlightRequestContextDecorator> requestContextDecoratorProvider,
       Provider<CredentialsService> credentialsServiceProvider,
-      RunQueryResponseHandlerFactory runQueryResponseHandlerFactory) {
+      RunQueryResponseHandlerFactory runQueryResponseHandlerFactory,
+      Provider<OptionValidatorListing> optionValidatorListingProvider,
+      Provider<UserService> userServiceProvider) {
     this.configProvider = configProvider;
     this.bufferAllocator = bufferAllocator;
-    this.sabotContextProvider = sabotContextProvider;
     this.tokenManagerProvider = tokenManagerProvider;
     this.userWorkerProvider = userWorkerProvider;
     this.optionManagerProvider = optionManagerProvider;
@@ -140,6 +144,8 @@ public class DremioFlightService implements Service {
     this.authProvider = authProvider;
     this.requestContextDecoratorProvider = requestContextDecoratorProvider;
     this.credentialsServiceProvider = credentialsServiceProvider;
+    this.optionValidatorListingProvider = optionValidatorListingProvider;
+    this.userServiceProvider = userServiceProvider;
   }
 
   @Override
@@ -156,10 +162,16 @@ public class DremioFlightService implements Service {
         && config.getBoolean(FLIGHT_USE_SESSION_SERVICE)) {
       dremioFlightSessionsManager =
           new SessionServiceFlightSessionsManager(
-              sabotContextProvider, tokenManagerProvider, userSessionServiceProvider);
+              optionValidatorListingProvider.get(),
+              optionManagerProvider.get(),
+              tokenManagerProvider,
+              userSessionServiceProvider);
     } else {
       dremioFlightSessionsManager =
-          new TokenCacheFlightSessionManager(sabotContextProvider, tokenManagerProvider);
+          new TokenCacheFlightSessionManager(
+              tokenManagerProvider,
+              optionManagerProvider.get(),
+              optionValidatorListingProvider.get());
     }
 
     final int port = config.getInt(DremioConfig.FLIGHT_SERVICE_PORT_INT);
@@ -194,7 +206,8 @@ public class DremioFlightService implements Service {
                     optionManagerProvider,
                     allocator,
                     requestContextDecoratorProvider,
-                    runQueryResponseHandlerFactory));
+                    runQueryResponseHandlerFactory,
+                    userServiceProvider));
 
     builder.middleware(
         FLIGHT_CLIENT_PROPERTIES_MIDDLEWARE_KEY, new ServerCookieMiddleware.Factory());

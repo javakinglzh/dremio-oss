@@ -114,9 +114,7 @@ public class TestMetadataProvider extends BaseTestQuery {
     TestSysFlightResource.addSysFlightPlugin(nodes[0]);
     ((CatalogServiceImpl) getCatalogService())
         .refreshSource(
-            new NamespaceKey("sys"),
-            CatalogService.REFRESH_EVERYTHING_NOW,
-            CatalogServiceImpl.UpdateType.FULL);
+            new NamespaceKey("sys"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     test("SELECT * from cp.\"tpch/customer.parquet\"");
   }
@@ -431,7 +429,7 @@ public class TestMetadataProvider extends BaseTestQuery {
     assertEquals(RequestStatus.OK, resp1.getStatus());
 
     final List<ColumnMetadata> columns1 = resp1.getColumnsList();
-    assertEquals(345, columns1.size());
+    assertEquals(352, columns1.size());
     assertTrue(
         "incremental update column shouldn't be returned",
         columns1.stream()
@@ -455,7 +453,7 @@ public class TestMetadataProvider extends BaseTestQuery {
 
     assertEquals(RequestStatus.OK, resp.getStatus());
     List<ColumnMetadata> columns = resp.getColumnsList();
-    assertEquals(27, columns.size());
+    assertEquals(26, columns.size());
 
     Iterator<ColumnMetadata> iterator = columns.iterator();
     verifyColumn("INFORMATION_SCHEMA", "COLUMNS", "ORDINAL_POSITION", iterator.next());
@@ -473,7 +471,6 @@ public class TestMetadataProvider extends BaseTestQuery {
     verifyColumn("sys", "jobs_recent", "execution_planning_ts", iterator.next());
     verifyColumn("sys", "jobs_recent", "execution_planning_epoch_millis", iterator.next());
     verifyColumn("sys", "jobs_recent", "is_profile_incomplete", iterator.next());
-    verifyColumn("sys", "materializations", "data_partitions", iterator.next());
     verifyColumn("sys", "materializations", "last_refresh_from_pds", iterator.next());
     verifyColumn("sys", "memory", "fabric_port", iterator.next());
     verifyColumn("sys", "nodes", "user_port", iterator.next());

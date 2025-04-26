@@ -121,7 +121,6 @@ public class DatasetTestUtils {
     datasetConfig.setType(datasetType);
     datasetConfig.setFullPathList(physicalDatasetPath.toPathList());
     datasetConfig.setName(physicalDatasetPath.getLeaf().getName());
-    datasetConfig.setCreatedAt(System.currentTimeMillis());
     datasetConfig.setTag(null);
     datasetConfig.setOwner("test_user");
     datasetConfig.setPhysicalDataset(new PhysicalDataset());
@@ -136,7 +135,6 @@ public class DatasetTestUtils {
     datasetConfig.setType(datasetType);
     datasetConfig.setFullPathList(filePath.toPathList());
     datasetConfig.setName(filePath.getFileName().toString());
-    datasetConfig.setCreatedAt(System.currentTimeMillis());
     datasetConfig.setTag(null);
     datasetConfig.setOwner("test_user");
     datasetConfig.setPhysicalDataset(new PhysicalDataset());

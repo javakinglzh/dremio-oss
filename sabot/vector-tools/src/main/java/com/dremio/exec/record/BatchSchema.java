@@ -39,12 +39,16 @@ import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Multimaps;
+import com.google.common.collect.Streams;
 import com.google.flatbuffers.FlatBufferBuilder;
 import io.protostuff.ByteString;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -90,7 +94,7 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
                   new FieldType(true, new ArrowType.Utf8(), null),
                   null))
           .build();
-  public static final BatchSchema EMPTY = new BatchSchema(Collections.EMPTY_LIST);
+  public static final BatchSchema EMPTY = new BatchSchema(Collections.emptyList());
 
   public static final String MIXED_TYPES_ERROR =
       "Mixed types are not supported as returned values over JDBC, ODBC and Flight connections.";
@@ -366,9 +370,9 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
    * needed for understanding the schema.
    *
    * @return
-   * @throws Exception
+   * @throws IOException
    */
-  public String toJSONString() throws Exception {
+  public String toJSONString() throws IOException {
     final JsonFactory factory = new JsonFactory();
     final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     final JsonGenerator jsonGenerator = factory.createGenerator(outputStream);
@@ -464,35 +468,83 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
     return thisUpperCaseFields.equals(thatUpperCaseFields);
   }
 
-  private boolean compareFields(List<Field> srcFields, List<Field> tgtFields) {
+  private boolean compareFields(
+      List<Field> srcFields,
+      List<Field> tgtFields,
+      final boolean ignoreNullability,
+      final boolean allowMissingNullableFields) {
     if (srcFields == null && tgtFields == null) {
       return true;
     }
-    if (srcFields == null || tgtFields == null) {
-      return false;
+    if (!allowMissingNullableFields) {
+      if (srcFields == null || tgtFields == null) {
+        return false;
+      }
+      if (srcFields.size() != tgtFields.size()) {
+        return false;
+      }
+    } else {
+      if (null == srcFields) {
+        srcFields = Collections.emptyList();
+      }
+      if (null == tgtFields) {
+        tgtFields = Collections.emptyList();
+      }
     }
-    if (srcFields.size() != tgtFields.size()) {
-      return false;
-    }
+
+    // The early returns above should guarantee this invariant, but check it here anyway,
+    // so that a potential future violation can be detected early in development
+    Preconditions.checkState(null != srcFields, "srcFields cannot be null");
+    Preconditions.checkState(null != tgtFields, "tgtFields cannot be null");
+
     Map<String, Field> srcChildrenFields = new HashMap<>();
     for (Field srcField : srcFields) {
       srcChildrenFields.put(srcField.getName().toLowerCase(), srcField);
     }
 
+    /* Incrementally-computed set-difference of srcFields minus tgtFields, using case-insensitive
+     * field names as the sole criterion for equality of two fields.  If this is non-empty, then
+     * there was at least one element in srcFields for which no correspondingly-named element existed
+     * in tgtFields, and we'll return false on that basis, if we make it that far through iteration.
+     *
+     * It might be correct to initialize and compute this when !allowMissingNullableFields.  It's
+     * conditioned on this boolean only to limit the blast radius of the change at the time of its
+     * introduction.
+     */
+    final Set<String> fieldsUniqueToSrc =
+        allowMissingNullableFields
+            ? srcChildrenFields.keySet().stream()
+                .map(String::toLowerCase)
+                .collect(Collectors.toSet())
+            : null;
+
     for (Field tgtChildField : tgtFields) {
-      Field srcChildField = srcChildrenFields.get(tgtChildField.getName().toLowerCase());
+      final String childFieldName = tgtChildField.getName().toLowerCase();
+      Field srcChildField = srcChildrenFields.get(childFieldName);
       if (srcChildField == null) {
-        return false;
+        if (allowMissingNullableFields && tgtChildField.isNullable()) {
+          continue;
+        } else {
+          return false;
+        }
       }
-      if (!compareField(srcChildField, tgtChildField)) {
+      if (null != fieldsUniqueToSrc) {
+        fieldsUniqueToSrc.remove(childFieldName);
+      }
+      if (!compareField(
+          srcChildField, tgtChildField, ignoreNullability, allowMissingNullableFields)) {
         return false;
       }
     }
 
-    return true;
+    return null == fieldsUniqueToSrc || fieldsUniqueToSrc.isEmpty();
   }
 
-  private boolean compareField(Field src, Field tgt) {
+  private boolean compareField(
+      final Field src,
+      final Field tgt,
+      final boolean ignoreNullability,
+      final boolean allowMissingNullableFields) {
     Preconditions.checkArgument(src != null && tgt != null, "Unexpected state");
     if (!src.getName().toLowerCase().equalsIgnoreCase(tgt.getName().toLowerCase())) {
       return false;
@@ -502,21 +554,59 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
     CompleteType srcCompleteType = CompleteType.fromField(src);
     CompleteType tgtCompleteType = CompleteType.fromField(tgt);
     if (srcCompleteType.isUnion() && tgtCompleteType.isUnion()) {
-      return compareFields(srcCompleteType.getChildren(), tgtCompleteType.getChildren());
+      return compareFields(
+          srcCompleteType.getChildren(),
+          tgtCompleteType.getChildren(),
+          ignoreNullability,
+          allowMissingNullableFields);
     } else {
       typesEqual = Objects.equals(src.getType(), tgt.getType());
     }
-    if (!Objects.equals(src.isNullable(), tgt.isNullable())
-        || !typesEqual
-        || !Objects.equals(src.getDictionary(), tgt.getDictionary())
-        || !Objects.equals(src.getMetadata(), tgt.getMetadata())) {
+    boolean metadataMismatch =
+        !typesEqual
+            || !Objects.equals(src.getDictionary(), tgt.getDictionary())
+            || !Objects.equals(src.getMetadata(), tgt.getMetadata());
+    if (!ignoreNullability) {
+      metadataMismatch |= !Objects.equals(src.isNullable(), tgt.isNullable());
+    }
+    if (metadataMismatch) {
       return false;
     }
-    return compareFields(src.getChildren(), tgt.getChildren());
+    return compareFields(
+        src.getChildren(), tgt.getChildren(), ignoreNullability, allowMissingNullableFields);
+  }
+
+  /**
+   * Tests whether rows with schema {@code this} could be inserted into a table with schema {@code
+   * that}.
+   *
+   * <p>This recursively descends through nested types, comparing {@code this} and {@code that} at
+   * each step. At each level of descent, every non-nullable field on {@code that} must also be
+   * present on {@code this}, but nullable fields on {@code that} may be missing from {@code this}.
+   *
+   * <p>If {@code that} has a nullable nested type missing from {@code this}, then it gets pruned
+   * from the traversal. Any fields inside are not visited. In particular, any non-nullable
+   * constraints on fields inside that nested type will not be seen or considered.
+   *
+   * <p>If the traversal encounters a field on {@code this} which has no counterpart in {@code
+   * that}, then this method immediately returns false.
+   *
+   * <p>This method considers two fields to be the same if each of the following are equal:
+   *
+   * <ul>
+   *   <li>{@link Field#getName()}, case-insensitive comparison
+   *   <li>{@link Field#getType()}
+   *   <li>{@link Field#getMetadata()}
+   *   <li>{@link Field#getDictionary()}
+   * </ul>
+   */
+  public boolean insertsInto(BatchSchema that) {
+    return compareFields(this.getFields(), that.getFields(), true, true)
+        && Objects.equals(this.selectionVectorMode, that.selectionVectorMode);
   }
 
   public boolean equalsTypesWithoutPositions(BatchSchema that) {
-    return compareFields(this.getFields(), that.getFields())
+    return compareFields(this.getFields(), that.getFields(), false, false)
         && Objects.equals(this.selectionVectorMode, that.selectionVectorMode);
   }
 
@@ -866,36 +956,42 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
   }
 
   public BatchSchema difference(BatchSchema schema) {
-    Map<String, Field> alreadyExisting = new LinkedHashMap<>();
-    for (Field field : getFields()) {
-      String dottedName = field.getName().toLowerCase();
-      Field temp = field;
-      while (!temp.getChildren().isEmpty()) {
-        dottedName = dottedName.concat("." + temp.getChildren().get(0).getName().toLowerCase());
-        temp = temp.getChildren().get(0);
+    List<Field> leftOnlyFields = difference(getFields(), schema.getFields());
+    return new BatchSchema(leftOnlyFields);
+  }
+
+  public static List<Field> difference(List<Field> left, List<Field> right) {
+    List<Field> leftOnly = new ArrayList<>();
+    Multimap<String, Field> rightMap = Multimaps.index(right, f -> f.getName().toLowerCase());
+    for (Field leftField : left) {
+      // get all fields on the right with the same name, there can be multiples in the internal
+      // schema case where nested leaf fields are separated
+      Collection<Field> rightFieldsWithSameName = rightMap.get(leftField.getName().toLowerCase());
+      if (rightFieldsWithSameName.isEmpty()) {
+        leftOnly.add(leftField);
+      } else {
+        // if left and right are both complex and the same type, compute the nested difference of
+        // child fields
+        Field firstOnRight = rightFieldsWithSameName.iterator().next();
+        if (leftField.getType().isComplex()
+            && firstOnRight.getType().isComplex()
+            && leftField.getType().getTypeID() == firstOnRight.getType().getTypeID()) {
+          // combine the right children with the same parent, they will be separated in the internal
+          // schema case
+          List<Field> rightFieldChildren =
+              rightFieldsWithSameName.stream()
+                  .flatMap(f -> f.getChildren().stream())
+                  .collect(Collectors.toList());
+          List<Field> leftOnlyChildren = difference(leftField.getChildren(), rightFieldChildren);
+          if (!leftOnlyChildren.isEmpty()) {
+            leftOnly.add(
+                new Field(leftField.getName(), leftField.getFieldType(), leftOnlyChildren));
+          }
+        }
       }
-      alreadyExisting.put(dottedName, field);
     }
 
-    if (alreadyExisting.isEmpty()) {
-      return BatchSchema.EMPTY;
-    }
-
-    Map<String, Field> newFields = new LinkedHashMap<>();
-    for (Field field : schema.getFields()) {
-      String dottedName = field.getName().toLowerCase();
-      Field temp = field;
-      while (!temp.getChildren().isEmpty()) {
-        dottedName = dottedName.concat("." + temp.getChildren().get(0).getName().toLowerCase());
-        temp = temp.getChildren().get(0);
-      }
-      newFields.put(dottedName, field);
-    }
-
-    List<Field> addedFields =
-        Maps.difference(alreadyExisting, newFields).entriesOnlyOnLeft().values().stream()
-            .collect(Collectors.toList());
-    return new BatchSchema(addedFields);
+    return leftOnly;
   }
 
   private List<Field> mergeWithUpPromotion(
@@ -950,6 +1046,86 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
         .findFirst();
   }
 
+  private static void validateUserDefinedFieldTypes(
+      List<Field> srcFields,
+      List<Field> userFields,
+      SupportsTypeCoercionsAndUpPromotions coercionRulesSet) {
+    Map<String, Field> userFieldsMap = new LinkedHashMap<>();
+    for (Field userField : userFields) {
+      userFieldsMap.put(userField.getName().toLowerCase(), userField);
+    }
+
+    for (Field src : srcFields) {
+      Field user = userFieldsMap.get(src.getName().toLowerCase());
+      if (user != null) {
+        try {
+          validateUserDefinedFieldTypes(src, user, coercionRulesSet);
+        } catch (NoSupportedUpPromotionOrCoercionException ex) {
+          ex.addColumnName(user.getName());
+          throw ex;
+        }
+      }
+    }
+  }
+
+  private static void validateUserDefinedFieldTypes(
+      Field srcField, Field userField, SupportsTypeCoercionsAndUpPromotions coercionRulesSet) {
+    CompleteType srcType = CompleteType.fromField(srcField);
+    CompleteType userType = CompleteType.fromField(userField);
+
+    if (srcType.isUnion()) {
+      srcType = CompleteType.removeUnions(srcType, coercionRulesSet);
+    }
+
+    if (userType.isUnion()) {
+      userType = CompleteType.removeUnions(userType, coercionRulesSet);
+    }
+
+    // non-coercible type combinations (srcType -> userType):
+    // - scalar -> scalar dependent on coercion rules
+    // - scalar -> complex
+    // - complex -> scalar, varchar allowed if allowComplexToVarcharCoercion == true
+    // - complex -> complex of different base type e.g. struct -> list
+
+    boolean incompatibleScalarToScalar =
+        srcType.isScalar()
+            && userType.isScalar()
+            && !srcType.equals(userType)
+            && !coercionRulesSet
+                .getUpPromotionRules()
+                .getResultantType(srcType, userType)
+                .isPresent()
+            && !coercionRulesSet
+                .getTypeCoercionRules()
+                .getResultantType(srcType, userType)
+                .isPresent();
+    boolean incompatibleScalarToComplex = srcType.isScalar() && userType.isComplex();
+    boolean incompatibleComplexToScalar =
+        srcType.isComplex()
+            && userType.isScalar()
+            && !(userType.getType().getTypeID() == ArrowTypeID.Utf8
+                && coercionRulesSet.isComplexToVarcharCoercionSupported());
+    boolean incompatibleComplexToComplex =
+        srcType.isComplex()
+            && userType.isComplex()
+            && userType.getType().getTypeID() != srcType.getType().getTypeID();
+
+    if (incompatibleScalarToScalar
+        || incompatibleScalarToComplex
+        || incompatibleComplexToScalar
+        || incompatibleComplexToComplex) {
+      throw new NoSupportedUpPromotionOrCoercionException(srcType, userType);
+    }
+
+    if (srcType.isStruct()) {
+      validateUserDefinedFieldTypes(
+          srcType.getChildren(), userType.getChildren(), coercionRulesSet);
+    } else if (srcType.isList() || srcType.isMap()) {
+      validateUserDefinedFieldTypes(
+          srcType.getOnlyChild(), userType.getOnlyChild(), coercionRulesSet);
+    }
+  }
+
   public BatchSchema applyUserDefinedSchemaAfterSchemaLearning(
       BatchSchema newSchema,
       List<Field> droppedColumns,
@@ -959,24 +1135,44 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
       String filePath,
       List<String> tableSchemaPath,
       SupportsTypeCoercionsAndUpPromotions coercionRulesSet) {
-    if (isUserDefinedSchemaEnabled && isSchemaLearningDisabledByUser) {
-      return this;
-    }
-    BatchSchema finalSchema;
     try {
-      finalSchema = this.mergeWithUpPromotion(newSchema, coercionRulesSet);
-      for (Field field : droppedColumns) {
-        finalSchema = finalSchema.dropField(field);
-      }
-      for (Field field : updatedColumns) {
-        finalSchema = finalSchema.changeTypeRecursive(field);
+      if (isUserDefinedSchemaEnabled && isSchemaLearningDisabledByUser) {
+        // check for incompatible schemas when schema learning is disabled
+        BatchSchema.validateUserDefinedFieldTypes(
+            newSchema.getFields(), getFields(), coercionRulesSet);
+        return this;
+      } else {
+        // split the new fields into two subsets - those which have user defined updates and
+        // those without
+        Set<String> updatedFieldNames =
+            Streams.concat(droppedColumns.stream(), updatedColumns.stream())
+                .map(f -> f.getName().toLowerCase())
+                .collect(Collectors.toSet());
+        Map<Boolean, List<Field>> partitionedNewFields =
+            newSchema.getFields().stream()
+                .collect(
+                    Collectors.partitioningBy(
+                        f -> updatedFieldNames.contains(f.getName().toLowerCase())));
+        List<Field> newFieldsWithUpdates = partitionedNewFields.get(true);
+        List<Field> newFieldsWithoutUpdates = partitionedNewFields.get(false);
+
+        // merge outgoing with the subset of new fields without user defined schema
+        BatchSchema finalSchema =
+            mergeWithUpPromotion(new BatchSchema(newFieldsWithoutUpdates), coercionRulesSet);
+
+        // check for incompatible types on fields with user defined schema
+        if (!newFieldsWithUpdates.isEmpty()) {
+          BatchSchema.validateUserDefinedFieldTypes(
+              newFieldsWithUpdates, getFields(), coercionRulesSet);
+        }
+
+        return finalSchema.removeNullFields();
       }
     } catch (NoSupportedUpPromotionOrCoercionException e) {
-      e.addFilePath(filePath);
       e.addDatasetPath(tableSchemaPath);
-      throw UserException.unsupportedError(e).message(e.getMessage()).build(logger);
+      e.addFilePath(filePath);
+      throw UserException.unsupportedError(e).message(e.getMessage()).buildSilently();
     }
-    return finalSchema.removeNullFields();
   }
 
   /**

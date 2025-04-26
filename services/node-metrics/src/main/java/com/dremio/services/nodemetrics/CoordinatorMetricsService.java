@@ -15,13 +15,15 @@
  */
 package com.dremio.services.nodemetrics;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
 import com.dremio.exec.store.sys.MemoryIterator;
 import com.dremio.exec.store.sys.ThreadsIterator;
+import com.dremio.exec.work.WorkStats;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import javax.inject.Provider;
+import org.apache.arrow.memory.BufferAllocator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -30,10 +32,17 @@ public class CoordinatorMetricsService
     extends CoordinatorMetricsServiceGrpc.CoordinatorMetricsServiceImplBase {
   private static final Logger logger = LoggerFactory.getLogger(CoordinatorMetricsService.class);
 
-  private final Provider<SabotContext> contextProvider;
+  private final Provider<WorkStats> workStatsProvider;
+  private final Provider<NodeEndpoint> nodeEndpointProvider;
+  private final Provider<BufferAllocator> bufferAllocatorProvider;
 
-  public CoordinatorMetricsService(Provider<SabotContext> contextProvider) {
-    this.contextProvider = contextProvider;
+  public CoordinatorMetricsService(
+      Provider<WorkStats> workStatsProvider,
+      Provider<NodeEndpoint> nodeEndpointProvider,
+      Provider<BufferAllocator> bufferAllocatorProvider) {
+    this.workStatsProvider = workStatsProvider;
+    this.nodeEndpointProvider = nodeEndpointProvider;
+    this.bufferAllocatorProvider = bufferAllocatorProvider;
   }
 
   @Override
@@ -42,11 +51,13 @@ public class CoordinatorMetricsService
       CoordinatorMetricsProto.GetMetricsRequest request,
       StreamObserver<CoordinatorMetricsProto.GetMetricsResponse> responseObserver) {
     try {
-      final ThreadsIterator threads = new ThreadsIterator(contextProvider.get());
+      final ThreadsIterator threads =
+          new ThreadsIterator(workStatsProvider.get(), nodeEndpointProvider.get());
       double cpuUtilization = calculateCpuUtilization(threads);
 
       MemoryIterator.MemoryInfo memoryInfo =
-          (MemoryIterator.MemoryInfo) new MemoryIterator(contextProvider.get()).next();
+          (MemoryIterator.MemoryInfo)
+              new MemoryIterator(nodeEndpointProvider.get(), bufferAllocatorProvider.get()).next();
       long heapMax = memoryInfo.heap_max;
       long heapCurrent = memoryInfo.heap_current;
 

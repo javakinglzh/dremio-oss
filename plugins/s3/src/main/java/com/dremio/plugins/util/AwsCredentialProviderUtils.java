@@ -23,10 +23,12 @@ import static com.dremio.plugins.s3.store.S3StoragePlugin.EC2_METADATA_PROVIDER;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.GLUE_ACCESS_KEY_PROVIDER;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.HADOOP_ASSUME_ROLE_PROVIDER;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.NONE_PROVIDER;
+import static com.dremio.plugins.s3.store.S3StoragePlugin.SESSION_ACCESS_KEY_PROVIDER;
 
 import com.dremio.aws.SharedInstanceProfileCredentialsProvider;
 import com.dremio.plugins.s3.store.AWSProfileCredentialsProviderV2;
 import com.dremio.plugins.s3.store.STSCredentialProviderV2;
+import com.dremio.plugins.util.awsauth.DremioSessionCredentialsProviderV2;
 import com.dremio.plugins.util.awsauth.GlueAwsCredentialsProviderV2;
 import com.dremio.service.coordinator.DremioAssumeRoleCredentialsProviderV2;
 import java.io.IOException;
@@ -63,6 +65,8 @@ public final class AwsCredentialProviderUtils {
         return new DremioAssumeRoleCredentialsProviderV2();
       case AWS_PROFILE_PROVIDER:
         return new AWSProfileCredentialsProviderV2(config);
+      case SESSION_ACCESS_KEY_PROVIDER:
+        return new DremioSessionCredentialsProviderV2(config);
       default:
         throw new IllegalStateException(
             "Invalid AWSCredentialsProvider provided: "

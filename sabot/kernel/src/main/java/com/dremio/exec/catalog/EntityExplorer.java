@@ -64,6 +64,12 @@ public interface EntityExplorer {
   boolean containerExists(CatalogEntityKey path);
 
   /**
+   * Determines whether the given path exists. It handles all container types as well as all entity
+   * types.
+   */
+  boolean exists(CatalogEntityKey path);
+
+  /**
    * Get a list of all schemas.
    *
    * @param path The path to contextualize to. If the path has no fields, get all schemas. Note that

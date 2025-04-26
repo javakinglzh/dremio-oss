@@ -59,8 +59,8 @@ public interface SearchTypeVisitor<R> {
         return visit(query.getBoost());
       case WILDCARD:
         return visit(query.getWildcard());
-        // Since float fields can't be used as index keys, an UnsupportedOperationException
-        // will be thrown if the query type is either a RANGE_FLOAT or a TERM_FLOAT.
+      // Since float fields can't be used as index keys, an UnsupportedOperationException
+      // will be thrown if the query type is either a RANGE_FLOAT or a TERM_FLOAT.
       case RANGE_FLOAT:
       case TERM_FLOAT:
       default:

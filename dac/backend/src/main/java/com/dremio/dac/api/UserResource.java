@@ -119,7 +119,7 @@ public class UserResource {
       if (context.isUserInRole("admin")) {
         namespaceService.addOrUpdateHome(
             new HomePath(HomeName.getUserHomePath(userName)).toNamespaceKey(),
-            new HomeConfig().setCtime(System.currentTimeMillis()).setOwner(userName));
+            new HomeConfig().setOwner(userName));
       }
     } catch (Exception e) {
       try {

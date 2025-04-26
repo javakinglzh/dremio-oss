@@ -24,6 +24,8 @@ public class MetricLabel {
   public static final String JTS_METRIC_TAG_KEY_ERROR_ORIGIN = "error_origin";
   public static final String JTS_METRIC_TAG_VALUE_NODE_QUERY_COMPLETE = "NODE_QUERY_COMPLETE";
   public static final String JTS_METRIC_TAG_VALUE_ATTEMPT_CLOSE = "ATTEMPT_CLOSE";
+  public static final String JTS_METRIC_TAG_VALUE_EXEC_COMPLETION = "EXEC_COMPLETION";
+  public static final String JTS_METRIC_TAG_VALUE_PENDING_PROFILE = "PENDING_PROFILE";
   public static final String JTS_METRIC_TAG_VALUE_NEW_ATTEMPT = "NEW_ATTEMPT";
   public static final String JTS_METRIC_TAG_VALUE_COORD_EXEC_NODE_QUERY_PROFILE =
       "COORD_EXEC_NODE_QUERY_PROFILE";

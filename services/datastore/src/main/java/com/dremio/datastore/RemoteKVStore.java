@@ -41,9 +41,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Remote KVStore. Caches store id received from master. */
 public class RemoteKVStore<K, V> implements KVStore<K, V> {
+  private static final Logger logger = LoggerFactory.getLogger(RemoteKVStore.class);
 
   private static final String METRIC_PREFIX = "kvstore.remote";
 
@@ -116,8 +119,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
 
   @Override
   public Document<K, V> get(K key, GetOption... options) {
-    return timedOperation(
-        time(Stats.GET),
+    return loggedTimedOperation(
+        Stats.GET,
         () -> {
           try {
             final Document<ByteString, ByteString> document = client.get(storeId, convertKey(key));
@@ -152,8 +155,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
 
   @Override
   public Iterable<Document<K, V>> get(List<K> keys, GetOption... options) {
-    return timedOperation(
-        time(Stats.GET_LIST),
+    return loggedTimedOperation(
+        Stats.GET_LIST,
         () -> {
           try {
             List<ByteString> keyLists = Lists.newArrayList();
@@ -177,8 +180,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
       helper.getDocumentConverter().doConvert(putRequestDocumentWriter, key, value);
     }
 
-    return timedOperation(
-        time(Stats.PUT),
+    return loggedTimedOperation(
+        Stats.PUT,
         () -> {
           final String tag;
           try {
@@ -206,8 +209,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
 
   @Override
   public boolean contains(K key, ContainsOption... options) {
-    return timedOperation(
-        time(Stats.CONTAINS),
+    return loggedTimedOperation(
+        Stats.CONTAINS,
         () -> {
           try {
             return client.contains(storeId, convertKey(key));
@@ -220,12 +223,13 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
 
   @Override
   public void delete(K key, DeleteOption... options) {
-    timedOperation(
-        time(Stats.DELETE),
+    loggedTimedOperation(
+        Stats.DELETE,
         () -> {
           try {
             final String deleteOptionTag = VersionOption.getTagInfo(options).getTag();
             client.delete(storeId, convertKey(key), deleteOptionTag);
+            return (Void) null;
           } catch (RpcException e) {
             throw new DatastoreException(
                 format("Failed to delete from store id: %s", getStoreId()), e);
@@ -255,8 +259,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
           maxResultsOption -> request.setMaxResults(maxResultsOption.maxResults()));
     }
 
-    return timedOperation(
-        time(Stats.FIND_BY_RANGE),
+    return loggedTimedOperation(
+        Stats.FIND_BY_RANGE,
         () -> {
           try {
             return Iterables.transform(client.find(request.build()), this::convertDocument);
@@ -282,8 +286,8 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
 
   @Override
   public Iterable<Document<K, V>> find(FindOption... options) {
-    return timedOperation(
-        time(Stats.FIND_ALL),
+    return loggedTimedOperation(
+        Stats.FIND_ALL,
         () -> {
           try {
             return Iterables.transform(client.find(storeId), this::convertDocument);
@@ -300,7 +304,7 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
   }
 
   protected Document<K, V> createDocument(K key, V value, String tag) {
-    ImmutableDocument.Builder<K, V> builder = new ImmutableDocument.Builder();
+    ImmutableDocument.Builder<K, V> builder = new ImmutableDocument.Builder<>();
     builder.setKey(key);
     builder.setValue(value);
     if (!Strings.isNullOrEmpty(tag)) {
@@ -317,5 +321,14 @@ public class RemoteKVStore<K, V> implements KVStore<K, V> {
     return (document != null)
         ? createDocumentFromBytes(document.getKey(), document.getValue(), document.getTag())
         : null;
+  }
+
+  private <VALUE> VALUE loggedTimedOperation(Stats stat, Supplier<VALUE> operation) {
+    try {
+      logger.debug("Starting {}", stat);
+      return timedOperation(time(stat), operation);
+    } finally {
+      logger.debug("Finished {}", stat);
+    }
   }
 }

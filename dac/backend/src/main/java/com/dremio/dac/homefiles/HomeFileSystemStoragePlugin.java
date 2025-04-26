@@ -34,9 +34,9 @@ import com.dremio.dac.model.spaces.HomeName;
 import com.dremio.exec.catalog.CurrentSchemaOption;
 import com.dremio.exec.catalog.FileConfigOption;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.SortColumnsOption;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
 import com.dremio.exec.store.dfs.FileSelection;
@@ -48,7 +48,6 @@ import com.dremio.exec.store.file.proto.FileProtobuf;
 import com.dremio.exec.store.file.proto.FileProtobuf.FileUpdateKey;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
-import com.dremio.io.file.FileSystemUtils;
 import com.dremio.io.file.Path;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
@@ -85,16 +84,17 @@ public class HomeFileSystemStoragePlugin extends MayBeDistFileSystemPlugin<HomeF
 
   private final Path stagingDir;
   private final Path uploadsDir;
-  private Object deleteHookKey;
 
   public HomeFileSystemStoragePlugin(
       final HomeFileConf config,
-      final SabotContext context,
+      final PluginSabotContext pluginSabotContext,
       final String name,
       Provider<StoragePluginId> idProvider) {
-    super(config, context, name, idProvider);
+    super(config, pluginSabotContext, name, idProvider);
     this.stagingDir =
-        config.getPath().resolve(STAGING + "." + context.getDremioConfig().getThisNode());
+        config
+            .getPath()
+            .resolve(STAGING + "." + pluginSabotContext.getDremioConfig().getThisNode());
     this.uploadsDir = config.getPath().resolve(UPLOADS);
   }
 
@@ -110,22 +110,19 @@ public class HomeFileSystemStoragePlugin extends MayBeDistFileSystemPlugin<HomeF
     fs.mkdirs(getConfig().getPath(), DEFAULT_PERMISSIONS);
     fs.mkdirs(stagingDir, DEFAULT_PERMISSIONS);
     fs.mkdirs(uploadsDir, DEFAULT_PERMISSIONS);
-    deleteHookKey = FileSystemUtils.deleteOnExit(fs, stagingDir);
   }
 
   @Override
   public void close() {
-    if (deleteHookKey != null) {
-      try {
-        if (getSystemUserFS().exists(stagingDir)) {
-          getSystemUserFS().delete(stagingDir, true);
-          FileSystemUtils.cancelDeleteOnExit(deleteHookKey);
-        }
-      } catch (IOException | RejectedExecutionException ex) {
-        logger.warn("Unable to delete staging directory when closing HomeFileSystemPlugin.", ex);
+    try {
+      FileSystem systemUserFS = getSystemUserFS();
+      if (systemUserFS != null && systemUserFS.exists(stagingDir)) {
+        systemUserFS.delete(stagingDir, true);
       }
-      deleteHookKey = null;
+    } catch (IOException | RejectedExecutionException ex) {
+      logger.warn("Unable to delete staging directory when closing HomeFileSystemPlugin.", ex);
     }
+
     super.close();
   }
 

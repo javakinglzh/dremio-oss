@@ -54,37 +54,6 @@
       ]
     },
     {
-      "label": "Azure Data Lake Store",
-      "sourceType": "ADL",
-      "elements": [
-        {
-          "type": "text",
-          "propertyName": "accountName",
-          "label": "Data Lake Store Resource Name"
-        },
-        {
-          "type": "text",
-          "propertyName": "clientId",
-          "label": "Application ID"
-        },
-        {
-          "type": "text",
-          "propertyName": "clientKeyRefreshUrl",
-          "label": "OAuth 2.0 Token Endpoint"
-        },
-        {
-          "type": "text",
-          "propertyName": "clientKeyPassword",
-          "label": "Access key value",
-          "secret": true
-        },
-        {
-          "type": "property_list",
-          "propertyName": "propertyList"
-        }
-      ]
-    },
-    {
       "label": "Elasticsearch",
       "sourceType": "ELASTIC",
       "elements": [

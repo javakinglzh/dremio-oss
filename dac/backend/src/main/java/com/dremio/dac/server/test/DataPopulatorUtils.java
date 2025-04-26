@@ -35,6 +35,7 @@ public final class DataPopulatorUtils {
   private static final String PASSWORD = "dremio123";
   private static final String DEFAULT_USER_FIRSTNAME = "Dre";
   private static final String DEFAULT_USER_LASTNAME = "Mio";
+  public static final String DEFAULT_EMAIL_SUFFIX = "@dremio.test";
   private static final boolean ADD_PROCESS_USER = Boolean.getBoolean("dremio.test.add-processuser");
 
   private DataPopulatorUtils() {}
@@ -78,7 +79,7 @@ public final class DataPopulatorUtils {
       User userConfig =
           SimpleUser.newBuilder()
               .setUserName(user)
-              .setEmail(user + "@dremio.test")
+              .setEmail(user + DEFAULT_EMAIL_SUFFIX)
               .setFirstName(firstName)
               .setLastName(lastName)
               .build();

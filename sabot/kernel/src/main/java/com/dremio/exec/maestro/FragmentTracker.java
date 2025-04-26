@@ -21,6 +21,7 @@ import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.common.nodes.EndpointHelper;
 import com.dremio.common.util.Retryer;
 import com.dremio.common.utils.protos.QueryIdHelper;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.fragment.PlanFragmentFull;
 import com.dremio.exec.proto.CoordExecRPC.CancelFragments;
 import com.dremio.exec.proto.CoordExecRPC.NodeQueryCompletion;
@@ -176,7 +177,23 @@ class FragmentTracker implements AutoCloseable {
         QueryIdHelper.getQueryId(queryId));
     screenCompletionRpcReceivedAt = System.currentTimeMillis();
     screenOperatorCompletionTime = screenOperatorCompletionTimeMs;
+    if (executorSetService.getOptionManager().getOption(ExecConstants.JOB_PROFILE_ASYNC_UPDATE)
+        && !completionSuccessNotified.getAndSet(true)) {
+      completionListener.succeeded(
+          screenOperatorCompletionTime,
+          screenCompletionRpcReceivedAt,
+          lastNodeCompletionRpcReceivedAt,
+          lastNodeCompletionRpcStartedAt);
+    }
     cancelExecutingFragmentsInternal();
+  }
+
+  public void putExecutorProfile(String nodeEndpoint) {
+    completionListener.putExecutorProfile(nodeEndpoint);
+  }
+
+  public void removeExecutorProfile(String nodeEndpoint) {
+    completionListener.removeExecutorProfile(nodeEndpoint);
   }
 
   void handleFailedNodes(final Set<NodeEndpoint> unregisteredNodes) {
@@ -356,8 +373,11 @@ class FragmentTracker implements AutoCloseable {
   private void checkAndCloseQuery() {
     if (pendingNodes.isEmpty()
         || // nothing pending from any of the executors.
-        firstError.get() != null
-            && cancelled) { // there was an error, and the cancels have been sent.
+        firstError.get() != null && cancelled) {
+      // there was an error, and the cancels have been sent.
+      if (executorSetService.getOptionManager().getOption(ExecConstants.JOB_PROFILE_ASYNC_UPDATE)) {
+        completionListener.queryClosed();
+      }
       queryCloser.run();
       queryCloserInvoked = true;
     }

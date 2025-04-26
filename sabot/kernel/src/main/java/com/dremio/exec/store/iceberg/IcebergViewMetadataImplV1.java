@@ -16,6 +16,8 @@
 package com.dremio.exec.store.iceberg;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.connector.metadata.DatasetStats;
+import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.google.common.base.Preconditions;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -186,5 +188,24 @@ public class IcebergViewMetadataImplV1 implements IcebergViewMetadata {
     validateAndGetSqlViewRepresentation()
         .ifPresent(representation -> sqlViewRepresentation = representation);
     return sqlViewRepresentation;
+  }
+
+  @Override
+  public DatasetStats getDatasetStats() {
+    // TODO(DX-99176): Implement this method. Have to figure what stats to gather from a view  .
+    throw new UnsupportedOperationException("getDatasetStats is not supported");
+  }
+
+  @Override
+  public org.apache.arrow.vector.types.pojo.Schema getRecordSchema() {
+    throw new UnsupportedOperationException("getRecordSchema is not supported");
+  }
+
+  @Override
+  public DatasetConfig newDeepConfig(DatasetConfig shallowConfig) {
+    // TODO(DX-99177) : Implement this by moving the code from
+    // VersionedDatasetAdapter#translateIcebergView to here and calling this method in
+    // VersionedDatasetAdapter.
+    throw new UnsupportedOperationException("newDeepConfig is not yet supported");
   }
 }

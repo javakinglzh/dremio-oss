@@ -16,7 +16,7 @@
 
 import { dremio } from "#oss/dremio";
 import { queryClient } from "#oss/queryClient";
-import { CommunityScript } from "@dremio/dremio-js/interfaces";
+import type { Script } from "@dremio/dremio-js/oss";
 import { queryOptions, useMutation } from "@tanstack/react-query";
 
 export const scriptQuery = (pid?: string) => (id: string) =>
@@ -44,7 +44,7 @@ export const scriptsListQuery = (pid?: string) =>
 
 export const useScriptSaveMutation = (
   pid: string | undefined,
-  script: CommunityScript,
+  script: Script,
   {
     onSuccess,
     onError,

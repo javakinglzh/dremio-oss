@@ -41,10 +41,14 @@ public class FixedListSizer implements Sizer {
 
   // variable-size list vector this class operates on
   private final FixedSizeListVector incoming;
+  private final Sizer childVectorSizer;
+  private final int listSize;
 
   public FixedListSizer(final FixedSizeListVector incoming) {
     super();
     this.incoming = incoming;
+    this.childVectorSizer = Sizer.get(incoming.getDataVector());
+    this.listSize = incoming.getListSize();
   }
 
   @Override
@@ -66,8 +70,17 @@ public class FixedListSizer implements Sizer {
     final int start = startIndex * incoming.getListSize();
     final int length = numberOfEntries * incoming.getListSize();
 
-    final Sizer childVectorSizer = Sizer.get(incoming.getDataVector());
     return childVectorSizer.getDataLengthFromIndex(start, length);
+  }
+
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    for (int index = 0; index < recordCount; index++) {
+      rowLengthAccumulator.setInt(
+          index * 4L,
+          rowLengthAccumulator.getInt(index * 4L)
+              + childVectorSizer.getDataLengthFromIndex(index * listSize, listSize));
+    }
   }
 
   /**

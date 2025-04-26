@@ -32,12 +32,13 @@ public class OrphanFileDeleteTableFunctionContext extends TableFunctionContext {
       @JsonProperty("schema") BatchSchema fullSchema,
       @JsonProperty("pluginId") StoragePluginId pluginId,
       @JsonProperty("columns") List<SchemaPath> columns,
-      @JsonProperty("tableLocation") String tableLocation) {
+      @JsonProperty("tableLocation") String tableLocation,
+      @JsonProperty("dataset") List<String> dataset) {
     super(
         null,
         fullSchema,
         null,
-        null,
+        List.of(dataset != null ? dataset : List.of()),
         null,
         null,
         pluginId,

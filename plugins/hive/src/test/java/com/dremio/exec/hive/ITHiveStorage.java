@@ -15,9 +15,7 @@
  */
 package com.dremio.exec.hive;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.common.utils.PathUtils.parseFullPath;
-import static com.dremio.exec.store.hive.exec.HiveDatasetOptions.HIVE_PARQUET_ENFORCE_VARCHAR_WIDTH;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.joda.time.DateTimeZone.UTC;
 import static org.junit.Assert.assertEquals;
@@ -25,6 +23,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
+import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.SourceUpdateType;
 import java.io.File;
 import java.math.BigDecimal;
 import java.sql.Date;
@@ -310,36 +310,6 @@ public class ITHiveStorage extends HiveTestBase {
   }
 
   @Test
-  public void readStringFieldSizeLimitText() throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test", "col1");
-  }
-
-  @Test
-  public void readStringFieldSizeLimitORC()  throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test_orc", "col1");
-  }
-
-  @Test
-  public void readVarcharFieldSizeLimitText()  throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test", "col2");
-  }
-
-  @Test
-  public void readVarcharFieldSizeLimitORC()  throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test_orc", "col2");
-  }
-
-  @Test
-  public void readBinaryFieldSizeLimitText()  throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test", "col3");
-  }
-
-  @Test
-  public void readBinaryFieldSizeLimitORC()  throws Exception {
-    readFieldSizeLimit("hive.field_size_limit_test_orc", "col3");
-  }
-
-  @Test
   public void readTimestampToStringORC() throws Exception {
     String query = "SELECT col1 FROM hive.timestamptostring_orc_ext order by col1 limit 1";
     testBuilder().sqlQuery(query)
@@ -538,6 +508,23 @@ public class ITHiveStorage extends HiveTestBase {
         .go();
   }
 
+  @Test
+  public void testRowSizeLimitHiveAvro() throws Exception {
+    try (AutoCloseable ac = withOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = withOption(ExecConstants.LIMIT_ROW_SIZE_BYTES, 2); ) {
+      testBuilder()
+          .sqlQuery("SELECT * FROM hive.db1.avro ORDER BY key DESC LIMIT 1")
+          .unOrdered()
+          .baselineColumns("key", "value")
+          .baselineValues(5, " key_5")
+          .go();
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+
+  }
+
   @Test // DRILL-3266
   public void queryingTableWithSerDeInHiveContribJar() throws Exception {
     testBuilder()
@@ -689,6 +676,23 @@ public class ITHiveStorage extends HiveTestBase {
         .go();
   }
 
+  @Test // DRILL-745
+  public void testRowSizeLimitHiveRC() throws Exception {
+    try (AutoCloseable ac = withOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = withOption(ExecConstants.LIMIT_ROW_SIZE_BYTES, 2); ) {
+      testBuilder()
+          .sqlQuery("select * from hive.skipper.kv_rcfile_large")
+          .unOrdered()
+          .baselineColumns("cnt")
+          .baselineValues(5000L)
+          .go();
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+
+  }
+
   @Test // DRILL-3688
   public void testIgnoreSkipHeaderFooterForParquet() throws Exception {
     testBuilder()
@@ -719,7 +723,7 @@ public class ITHiveStorage extends HiveTestBase {
   @Test
   public void testReadSignatures() throws Exception {
     Assume.assumeFalse(runWithUnlimitedSplitSupport);
-    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     NamespaceService ns = getSabotContext().getNamespaceService(SystemUser.SYSTEM_USERNAME);
     assertEquals(2, getCachedEntities(ns.getDataset(new NamespaceKey(parseFullPath("hive.db1.kv_db1")))).size());
     assertEquals(1, getCachedEntities(ns.getDataset(new NamespaceKey(parseFullPath("hive.db1.avro")))).size());
@@ -736,15 +740,15 @@ public class ITHiveStorage extends HiveTestBase {
 
   @Test
   public void testCheckReadSignatureValid() throws Exception {
-    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
-    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
+    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     testCheckReadSignature(new EntityPath(ImmutableList.of("hive", "db1", "kv_db1")), SupportsReadSignature.MetadataValidity.VALID);
     testCheckReadSignature(new EntityPath(ImmutableList.of("hive", "default", "partition_with_few_schemas")), SupportsReadSignature.MetadataValidity.VALID);
   }
 
   @Test
   public void testCheckReadSignatureInvalid() throws Exception {
-    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     new File(dataGenerator.getWhDir() + "/db1.db/kv_db1", "000000_0").setLastModified(System.currentTimeMillis());
 
     File newFile = new File(dataGenerator.getWhDir() + "/partition_with_few_schemas/c=1/d=1/e=1/", "empty_file");
@@ -760,10 +764,7 @@ public class ITHiveStorage extends HiveTestBase {
 
   @Test
   public void testCheckHasPermission() throws Exception {
-    // TODO: enable back for MapR once DX-21902 is fixed
-    assumeNonMaprProfile();
-
-    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+    ((CatalogServiceImpl) getCatalogService()).refreshSource(new NamespaceKey("hive"), CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     NamespaceService ns = getSabotContext().getNamespaceService(SystemUser.SYSTEM_USERNAME);
 
     NamespaceKey dataset = new NamespaceKey(parseFullPath("hive.db1.kv_db1"));
@@ -803,7 +804,7 @@ public class ITHiveStorage extends HiveTestBase {
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
         .setDatasetDefinitionTtlMs(0L)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
 
     List<NamespaceKey> tables1 = Lists.newArrayList(getSabotContext()
         .getNamespaceService(SystemUser.SYSTEM_USERNAME)
@@ -819,7 +820,7 @@ public class ITHiveStorage extends HiveTestBase {
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
         .setDatasetDefinitionTtlMs(0L)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
 
     // make sure new table is visible
     List<NamespaceKey> tables2 = Lists.newArrayList(getSabotContext()
@@ -856,7 +857,7 @@ public class ITHiveStorage extends HiveTestBase {
       .setAuthTtlMs(0L)
       .setDatasetUpdateMode(UpdateMode.PREFETCH)
       .setDatasetDefinitionTtlMs(0L)
-      .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+      .setNamesRefreshMs(0L), SourceUpdateType.FULL);
 
     // make sure table is deleted from namespace
     List<NamespaceKey> tables4 = Lists.newArrayList(getSabotContext()
@@ -878,7 +879,7 @@ public class ITHiveStorage extends HiveTestBase {
       new MetadataPolicy()
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
     List<NamespaceKey> tables1 = Lists.newArrayList(getSabotContext()
       .getNamespaceService(SystemUser.SYSTEM_USERNAME)
       .getAllDatasets(new NamespaceKey("hive")));
@@ -892,7 +893,7 @@ public class ITHiveStorage extends HiveTestBase {
       new MetadataPolicy()
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
     List<NamespaceKey> tables2 = Lists.newArrayList(getSabotContext()
       .getNamespaceService(SystemUser.SYSTEM_USERNAME)
       .getAllDatasets(new NamespaceKey("hive")));
@@ -934,7 +935,7 @@ public class ITHiveStorage extends HiveTestBase {
       new MetadataPolicy()
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
 
     // check if table is deleted from namespace
     List<NamespaceKey> tables3 = Lists.newArrayList(getSabotContext()
@@ -1018,13 +1019,41 @@ public class ITHiveStorage extends HiveTestBase {
         .setAuthTtlMs(0L)
         .setDatasetUpdateMode(UpdateMode.PREFETCH)
         .setDatasetDefinitionTtlMs(0L)
-        .setNamesRefreshMs(0L), CatalogServiceImpl.UpdateType.FULL);
+        .setNamesRefreshMs(0L), SourceUpdateType.FULL);
 
     // make sure table is deleted from namespace
     List<NamespaceKey> tables4 = Lists.newArrayList(getSabotContext()
       .getNamespaceService(SystemUser.SYSTEM_USERNAME)
       .getAllDatasets(new NamespaceKey("hive")));
     assertEquals(tables3.size() - 1, tables4.size());
+  }
+
+
+  @Test
+  public void testRowSizeLimitHiveText() throws Exception {
+    try (AutoCloseable ac = withOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = withOption(ExecConstants.LIMIT_ROW_SIZE_BYTES, 2); ) {
+      LocalDateTime dateTime1 = LocalDateTime.parse("0001-01-01");
+      LocalDateTime dateTime2 = LocalDateTime.parse("1299-01-01");
+      LocalDateTime dateTime3 = LocalDateTime.parse("1499-01-01");
+      LocalDateTime dateTime4 = LocalDateTime.parse("1582-01-01");
+      LocalDateTime dateTime5 = LocalDateTime.parse("1699-01-01");
+      String textQuery = "SELECT date_col from hive.text_date";
+      testBuilder()
+          .sqlQuery(textQuery)
+          .unOrdered()
+          .baselineColumns("date_col")
+          .baselineValues(dateTime1)
+          .baselineValues(dateTime2)
+          .baselineValues(dateTime3)
+          .baselineValues(dateTime4)
+          .baselineValues(dateTime5)
+          .go();
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+
   }
 
   @Test
@@ -1341,17 +1370,6 @@ public class ITHiveStorage extends HiveTestBase {
 
     assertEquals(expectedResult, ((SupportsReadSignature) getCatalogService().getSource("hive")).validateMetadata(
         signature, datasetHandle, metadata));
-  }
-
-  private void readFieldSizeLimit(String table, String column) throws Exception {
-    String exceptionMessage = "UNSUPPORTED_OPERATION ERROR: Field exceeds the size limit of 32000 bytes, actual size is 32001 bytes.";
-    String query = "SELECT " + column + " FROM " + table;
-    assertThatThrownBy(() -> testBuilder().sqlQuery(query)
-        .ordered()
-        .baselineColumns(column)
-        .baselineValues("")
-        .go())
-      .hasMessageContaining(exceptionMessage);
   }
 
   /**

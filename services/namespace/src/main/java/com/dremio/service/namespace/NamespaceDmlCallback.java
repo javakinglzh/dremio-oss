@@ -20,9 +20,9 @@ import java.util.List;
 
 /** Defines callbacks that are invoked on write operations to the namespace. */
 public interface NamespaceDmlCallback {
-  void onAdd(List<String> path);
+  void onAdd(List<String> path, String entityId);
 
-  void onUpdate(List<String> path);
+  void onUpdate(List<String> path, String entityId);
 
   void onDelete(List<String> path);
 }

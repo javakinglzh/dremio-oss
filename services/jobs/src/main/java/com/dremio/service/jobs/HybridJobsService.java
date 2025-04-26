@@ -33,6 +33,7 @@ import com.dremio.service.job.JobAndUserStats;
 import com.dremio.service.job.JobAndUserStatsRequest;
 import com.dremio.service.job.JobCounts;
 import com.dremio.service.job.JobCountsRequest;
+import com.dremio.service.job.JobCountsRequestDaily;
 import com.dremio.service.job.JobDetails;
 import com.dremio.service.job.JobDetailsRequest;
 import com.dremio.service.job.JobStats;
@@ -50,8 +51,6 @@ import com.dremio.service.job.ReflectionJobSummaryRequest;
 import com.dremio.service.job.SearchJobsRequest;
 import com.dremio.service.job.SearchReflectionJobsRequest;
 import com.dremio.service.job.SubmitJobRequest;
-import com.dremio.service.job.UniqueUserStats;
-import com.dremio.service.job.UniqueUserStatsRequest;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobSubmission;
 import io.grpc.Status;
@@ -183,6 +182,17 @@ public class HybridJobsService implements JobsService {
   }
 
   @Override
+  @WithSpan
+  public JobCounts getJobCountsDaily(JobCountsRequestDaily request) {
+    try {
+      return getChronicleBlockingStub().getJobCountsDaily(request);
+    } catch (StatusRuntimeException e) {
+      GrpcExceptionUtil.throwIfUserException(e);
+      throw e;
+    }
+  }
+
+  @Override
   public void deleteJobCounts(DeleteJobCountsRequest request) {
     try {
       getBlockingStub().deleteJobCounts(request);
@@ -206,16 +216,6 @@ public class HybridJobsService implements JobsService {
   public JobAndUserStats getJobAndUserStats(JobAndUserStatsRequest request) {
     try {
       return getChronicleBlockingStub().getJobAndUserStats(request);
-    } catch (StatusRuntimeException e) {
-      GrpcExceptionUtil.throwIfUserException(e);
-      throw e;
-    }
-  }
-
-  @Override
-  public UniqueUserStats getUniqueUserStats(UniqueUserStatsRequest request) {
-    try {
-      return getChronicleBlockingStub().getUniqueUserStats(request);
     } catch (StatusRuntimeException e) {
       GrpcExceptionUtil.throwIfUserException(e);
       throw e;

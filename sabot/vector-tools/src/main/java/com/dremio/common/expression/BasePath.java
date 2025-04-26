@@ -30,8 +30,12 @@ public abstract class BasePath implements ProvidesUnescapedPath {
   @SuppressWarnings("checkstyle:VisibilityModifier")
   protected final NameSegment rootSegment;
 
-  public static BasePath getSimple(String name) {
-    return new BasePath(new NameSegment(name)) {};
+  protected BasePath(BasePath path) {
+    this.rootSegment = path.rootSegment;
+  }
+
+  public BasePath(NameSegment rootSegment) {
+    this.rootSegment = rootSegment;
   }
 
   public PathSegment getLastSegment() {
@@ -56,28 +60,6 @@ public abstract class BasePath implements ProvidesUnescapedPath {
     public OUT visitArray(ArraySegment segment, IN in);
 
     public OUT visitArrayInput(ArraySegmentInputRef inputRef, IN in);
-  }
-
-  private static NamePart getNamePart(PathSegment s) {
-    if (s == null) {
-      return null;
-    }
-    NamePart.Builder b = NamePart.newBuilder();
-    if (s.getChild() != null) {
-      b.setChild(getNamePart(s.getChild()));
-    }
-
-    if (s.getType().equals(PathSegmentType.ARRAY_INDEX)) {
-      if (s.getArraySegment().hasIndex()) {
-        throw new IllegalStateException(
-            "You cannot convert a indexed schema path to a NamePart.  NameParts can only reference Vectors, not individual records or values.");
-      }
-      b.setType(Type.ARRAY);
-    } else {
-      b.setType(Type.NAME);
-      b.setName(s.getNameSegment().getPath());
-    }
-    return b.build();
   }
 
   public List<String> getNameSegments() {
@@ -134,14 +116,6 @@ public abstract class BasePath implements ProvidesUnescapedPath {
     return true;
   }
 
-  protected BasePath(BasePath path) {
-    this.rootSegment = path.rootSegment;
-  }
-
-  public BasePath(NameSegment rootSegment) {
-    this.rootSegment = rootSegment;
-  }
-
   public NameSegment getRootSegment() {
     return rootSegment;
   }
@@ -171,5 +145,31 @@ public abstract class BasePath implements ProvidesUnescapedPath {
       }
     }
     return sb.toString();
+  }
+
+  public static BasePath getSimple(String name) {
+    return new BasePath(new NameSegment(name)) {};
+  }
+
+  private static NamePart getNamePart(PathSegment s) {
+    if (s == null) {
+      return null;
+    }
+    NamePart.Builder b = NamePart.newBuilder();
+    if (s.getChild() != null) {
+      b.setChild(getNamePart(s.getChild()));
+    }
+
+    if (s.getType().equals(PathSegmentType.ARRAY_INDEX)) {
+      if (s.getArraySegment().hasIndex()) {
+        throw new IllegalStateException(
+            "You cannot convert a indexed schema path to a NamePart.  NameParts can only reference Vectors, not individual records or values.");
+      }
+      b.setType(Type.ARRAY);
+    } else {
+      b.setType(Type.NAME);
+      b.setName(s.getNameSegment().getPath());
+    }
+    return b.build();
   }
 }

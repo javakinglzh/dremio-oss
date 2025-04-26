@@ -18,7 +18,9 @@ package com.dremio.sabot.op.receiver.merging;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.LogicalExpression;
+import com.dremio.common.logical.data.Order;
 import com.dremio.common.logical.data.Order.Ordering;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.sig.GeneratorMapping;
 import com.dremio.exec.compile.sig.MappingSet;
 import com.dremio.exec.exception.SchemaChangeException;
@@ -32,6 +34,7 @@ import com.dremio.exec.record.ExpandableHyperContainer;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
+import com.dremio.exec.util.Utilities;
 import com.dremio.exec.vector.CopyUtil;
 import com.dremio.sabot.exec.context.MetricDef;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -43,9 +46,12 @@ import com.dremio.sabot.op.spi.BatchStreamProvider;
 import com.dremio.sabot.op.spi.ProducerOperator;
 import com.sun.codemodel.JConditional;
 import com.sun.codemodel.JExpr;
+import com.sun.codemodel.JMethod;
+import com.sun.codemodel.JVar;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 import java.util.PriorityQueue;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.AllocationHelper;
@@ -65,6 +71,7 @@ public class MergingReceiverOperator implements ProducerOperator {
   private final BatchStreamProvider streamProvider;
   private final OperatorStats stats;
   private final ReceiverLatencyTracker latencyTracker = new ReceiverLatencyTracker();
+  private final int maxComparatorBlockSize;
 
   private static enum OutputState {
     INIT_ON_NEXT,
@@ -112,6 +119,14 @@ public class MergingReceiverOperator implements ProducerOperator {
     for (int i = 0; i < nodes.length; i++) {
       nodes[i] = new Node(i, fragProviders[i]);
     }
+    this.maxComparatorBlockSize =
+        Optional.ofNullable(
+                context
+                    .getOptions()
+                    .getOption(ExecConstants.COMPARATOR_MAX_BLOCK_SIZE_OPTION.getOptionName()))
+            .orElse(ExecConstants.COMPARATOR_MAX_BLOCK_SIZE_OPTION.getDefault())
+            .getNumVal()
+            .intValue();
   }
 
   @Override
@@ -265,11 +280,52 @@ public class MergingReceiverOperator implements ProducerOperator {
   private void generateComparisons(final ClassGenerator<?> g, final VectorAccessible batch)
       throws SchemaChangeException {
     g.setMappingSet(mainMapping);
+    if (config.getOrderings().size() > this.maxComparatorBlockSize) {
+      generateComparisonsDistributed(g, batch);
+      return;
+    }
 
-    for (final Ordering od : config.getOrderings()) {
+    generateComparisonBlock(g, batch, config.getOrderings());
+  }
+
+  private void generateComparisonsDistributed(ClassGenerator<?> g, VectorAccessible batch) {
+    g.setMappingSet(mainMapping);
+    int splitCount =
+        (int)
+            Math.ceil(
+                ((double) config.getOrderings().size()) / ((double) this.maxComparatorBlockSize));
+    List<List<Order.Ordering>> splits = Utilities.splitList(config.getOrderings(), splitCount);
+    for (List<Ordering> split : splits) {
+      JMethod innerMethod = g.innerMethod(int.class);
+      generateComparisonBlock(g, batch, split);
+      g.unNestEvalBlock();
+
+      String resultVarName = innerMethod.name() + "_result";
+      JVar innerFunctionResultVar =
+          g.getEvalBlock()
+              .decl(
+                  g.getModel().INT,
+                  resultVarName,
+                  JExpr.invoke(innerMethod)
+                      .arg(leftMapping.getValueReadIndex())
+                      .arg(rightMapping.getValueReadIndex()));
+
+      g.getEvalBlock()
+          ._if(innerFunctionResultVar.ne(JExpr.lit(0)))
+          ._then()
+          ._return(innerFunctionResultVar);
+    }
+
+    g.getEvalBlock()._return(JExpr.lit(0));
+  }
+
+  private void generateComparisonBlock(
+      ClassGenerator<?> g, VectorAccessible batch, List<Ordering> orderinds) {
+    for (final Ordering od : orderinds) {
       // first, we rewrite the evaluation stack for each side of the comparison.
       final LogicalExpression expr = context.getClassProducer().materialize(od.getExpr(), batch);
       g.setMappingSet(leftMapping);
+
       final HoldingContainer left = g.addExpr(expr, ClassGenerator.BlockCreateMode.MERGE);
       g.setMappingSet(rightMapping);
       final HoldingContainer right = g.addExpr(expr, ClassGenerator.BlockCreateMode.MERGE);
@@ -288,7 +344,6 @@ public class MergingReceiverOperator implements ProducerOperator {
         jc._then()._return(out.getValue().minus());
       }
     }
-
     g.getEvalBlock()._return(JExpr.lit(0));
   }
 

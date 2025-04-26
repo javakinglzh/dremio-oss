@@ -17,7 +17,6 @@ package com.dremio.exec.store.sys;
 
 import com.dremio.common.VM;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.work.WorkStats;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
@@ -34,13 +33,14 @@ public class ThreadsIterator implements Iterator<Object> {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ThreadsIterator.class);
 
-  private final SabotContext dbContext;
   private final Iterator<ThreadInfo> threadInfoIterator;
   private final WorkStats stats;
+  private final NodeEndpoint nodeEndpoint;
   private final ThreadMXBean threadMXBean;
 
-  public ThreadsIterator(final SabotContext dbContext) {
-    this.dbContext = dbContext;
+  public ThreadsIterator(WorkStats stats, NodeEndpoint nodeEndpoint) {
+    this.stats = stats;
+    this.nodeEndpoint = nodeEndpoint;
     threadMXBean = ManagementFactory.getThreadMXBean();
     final long[] ids = threadMXBean.getAllThreadIds();
 
@@ -61,8 +61,6 @@ public class ThreadsIterator implements Iterator<Object> {
 
     logger.debug(
         "number of threads = {}, number of cores = {}", ids.length, VM.availableProcessors());
-
-    this.stats = dbContext.getWorkStatsProvider().get();
   }
 
   @Override
@@ -73,11 +71,10 @@ public class ThreadsIterator implements Iterator<Object> {
   @Override
   public Object next() {
     ThreadInfo currentThread = threadInfoIterator.next();
-    final NodeEndpoint endpoint = dbContext.getEndpoint();
     final long id = currentThread.getThreadId();
     return new ThreadSummary(
-        endpoint.getAddress(),
-        endpoint.getFabricPort(),
+        nodeEndpoint.getAddress(),
+        nodeEndpoint.getFabricPort(),
         currentThread.getThreadName(),
         currentThread.getThreadId(),
         currentThread.isInNative(),

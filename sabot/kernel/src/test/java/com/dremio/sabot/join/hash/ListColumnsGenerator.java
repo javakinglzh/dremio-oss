@@ -43,7 +43,7 @@ import org.apache.arrow.vector.util.JsonStringArrayList;
  *
  * @param <T>
  */
-class ListColumnsGenerator<T extends FieldVector> implements Generator {
+public class ListColumnsGenerator<T extends FieldVector> implements Generator {
 
   private final int rows;
   private final VectorContainer result;

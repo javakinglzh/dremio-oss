@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.work.CacheManagerStoragePluginInfo;
 import com.dremio.sabot.exec.context.OperatorContext;
 import java.util.Collections;
@@ -25,7 +25,8 @@ import java.util.Iterator;
 public class CacheManagerStoragePluginIterator implements Iterator<Object> {
   private final Iterator<CacheManagerStoragePluginInfo> iter;
 
-  CacheManagerStoragePluginIterator(SabotContext sabotContext, OperatorContext operatorContext) {
+  CacheManagerStoragePluginIterator(
+      PluginSabotContext sabotContext, OperatorContext operatorContext) {
     iter =
         sabotContext.getFileSystemWrapper().isWrapperFor(CacheManagerStatsProvider.class)
             ? sabotContext
@@ -33,7 +34,7 @@ public class CacheManagerStoragePluginIterator implements Iterator<Object> {
                 .unwrap(CacheManagerStatsProvider.class)
                 .getStoragePluginStats()
                 .iterator()
-            : Collections.EMPTY_LIST.iterator();
+            : Collections.emptyIterator();
   }
 
   @Override

@@ -15,12 +15,16 @@
  */
 package com.dremio.exec.planner.sql.handlers.query;
 
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
 import static com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.PLANNER_SOURCE_TARGET_SOURCE_TYPE_SPAN_ATTRIBUTE_NAME;
+import static com.dremio.exec.store.iceberg.IcebergUtils.DEFAULT_TABLE_PROPERTIES;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.protos.QueryIdHelper;
+import com.dremio.context.ContextUtil;
+import com.dremio.context.RequestContext;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogOptions;
@@ -65,7 +69,6 @@ import com.dremio.exec.planner.sql.parser.SqlCreateTable;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.StoragePlugin;
-import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.dfs.copyinto.SystemIcebergTablePluginAwareCreateTableEntry;
@@ -77,6 +80,7 @@ import com.dremio.exec.store.iceberg.model.IcebergCommandType;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -87,7 +91,7 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import io.protostuff.ByteString;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -134,6 +138,40 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
 
   private boolean isVersionedTable() {
     return isVersionedTable;
+  }
+
+  protected boolean isAutoClusteringAllowed() {
+    return false;
+  }
+
+  protected String getSortOrder(
+      PartitionSpec partitionSpec,
+      BatchSchema batchSchema,
+      SqlHandlerConfig config,
+      DataAdditionCmdCall sqlCmd) {
+    return IcebergSerDe.serializeSortOrderAsJson(
+        IcebergUtils.getIcebergSortOrder(
+            batchSchema,
+            sqlCmd.getSortColumns(),
+            partitionSpec.schema(),
+            config.getContext().getOptions()));
+  }
+
+  protected List<String> getSortColumns(
+      BatchSchema tableSchema,
+      String sortOrder,
+      IcebergMetadata icebergMetadata,
+      DataAdditionCmdCall sqlCmd,
+      OptionManager options) {
+    Schema schema = SchemaConverter.getBuilder().build().toIcebergSchema(tableSchema);
+    SortOrder deserializedSortOrder = IcebergSerDe.deserializeSortOrderFromJson(schema, sortOrder);
+
+    return IcebergUtils.getColumnsFromSortOrder(deserializedSortOrder, options);
+  }
+
+  protected Map<String, String> handleExtraTableProperty(
+      DataAdditionCmdCall sqlCmd, Map<String, String> tableProperties) {
+    return tableProperties;
   }
 
   public TableFormatOperation getIcebergWriterOperation() {
@@ -209,18 +247,24 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
           new ImmutableTableFormatWriterOptions.Builder()
               .setOperation(getIcebergWriterOperation())
               .build();
-      Map<String, String> tableProperties =
-          isCreate()
-              ? IcebergUtils.convertTableProperties(
-                  ((SqlCreateTable) sqlCmd).getTablePropertyNameList(),
-                  ((SqlCreateTable) sqlCmd).getTablePropertyValueList(),
-                  false)
-              : Collections.emptyMap();
-
-      if (hasClusteringKey(sqlCmd)) {
-        // set CLUSTERING_TABLE_PROPERTY to true
-        tableProperties.put(SystemSchemas.CLUSTERING_TABLE_PROPERTY, "true");
+      Map<String, String> tableProperties;
+      if (isCreate()) {
+        tableProperties =
+            new HashMap<>(DEFAULT_TABLE_PROPERTIES) {
+              {
+                putAll(
+                    IcebergUtils.convertTableProperties(
+                        ((SqlCreateTable) sqlCmd).getTablePropertyNameList(),
+                        ((SqlCreateTable) sqlCmd).getTablePropertyValueList(),
+                        false));
+              }
+            };
+      } else {
+        tableProperties = new HashMap<>();
       }
+
+      tableProperties = handleExtraTableProperty(sqlCmd, tableProperties);
+
       WriterOptions options =
           new WriterOptions(
               (int) ringCount,
@@ -281,15 +325,22 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
       final Prel prel = convertToPrel.getKey();
       textPlan = convertToPrel.getValue();
       PhysicalOperator pop = PrelTransformer.convertToPop(config, prel);
-
+      RequestContext currentContext = RequestContext.current();
       PhysicalPlan plan =
           PrelTransformer.convertToPlan(
               config,
               pop,
               isIcebergTable() && !isVersionedTable()
-                  ? () -> refreshDataset(catalog, catalogEntityKey.toNamespaceKey(), isCreate())
+                  ? () ->
+                      ContextUtil.runWithUserContext(
+                          currentContext,
+                          () ->
+                              refreshDataset(
+                                  catalog, catalogEntityKey.toNamespaceKey(), isCreate()))
                   : null,
-              () -> cleanUp(catalog, catalogEntityKey.toNamespaceKey()));
+              () ->
+                  ContextUtil.runWithUserContext(
+                      currentContext, () -> cleanUp(catalog, catalogEntityKey.toNamespaceKey())));
 
       PlanLogUtil.log(config, "Dremio Plan", plan, logger);
       return plan;
@@ -336,14 +387,6 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
         updateStatus.name());
   }
 
-  private boolean hasClusteringKey(DataAdditionCmdCall sqlCmd) {
-    return isCreate()
-        && (sqlCmd.getClusterKeys() != null && !sqlCmd.getClusterKeys().isEmpty())
-        && !(sqlCmd.getSortColumns() != null && !sqlCmd.getSortColumns().isEmpty())
-        && !(sqlCmd.getPartitionTransforms(null) != null
-            && !sqlCmd.getPartitionTransforms(null).isEmpty());
-  }
-
   private Rel convertToDrel(
       SqlHandlerConfig config,
       ConvertedRelNode queryRelNode,
@@ -371,9 +414,11 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
       ByteString partitionSpec = null;
       String sortOrder = null;
       BatchSchema tableSchema = null;
+      IcebergMetadata icebergMetadata = null;
       String icebergSchema = null;
       Long snapshotId = null;
       List<String> sortColumns;
+      Map<String, String> tableProperties;
       if (!isCreate()) {
         DremioTable dremioTable = dremioTableSupplier(datasetCatalog, key).get();
         tableSchemaFromKVStore = dremioTable.getSchema();
@@ -389,13 +434,11 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
                 dremioTable.getDatasetConfig().getPhysicalDataset(),
                 config.getContext().getOptions());
         tableSchema = dremioTable.getSchema();
-        snapshotId =
-            dremioTable
-                .getDataset()
-                .getDatasetConfig()
-                .getPhysicalDataset()
-                .getIcebergMetadata()
-                .getSnapshotId();
+        icebergMetadata =
+            dremioTable.getDataset().getDatasetConfig().getPhysicalDataset().getIcebergMetadata();
+        snapshotId = icebergMetadata.getSnapshotId();
+        tableProperties =
+            IcebergUtils.convertListTablePropertiesToMap(icebergMetadata.getTablePropertiesList());
         icebergSchema =
             IcebergUtils.getCurrentIcebergSchema(
                 dremioTable.getDatasetConfig().getPhysicalDataset(), dremioTable.getSchema());
@@ -410,44 +453,13 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
                 tableSchema, sqlCmd.getPartitionTransforms(null), null);
         partitionSpec =
             ByteString.copyFrom(IcebergSerDe.serializePartitionSpec(partitionSpecBytes));
-        if (sqlCmd.getClusterKeys() != null && !sqlCmd.getClusterKeys().isEmpty()) {
-          // Cannot add clustering key together with partition keys or sort orders
-          if (sqlCmd.getSortColumns() != null && !sqlCmd.getSortColumns().isEmpty()) {
-            throw UserException.unsupportedError()
-                .message("Dremio doesn't support creating a table with both CLUSTER and LOCALSORT")
-                .buildSilently();
-          } else if (sqlCmd.getPartitionTransforms(null) != null
-              && !sqlCmd.getPartitionTransforms(null).isEmpty()) {
-            throw UserException.unsupportedError()
-                .message("Dremio doesn't support creating a table with both CLUSTER and PARTITION")
-                .buildSilently();
-          } else {
-            // convert clustering keys to SortOrder
-            sortOrder =
-                IcebergSerDe.serializeSortOrderAsJson(
-                    IcebergUtils.getIcebergSortOrder(
-                        tableSchema,
-                        sqlCmd.getClusterKeys(),
-                        partitionSpecBytes.schema(),
-                        config.getContext().getOptions()));
-          }
-        } else {
-          sortOrder =
-              IcebergSerDe.serializeSortOrderAsJson(
-                  IcebergUtils.getIcebergSortOrder(
-                      tableSchema,
-                      sqlCmd.getSortColumns(),
-                      partitionSpecBytes.schema(),
-                      config.getContext().getOptions()));
-        }
+        sortOrder = getSortOrder(partitionSpecBytes, tableSchema, config, sqlCmd);
         icebergSchema = IcebergSerDe.serializedSchemaAsJson(partitionSpecBytes.schema());
+        tableProperties = options.getTableProperties();
       }
-      Schema schema = SchemaConverter.getBuilder().build().toIcebergSchema(tableSchema);
-      SortOrder deserializedSortOrder =
-          IcebergSerDe.deserializeSortOrderFromJson(schema, sortOrder);
       sortColumns =
-          IcebergUtils.getColumnsFromSortOrder(
-              deserializedSortOrder, config.getContext().getOptions());
+          getSortColumns(
+              tableSchema, sortOrder, icebergMetadata, sqlCmd, config.getContext().getOptions());
       icebergTableProps =
           new IcebergTableProps(
               null,
@@ -463,7 +475,7 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
               icebergSchema,
               null,
               sortOrder,
-              options.getTableProperties(),
+              tableProperties,
               FileType.PARQUET);
       icebergTableProps.setPersistedFullSchema(tableSchema);
       IcebergWriterOptions icebergOptions =
@@ -533,9 +545,7 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
               tableRowType);
     }
 
-    drelNode =
-        SqlHandlerUtil.storeQueryResultsIfNeeded(
-            config.getConverter().getParserConfig(), config.getContext(), drelNode);
+    drelNode = storeQueryResultsIfNeeded(config, drelNode);
 
     return new ScreenRel(drelNode.getCluster(), drelNode.getTraitSet(), drelNode);
   }
@@ -681,9 +691,13 @@ public abstract class DataAdditionCmdHandler implements SqlToPlanHandler, Direct
     return true;
   }
 
-  public static String getDefaultCtasFormat(SourceCatalog sourceCatalog, NamespaceKey path) {
+  private static String getDefaultCtasFormat(SourceCatalog sourceCatalog, NamespaceKey path) {
     StoragePlugin storagePlugin = sourceCatalog.getSource(path.getRoot());
-    Preconditions.checkState(storagePlugin instanceof MutablePlugin, "Source is not mutable");
+    Preconditions.checkState(
+        storagePlugin instanceof MutablePlugin,
+        String.format(
+            "Source [%s] does not support INSERT, UPDATE, DELETE, MERGE, ALTER, DROP, ADD and CREATE SQL commands.",
+            path.getRoot()));
     return ((MutablePlugin) storagePlugin).getDefaultCtasFormat();
   }
 

@@ -16,7 +16,6 @@
 package com.dremio.dac.service.catalog;
 
 import static com.dremio.dac.util.DatasetsUtil.toDatasetConfig;
-import static com.dremio.exec.ExecConstants.VERSIONED_VIEW_ENABLED;
 import static com.dremio.exec.calcite.SqlNodes.DREMIO_DIALECT;
 import static com.dremio.exec.catalog.CatalogOptions.SUPPORT_UDF_API;
 import static com.dremio.exec.catalog.CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED;
@@ -24,20 +23,29 @@ import static com.dremio.service.job.QueryLabel.CTAS;
 import static com.dremio.service.job.QueryType.REST;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.VIRTUAL_DATASET;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.exception.SourceDoesNotExistException;
 import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.CatalogFolder;
+import com.dremio.catalog.model.ImmutableCatalogFolder;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
+import com.dremio.catalog.model.dataset.TableVersionType;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.utils.PathUtils;
+import com.dremio.connector.metadata.EntityPath;
 import com.dremio.dac.api.CatalogEntity;
 import com.dremio.dac.api.CatalogItem;
 import com.dremio.dac.api.CatalogPageToken;
 import com.dremio.dac.api.Dataset;
+import com.dremio.dac.api.DatasetFields;
 import com.dremio.dac.api.File;
 import com.dremio.dac.api.Folder;
 import com.dremio.dac.api.Function;
@@ -49,6 +57,7 @@ import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.VersionContextUtils;
 import com.dremio.dac.homefiles.HomeFileSystemStoragePlugin;
 import com.dremio.dac.homefiles.HomeFileTool;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.sources.PhysicalDatasetPath;
@@ -72,6 +81,9 @@ import com.dremio.exec.catalog.DatasetMetadataState;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.ImmutableVersionedListOptions;
 import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.SourceCatalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
+import com.dremio.exec.catalog.SupportsMutatingFolders;
 import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.VersionedListResponsePage;
 import com.dremio.exec.catalog.VersionedPlugin;
@@ -86,6 +98,7 @@ import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.SchemaBuilder;
 import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SabotQueryContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.NoDefaultBranchException;
 import com.dremio.exec.store.ReferenceConflictException;
@@ -96,8 +109,10 @@ import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.SchemaEntity;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.sys.SystemStoragePlugin;
 import com.dremio.options.OptionManager;
 import com.dremio.plugins.ExternalNamespaceEntry;
+import com.dremio.plugins.sysflight.SysFlightStoragePlugin;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.jobs.metadata.QueryMetadata;
 import com.dremio.service.namespace.BoundedDatasetCount;
@@ -106,6 +121,7 @@ import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
+import com.dremio.service.namespace.NamespaceUtils;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
@@ -154,6 +170,7 @@ import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.ws.rs.BadRequestException;
 import javax.ws.rs.InternalServerErrorException;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.sql.SqlNode;
@@ -164,6 +181,7 @@ import org.apache.calcite.tools.RelConversionException;
 import org.apache.calcite.tools.ValidationException;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -192,7 +210,7 @@ public class CatalogServiceHelper {
                           + "-- If you see this, feel free to remove it. We tried to clean it up but failed.\n"
                           + "SELECT 1")
                   .setSerializedPlan(null))
-          .setFunctionArgList(Collections.EMPTY_LIST);
+          .setFunctionArgList(Collections.emptyList());
 
   public static final NamespaceAttribute[] DEFAULT_NS_ATTRIBUTES = new NamespaceAttribute[] {};
 
@@ -251,6 +269,7 @@ public class CatalogServiceHelper {
   private final SourceService sourceService;
   private final NamespaceService namespaceService;
   private final SabotContext sabotContext;
+  private final SabotQueryContext sabotQueryContext;
   private final ReflectionServiceHelper reflectionServiceHelper;
   private final HomeFileTool homeFileTool;
   private final DatasetVersionMutator datasetVersionMutator;
@@ -275,6 +294,7 @@ public class CatalogServiceHelper {
     this.securityContext = securityContext;
     this.sourceService = sourceService;
     this.namespaceService = namespaceService;
+    this.sabotQueryContext = sabotContext;
     this.sabotContext = sabotContext;
     this.reflectionServiceHelper = reflectionServiceHelper;
     this.homeFileTool = homeFileTool;
@@ -358,7 +378,7 @@ public class CatalogServiceHelper {
     return namespaceService.getEntities(Collections.singletonList(namespaceKey)).get(0);
   }
 
-  protected NameSpaceContainer getRootContainer(List<String> path) throws NamespaceException {
+  public @Nullable NameSpaceContainer getRootContainer(List<String> path) {
     NamespaceKey parentKey = new NamespaceKey(path.get(0));
     return namespaceService.getEntities(Collections.singletonList(parentKey)).get(0);
   }
@@ -409,96 +429,108 @@ public class CatalogServiceHelper {
     if (!isRoot
         && CatalogUtil.requestedPluginSupportsVersionedTables(
             namespaceKey, catalogSupplier.get())) {
-      final Optional<TableVersionContext> tableVersionContext =
-          TableVersionContext.tryParse(versionType, versionValue);
-      final CatalogEntityKey.Builder builder = CatalogEntityKey.newBuilder().keyComponents(path);
-
-      VersionContext versionContext = VersionContext.NOT_SPECIFIED;
-      if (tableVersionContext.isPresent()) {
-        builder.tableVersionContext(tableVersionContext.get());
-        versionContext = tableVersionContext.get().asVersionContext();
-      } else {
-        if (!Strings.isNullOrEmpty(versionType) || !Strings.isNullOrEmpty(versionValue)) {
-          throw new ClientErrorException(
-              "Missing a valid versionType/versionValue pair for versioned entity.");
-        }
-        builder.tableVersionContext(TableVersionContext.of(versionContext));
-      }
-
-      VersionedPlugin.EntityType entityType = getVersionedEntityType(path, versionContext);
-      final CatalogEntityKey catalogEntityKey = builder.build();
-      switch (entityType) {
-        case ICEBERG_TABLE:
-        case ICEBERG_VIEW:
-          final DremioTable table = catalogSupplier.get().getTable(catalogEntityKey);
-
-          if (table == null) {
-            return Optional.empty();
-          }
-
-          final DatasetConfig datasetConfig = table.getDatasetConfig();
-          final Optional<AccelerationSettings> settings =
-              getStoredReflectionSettingsForDataset(datasetConfig);
-          final Dataset dataset =
-              toDatasetAPI(
-                  datasetConfig,
-                  settings.map(Dataset.RefreshSettings::new).orElse(null),
-                  table.getDatasetMetadataState());
-
-          return Optional.of(dataset);
-        case FOLDER:
-          final String id = catalogSupplier.get().getDatasetId(namespaceKey);
-          VersionedDatasetId versionedDatasetId = VersionedDatasetId.tryParse(id);
-          String refType = versionType;
-          String refValue = versionValue;
-          if (versionedDatasetId != null) {
-            VersionContext vContext = versionedDatasetId.getVersionContext().asVersionContext();
-            refType = vContext.getType().name();
-            refValue = vContext.getValue();
-          }
-          final Folder folder =
-              createCatalogItemForVersionedFolder(
-                  path, id, refType, refValue, pageToken, maxChildren, includeVersionedUDFChildren);
-          return Optional.of(folder);
-        case UDF:
-          checkIfUDFApiSupported();
-          checkIfVersionedUDFSupported();
-          final String sourceName = path.get(0);
-          return getVersionedFunction(sourceName, catalogEntityKey);
-        case UNKNOWN:
-          logger.warn("Could not find versioned entity with path {}", path);
-          return Optional.empty();
-        default:
-          logger.warn("Unrecognized type of versioned entity with path {}", path);
-          return Optional.empty();
-      }
+      return getCatalogEntityByPathFromVersionedPlugin(
+          path,
+          versionType,
+          versionValue,
+          pageToken,
+          maxChildren,
+          namespaceKey,
+          includeVersionedUDFChildren);
     }
 
-    final NameSpaceContainer entity = getNamespaceEntity(namespaceKey);
-
+    @Nullable NameSpaceContainer entity = getNamespaceEntity(namespaceKey);
     if (entity == null) {
-      // if we can't find it in the namespace, check if it is a non-promoted file/folder in a
-      // filesystem source
-      Optional<CatalogItem> internalItem = getInternalItemByPath(path);
-      if (!internalItem.isPresent()) {
-        return Optional.empty();
-      }
-
-      return getCatalogEntityFromCatalogItem(internalItem.get(), pageToken, maxChildren);
-    } else {
-      return getCatalogEntityFromNamespaceContainer(
-          entity, versionType, versionValue, pageToken, maxChildren, includeVersionedUDFChildren);
+      return getCatalogEntityFromNonPromotedFileOrFolder(path, pageToken, maxChildren);
     }
+
+    return getCatalogEntityFromNamespaceContainer(
+        entity, versionType, versionValue, pageToken, maxChildren, includeVersionedUDFChildren);
   }
 
-  public Optional<CatalogEntity> getCatalogEntityById(
-      String id,
-      List<String> include,
-      List<String> exclude,
-      @Nullable CatalogPageToken pageToken,
-      Integer maxChildren)
+  private @NotNull Optional<CatalogEntity> getCatalogEntityFromNonPromotedFileOrFolder(
+      List<String> path, @Nullable CatalogPageToken pageToken, Integer maxChildren)
       throws NamespaceException {
-    return getCatalogEntityById(id, include, exclude, pageToken, maxChildren, false);
+    Optional<CatalogItem> internalItem = getInternalItemByPath(path);
+    if (internalItem.isEmpty()) {
+      return Optional.empty();
+    }
+
+    return getCatalogEntityFromCatalogItem(internalItem.get(), pageToken, maxChildren);
+  }
+
+  private Optional<CatalogEntity> getCatalogEntityByPathFromVersionedPlugin(
+      List<String> path,
+      String versionType,
+      String versionValue,
+      @Nullable CatalogPageToken pageToken,
+      Integer maxChildren,
+      NamespaceKey namespaceKey,
+      boolean includeVersionedUDFChildren)
+      throws NamespaceException {
+    final Optional<TableVersionContext> tableVersionContext =
+        TableVersionContext.tryParse(versionType, versionValue);
+    final CatalogEntityKey.Builder builder = CatalogEntityKey.newBuilder().keyComponents(path);
+
+    VersionContext versionContext = VersionContext.NOT_SPECIFIED;
+    if (tableVersionContext.isPresent()) {
+      builder.tableVersionContext(tableVersionContext.get());
+      versionContext = tableVersionContext.get().asVersionContext();
+    } else {
+      if (!Strings.isNullOrEmpty(versionType) || !Strings.isNullOrEmpty(versionValue)) {
+        throw new ClientErrorException(
+            "Missing a valid versionType/versionValue pair for versioned entity.");
+      }
+      builder.tableVersionContext(TableVersionContext.of(versionContext));
+    }
+
+    VersionedPlugin.EntityType entityType = getVersionedEntityType(path, versionContext);
+    final CatalogEntityKey catalogEntityKey = builder.build();
+    switch (entityType) {
+      case ICEBERG_TABLE:
+      case ICEBERG_VIEW:
+        final DremioTable table = catalogSupplier.get().getTable(catalogEntityKey);
+
+        if (table == null) {
+          return Optional.empty();
+        }
+
+        final DatasetConfig datasetConfig = table.getDatasetConfig();
+        final Optional<AccelerationSettings> settings =
+            getStoredReflectionSettingsForDataset(datasetConfig);
+        final Dataset dataset =
+            toDatasetAPI(
+                datasetConfig,
+                settings.map(Dataset.RefreshSettings::new).orElse(null),
+                table.getDatasetMetadataState());
+
+        return Optional.of(dataset);
+      case FOLDER:
+        final String id = catalogSupplier.get().getDatasetId(namespaceKey);
+        VersionedDatasetId versionedDatasetId = VersionedDatasetId.tryParse(id);
+        String refType = versionType;
+        String refValue = versionValue;
+        if (versionedDatasetId != null) {
+          VersionContext vContext = versionedDatasetId.getVersionContext().asVersionContext();
+          refType = vContext.getType().name();
+          refValue = vContext.getValue();
+        }
+        final Folder folder =
+            createCatalogItemForVersionedFolder(
+                path, id, refType, refValue, pageToken, maxChildren, includeVersionedUDFChildren);
+        return Optional.of(folder);
+      case UDF:
+        checkIfUDFApiSupported();
+        checkIfVersionedUDFSupported();
+        final String sourceName = path.get(0);
+        return getVersionedFunction(sourceName, catalogEntityKey);
+      case UNKNOWN:
+        logger.warn("Could not find versioned entity with path {}", path);
+        return Optional.empty();
+      default:
+        logger.warn("Unrecognized type of versioned entity with path {}", path);
+        return Optional.empty();
+    }
   }
 
   @WithSpan
@@ -661,11 +693,6 @@ public class CatalogServiceHelper {
     }
   }
 
-  private Optional<?> getById(
-      String id, @Nullable CatalogPageToken pageToken, Integer maxChildren) {
-    return getById(id, pageToken, maxChildren, false);
-  }
-
   /**
    * Given an id, retrieves the entity from the namespace. Also handles fake ids (using
    * generateInternalId) that we generate for folders/files that exist in file-based sources that
@@ -682,65 +709,9 @@ public class CatalogServiceHelper {
       boolean includeVersionedUDFChildren) {
     try {
       if (isInternalId(id)) {
-        Optional<CatalogItem> catalogItem = getInternalItemByPath(getPathFromInternalId(id));
-
-        if (!catalogItem.isPresent()) {
-          return Optional.empty();
-        }
-
-        final CatalogItem item = catalogItem.get();
-
-        // sometimes we can get back a namespace entity for an internal id (like a folder that gets
-        // ACLs)
-        if (!isInternalId(item.getId())) {
-          return getById(item.getId(), pageToken, maxChildren, includeVersionedUDFChildren);
-        }
-
-        return getCatalogEntityFromCatalogItem(item, pageToken, maxChildren);
+        return getInternalObjectById(id, pageToken, maxChildren, includeVersionedUDFChildren);
       } else if (VersionedDatasetId.tryParse(id) != null) {
-        VersionedDatasetId versionedDatasetId = VersionedDatasetId.tryParse(id);
-        assert versionedDatasetId != null;
-        final VersionedPlugin.EntityType entityType = getVersionedEntityType(versionedDatasetId);
-        switch (entityType) {
-          case ICEBERG_VIEW:
-          case ICEBERG_TABLE:
-            DremioTable table = catalogSupplier.get().getTable(id);
-            DatasetConfig datasetConfig = table.getDatasetConfig();
-            Optional<AccelerationSettings> settings =
-                getStoredReflectionSettingsForDataset(datasetConfig);
-            Dataset dataset =
-                toDatasetAPI(
-                    datasetConfig,
-                    settings.map(Dataset.RefreshSettings::new).orElse(null),
-                    table.getDatasetMetadataState());
-            return Optional.of(dataset);
-          case FOLDER:
-            final List<String> path = versionedDatasetId.getTableKey();
-            VersionContext versionContext =
-                versionedDatasetId.getVersionContext().asVersionContext();
-            String refType = versionContext.getType().name();
-            String refValue = versionContext.getValue();
-            final Folder folder =
-                createCatalogItemForVersionedFolder(
-                    path,
-                    id,
-                    refType,
-                    refValue,
-                    pageToken,
-                    maxChildren,
-                    includeVersionedUDFChildren);
-            return Optional.of(folder);
-          case UDF:
-            checkIfUDFApiSupported();
-            checkIfVersionedUDFSupported();
-            return getVersionedFunction(versionedDatasetId);
-          case UNKNOWN:
-            logger.debug("Could not find entity with versioned id [{}]", id);
-            return Optional.empty();
-          default:
-            logger.debug("Unrecognized entity type [{}] for versioned id [{}]", entityType, id);
-            return Optional.empty();
-        }
+        return getVersionedObjectById(id, pageToken, maxChildren, includeVersionedUDFChildren);
       } else {
         Optional<NameSpaceContainer> container = namespaceService.getEntityById(new EntityId(id));
         if (container.isEmpty()) {
@@ -751,6 +722,73 @@ public class CatalogServiceHelper {
     } catch (NamespaceException e) {
       logger.debug("Failed to get entity ", e);
       return Optional.empty();
+    }
+  }
+
+  private Optional<?> getInternalObjectById(
+      String id,
+      @Nullable CatalogPageToken pageToken,
+      Integer maxChildren,
+      boolean includeVersionedUDFChildren)
+      throws NamespaceException {
+    Optional<CatalogItem> catalogItem = getInternalItemByPath(getPathFromInternalId(id));
+
+    if (catalogItem.isEmpty()) {
+      return Optional.empty();
+    }
+
+    final CatalogItem item = catalogItem.get();
+
+    // sometimes we can get back a namespace entity for an internal id (like a folder that gets
+    // ACLs)
+    if (!isInternalId(item.getId())) {
+      return getById(item.getId(), pageToken, maxChildren, includeVersionedUDFChildren);
+    }
+
+    return getCatalogEntityFromCatalogItem(item, pageToken, maxChildren);
+  }
+
+  private Optional<CatalogEntity> getVersionedObjectById(
+      String id,
+      @Nullable CatalogPageToken pageToken,
+      Integer maxChildren,
+      boolean includeVersionedUDFChildren)
+      throws NamespaceException {
+    VersionedDatasetId versionedDatasetId = VersionedDatasetId.tryParse(id);
+    assert versionedDatasetId != null;
+    final VersionedPlugin.EntityType entityType = getVersionedEntityType(versionedDatasetId);
+    switch (entityType) {
+      case ICEBERG_VIEW:
+      case ICEBERG_TABLE:
+        DremioTable table = catalogSupplier.get().getTable(id);
+        DatasetConfig datasetConfig = table.getDatasetConfig();
+        Optional<AccelerationSettings> settings =
+            getStoredReflectionSettingsForDataset(datasetConfig);
+        Dataset dataset =
+            toDatasetAPI(
+                datasetConfig,
+                settings.map(Dataset.RefreshSettings::new).orElse(null),
+                table.getDatasetMetadataState());
+        return Optional.of(dataset);
+      case FOLDER:
+        final List<String> path = versionedDatasetId.getTableKey();
+        VersionContext versionContext = versionedDatasetId.getVersionContext().asVersionContext();
+        String refType = versionContext.getType().name();
+        String refValue = versionContext.getValue();
+        final Folder folder =
+            createCatalogItemForVersionedFolder(
+                path, id, refType, refValue, pageToken, maxChildren, includeVersionedUDFChildren);
+        return Optional.of(folder);
+      case UDF:
+        checkIfUDFApiSupported();
+        checkIfVersionedUDFSupported();
+        return getVersionedFunction(versionedDatasetId);
+      case UNKNOWN:
+        logger.debug("Could not find entity with versioned id [{}]", id);
+        return Optional.empty();
+      default:
+        logger.debug("Unrecognized entity type [{}] for versioned id [{}]", entityType, id);
+        return Optional.empty();
     }
   }
 
@@ -770,7 +808,8 @@ public class CatalogServiceHelper {
               catalogItem.getPath(),
               null,
               listingResult.children(),
-              listingResult.getApiNextPageToken());
+              listingResult.getApiNextPageToken(),
+              null);
       return Optional.of(folder);
     } else if (catalogItem.getType() == CatalogItem.CatalogItemType.FILE) {
       final File file = new File(catalogItem.getId(), catalogItem.getPath());
@@ -818,7 +857,7 @@ public class CatalogServiceHelper {
     }
 
     SchemaEntity entity =
-        ((FileSystemPlugin) plugin).get(path, securityContext.getUserPrincipal().getName());
+        ((FileSystemPlugin<?>) plugin).get(path, securityContext.getUserPrincipal().getName());
 
     return convertSchemaEntityToCatalogItem(entity, path.subList(0, path.size() - 1), null);
   }
@@ -831,7 +870,7 @@ public class CatalogServiceHelper {
   private List<CatalogItem> convertVersionedNamespaceTreeToCatalogItems(NamespaceTree nsTree) {
     List<CatalogItem> items = new ArrayList<>();
 
-    for (com.dremio.dac.model.folder.Folder folder : nsTree.getFolders()) {
+    for (FolderModel folder : nsTree.getFolders()) {
       items.add(
           new CatalogItem.Builder()
               .setId(folder.getId())
@@ -982,7 +1021,11 @@ public class CatalogServiceHelper {
       Integer maxChildren,
       boolean includeVersionedUDFChildren)
       throws NamespaceException {
-    NameSpaceContainer rootEntity = getRootContainer(path.getPathComponents());
+    @Nullable NameSpaceContainer rootEntity = getRootContainer(path.getPathComponents());
+    if (rootEntity == null) {
+      throw new NotFoundException(
+          String.format("The system could not find [%s]", path.getPathComponents().get(0)));
+    }
     boolean isSource = rootEntity.getType() == NameSpaceContainer.Type.SOURCE;
 
     validatePageToken(path, pageToken, isSource, refType, refValue);
@@ -1130,7 +1173,7 @@ public class CatalogServiceHelper {
       // any promoted datasets
       // that are in the namespace for us.  This is in line with what the UI does.
       final List<SchemaEntity> list =
-          ((FileSystemPlugin) plugin)
+          ((FileSystemPlugin<?>) plugin)
               .list(listingPath, securityContext.getUserPrincipal().getName());
 
       // Check existence of folders in namespace in bulk.
@@ -1171,6 +1214,11 @@ public class CatalogServiceHelper {
     }
   }
 
+  public CatalogEntity createCatalogItem(CatalogEntity entity)
+      throws NamespaceException, UnsupportedOperationException, ExecutionSetupException {
+    return createCatalogItem(entity, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+  }
+
   /**
    * Create CatalogEntity {@code entity} via Catalog API. For versioned entity, it would be created
    * in the default branch.
@@ -1179,13 +1227,14 @@ public class CatalogServiceHelper {
    * @return Created {@code CatalogEntity}
    */
   @WithSpan
-  public CatalogEntity createCatalogItem(CatalogEntity entity)
+  public CatalogEntity createCatalogItem(
+      CatalogEntity entity, SourceRefreshOption sourceRefreshOption)
       throws NamespaceException, UnsupportedOperationException, ExecutionSetupException {
     if (entity instanceof Space) {
       Space space = (Space) entity;
       return createSpace(space, getNamespaceAttributes(entity));
     } else if (entity instanceof Source) {
-      return createSource((Source) entity, getNamespaceAttributes(entity));
+      return createSource((Source) entity, sourceRefreshOption, getNamespaceAttributes(entity));
     } else if (entity instanceof Dataset) {
       Dataset dataset = (Dataset) entity;
       return createDataset(dataset, getNamespaceAttributes(entity));
@@ -1221,28 +1270,12 @@ public class CatalogServiceHelper {
 
     final boolean isVersionedSource =
         CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, catalogSupplier.get());
-    final boolean isVersionedViewEnabled = optionManager.getOption(VERSIONED_VIEW_ENABLED);
-    if (isVersionedSource && !isVersionedViewEnabled) {
-      throw UserException.unsupportedError()
-          .message("Versioned view is not enabled")
-          .buildSilently();
-    }
 
-    // Can create VDS in a space, home or versioned source
     NameSpaceContainer rootEntity = getNamespaceEntity(topLevelKey);
-    List<NameSpaceContainer.Type> types =
-        new ArrayList<>(Arrays.asList(NameSpaceContainer.Type.SPACE, NameSpaceContainer.Type.HOME));
-    if (isVersionedSource) {
-      types.add(NameSpaceContainer.Type.SOURCE);
-    }
+
     Preconditions.checkArgument(
         rootEntity != null,
-        String.format(
-            "Could not find the space, home space or versioned source with name [%s].",
-            topLevelKey));
-    Preconditions.checkArgument(
-        types.contains(rootEntity.getType()),
-        "Virtual datasets can only be saved into spaces, home space or versioned sources.");
+        String.format("Could not find the entity with name [%s].", topLevelKey));
 
     sabotContext
         .getViewCreatorFactoryProvider()
@@ -1312,7 +1345,7 @@ public class CatalogServiceHelper {
     NamespaceKey namespaceKey = new NamespaceKey(path);
     Optional<CatalogItem> catalogItem = getInternalItemByPath(path);
 
-    if (!catalogItem.isPresent()) {
+    if (catalogItem.isEmpty()) {
       throw new IllegalArgumentException(
           String.format("Could not find entity to promote with path [%s]", path));
     }
@@ -1360,7 +1393,11 @@ public class CatalogServiceHelper {
   }
 
   private void updateDataset(Dataset dataset, NamespaceAttribute... attributes)
-      throws NamespaceException, IOException {
+      throws NamespaceException,
+          IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     validateDataset(dataset);
 
     final boolean isVersionedSource =
@@ -1373,7 +1410,11 @@ public class CatalogServiceHelper {
     }
   }
 
-  private void updateVersionedDataset(Dataset dataset) throws IOException {
+  private void updateVersionedDataset(Dataset dataset)
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     validateUpdateVersionedDataset(dataset);
 
     NamespaceKey namespaceKey = new NamespaceKey(dataset.getPath());
@@ -1428,12 +1469,6 @@ public class CatalogServiceHelper {
         dataset.getPath().size() > 1,
         "View path " + PathUtils.constructFullPath(dataset.getPath()) + " is not valid.");
 
-    if (!optionManager.getOption(VERSIONED_VIEW_ENABLED)) {
-      throw UserException.unsupportedError()
-          .message("Versioned view is not enabled")
-          .buildSilently();
-    }
-
     if (ParserUtil.checkTimeTravelOnView(dataset.getSql())) {
       throw UserException.unsupportedError()
           .message(
@@ -1468,7 +1503,7 @@ public class CatalogServiceHelper {
   }
 
   private void validateParsedViewQuery(Optional<SqlNode> viewQuery) {
-    if (!viewQuery.isPresent()) {
+    if (viewQuery.isEmpty()) {
       throw UserException.unsupportedError().message("Invalid view query.").buildSilently();
     }
     ParserUtil.validateParsedViewQuery(viewQuery.get());
@@ -1492,8 +1527,29 @@ public class CatalogServiceHelper {
     }
   }
 
+  private BatchSchema getBatchSchema(Dataset dataset) {
+    SchemaBuilder schemaBuilder = BatchSchema.newBuilder();
+    final SqlQuery query =
+        new SqlQuery(
+            dataset.getSql(),
+            dataset.getSqlContext(),
+            securityContext.getUserPrincipal().getName());
+    QueryMetadata queryMetadata = QueryParser.extract(query, sabotQueryContext);
+
+    validateParsedViewQuery(queryMetadata.getSqlNode());
+    for (RelDataTypeField f : queryMetadata.getRowType().getFieldList()) {
+      CalciteArrowHelper.fieldFromCalciteRowType(f.getKey(), f.getValue())
+          .ifPresent(schemaBuilder::addField);
+    }
+    return schemaBuilder.build();
+  }
+
   private void updateNonVersionedDataset(Dataset dataset, NamespaceAttribute... attributes)
-      throws NamespaceException, IOException {
+      throws NamespaceException,
+          IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     Preconditions.checkArgument(dataset.getId() != null, "Dataset Id is missing.");
 
     // TODO: Make a get dataset by id function in NamespaceService.
@@ -1614,12 +1670,17 @@ public class CatalogServiceHelper {
               null,
               virtualDataset.getContextList(),
               false);
+      final ViewOptions viewOptions =
+          new ViewOptions.ViewOptionsBuilder()
+              .batchSchema(getBatchSchema(dataset))
+              .actionType(ViewOptions.ActionType.UPDATE_VIEW)
+              .build();
       catalogSupplier
           .get()
           .updateView(
               namespaceKey,
               view,
-              null,
+              viewOptions,
               attributes); // ViewOption will be null because this is unrelated to version context
     }
   }
@@ -1676,10 +1737,7 @@ public class CatalogServiceHelper {
     Preconditions.checkArgument(
         pathComponents != null && !pathComponents.isEmpty(), "Cannot find path to dataset");
 
-    // TODO: Probably should be combined into one call for safe home file deletion.
-    if (homeFileTool.fileExists(formatSettings.getLocation())) {
-      homeFileTool.deleteFile(formatSettings.getLocation());
-    }
+    homeFileTool.deleteUploadedFile(formatSettings.getLocation());
     namespaceService.deleteDataset(new NamespaceKey(pathComponents), version);
   }
 
@@ -1703,7 +1761,7 @@ public class CatalogServiceHelper {
       Preconditions.checkArgument(
           dataset.getSql() != null, "Virtual dataset must have sql defined.");
       Preconditions.checkArgument(
-          dataset.getSql().trim().length() > 0, "Virtual dataset cannot have empty sql defined.");
+          !dataset.getSql().trim().isEmpty(), "Virtual dataset cannot have empty sql defined.");
       Preconditions.checkArgument(
           dataset.getFormat() == null, "Virtual dataset cannot have a format defined.");
       Preconditions.checkArgument(
@@ -1725,7 +1783,7 @@ public class CatalogServiceHelper {
 
     Preconditions.checkArgument(space.getId() == null, "Space id is immutable.");
     Preconditions.checkArgument(spaceName != null, "Space name is required.");
-    Preconditions.checkArgument(spaceName.trim().length() > 0, "Space name cannot be empty.");
+    Preconditions.checkArgument(!spaceName.trim().isEmpty(), "Space name cannot be empty.");
 
     // TODO: move the space name validation somewhere reusable instead of having to create a new
     // SpaceName
@@ -1739,8 +1797,7 @@ public class CatalogServiceHelper {
           String.format("A space with the name [%s] already exists.", spaceName));
     }
 
-    namespaceService.addOrUpdateSpace(
-        namespaceKey, getSpaceConfig(space).setCtime(System.currentTimeMillis()), attributes);
+    namespaceService.addOrUpdateSpace(namespaceKey, getSpaceConfig(space), attributes);
 
     return toSpaceAPI(namespaceService.getEntityByPath(namespaceKey), CatalogListingResult.empty());
   }
@@ -1753,17 +1810,18 @@ public class CatalogServiceHelper {
     Preconditions.checkArgument(
         space.getName().equals(spaceConfig.getName()), "Space name is immutable.");
 
-    namespaceService.addOrUpdateSpace(
-        namespaceKey, getSpaceConfig(space).setCtime(spaceConfig.getCtime()), attributes);
+    namespaceService.addOrUpdateSpace(namespaceKey, getSpaceConfig(space), attributes);
   }
 
   protected void deleteSpace(SpaceConfig spaceConfig, String version) throws NamespaceException {
     namespaceService.deleteSpace(new NamespaceKey(spaceConfig.getName()), version);
   }
 
-  private CatalogEntity createSource(Source source, NamespaceAttribute... attributes)
+  private CatalogEntity createSource(
+      Source source, SourceRefreshOption sourceRefreshOption, NamespaceAttribute... attributes)
       throws NamespaceException, ExecutionSetupException {
-    SourceConfig sourceConfig = sourceService.createSource(source.toSourceConfig(), attributes);
+    SourceConfig sourceConfig =
+        sourceService.createSource(source.toSourceConfig(), sourceRefreshOption, attributes);
     // TODO: Use NamespaceService::getSourceById
     Optional<NameSpaceContainer> container = namespaceService.getEntityById(sourceConfig.getId());
     if (container.isEmpty()) {
@@ -1791,7 +1849,10 @@ public class CatalogServiceHelper {
       throws NamespaceException,
           UnsupportedOperationException,
           ExecutionSetupException,
-          IOException {
+          IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     Preconditions.checkArgument(entity.getId() != null, "Entity id is required.");
     Preconditions.checkArgument(entity.getId().equals(id), "Ids must match.");
     String finalId = id;
@@ -1810,9 +1871,7 @@ public class CatalogServiceHelper {
       updateSpace(space, getNamespaceAttributes(space));
     } else if (entity instanceof Folder) {
       Span.current().setAttribute("dremio.catalog.entityType", "Folder");
-      Folder folder = (Folder) entity;
-      FolderConfig folderConfig = updateFolder(folder, getNamespaceAttributes(entity));
-      finalId = folderConfig.getId().getId();
+      return updateFolder((Folder) entity);
     } else if (entity instanceof Function) {
       Span.current().setAttribute("dremio.catalog.entityType", "Function");
       Function function = (Function) entity;
@@ -1824,7 +1883,6 @@ public class CatalogServiceHelper {
               id, entity.getClass().getName()));
     }
 
-    // TODO(DX-18416) What to do?
     Optional<CatalogEntity> newEntity =
         getCatalogEntityById(
             finalId,
@@ -1846,10 +1904,10 @@ public class CatalogServiceHelper {
 
   @WithSpan
   public void deleteCatalogItem(String id, String tag)
-      throws NamespaceException, UnsupportedOperationException {
-    Optional<?> entity = getById(id, null, 0);
+      throws NamespaceException, UnsupportedOperationException, CatalogException {
+    Optional<?> entity = getById(id, null, 0, false);
 
-    if (!entity.isPresent()) {
+    if (entity.isEmpty()) {
       throw new IllegalArgumentException(String.format("Could not find entity with id [%s].", id));
     }
 
@@ -1868,7 +1926,7 @@ public class CatalogServiceHelper {
   }
 
   private void deleteCatalogItemFromNamespace(NameSpaceContainer container, String tag)
-      throws NamespaceException, UnsupportedOperationException {
+      throws NamespaceException, UnsupportedOperationException, CatalogException {
     switch (container.getType()) {
       case SOURCE:
         Span.current().setAttribute("dremio.catalog.entityType", "Source");
@@ -1878,7 +1936,7 @@ public class CatalogServiceHelper {
           config.setTag(tag);
         }
 
-        sourceService.deleteSource(config);
+        sourceService.deleteSource(config, SourceRefreshOption.BACKGROUND_DATASETS_CREATION);
         break;
       case SPACE:
         Span.current().setAttribute("dremio.catalog.entityType", "Space");
@@ -1904,18 +1962,11 @@ public class CatalogServiceHelper {
         break;
       case FOLDER:
         Span.current().setAttribute("dremio.catalog.entityType", "Folder");
-
-        FolderConfig folderConfig = container.getFolder();
-
-        String folderVersion = folderConfig.getTag();
-
-        if (tag != null) {
-          folderVersion = tag;
-        }
-
-        namespaceService.deleteFolder(
-            new NamespaceKey(folderConfig.getFullPathList()), folderVersion);
-        break;
+        getCatalog()
+            .deleteFolder(
+                CatalogEntityKey.newBuilder().keyComponents(container.getFullPathList()).build(),
+                container.getFolder().getTag());
+        return;
       case FUNCTION:
         checkIfUDFApiSupported();
         Span.current().setAttribute("dremio.catalog.entityType", "Function");
@@ -2009,15 +2060,23 @@ public class CatalogServiceHelper {
   protected Folder createFolder(Folder folder, NamespaceAttribute... attributes)
       throws NamespaceException {
     validateFolder(folder);
-    final boolean isVersionedSource =
-        CatalogUtil.requestedPluginSupportsVersionedTables(
-            new NamespaceKey(folder.getPath()), catalogSupplier.get());
-    if (isVersionedSource) {
-      // TODO: DX-95492 shouldn't hard code the branch. The contract is the API should create the
-      // folder in the default branch
-      return createFolderInVersionedSource(folder, "BRANCH", "main");
-    } else {
-      return createFolderInNamespace(folder, attributes);
+    final boolean doesPluginSupportMutatingFolders =
+        doesPluginSupportMutatingFolders(folder.getPath().get(0), catalogSupplier.get());
+    if (doesPluginSupportMutatingFolders) {
+      // Intentionally set both refType/refValue to null so that the folder would be created in the
+      // default branch.
+      return createFolderInSource(folder, null, null);
+    }
+    return createFolderInNamespace(folder, attributes);
+  }
+
+  private static boolean doesPluginSupportMutatingFolders(
+      String sourceName, SourceCatalog catalog) {
+    try {
+      return catalog.getSource(sourceName) != null
+          && catalog.getSource(sourceName).isWrapperFor(SupportsMutatingFolders.class);
+    } catch (UserException e) {
+      return false;
     }
   }
 
@@ -2028,17 +2087,17 @@ public class CatalogServiceHelper {
         folder.getPath().size() >= 2, "Folder path should be fully qualified.");
   }
 
-  private Folder createFolderInVersionedSource(
-      Folder folder, final String refType, final String refValue) {
+  private Folder createFolderInSource(Folder folder, final String refType, final String refValue) {
     SourceFolderPath folderPath = new SourceFolderPath(folder.getPath());
-    com.dremio.dac.model.folder.Folder createdFolder =
+    Optional<FolderModel> createdFolder =
         sourceService.createFolder(
             new SourceName(folder.getPath().get(0)),
             folderPath,
             securityContext.getUserPrincipal().getName(),
             refType,
-            refValue);
-    return toFolderAPI(createdFolder, CatalogListingResult.empty());
+            refValue,
+            null);
+    return toFolderAPI(createdFolder.get(), CatalogListingResult.empty());
   }
 
   private Folder createFolderInNamespace(Folder folder, NamespaceAttribute... attributes)
@@ -2076,30 +2135,56 @@ public class CatalogServiceHelper {
     return toFolderAPI(namespaceService.getEntityByPath(key), CatalogListingResult.empty());
   }
 
-  protected FolderConfig updateFolder(Folder folder, NamespaceAttribute... attributes)
-      throws NamespaceException {
-    final NameSpaceContainer rootContainer = getRootContainer(folder.getPath());
-    NamespaceKey namespaceKey = new NamespaceKey(folder.getPath());
-
-    // convert non-ns folder to folder
-    if (rootContainer.getType() == NameSpaceContainer.Type.SOURCE && isInternalId(folder.getId())) {
-      namespaceKey = new NamespaceKey(getPathFromInternalId(folder.getId()));
-      FolderConfig config = getFolderConfig(folder);
-      config.setId(new EntityId(UUID.randomUUID().toString()));
-      namespaceService.addOrUpdateFolder(namespaceKey, config, attributes);
-    } else {
-      FolderConfig folderConfig = namespaceService.getFolder(namespaceKey);
-
-      Preconditions.checkArgument(
-          folder.getPath().equals(folderConfig.getFullPathList()), "Folder path is immutable.");
-
-      namespaceService.addOrUpdateFolder(namespaceKey, getFolderConfig(folder), attributes);
+  protected Folder updateFolder(Folder folder) throws NamespaceException {
+    @Nullable NameSpaceContainer rootContainer = getRootContainer(folder.getPath());
+    if (rootContainer == null) {
+      throw new NotFoundException(
+          String.format("The system could not find [%s]", folder.getPath().get(0)));
     }
-
-    return namespaceService.getFolder(namespaceKey);
+    if (isNonNamespaceServiceFolder(rootContainer.getType(), folder.getId())) {
+      return convertNonNamespaceFolderToNamespaceFolder(folder);
+    }
+    CatalogFolder inputCatalogFolder = createCatalogFolderFromDACFolder(folder);
+    try {
+      Optional<CatalogFolder> outputFolder = getCatalog().updateFolder(inputCatalogFolder);
+      if (outputFolder.isEmpty()) {
+        throw new NotFoundException(
+            String.format("The folder [%s] was not found.", folder.getPath()));
+      }
+      return toFolderAPI(outputFolder.get(), CatalogListingResult.empty());
+    } catch (CatalogEntityNotFoundException ex) {
+      throw new NotFoundException(
+          String.format("The folder [%s] was not found.", folder.getPath()), ex);
+    } catch (CatalogException ex) {
+      throw ex.toRestApiException();
+    }
   }
 
-  public Source toSourceAPI(NameSpaceContainer container, CatalogListingResult listingResult) {
+  private CatalogFolder createCatalogFolderFromDACFolder(Folder folder) {
+    return new ImmutableCatalogFolder.Builder()
+        .setId(folder.getId())
+        .addAllFullPath(folder.getPath())
+        .setTag(folder.getTag())
+        .setStorageUri(folder.getStorageUri())
+        .setAttributes(Arrays.stream(getNamespaceAttributes(folder)).collect(Collectors.toList()))
+        .build();
+  }
+
+  private static boolean isNonNamespaceServiceFolder(
+      NameSpaceContainer.Type rootContainerType, String folderId) {
+    return rootContainerType == NameSpaceContainer.Type.SOURCE && isInternalId(folderId);
+  }
+
+  private Folder convertNonNamespaceFolderToNamespaceFolder(Folder folder)
+      throws NamespaceException {
+    NamespaceKey namespaceKey = new NamespaceKey(getPathFromInternalId(folder.getId()));
+    FolderConfig config = getFolderConfig(folder);
+    config.setId(new EntityId(UUID.randomUUID().toString()));
+    namespaceService.addOrUpdateFolder(namespaceKey, config, getNamespaceAttributes(folder));
+    return toFolderAPI(namespaceService.getFolder(namespaceKey), CatalogListingResult.empty());
+  }
+
+  protected Source toSourceAPI(NameSpaceContainer container, CatalogListingResult listingResult) {
     // TODO: clean up source config creation, move it all into this class
     return sourceService.fromSourceConfig(
         container.getSource(), listingResult.children(), listingResult.getApiNextPageToken());
@@ -2147,6 +2232,13 @@ public class CatalogServiceHelper {
       @Nullable DatasetMetadataState metadataState) {
 
     Dataset dataset;
+    DatasetFields fields =
+        DatasetFields.builder()
+            .setFields(DatasetsUtil.getArrowFieldsFromDatasetConfig(config))
+            .setPartitionedFields(DatasetsUtil.getPartitionedColumns(config))
+            .setSortedFields(DatasetsUtil.getSortedColumns(config))
+            .build();
+
     if (config.getType() == VIRTUAL_DATASET) {
       String sql = null;
       List<String> sqlContext = null;
@@ -2162,14 +2254,15 @@ public class CatalogServiceHelper {
               config.getId().getId(),
               Dataset.DatasetType.VIRTUAL_DATASET,
               config.getFullPathList(),
-              DatasetsUtil.getArrowFieldsFromDatasetConfig(config),
+              fields,
               config.getCreatedAt(),
               config.getTag(),
               refreshSettings,
               sql,
               sqlContext,
               null,
-              null);
+              null,
+              NamespaceUtils.isSchemaOutdated(config));
     } else {
       FileFormat format = FileFormat.getForDataset(config);
       PhysicalDataset physicalDataset = config.getPhysicalDataset();
@@ -2178,14 +2271,15 @@ public class CatalogServiceHelper {
               config.getId().getId(),
               Dataset.DatasetType.PHYSICAL_DATASET,
               config.getFullPathList(),
-              DatasetsUtil.getArrowFieldsFromDatasetConfig(config),
+              fields,
               config.getCreatedAt(),
               String.valueOf(config.getTag()),
               refreshSettings,
               null,
               null,
               format,
-              (physicalDataset != null) ? physicalDataset.getAllowApproxStats() : Boolean.FALSE);
+              (physicalDataset != null) ? physicalDataset.getAllowApproxStats() : Boolean.FALSE,
+              false);
     }
 
     if (metadataState != null) {
@@ -2228,6 +2322,16 @@ public class CatalogServiceHelper {
     return config;
   }
 
+  protected Folder toFolderAPI(CatalogFolder folder, CatalogListingResult listingResult) {
+    return new Folder(
+        folder.id(),
+        folder.fullPath(),
+        folder.tag(),
+        listingResult.children(),
+        listingResult.getApiNextPageToken(),
+        folder.storageUri());
+  }
+
   protected Folder toFolderAPI(NameSpaceContainer container, CatalogListingResult listingResult) {
     FolderConfig config = container.getFolder();
     return new Folder(
@@ -2235,7 +2339,8 @@ public class CatalogServiceHelper {
         config.getFullPathList(),
         config.getTag(),
         listingResult.children(),
-        listingResult.getApiNextPageToken());
+        listingResult.getApiNextPageToken(),
+        config.getStorageUri());
   }
 
   protected Folder toFolderAPI(FolderConfig config, CatalogListingResult listingResult) {
@@ -2244,17 +2349,18 @@ public class CatalogServiceHelper {
         config.getFullPathList(),
         config.getTag(),
         listingResult.children(),
-        listingResult.getApiNextPageToken());
+        listingResult.getApiNextPageToken(),
+        config.getStorageUri());
   }
 
-  protected Folder toFolderAPI(
-      com.dremio.dac.model.folder.Folder createdFolder, CatalogListingResult listingResult) {
+  protected Folder toFolderAPI(FolderModel createdFolder, CatalogListingResult listingResult) {
     return new Folder(
         createdFolder.getId(),
         createdFolder.getFullPathList(),
-        null,
+        createdFolder.getTag(),
         listingResult.children(),
-        listingResult.getApiNextPageToken());
+        listingResult.getApiNextPageToken(),
+        createdFolder.getStorageUri());
   }
 
   public static FolderConfig getFolderConfig(Folder folder) {
@@ -2347,8 +2453,7 @@ public class CatalogServiceHelper {
     final NamespaceKey homeKey = new HomePath(HomeName.getUserHomePath(userName)).toNamespaceKey();
     try {
       if (!namespaceService.exists(homeKey, NameSpaceContainer.Type.HOME)) {
-        namespaceService.addOrUpdateHome(
-            homeKey, new HomeConfig().setCtime(System.currentTimeMillis()).setOwner(userName));
+        namespaceService.addOrUpdateHome(homeKey, new HomeConfig().setOwner(userName));
       }
     } catch (NamespaceException ex) {
       if (!namespaceService.exists(homeKey, NameSpaceContainer.Type.HOME)) {
@@ -2382,6 +2487,14 @@ public class CatalogServiceHelper {
     return getNamespaceChildrenForPath(key, pageToken, maxChildren);
   }
 
+  public List<EntityPath> getUnlistedSystemTablesOrViews() {
+    StoragePlugin sysStoragePlugin = getStoragePlugin(SystemStoragePlugin.NAME);
+    if (sysStoragePlugin instanceof SysFlightStoragePlugin) {
+      return ((SysFlightStoragePlugin) sysStoragePlugin).getUnlistedSystemTablesOrViews();
+    }
+    return Collections.emptyList();
+  }
+
   private CatalogListingResult getChildrenForVersionedSourcePath(
       VersionedPlugin plugin,
       NamespaceKey sourceKey,
@@ -2399,7 +2512,11 @@ public class CatalogServiceHelper {
       if (effectiveMaxChildren == MAX_CHILDREN_PER_PAGE && pageToken == null) {
         // Use streaming API.
         Stream<ExternalNamespaceEntry> entities =
-            plugin.listEntries(sourceKey.getPathWithoutRoot(), version);
+            plugin.listEntries(
+                sourceKey.getPathWithoutRoot(),
+                plugin.resolveVersionContext(version),
+                VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY);
         resultBuilder.addAllChildren(generateCatalogItemList(sourceKey.getRoot(), entities));
       } else {
         // Use paging API.
@@ -2407,7 +2524,9 @@ public class CatalogServiceHelper {
         VersionedListResponsePage responsePage =
             plugin.listEntriesPage(
                 sourceKey.getPathWithoutRoot(),
-                version,
+                plugin.resolveVersionContext(version),
+                VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY,
                 new ImmutableVersionedListOptions.Builder()
                     .setMaxResultsPerPage(effectiveMaxChildren)
                     .setPageToken(nessiePageToken)
@@ -2588,7 +2707,7 @@ public class CatalogServiceHelper {
   }
 
   private FunctionConfig validateUpdateFunction(Function function) {
-    Optional<?> entity = getById(function.getId(), null, 0);
+    Optional<?> entity = getById(function.getId(), null, 0, false);
 
     if (entity.isEmpty()) {
       throw new IllegalArgumentException(
@@ -2675,12 +2794,39 @@ public class CatalogServiceHelper {
   private Function addOrUpdateFunctionInVersionedSource(boolean isUpdate, Function function) {
     checkIfVersionedUDFSupported();
     NamespaceKey key = new NamespaceKey(function.getPath());
-    if (!isUpdate && function.getPath().size() < 2) {
-      throw new IllegalArgumentException(String.format("Invalid function path [%s].", key));
+    if (!isUpdate) {
+      if (function.getPath().size() < 2) {
+        throw new IllegalArgumentException(String.format("Invalid function path [%s].", key));
+      }
+      Optional<CatalogEntity> catalogEntity =
+          getVersionedFunction(
+              function.getPath().get(0),
+              CatalogEntityKey.namespaceKeyToCatalogEntityKey(key, VersionContext.NOT_SPECIFIED));
+
+      if (catalogEntity.isPresent()) {
+        throw UserException.concurrentModificationError()
+            .message(
+                String.format(
+                    "Function [%s] was not created as an entity with the same name already exists.",
+                    key))
+            .buildSilently();
+      }
+    }
+
+    VersionedDatasetId versionedDatasetId = null;
+    String versionContext = null;
+    if (isUpdate) {
+      versionedDatasetId = VersionedDatasetId.tryParse(function.getId());
+      TableVersionContext tableVersionContext = versionedDatasetId.getVersionContext();
+      Preconditions.checkArgument(
+          tableVersionContext != null && tableVersionContext.getType() == TableVersionType.BRANCH,
+          "Function id should specify the BRANCH value in version context.");
+      versionContext = tableVersionContext.toSql();
     }
 
     try {
-      String addOrUpdateFunctionQuery = generateAddOrUpdateFunctionQuery(function, isUpdate);
+      String addOrUpdateFunctionQuery =
+          generateAddOrUpdateFunctionQuery(function, isUpdate, versionContext);
       String userName = securityContext.getUserPrincipal().getName();
       sabotContext
           .getJobsRunner()
@@ -2695,7 +2841,6 @@ public class CatalogServiceHelper {
     String sourceName;
     CatalogEntityKey catalogEntityKey;
     if (isUpdate) {
-      VersionedDatasetId versionedDatasetId = VersionedDatasetId.tryParse(function.getId());
       sourceName = versionedDatasetId.getTableKey().get(0);
       catalogEntityKey =
           CatalogEntityKey.newBuilder()
@@ -2813,7 +2958,7 @@ public class CatalogServiceHelper {
   private void updateFunctionDefinition(
       NamespaceKey key, boolean isUpdate, FunctionConfig oldFunction, Function function) {
     try {
-      String updateFunctionQuery = generateAddOrUpdateFunctionQuery(function, true);
+      String updateFunctionQuery = generateAddOrUpdateFunctionQuery(function, true, null);
       String userName = securityContext.getUserPrincipal().getName();
       sabotContext
           .getJobsRunner()
@@ -2838,7 +2983,8 @@ public class CatalogServiceHelper {
     }
   }
 
-  public static String generateAddOrUpdateFunctionQuery(Function function, boolean isUpdate) {
+  public static String generateAddOrUpdateFunctionQuery(
+      Function function, boolean isUpdate, String versionContext) {
     StringBuilder buf = new StringBuilder();
     SqlWriterConfig config =
         SqlPrettyWriter.config().withDialect(DREMIO_DIALECT).withQuoteAllIdentifiers(false);
@@ -2857,6 +3003,11 @@ public class CatalogServiceHelper {
       writer.literal(function.getFunctionArgList());
     }
     writer.keyword(")");
+
+    if (isUpdate && versionContext != null) {
+      writer.keyword("AT");
+      writer.literal(versionContext);
+    }
 
     writer.keyword("RETURNS");
     if (function.getIsScalar()) {
@@ -2892,7 +3043,7 @@ public class CatalogServiceHelper {
       String sourceName, CatalogEntityKey catalogEntityKey) {
     VersionedPlugin versionedPlugin = getVersionedPluginFromSourceName(sourceName);
     Optional<FunctionConfig> functionConfig = versionedPlugin.getFunction(catalogEntityKey);
-    if (!functionConfig.isPresent()) {
+    if (functionConfig.isEmpty()) {
       return Optional.empty();
     }
     Function function = toFunctionAPI(functionConfig.get());
@@ -2908,7 +3059,7 @@ public class CatalogServiceHelper {
             .build();
     VersionedPlugin versionedPlugin = getVersionedPluginFromSourceName(sourceName);
     Optional<FunctionConfig> functionConfig = versionedPlugin.getFunction(catalogEntityKey);
-    if (!functionConfig.isPresent()) {
+    if (functionConfig.isEmpty()) {
       return Optional.empty();
     }
     VersionedDatasetId returnedVersionedDatasetId =

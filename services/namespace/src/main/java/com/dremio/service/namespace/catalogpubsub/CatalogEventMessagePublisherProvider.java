@@ -17,23 +17,18 @@ package com.dremio.service.namespace.catalogpubsub;
 
 import com.dremio.service.namespace.CatalogEventProto;
 import com.dremio.services.pubsub.MessagePublisher;
-import java.util.concurrent.CompletableFuture;
+import com.dremio.services.pubsub.inprocess.InProcessPubSubClient;
 
+/**
+ * Provides a MessagePublisher of CatalogEventMessage. This exists because the {@link
+ * InProcessPubSubClient} only permits a single publisher per topic, so it must be reused.
+ */
 public interface CatalogEventMessagePublisherProvider {
   CatalogEventMessagePublisherProvider NO_OP =
       new CatalogEventMessagePublisherProvider() {
         @Override
         public MessagePublisher<CatalogEventProto.CatalogEventMessage> get() {
-          return new MessagePublisher<>() {
-            @Override
-            public CompletableFuture<String> publish(
-                CatalogEventProto.CatalogEventMessage message) {
-              return CompletableFuture.completedFuture("Publishing disabled.");
-            }
-
-            @Override
-            public void close() {}
-          };
+          return (MessagePublisher<CatalogEventProto.CatalogEventMessage>) MessagePublisher.NO_OP;
         }
       };
 

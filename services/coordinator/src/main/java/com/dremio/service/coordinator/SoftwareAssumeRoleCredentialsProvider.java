@@ -15,7 +15,7 @@
  */
 package com.dremio.service.coordinator;
 
-import com.dremio.common.utils.AssumeRoleCredentialsProvider;
+import com.dremio.common.aws.AssumeRoleCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 
 /** Does not work in software. */

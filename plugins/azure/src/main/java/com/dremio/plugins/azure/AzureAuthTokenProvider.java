@@ -37,5 +37,17 @@ public interface AzureAuthTokenProvider {
    * @param req
    * @return
    */
-  String getAuthzHeaderValue(final Request req);
+  default String getAuthorizationHeader(final Request req) {
+    return "";
+  }
+
+  /**
+   * Should return a SAS signature in the following format: path to resource + "?" + SAS token. For
+   * example:
+   *
+   * @return
+   */
+  default String getSasSignature(final boolean withPath) {
+    return "";
+  }
 }

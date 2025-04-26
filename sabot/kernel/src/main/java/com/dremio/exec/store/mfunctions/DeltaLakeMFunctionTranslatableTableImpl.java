@@ -25,6 +25,7 @@ import com.dremio.exec.store.deltalake.DeltaConstants;
 import com.dremio.exec.store.deltalake.DeltaLakeHistoryScanTableMetadata;
 import com.dremio.exec.store.deltalake.DeltaVersion;
 import com.dremio.exec.store.deltalake.DeltaVersionResolver;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.tablefunctions.MFunctionTranslatableTable;
 import com.dremio.io.file.FileSystem;
@@ -57,7 +58,8 @@ public final class DeltaLakeMFunctionTranslatableTableImpl extends MFunctionTran
     super(catalogMetadata, mFunctionMetadata.getSchemaConfig().getUserName(), true);
     Preconditions.checkArgument(mFunctionMetadata.getCurrentConfig() != null);
     this.underlyingTableConfig = mFunctionMetadata.getCurrentConfig();
-    this.storagePlugin = mFunctionMetadata.getPlugin();
+    Preconditions.checkArgument(mFunctionMetadata.getPlugin().isPresent());
+    this.storagePlugin = mFunctionMetadata.getPlugin().get();
   }
 
   @Override
@@ -129,7 +131,12 @@ public final class DeltaLakeMFunctionTranslatableTableImpl extends MFunctionTran
       String tableLocation =
           underlyingTableConfig.getPhysicalDataset().getFormatSettings().getLocation();
       try (FileSystem fs =
-          ((SupportsIcebergRootPointer) storagePlugin).createFS(tableLocation, user, null)) {
+          ((SupportsIcebergRootPointer) storagePlugin)
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(tableLocation)
+                      .userName(user)
+                      .dataset(this.underlyingTableConfig.getFullPathList()))) {
         Path metadataDirPath = Path.of(tableLocation).resolve(DeltaConstants.DELTA_LOG_DIR);
         DeltaVersionResolver resolver = new DeltaVersionResolver(fs, metadataDirPath);
         DeltaVersion version = resolver.getLastCheckpoint();

@@ -45,9 +45,12 @@ import com.dremio.dac.server.BaseTestServerJunit5;
 import com.dremio.dac.server.FamilyExpectation;
 import com.dremio.dac.server.ValidationErrorMessage;
 import com.dremio.dac.service.catalog.CatalogServiceHelper;
+import com.dremio.dac.service.catalog.CatalogServiceHelper.DetailType;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogServiceImpl;
+import com.dremio.exec.catalog.SourceRefreshOption;
+import com.dremio.exec.catalog.SourceUpdateType;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.NessieAuthType;
@@ -76,6 +79,7 @@ import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
+import com.dremio.service.namespace.SourceChangeStateUtils;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
@@ -100,6 +104,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -132,9 +137,9 @@ import org.projectnessie.tools.compatibility.internal.OlderNessieServersExtensio
 import software.amazon.awssdk.regions.Region;
 
 /** Tests for CatalogResource */
+@SuppressWarnings("resource") // Many usages of "expect()" that don't really need closing
 @ExtendWith(OlderNessieServersExtension.class)
 public class TestCatalogResource extends BaseTestServerJunit5 {
-  private static final String CATALOG_PATH = "/catalog/";
   private static final int SRC_INFORMATION_SCHEMA = 1;
   private static final int SRC_SYS = 2;
   private static final int SRC_EXTERNAL = 3;
@@ -196,10 +201,10 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Catalog catalog = getCatalogService().getSystemUserCatalog();
     SourceConfig sourceConfig =
         new SourceConfig()
-            .setConnectionConf(buildNessiePluginConfig(BUCKET_NAME))
+            .setConnectionConf(buildNessiePluginConfig())
             .setName(NESSIE_SOURCE_NAME)
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
-    catalog.createSource(sourceConfig);
+    catalog.createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   private void emptyNessieSource() throws Exception {
@@ -249,7 +254,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .build();
   }
 
-  private static NessiePluginConfig buildNessiePluginConfig(String bucket) {
+  private static NessiePluginConfig buildNessiePluginConfig() {
     NessiePluginConfig nessiePluginConfig = new NessiePluginConfig();
     nessiePluginConfig.nessieEndpoint = createNessieURIString();
     nessiePluginConfig.nessieAuthType = NessieAuthType.NONE;
@@ -258,7 +263,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         AWSAuthenticationType.ACCESS_KEY; // Unused, just needs to be set
     nessiePluginConfig.awsAccessKey = "foo"; // Unused, just needs to be set
     nessiePluginConfig.awsAccessSecret = SecretRef.of("bar"); // Unused, just needs to be set
-    nessiePluginConfig.awsRootPath = bucket;
+    nessiePluginConfig.awsRootPath = TestCatalogResource.BUCKET_NAME;
 
     // S3Mock settings
     nessiePluginConfig.propertyList =
@@ -276,7 +281,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testListTopLevelCatalog() throws Exception {
+  public void testListTopLevelCatalog() {
     // home space always exists
     int topLevelCount =
         getSourceService().getSources().size() + getNamespaceService().getSpaces().size() + 1;
@@ -318,7 +323,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Space space =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSpace)),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     SpaceConfig spaceConfig = getNamespaceService().getSpace(new NamespaceKey(newSpace.getName()));
 
     assertEquals(space.getId(), spaceConfig.getId().getId());
@@ -337,7 +342,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Space space1 =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     assertEquals(spaceConfig.getCtime(), space1.getCreatedAt());
 
     // delete the space
@@ -357,7 +362,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       Space space =
           expectSuccess(
               getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSpace)),
-              new GenericType<Space>() {});
+              new GenericType<>() {});
 
       // no children at this point
       assertEquals(space.getChildren().size(), 0);
@@ -371,7 +376,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       space =
           expectSuccess(
               getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-              new GenericType<Space>() {});
+              new GenericType<>() {});
 
       // make sure that trying to create the folder again fails
       expectStatus(
@@ -389,7 +394,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         space =
             expectSuccess(
                 getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-                new GenericType<Space>() {});
+                new GenericType<>() {});
         assertEquals(space.getChildren().size(), 0);
 
         getNamespaceService().deleteSpace(new NamespaceKey(space.getName()), space.getTag());
@@ -413,7 +418,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       Space space =
           expectSuccess(
               getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSpace)),
-              new GenericType<Space>() {});
+              new GenericType<>() {});
 
       // no children at this point
       assertEquals(space.getChildren().size(), 0);
@@ -425,7 +430,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       space =
           expectSuccess(
               getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-              new GenericType<Space>() {});
+              new GenericType<>() {});
       assertEquals(space.getChildren().size(), 1);
 
       if (deleteFunctionFirst) {
@@ -434,7 +439,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         space =
             expectSuccess(
                 getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-                new GenericType<Space>() {});
+                new GenericType<>() {});
         assertEquals(space.getChildren().size(), 0);
 
         getNamespaceService().deleteSpace(new NamespaceKey(space.getName()), space.getTag());
@@ -480,8 +485,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   private void checkSpaceDatasetCount(String spaceId, int expectedDatasetCount) {
-    ResponseList<CatalogItem> items =
-        getRootEntities(Arrays.asList(CatalogServiceHelper.DetailType.datasetCount));
+    ResponseList<CatalogItem> items = getRootEntities(List.of(DetailType.datasetCount));
 
     Optional<CatalogItem> space =
         items.getData().stream().filter(item -> item.getId().equals(spaceId)).findFirst();
@@ -502,15 +506,14 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       }
     }
 
-    return expectSuccess(
-        getBuilder(api).buildGet(), new GenericType<ResponseList<CatalogItem>>() {});
+    return expectSuccess(getBuilder(api).buildGet(), new GenericType<>() {});
   }
 
   private Space createSpace(final String spaceName) {
     Space newSpace = new Space(null, spaceName, null, null, null);
     return expectSuccess(
         getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSpace)),
-        new GenericType<Space>() {});
+        new GenericType<>() {});
   }
 
   @Test
@@ -519,11 +522,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Space space = createSpace("final frontier");
 
     // add a folder
-    Folder newFolder = new Folder(null, Arrays.asList(space.getName(), "myFolder"), null, null);
+    Folder newFolder =
+        new Folder(null, Arrays.asList(space.getName(), "myFolder"), null, null, null, null);
     Folder folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newFolder)),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     // create a VDS in the space
     Dataset newVDS =
@@ -532,7 +536,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Dataset vds =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newVDS)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // make sure that trying to create the vds again fails
     expectStatus(
@@ -543,7 +547,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 1);
     assertEquals(folder.getChildren().get(0).getId(), vds.getId());
 
@@ -560,17 +564,18 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             vds.getSql(),
             null,
             null,
-            null);
+            null,
+            false);
     vds =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(renamedVDS.getId()))
                 .buildPut(Entity.json(renamedVDS)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(1, folder.getChildren().size());
     assertEquals(vds.getId(), folder.getChildren().get(0).getId());
     assertEquals("myVDSRenamed", folder.getChildren().get(0).getPath().get(2));
@@ -588,20 +593,21 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             "select version from sys.version",
             null,
             null,
-            null);
+            null,
+            false);
     vds =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(modifiedVDS.getId()))
                 .buildPut(Entity.json(modifiedVDS)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
     assertEquals(modifiedVDS.getSql(), vds.getSql());
     assertNotEquals(modifiedVDS.getTag(), vds.getTag()); // make sure it stores a new version
 
     // we currently doesn't allow deserializing of fields so manually check them
     List<Field> fieldsFromDatasetConfig =
         DatasetsUtil.getFieldsFromDatasetConfig(
-            getNamespaceService().getDatasetById(new EntityId(vds.getId())).get());
-    assertEquals(1, fieldsFromDatasetConfig.size());
+            getNamespaceService().getDatasetById(new EntityId(vds.getId())).orElseThrow());
+    assertThat(fieldsFromDatasetConfig).hasSize(1);
     assertEquals("version", fieldsFromDatasetConfig.get(0).getName());
 
     // delete the vds
@@ -609,7 +615,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(0, folder.getChildren().size());
 
     getNamespaceService().deleteSpace(new NamespaceKey(space.getName()), space.getTag());
@@ -621,7 +627,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     SourceUI source = new SourceUI();
     source.setName(sourceName);
-    source.setCtime(1000L);
 
     TemporaryFolder folder = new TemporaryFolder();
     folder.create();
@@ -639,7 +644,8 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     }
     file.close();
 
-    getSourceService().registerSourceWithRuntime(source);
+    getSourceService()
+        .registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     final DatasetPath path1 = new DatasetPath(ImmutableList.of(sourceName, "myFile.json"));
     final DatasetConfig dataset1 =
@@ -647,7 +653,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path1.toPathList())
             .setName(path1.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -657,7 +662,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     DatasetPath vdsPath = new DatasetPath(ImmutableList.of("@dremio", "myFile.json"));
     getHttpClient()
         .getDatasetApi()
-        .createDatasetFromSQLAndSave(vdsPath, "SELECT * FROM \"myFile.json\"", asList(sourceName));
+        .createDatasetFromSQLAndSave(vdsPath, "SELECT * FROM \"myFile.json\"", List.of(sourceName));
 
     final String query = "select * from \"myFile.json\"";
     submitJobAndWaitUntilCompletion(
@@ -673,11 +678,10 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
     final String vdsName1 = sourceName1 + "VDS";
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     final String vdsName2 = sourceName2 + "VDS";
-    Source newSource2 =
-        createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
+    createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
 
     getOptionManager()
         .setOption(
@@ -702,11 +706,10 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
     final String vdsName1 = sourceName1 + "VDS";
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     final String vdsName2 = sourceName2 + "VDS";
-    Source newSource2 =
-        createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
+    createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
 
     getOptionManager()
         .setOption(
@@ -740,18 +743,17 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
     final String vdsName1 = sourceName1 + "VDS";
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     final String vdsName2 = sourceName2 + "VDS";
     Source newSource2 =
         createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
 
     newSource2.setAllowCrossSourceSelection(true);
-    newSource2 =
-        expectSuccess(
-            getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
-                .buildPut(Entity.json(newSource2)),
-            new GenericType<Source>() {});
+    expectSuccess(
+        getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
+            .buildPut(Entity.json(newSource2)),
+        new GenericType<>() {});
 
     getOptionManager()
         .setOption(
@@ -776,22 +778,20 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
     final String vdsName1 = sourceName1 + "VDS";
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, vdsName1);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     final String vdsName2 = sourceName2 + "VDS";
     Source newSource2 =
         createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, vdsName2);
     final String sourceName3 = "src_" + System.currentTimeMillis();
     final String vdsName3 = sourceName3 + "VDS";
-    Source newSource3 =
-        createDatasetFromSource(sourceName3, "myFile3.json", SRC_EXTERNAL, vdsName3);
+    createDatasetFromSource(sourceName3, "myFile3.json", SRC_EXTERNAL, vdsName3);
 
     newSource2.setAllowCrossSourceSelection(true);
-    newSource2 =
-        expectSuccess(
-            getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
-                .buildPut(Entity.json(newSource2)),
-            new GenericType<Source>() {});
+    expectSuccess(
+        getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
+            .buildPut(Entity.json(newSource2)),
+        new GenericType<>() {});
 
     getOptionManager()
         .setOption(
@@ -826,9 +826,9 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectDefault() throws Exception {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
     final String sourceName2 = "src_" + System.currentTimeMillis();
-    Source newSource2 = createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
 
     getOptionManager()
         .setOption(
@@ -852,9 +852,9 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectOptionEnabled() throws Exception {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
     final String sourceName2 = "src_" + System.currentTimeMillis();
-    Source newSource2 = createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
 
     getOptionManager()
         .setOption(
@@ -887,16 +887,15 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectAllowSource() throws Exception {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     Source newSource2 = createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
 
     newSource2.setAllowCrossSourceSelection(true);
-    newSource2 =
-        expectSuccess(
-            getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
-                .buildPut(Entity.json(newSource2)),
-            new GenericType<Source>() {});
+    expectSuccess(
+        getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
+            .buildPut(Entity.json(newSource2)),
+        new GenericType<>() {});
 
     getOptionManager()
         .setOption(
@@ -920,18 +919,17 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectMixed() throws Exception {
 
     final String sourceName1 = "src_" + System.currentTimeMillis();
-    Source newSource1 = createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName1, "myFile.json", SRC_EXTERNAL, null);
     final String sourceName2 = "src_" + System.currentTimeMillis();
     Source newSource2 = createDatasetFromSource(sourceName2, "myFile2.json", SRC_EXTERNAL, null);
     final String sourceName3 = "src_" + System.currentTimeMillis();
-    Source newSource3 = createDatasetFromSource(sourceName3, "myFile3.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName3, "myFile3.json", SRC_EXTERNAL, null);
 
     newSource2.setAllowCrossSourceSelection(true);
-    newSource2 =
-        expectSuccess(
-            getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
-                .buildPut(Entity.json(newSource2)),
-            new GenericType<Source>() {});
+    expectSuccess(
+        getBuilder(getHttpClient().getCatalogApi().path(newSource2.getId()))
+            .buildPut(Entity.json(newSource2)),
+        new GenericType<>() {});
 
     getOptionManager()
         .setOption(
@@ -966,8 +964,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectInformationSchema() throws Exception {
 
     final String sourceName = "src_" + System.currentTimeMillis();
-    final Source newSource =
-        createDatasetFromSource(sourceName, "myFile.json", SRC_INFORMATION_SCHEMA, null);
+    createDatasetFromSource(sourceName, "myFile.json", SRC_INFORMATION_SCHEMA, null);
     getOptionManager()
         .setOption(
             OptionValue.createBoolean(
@@ -997,7 +994,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testCrossSourceSelectSys() throws Exception {
 
     final String sourceName = "src_" + System.currentTimeMillis();
-    final Source newSource = createDatasetFromSource(sourceName, "myFile.json", SRC_SYS, null);
+    createDatasetFromSource(sourceName, "myFile.json", SRC_SYS, null);
     getOptionManager()
         .setOption(
             OptionValue.createBoolean(
@@ -1049,17 +1046,17 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     newSource.setName(sourceName);
     newSource.setType("NAS");
     newSource.setConfig(config);
-    newSource.setCreatedAt(1000L);
     newSource.setAllowCrossSourceSelection(false);
 
     Source source =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSource)),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
+    waitForSourceModificationAndGetNewTag(sourceName);
     newSource =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(source.getId())).buildGet(),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
 
     final DatasetPath path = new DatasetPath(ImmutableList.of(sourceName, fileName));
     final DatasetConfig dataset =
@@ -1068,7 +1065,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -1080,7 +1076,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       final String query = String.format("SELECT * FROM %s.\"%s\"", sourceName, fileName);
       getHttpClient()
           .getDatasetApi()
-          .createDatasetFromSQLAndSave(vdsPath, query, asList(sourceName));
+          .createDatasetFromSQLAndSave(vdsPath, query, List.of(sourceName));
     }
 
     return newSource;
@@ -1106,7 +1102,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     String nestedDir = srcFolder + java.io.File.separator + "nestedDir";
     java.io.File dir = new java.io.File(nestedDir);
-    dir.mkdirs();
+    assertThat(dir.mkdirs()).isTrue();
 
     try (PrintStream file =
         new PrintStream(new java.io.File(dir.getAbsolutePath(), "nestedFile1.json"))) {
@@ -1123,16 +1119,14 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     newSource.setName(sourceName1);
     newSource.setType("NAS");
     newSource.setConfig(config);
-    newSource.setCreatedAt(1000L);
 
     Source source =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSource)),
-            new GenericType<Source>() {});
-    newSource =
-        expectSuccess(
-            getBuilder(getHttpClient().getCatalogApi().path(source.getId())).buildGet(),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
+    expectSuccess(
+        getBuilder(getHttpClient().getCatalogApi().path(source.getId())).buildGet(),
+        new GenericType<>() {});
 
     DatasetPath path = new DatasetPath(ImmutableList.of(sourceName1, "nestedDir"));
     DatasetConfig dataset =
@@ -1140,7 +1134,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -1153,7 +1146,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -1162,13 +1154,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     NamespaceKey datasetKey =
         new DatasetPath(ImmutableList.of(sourceName1, "zmyFile1.json")).toNamespaceKey();
-    DatasetConfig dataset1 = l(NamespaceService.class).getDataset(datasetKey);
 
     getOptionManager()
         .setOption(OptionValue.createLong(OptionType.SYSTEM, "dremio.store.dfs.max_files", 1));
 
     java.io.File deleted = new java.io.File(srcFolder.getAbsolutePath(), "zmyFile1.json");
-    boolean bool = deleted.delete();
+    assertThat(deleted.delete()).isTrue();
 
     // After delete "zmyFile1.json" from the source, if the refresh succeeds, it will delete the
     // dataset from the kv store.
@@ -1178,8 +1169,8 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         .refreshSource(
             new NamespaceKey(sourceName1),
             CatalogService.REFRESH_EVERYTHING_NOW,
-            CatalogServiceImpl.UpdateType.FULL);
-    dataset1 =
+            SourceUpdateType.FULL);
+    DatasetConfig dataset1 =
         getNamespaceService()
             .getDataset(
                 new DatasetPath(ImmutableList.of(sourceName1, "nestedDir")).toNamespaceKey());
@@ -1198,7 +1189,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testForgetTableDefault() throws Exception {
 
     final String sourceName = "src_" + System.currentTimeMillis();
-    final Source newSource = createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
 
     // Do an inline refresh to build complete DatasetConfig before forget metadata
     final String queryForInlineRefresh =
@@ -1257,14 +1248,14 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testForgetTableMultiple() throws Exception {
 
     final String sourceName = "src_" + System.currentTimeMillis();
-    final Source newSource = createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
 
     // Do a full refresh to build complete DatasetConfig before forget metadata
     ((CatalogServiceImpl) getCatalogService())
         .refreshSource(
             new NamespaceKey(sourceName),
             CatalogService.REFRESH_EVERYTHING_NOW,
-            CatalogServiceImpl.UpdateType.FULL);
+            SourceUpdateType.FULL);
     DatasetConfig dataset1 =
         l(NamespaceService.class)
             .getDataset(
@@ -1315,7 +1306,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   public void testForgetTableWithNameRefresh() throws Exception {
 
     final String sourceName = "src_" + System.currentTimeMillis();
-    final Source newSource = createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
+    createDatasetFromSource(sourceName, "myFile.json", SRC_EXTERNAL, null);
 
     // Do an inline refresh to build complete DatasetConfig before forget metadata
     final String queryForInlineRefresh =
@@ -1367,7 +1358,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null);
     l(NamespaceService.class).addOrUpdateDataset(path.toNamespaceKey(), dataset);
 
@@ -1443,14 +1433,16 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testSource() throws Exception {
+  public void testSource() {
     Source source = createSource();
 
     // make sure we can fetch the source by id
     source =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(source.getId())).buildGet(),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
+
+    assertEquals(source.getSourceChangeState(), SourceChangeStateUtils.NONE);
 
     // make sure that trying to create the source again fails
     NASConf nasConf = new NASConf();
@@ -1470,13 +1462,14 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(source.getId()))
                 .buildPut(Entity.json(source)),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
 
     assertNotNull(source.getTag());
     assertEquals((long) source.getAccelerationRefreshPeriodMs(), 0);
 
     // adding a folder to a source should fail
-    Folder newFolder = new Folder(null, Arrays.asList(source.getName(), "myFolder"), null, null);
+    Folder newFolder =
+        new Folder(null, Arrays.asList(source.getName(), "myFolder"), null, null, null, null);
     expectStatus(
         Response.Status.BAD_REQUEST,
         getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newFolder)));
@@ -1496,7 +1489,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         Path.of("file:///" + tempDir + "/" + "testCreateSourceWithInternalConnectionConfTypes/")
             .toString();
     Set<ConnectionConf<?, ?>> internalConnectionConfs =
-        new HashSet<ConnectionConf<?, ?>>() {
+        new HashSet<>() {
           {
             add(new PDFSConf(location));
             add(new HomeFileConf(location, "localhost"));
@@ -1521,7 +1514,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         Path.of("file:///" + tempDir + "/" + "testUpdateSourceWithInternalConnectionConfTypes/")
             .toString();
     Set<ConnectionConf<?, ?>> internalConnectionConfs =
-        new HashSet<ConnectionConf<?, ?>>() {
+        new HashSet<>() {
           {
             add(new PDFSConf(location));
             add(new HomeFileConf(location, "localhost"));
@@ -1545,12 +1538,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testSourceBrowsing() throws Exception {
+  public void testSourceBrowsing() {
     Source source = createSource();
 
     // browse to the json directory
     String id = getFolderIdByName(source.getChildren(), "json");
-    assertNotNull("Failed to find json directory", id);
+    assertNotNull(id, "Failed to find json directory");
 
     // deleting a folder on a source should fail
     expectStatus(
@@ -1563,12 +1556,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testSourcePromoting() throws Exception {
+  public void testSourcePromoting() {
     Source source = createSource();
 
     // browse to the json directory
     String id = getFolderIdByName(source.getChildren(), "json");
-    assertNotNull("Failed to find json directory", id);
+    assertNotNull(id, "Failed to find json directory");
 
     // load the json dir
     Folder folder =
@@ -1578,7 +1571,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(id)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 19);
 
     String fileId = null;
@@ -1593,7 +1586,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
       }
     }
 
-    assertNotNull("Failed to find numbers.json file", fileId);
+    assertNotNull(fileId, "Failed to find numbers.json file");
 
     // load the file
     File file =
@@ -1603,7 +1596,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(fileId)))
                 .buildGet(),
-            new GenericType<File>() {});
+            new GenericType<>() {});
 
     // promote the file (dac/backend/src/test/resources/json/numbers.json)
     Dataset dataset =
@@ -1616,13 +1609,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(fileId)))
                 .buildPost(Entity.json(dataset)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // load the dataset
     dataset =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(dataset.getId())).buildGet(),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // verify listing
     folder =
@@ -1632,7 +1625,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(id)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 19);
 
     // unpromote file
@@ -1651,13 +1644,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(id)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 19);
 
     // promote a folder that contains several csv files
     // (dac/backend/src/test/resources/datasets/folderdataset)
     String folderId = getFolderIdByName(source.getChildren(), "datasets");
-    assertNotNull("Failed to find datasets directory", folderId);
+    assertNotNull(folderId, "Failed to find datasets directory");
 
     Folder dsFolder =
         expectSuccess(
@@ -1666,10 +1659,10 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(folderId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     String folderDatasetId = getFolderIdByName(dsFolder.getChildren(), "folderdataset");
-    assertNotNull("Failed to find folderdataset directory", folderDatasetId);
+    assertNotNull(folderDatasetId, "Failed to find folderdataset directory");
 
     // we want to use the path that the backend gives us so fetch the full folder
     folder =
@@ -1680,7 +1673,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(
                             com.dremio.common.utils.PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     ParquetFileConfig parquetFileConfig = new ParquetFileConfig();
     Dataset.RefreshSettings refreshSettings =
@@ -1704,13 +1697,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(
                             com.dremio.common.utils.PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildPost(Entity.json(dataset)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // load the promoted dataset
     dataset =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(datasetPromoted.getId())).buildGet(),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // Verify the response from POST matches the response from GET
     assertEquals(dataset.getId(), datasetPromoted.getId());
@@ -1749,7 +1742,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Source source =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSource)),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
 
     FakeSource config = (FakeSource) source.getConfig();
 
@@ -1760,12 +1753,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     // verify that saving with the const works
     config.isAwesome = false;
     source.setConfig(config);
-
+    source.setTag(waitForSourceModificationAndGetNewTag(source.getName()));
     source =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(source.getId()))
                 .buildPut(Entity.json(source)),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
     config = (FakeSource) source.getConfig();
 
     assertFalse(config.isAwesome);
@@ -1784,11 +1777,11 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     // create the source
     return expectSuccess(
         getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newSource)),
-        new GenericType<Source>() {});
+        new GenericType<>() {});
   }
 
   @Test
-  public void testHome() throws Exception {
+  public void testHome() {
     ResponseList<CatalogItem> items = getRootEntities(null);
 
     String homeId = null;
@@ -1805,23 +1798,24 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Home home =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(homeId)).buildGet(),
-            new GenericType<Home>() {});
+            new GenericType<>() {});
 
     int size = home.getChildren().size();
 
     // add a folder
-    Folder newFolder = new Folder(null, Arrays.asList(home.getName(), "myFolder"), null, null);
+    Folder newFolder =
+        new Folder(null, Arrays.asList(home.getName(), "myFolder"), null, null, null, null);
     Folder folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(newFolder)),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(newFolder.getPath(), folder.getPath());
 
     // make sure folder shows up under space
     home =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(homeId)).buildGet(),
-            new GenericType<Home>() {});
+            new GenericType<>() {});
     assertEquals(home.getChildren().size(), size + 1);
 
     // make sure that trying to create the folder again fails
@@ -1833,7 +1827,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     // store a VDS in the folder
     Dataset vds =
@@ -1843,13 +1837,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     Dataset newVDS =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(vds)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // folder should have children now
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 1);
 
     // delete vds
@@ -1859,7 +1853,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     folder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(folder.getId())).buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 0);
 
     // delete folder
@@ -1868,12 +1862,12 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     home =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(homeId)).buildGet(),
-            new GenericType<Home>() {});
+            new GenericType<>() {});
     assertEquals(home.getChildren().size(), size);
   }
 
   @Test
-  public void testByPath() throws Exception {
+  public void testByPath() {
     Source createdSource = createSource();
 
     // test getting a source by name
@@ -1882,7 +1876,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             getBuilder(
                     getHttpClient().getCatalogApi().path("by-path").path(createdSource.getName()))
                 .buildGet(),
-            new GenericType<Source>() {});
+            new GenericType<>() {});
     assertEquals(source.getId(), createdSource.getId());
 
     // test getting a folder by path
@@ -1910,22 +1904,22 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testRepromote() throws Exception {
+  public void testRepromote() {
     final Source source = createSource();
 
     // promote a folder that contains several csv files
     // (dac/backend/src/test/resources/datasets/folderdataset)
     final String folderId = getFolderIdByName(source.getChildren(), "datasets");
-    assertNotNull("Failed to find datasets directory", folderId);
+    assertNotNull(folderId, "Failed to find datasets directory");
 
     Folder dsFolder =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(PathUtils.encodeURIComponent(folderId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     final String folderDatasetId = getFolderIdByName(dsFolder.getChildren(), "folderdataset");
-    assertNotNull("Failed to find folderdataset directory", folderDatasetId);
+    assertNotNull(folderDatasetId, "Failed to find folderdataset directory");
 
     // we want to use the path that the backend gives us so fetch the full folder
     Folder folder =
@@ -1935,7 +1929,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     final ParquetFileConfig parquetFileConfig = new ParquetFileConfig();
     Dataset dataset = createPDS(folder.getPath(), parquetFileConfig);
@@ -1947,13 +1941,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildPost(Entity.json(dataset)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // load the promoted dataset
     dataset =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(dataset.getId())).buildGet(),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // unpromote the folder
     expectSuccess(getBuilder(getHttpClient().getCatalogApi().path(dataset.getId())).buildDelete());
@@ -1972,14 +1966,14 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildPost(Entity.json(dataset)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // unpromote the folder
     expectSuccess(getBuilder(getHttpClient().getCatalogApi().path(dataset.getId())).buildDelete());
   }
 
   @Test
-  public void testErrors() throws Exception {
+  public void testErrors() {
     // test non-existent id
     expectStatus(
         Response.Status.NOT_FOUND,
@@ -1991,7 +1985,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         getBuilder(
                 getHttpClient()
                     .getCatalogApi()
-                    .path(CatalogServiceHelper.generateInternalId(Arrays.asList("bad-id"))))
+                    .path(CatalogServiceHelper.generateInternalId(List.of("bad-id"))))
             .buildGet());
 
     // test non-existent path
@@ -2002,7 +1996,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   }
 
   @Test
-  public void testExcludeChildren() throws Exception {
+  public void testExcludeChildren() {
     Space space = createSpace("children test");
 
     createVDS(Arrays.asList(space.getName(), "vds1"), "select * from sys.version");
@@ -2012,7 +2006,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path("by-path").path(space.getName()))
                 .buildGet(),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     assertEquals(2, result.getChildren().size());
 
     result =
@@ -2024,13 +2018,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(space.getName())
                         .queryParam("exclude", "children"))
                 .buildGet(),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     assertEquals(0, result.getChildren().size());
 
     result =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(space.getId())).buildGet(),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     assertEquals(2, result.getChildren().size());
 
     result =
@@ -2041,17 +2035,17 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(space.getId())
                         .queryParam("exclude", "children"))
                 .buildGet(),
-            new GenericType<Space>() {});
+            new GenericType<>() {});
     assertEquals(0, result.getChildren().size());
   }
 
   @Test
-  public void testPromotingReflectionSettings() throws Exception {
+  public void testPromotingReflectionSettings() {
     Source source = createSource();
 
     // browse to the json directory
     String id = getFolderIdByName(source.getChildren(), "json");
-    assertNotNull("Failed to find json directory", id);
+    assertNotNull(id, "Failed to find json directory");
 
     // load the json dir
     Folder folder =
@@ -2061,13 +2055,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(id)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
     assertEquals(folder.getChildren().size(), 19);
 
     // promote a folder that contains several csv files
     // (dac/backend/src/test/resources/datasets/folderdataset)
     String folderId = getFolderIdByName(source.getChildren(), "datasets");
-    assertNotNull("Failed to find datasets directory", folderId);
+    assertNotNull(folderId, "Failed to find datasets directory");
 
     Folder dsFolder =
         expectSuccess(
@@ -2076,10 +2070,10 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .getCatalogApi()
                         .path(com.dremio.common.utils.PathUtils.encodeURIComponent(folderId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     String folderDatasetId = getFolderIdByName(dsFolder.getChildren(), "folderdataset");
-    assertNotNull("Failed to find folderdataset directory", folderDatasetId);
+    assertNotNull(folderDatasetId, "Failed to find folderdataset directory");
 
     // we want to use the path that the backend gives us so fetch the full folder
     folder =
@@ -2090,7 +2084,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(
                             com.dremio.common.utils.PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildGet(),
-            new GenericType<Folder>() {});
+            new GenericType<>() {});
 
     ParquetFileConfig parquetFileConfig = new ParquetFileConfig();
     Dataset.RefreshSettings refreshSettings =
@@ -2115,13 +2109,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                         .path(
                             com.dremio.common.utils.PathUtils.encodeURIComponent(folderDatasetId)))
                 .buildPost(Entity.json(dataset)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
 
     // load the promoted dataset
     dataset =
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(dataset.getId())).buildGet(),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
     assertEquals(RefreshMethod.INCREMENTAL, dataset.getAccelerationRefreshPolicy().getMethod());
     assertFalse(dataset.getAccelerationRefreshPolicy().getNeverRefresh());
     assertFalse(dataset.getAccelerationRefreshPolicy().getNeverExpire());
@@ -2143,7 +2137,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         expectSuccess(
             getBuilder(getHttpClient().getCatalogApi().path(dataset.getId()))
                 .buildPut(Entity.json(newPDS)),
-            new GenericType<Dataset>() {});
+            new GenericType<>() {});
     assertEquals(RefreshMethod.FULL, dataset.getAccelerationRefreshPolicy().getMethod());
     assertTrue(dataset.getAccelerationRefreshPolicy().getNeverRefresh());
     assertTrue(dataset.getAccelerationRefreshPolicy().getNeverExpire());
@@ -2255,6 +2249,8 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                           null,
                           asList(NESSIE_SOURCE_NAME, String.format("folder%03d", i)),
                           null,
+                          null,
+                          null,
                           null))));
     }
 
@@ -2314,7 +2310,8 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
           getBuilder(getHttpClient().getCatalogApi())
               .buildPost(
                   Entity.json(
-                      new Folder(null, asList(NESSIE_SOURCE_NAME, folderName), null, null))));
+                      new Folder(
+                          null, asList(NESSIE_SOURCE_NAME, folderName), null, null, null, null))));
       allExpectedChildrenPaths.add(String.format("%s.%s", NESSIE_SOURCE_NAME, folderName));
     }
 
@@ -2341,6 +2338,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
           target = target.queryParam("pageToken", pageToken);
         }
         Source source = expectSuccess(getBuilder(target).buildGet(), Source.class);
+        assertEquals(source.getSourceChangeState(), SourceChangeStateUtils.NONE);
         assertThat(source.getChildren().size()).isLessThanOrEqualTo(maxChildren);
 
         pageToken = source.getNextPageToken();
@@ -2356,6 +2354,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         target = target.path("by-path").path(NESSIE_SOURCE_NAME);
       }
       Source source = expectSuccess(getBuilder(target).buildGet(), Source.class);
+      assertEquals(source.getSourceChangeState(), SourceChangeStateUtils.NONE);
       source.getChildren().forEach(c -> allChildrenPaths.add(String.join(".", c.getPath())));
     }
 
@@ -2377,7 +2376,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
             .getSource()
             .getId()
             .getId();
-    entityPaths.add(asList(NESSIE_SOURCE_NAME));
+    entityPaths.add(List.of(NESSIE_SOURCE_NAME));
     entityIds.add(sourceId);
     int numFolders = 5;
     for (int i = 0; i < numFolders; i++) {
@@ -2387,7 +2386,13 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
               getBuilder(getHttpClient().getCatalogApi())
                   .buildPost(
                       Entity.json(
-                          new Folder(null, asList(NESSIE_SOURCE_NAME, folderName), null, null))),
+                          new Folder(
+                              null,
+                              asList(NESSIE_SOURCE_NAME, folderName),
+                              null,
+                              null,
+                              null,
+                              null))),
               new GenericType<>() {});
       entityPaths.add(asList(NESSIE_SOURCE_NAME, folderName));
       entityIds.add(folder.getId());
@@ -2395,7 +2400,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
 
     // Create space.
     Space space = createSpace("space");
-    entityPaths.add(asList(space.getName()));
+    entityPaths.add(Collections.singletonList(space.getName()));
     entityIds.add(space.getId());
 
     // Add invalid entity id.
@@ -2439,6 +2444,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
     assertInstanceOf(Source.class, responseListByIds.getData().get(0));
     Source source = (Source) responseListByIds.getData().get(0);
     assertThat(source.getChildren()).hasSize(maxChildren);
+    assertEquals(source.getSourceChangeState(), SourceChangeStateUtils.NONE);
     assertThat(
             responseListByPaths.getData().stream()
                 .map(CatalogEntity::getId)
@@ -2446,6 +2452,9 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         .isEqualTo(entityIds.subList(0, entityIds.size() - 1));
     assertThat(responseListByPaths.getErrors().get(0).getErrorMessage())
         .startsWith(String.format("'%s'", invalidPath));
+    assertEquals(
+        ((Source) responseListByIds.getData().get(0)).getSourceChangeState(),
+        SourceChangeStateUtils.NONE);
   }
 
   @Test
@@ -2489,7 +2498,8 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         null,
         null,
         format,
-        null);
+        null,
+        false);
   }
 
   private Dataset createPDS(Dataset dataset, Dataset.RefreshSettings refreshSettings) {
@@ -2497,14 +2507,15 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         dataset.getId(),
         dataset.getType(),
         dataset.getPath(),
-        ImmutableList.of(),
+        null,
         dataset.getCreatedAt(),
         dataset.getTag(),
         refreshSettings,
         dataset.getSql(),
         dataset.getSqlContext(),
         dataset.getFormat(),
-        dataset.getApproximateStatisticsAllowed());
+        dataset.getApproximateStatisticsAllowed(),
+        false);
   }
 
   public static Dataset getVDSConfig(List<String> path, String sql) {
@@ -2519,18 +2530,28 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
         sql,
         null,
         null,
-        null);
+        null,
+        false);
   }
 
   private Dataset createVDS(List<String> path, String sql) {
     Dataset vds = getVDSConfig(path, sql);
-    return expectSuccess(
-        getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(vds)),
-        new GenericType<Dataset>() {});
+
+    long start = System.currentTimeMillis();
+    Dataset created =
+        expectSuccess(
+            getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(vds)),
+            new GenericType<>() {});
+    long end = System.currentTimeMillis();
+    assertNotEquals(vds.getCreatedAt(), created.getCreatedAt());
+    assertTrue(
+        created.getCreatedAt().longValue() > start && created.getCreatedAt().longValue() < end);
+
+    return created;
   }
 
   private Folder getFolderConfig(List<String> path) {
-    return new Folder(null, path, null, null);
+    return new Folder(null, path, null, null, null, null);
   }
 
   private Folder createFolder(List<String> path) {
@@ -2540,6 +2561,6 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
   private Folder createFolder(Folder folder) {
     return expectSuccess(
         getBuilder(getHttpClient().getCatalogApi()).buildPost(Entity.json(folder)),
-        new GenericType<Folder>() {});
+        new GenericType<>() {});
   }
 }

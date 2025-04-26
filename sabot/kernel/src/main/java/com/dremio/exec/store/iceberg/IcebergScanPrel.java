@@ -20,9 +20,8 @@ import static com.dremio.exec.ExecConstants.ENABLE_ICEBERG_SPEC_EVOL_TRANFORMATI
 import static com.dremio.exec.store.RecordReader.COL_IDS;
 import static com.dremio.exec.store.RecordReader.SPLIT_IDENTITY;
 import static com.dremio.exec.store.RecordReader.SPLIT_INFORMATION;
+import static com.dremio.exec.store.SystemSchemas.SYSTEM_COLUMNS;
 import static com.dremio.exec.store.iceberg.IcebergUtils.getUsedIndices;
-import static com.dremio.exec.util.ColumnUtils.FILE_PATH_COLUMN_NAME;
-import static com.dremio.exec.util.ColumnUtils.ROW_INDEX_COLUMN_NAME;
 
 import com.dremio.common.expression.FieldReference;
 import com.dremio.common.expression.SchemaPath;
@@ -53,6 +52,7 @@ import com.dremio.exec.store.MinMaxRewriter;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.ScanFilter;
 import com.dremio.exec.store.SystemSchemas;
+import com.dremio.exec.store.SystemSchemas.SystemColumn;
 import com.dremio.exec.store.TableMetadata;
 import com.dremio.exec.store.dfs.FilterableScan;
 import com.dremio.exec.store.iceberg.model.ImmutableManifestScanOptions;
@@ -75,7 +75,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.arrow.vector.types.Types;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
@@ -90,6 +89,7 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
+import org.apache.commons.collections4.CollectionUtils;
 import org.apache.iceberg.expressions.Expression;
 
 /** Iceberg dataset prel */
@@ -216,6 +216,31 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
     this.partitionValuesEnabled = partitionValuesEnabled;
   }
 
+  public IcebergScanPrel withParititionValuesEnabled() {
+    return new IcebergScanPrel(
+        getCluster(),
+        traitSet,
+        getTable(),
+        pluginId,
+        tableMetadata,
+        getProjectedColumns(),
+        observedRowcountAdjustment,
+        hints,
+        this.filter,
+        this.rowGroupFilter,
+        this.arrowCachingEnabled,
+        this.pruneCondition,
+        context,
+        isConvertedIcebergDataset,
+        survivingRowCount,
+        survivingFileCount,
+        canUsePartitionStats,
+        manifestScanFilters,
+        snapshotDiffContext,
+        true,
+        getPartitionStatsStatus());
+  }
+
   @Override
   public RelNode copy(RelTraitSet traitSet, List<RelNode> inputs) {
     return new IcebergScanPrel(
@@ -238,6 +263,7 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
         canUsePartitionStats,
         manifestScanFilters,
         snapshotDiffContext,
+        partitionValuesEnabled,
         getPartitionStatsStatus());
   }
 
@@ -464,6 +490,18 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
         manifestFileReaderSchema =
             manifestFileReaderSchema.addColumn(SystemSchemas.ICEBERG_METADATA_FIELD);
       }
+
+      List<String> columnsWithLowerAndUpperBounds =
+          manifestScanOptions.getColumnListWithLowerAndUpperBounds();
+      if (manifestScanOptions.getManifestContentType() == ManifestContentType.DATA
+          && columnsWithLowerAndUpperBounds.size() > 0) {
+        manifestFileReaderSchema =
+            getSchemaWithMinMaxColumns(
+                columnsWithLowerAndUpperBounds.stream()
+                    .map(f -> FieldReference.getWithQuotedRef(f))
+                    .collect(Collectors.toList()),
+                manifestFileReaderSchema);
+      }
     }
 
     manifestFileReaderSchema
@@ -520,7 +558,7 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
     ManifestScanOptions manifestScanOptions =
         new ImmutableManifestScanOptions.Builder().setIncludesSplitGen(true).build();
     RelNode output = buildManifestScan(survivingFileCount, manifestScanOptions);
-    return buildDataFileScan(output, false);
+    return buildDataFileScan(output, null);
   }
 
   public Prel buildManifestScan(
@@ -705,13 +743,15 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
     return input2;
   }
 
-  public Prel buildDataFileScan(RelNode input2, boolean withFilePathRowIndexFields) {
+  public Prel buildDataFileScan(RelNode input2, List<SystemColumn> additionalSystemColumns) {
     return buildDataFileScanWithImplicitPartitionCols(
-        input2, Collections.EMPTY_LIST, withFilePathRowIndexFields);
+        input2, Collections.emptyList(), additionalSystemColumns);
   }
 
   public Prel buildDataFileScanWithImplicitPartitionCols(
-      RelNode input2, List<String> implicitPartitionCols, boolean withFilePathRowIndexFields) {
+      RelNode input2,
+      List<String> implicitPartitionCols,
+      List<SystemColumn> additionalSystemColumns) {
     DistributionTrait.DistributionField distributionField =
         new DistributionTrait.DistributionField(0);
     DistributionTrait distributionTrait =
@@ -731,11 +771,13 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
             TableFunctionUtil.getHashExchangeTableFunctionCreator(tableMetadata, false));
 
     return buildDataFileScanTableFunction(
-        parquetSplitsExchange, implicitPartitionCols, withFilePathRowIndexFields);
+        parquetSplitsExchange, implicitPartitionCols, additionalSystemColumns);
   }
 
   public Prel buildDataFileScanTableFunction(
-      RelNode input, List<String> implicitPartitionCols, boolean withFilePathRowIndexFields) {
+      RelNode input,
+      List<String> implicitPartitionCols,
+      List<SystemColumn> additionalSystemColumns) {
     boolean limitDataScanParallelism =
         context.getPlannerSettings().getOptions().getOption(DATA_SCAN_PARALLELISM);
 
@@ -743,11 +785,14 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
     List<SchemaPath> dataScanProjectedColumns = getProjectedColumns();
     RelDataType dataScanRowType = getRowType();
     // add file_path and row_index system columns to the table scan
-    if (withFilePathRowIndexFields && shouldAddFilePathRowIndexFields(tableMetadata)) {
-      dataScanTableMetadata = getFilePathRowIndexExtendedTableMetadata(tableMetadata);
+    if (CollectionUtils.isNotEmpty(additionalSystemColumns)
+        && shouldAddSystemColumns(tableMetadata, additionalSystemColumns)) {
+      dataScanTableMetadata =
+          getExtendedTableMetadataWithSystemColumns(tableMetadata, additionalSystemColumns);
       dataScanProjectedColumns = new ArrayList<>(getProjectedColumns());
-      dataScanProjectedColumns.add(new SchemaPath(FILE_PATH_COLUMN_NAME));
-      dataScanProjectedColumns.add(new SchemaPath(ROW_INDEX_COLUMN_NAME));
+      for (SystemColumn systemColumn : additionalSystemColumns) {
+        dataScanProjectedColumns.add(new SchemaPath(systemColumn.getName()));
+      }
       dataScanRowType =
           getRowTypeFromProjectedColumns(
               dataScanProjectedColumns, dataScanTableMetadata.getSchema(), getCluster());
@@ -777,15 +822,17 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
         getSurvivingRowCount());
   }
 
-  private boolean shouldAddFilePathRowIndexFields(TableMetadata tableMetadata) {
+  private boolean shouldAddSystemColumns(
+      TableMetadata tableMetadata, List<SystemColumn> systemColumns) {
+    if (CollectionUtils.isEmpty(systemColumns)) {
+      return false;
+    }
+
     BatchSchema schema = tableMetadata.getSchema();
+    Set<String> systemColumnNames =
+        systemColumns.stream().map(SystemColumn::getName).collect(Collectors.toSet());
     long existingColumns =
-        schema.getFields().stream()
-            .filter(
-                f ->
-                    f.getName().equalsIgnoreCase(FILE_PATH_COLUMN_NAME)
-                        || f.getName().equalsIgnoreCase(ROW_INDEX_COLUMN_NAME))
-            .count();
+        schema.getFields().stream().filter(f -> systemColumnNames.contains(f.getName())).count();
 
     if (existingColumns > 0) {
       return false;
@@ -794,17 +841,21 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
     return true;
   }
 
-  private static TableMetadata getFilePathRowIndexExtendedTableMetadata(TableMetadata dataset) {
+  private static TableMetadata getExtendedTableMetadataWithSystemColumns(
+      TableMetadata dataset, final List<SystemColumn> systemColumns) {
+    if (CollectionUtils.isEmpty(systemColumns)) {
+      return dataset;
+    }
     return new DelegatingTableMetadata(dataset) {
       @Override
       public BatchSchema getSchema() {
         final SchemaBuilder schemaWithSystemColumns = BatchSchema.newBuilder();
         schemaWithSystemColumns.addFields(dataset.getSchema().getFields());
-        schemaWithSystemColumns.addField(
-            Field.nullablePrimitive(FILE_PATH_COLUMN_NAME, ArrowType.PrimitiveType.Utf8.INSTANCE));
-        schemaWithSystemColumns.addField(
-            Field.nullablePrimitive(
-                ROW_INDEX_COLUMN_NAME, new ArrowType.PrimitiveType.Int(64, true)));
+        systemColumns.stream()
+            .forEach(
+                column ->
+                    schemaWithSystemColumns.addField(
+                        Field.nullablePrimitive(column.getName(), column.getArrowType())));
         return schemaWithSystemColumns.build();
       }
     };
@@ -979,6 +1030,41 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
             .map(f -> new Field(f.getName() + "_val", f.getFieldType(), f.getChildren()))
             .collect(Collectors.toList());
     return schema.cloneWithFields(fields);
+  }
+
+  private BatchSchema getSchemaWithMinMaxColumns(List<SchemaPath> columns, BatchSchema schema) {
+    if (columns == null || columns.isEmpty()) {
+      return schema;
+    }
+
+    // system columns with min/max
+    List<Field> systemFields = new ArrayList<>();
+    List<SchemaPath> userColumns = new ArrayList<>();
+    for (SchemaPath column : columns) {
+      SystemColumn systemColumn =
+          SYSTEM_COLUMNS.get(column.getLastSegment().getNameSegment().getPath());
+      // system column
+      if (systemColumn != null) {
+        systemFields.add(Field.nullable(systemColumn.getName(), systemColumn.getArrowType()));
+      } else {
+        userColumns.add(column);
+      }
+    }
+
+    // combined fields: user + system
+    List<Field> fields =
+        new ArrayList<>(tableMetadata.getSchema().maskAndReorder(userColumns).getFields());
+    fields.addAll(systemFields);
+
+    List<Field> fieldsWithMinMax =
+        fields.stream()
+            .flatMap(
+                f ->
+                    Stream.of(
+                        new Field(f.getName() + "_MIN", f.getFieldType(), f.getChildren()),
+                        new Field(f.getName() + "_MAX", f.getFieldType(), f.getChildren())))
+            .collect(Collectors.toList());
+    return schema.cloneWithFields(fieldsWithMinMax);
   }
 
   public OptimizerRulesContext getContext() {

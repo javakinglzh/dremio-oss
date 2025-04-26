@@ -23,6 +23,7 @@ import org.junit.rules.TestRule;
 import org.junit.runner.Description;
 import org.junit.runners.model.Statement;
 
+// CHECKSTYLE:OFF JavadocType
 /**
  * A {@link TestRule} to repeat a test for a specified number of times. If "count" <= 0, the test is
  * not run. For example,
@@ -35,6 +36,7 @@ import org.junit.runners.model.Statement;
  * }
  * }</pre>
  */
+// CHECKSTYLE:ON JavadocType
 public class RepeatTestRule implements TestRule {
 
   @Retention(RetentionPolicy.RUNTIME)

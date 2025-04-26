@@ -22,7 +22,7 @@ import {
   JOB_COLUMNS,
   //@ts-ignore
 } from "dremio-ui-common/sonar/components/JobsTable/jobsPageTableColumns.js";
-import { GenericFilters } from "./components/JobsFilters/utils";
+import { GenericFilters } from "./components/JobsPageFilters/utils";
 
 type Query = {
   filters: any;

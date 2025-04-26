@@ -36,8 +36,8 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.connector.metadata.DatasetSplit;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.QueryOptionManager;
 import com.dremio.exec.store.SampleMutator;
 import com.dremio.exec.store.file.proto.FileProtobuf;
@@ -145,27 +145,33 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
   @Override
   public DeltaLogSnapshot parseMetadata(
       Path rootFolder,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       FileSystem fs,
       List<FileAttributes> fileAttributesList,
       long version)
       throws IOException {
     maxFooterLen =
-        context.getOptionManager().getOption(ExecConstants.PARQUET_MAX_FOOTER_LEN_VALIDATOR);
+        pluginSabotContext
+            .getOptionManager()
+            .getOption(ExecConstants.PARQUET_MAX_FOOTER_LEN_VALIDATOR);
     estimationFactor =
-        context.getOptionManager().getOption(ExecConstants.DELTALAKE_ROWCOUNT_ESTIMATION_FACTOR);
+        pluginSabotContext
+            .getOptionManager()
+            .getOption(ExecConstants.DELTALAKE_ROWCOUNT_ESTIMATION_FACTOR);
     numAddedFilesReadLimit =
-        context
+        pluginSabotContext
             .getOptionManager()
             .getOption(ExecConstants.DELTALAKE_MAX_ADDED_FILE_ESTIMATION_LIMIT);
     final boolean isFullRowCountEnabled =
-        DeltaLogReaderUtils.isFullRowCountEnabled(context.getOptionManager());
+        DeltaLogReaderUtils.isFullRowCountEnabled(pluginSabotContext.getOptionManager());
     final boolean isMapDataTypeEnabled =
-        context.getOptionManager().getOption(ExecConstants.ENABLE_MAP_DATA_TYPE);
+        pluginSabotContext.getOptionManager().getOption(ExecConstants.ENABLE_MAP_DATA_TYPE);
 
     try (BufferAllocator allocator =
-            context.getAllocator().newChildAllocator(BUFFER_ALLOCATOR_NAME, 0, Long.MAX_VALUE);
-        OperatorContextImpl operatorContext = createOperatorContext(context, allocator);
+            pluginSabotContext
+                .getAllocator()
+                .newChildAllocator(BUFFER_ALLOCATOR_NAME, 0, Long.MAX_VALUE);
+        OperatorContextImpl operatorContext = createOperatorContext(pluginSabotContext, allocator);
         SampleMutator mutator = new SampleMutator(allocator)) {
       fileAttributesList.sort(Comparator.comparing(o -> o.getPath().toString()));
 
@@ -381,7 +387,7 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
   }
 
   private OperatorContextImpl createOperatorContext(
-      SabotContext context, BufferAllocator allocator) {
+      PluginSabotContext context, BufferAllocator allocator) {
     final OperatorStats stats = new OperatorStats(new OpProfileDef(0, 0, 0), allocator);
     final QueryOptionManager queryOptionManager =
         new QueryOptionManager(context.getOptionValidatorListing());

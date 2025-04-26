@@ -15,7 +15,6 @@
  */
 package com.dremio.dac.explore;
 
-import static com.dremio.common.util.DateTimes.toMillis;
 import static com.dremio.common.utils.SqlUtils.quoteIdentifier;
 import static com.dremio.common.utils.SqlUtils.stringLiteral;
 import static com.dremio.dac.proto.model.dataset.DataType.FLOAT;
@@ -24,6 +23,7 @@ import static com.dremio.dac.proto.model.dataset.DataType.TEXT;
 import static java.lang.String.format;
 
 import com.dremio.common.types.TypeProtos.MinorType;
+import com.dremio.common.util.DateTimes;
 import com.dremio.dac.explore.model.Column;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.HistogramValue;
@@ -40,6 +40,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.collect.FluentIterable;
+import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -48,12 +50,10 @@ import java.util.Map;
 import java.util.Set;
 import javax.annotation.Nullable;
 import org.apache.arrow.memory.BufferAllocator;
-import org.joda.time.DateTimeZone;
-import org.joda.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-/** Utility class used to generate historgrams. */
+/** Utility class used to generate histograms. */
 class HistogramGenerator {
 
   private static final Logger logger = LoggerFactory.getLogger(HistogramGenerator.class);
@@ -102,8 +102,8 @@ class HistogramGenerator {
     final String colName = selection.getColName();
     final int myBuckets = BUCKETS;
 
-    // run preliminary job to get MIN, MAX, AVG, STDEV for colName to be able to do
-    // correct rounding and calculate ranges
+    // run preliminary job to get MIN, MAX, AVG, STDEV for colName to be able to
+    // do correct rounding and calculate ranges
     StringBuilder prelimValuesQueryBuilder = new StringBuilder();
     final String colNameClean = quoteIdentifier(colName);
     int offset = 0;
@@ -177,7 +177,7 @@ class HistogramGenerator {
 
             LocalDateTime max = (LocalDateTime) prelimData.extractValue("colMax", 0);
 
-            long duration = toMillis(max) - toMillis(min);
+            long duration = DateTimes.toMillis(max) - DateTimes.toMillis(min);
             range = duration / 1000L; // get seconds
             range /= myBuckets;
             range = Math.round(range);
@@ -198,7 +198,8 @@ class HistogramGenerator {
 
             /* Example of the query
             select count(*), date_trunc('DAY', B)
-            from yellow_tripdata_2009_01_100000_conv_full group by date_trunc('DAY', B)
+            from yellow_tripdata_2009_01_100000_conv_full group by
+            date_trunc('DAY', B)
             */
 
             hgQueryBuilder.setLength(0);
@@ -246,9 +247,8 @@ class HistogramGenerator {
           double value = lowerBoundary;
 
           double boundaries =
-              Math.abs(
-                  upperBoundary
-                      - lowerBoundary); // make sure it is > 0, though it should be in any case
+              Math.abs(upperBoundary - lowerBoundary); // make sure it is > 0, though it
+          // should be in any case
           if (boundaries == 0.0d) {
             ranges.add(value);
           }
@@ -270,7 +270,8 @@ class HistogramGenerator {
               value += range;
             }
             ranges.add(upperBoundary);
-            // adding one more range to avoid boundary conditions for exact numbers
+            // adding one more range to avoid boundary conditions for exact
+            // numbers
             ranges.add(upperBoundary + range);
           }
 
@@ -283,8 +284,8 @@ class HistogramGenerator {
                     colNameClean, range, range, projectedColName));
             hgQueryBuilder.append(
                 format("FROM %s AS dremio_values_table\n", datasetPreviewJobResultsTable));
-            // hgQueryBuilder.append(format(" WHERE %s < %s AND %s > %s\n", colNameClean,
-            // upperBoundary, colNameClean, lowerBoundary));
+            // hgQueryBuilder.append(format(" WHERE %s < %s AND %s > %s\n",
+            // colNameClean, upperBoundary, colNameClean, lowerBoundary));
             hgQueryBuilder.append(
                 format(
                     " GROUP BY ROUND(CAST(dremio_values_table.%s AS DOUBLE)/%f)*%f\n",
@@ -367,7 +368,7 @@ class HistogramGenerator {
                 || colType == DataType.DATE
                 || colType == DataType.DATETIME) {
               LocalDateTime dataValue = (LocalDateTime) data.extractValue(projectedColName, i);
-              while (toMillis(dataValue) >= (Long) ranges.get(rangeCount)) {
+              while (DateTimes.toMillis(dataValue) >= (Long) ranges.get(rangeCount)) {
                 valueRange =
                     new HistogramValue.ValueRange(
                         ranges.get(rangeCount - 1), ranges.get(rangeCount));
@@ -380,7 +381,7 @@ class HistogramGenerator {
                         valueRange));
                 rangeCount++;
               }
-              dataValueStr = Long.toString(toMillis(dataValue));
+              dataValueStr = Long.toString(DateTimes.toMillis(dataValue));
             }
             valueRange =
                 new HistogramValue.ValueRange(ranges.get(rangeCount - 1), ranges.get(rangeCount));
@@ -405,7 +406,8 @@ class HistogramGenerator {
       }
     }
 
-    // Set the percent values once all rows in dataset preview output are examined.
+    // Set the percent values once all rows in dataset preview output are
+    // examined.
     for (HistogramValue hgValue : values) {
       hgValue.setPercent((hgValue.getCount() * 100d) / total);
     }
@@ -416,45 +418,45 @@ class HistogramGenerator {
   @VisibleForTesting
   static void produceRanges(
       List<Number> ranges, LocalDateTime min, LocalDateTime max, TruncEvalEnum truncateTo) {
-    long timeValue = toMillis(roundTime(min, truncateTo, true));
-    long maxTimeValue = toMillis(roundTime(max, truncateTo, false));
+    long timeValue = DateTimes.toMillis(roundTime(min, truncateTo, true));
+    long maxTimeValue = DateTimes.toMillis(roundTime(max, truncateTo, false));
     ranges.add(timeValue);
     // adding one more range to alleviate boundary conditions
     while (timeValue <= maxTimeValue) {
-      LocalDateTime tmpValue = new LocalDateTime(timeValue, DateTimeZone.UTC);
+      LocalDateTime tmpValue = DateTimes.parseMillis(timeValue);
       switch (truncateTo) {
         case SECOND:
-          timeValue = toMillis(tmpValue.plusSeconds(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusSeconds(1));
           break;
         case MINUTE:
-          timeValue = toMillis(tmpValue.plusMinutes(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusMinutes(1));
           break;
         case HOUR:
-          timeValue = toMillis(tmpValue.plusHours(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusHours(1));
           break;
         case DAY:
-          timeValue = toMillis(tmpValue.plusDays(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusDays(1));
           break;
         case WEEK:
-          timeValue = toMillis(tmpValue.plusWeeks(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusWeeks(1));
           break;
         case MONTH:
-          timeValue = toMillis(tmpValue.plusMonths(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusMonths(1));
           break;
         case QUARTER:
-          timeValue = toMillis(tmpValue.plusMonths(3));
+          timeValue = DateTimes.toMillis(tmpValue.plusMonths(3));
           break;
         case YEAR:
-          timeValue = toMillis(tmpValue.plusYears(1));
+          timeValue = DateTimes.toMillis(tmpValue.plusYears(1));
           break;
         case DECADE:
-          timeValue = toMillis(tmpValue.plusYears(10));
+          timeValue = DateTimes.toMillis(tmpValue.plusYears(10));
           break;
         case CENTURY:
-          timeValue = toMillis(tmpValue.plusYears(100));
+          timeValue = DateTimes.toMillis(tmpValue.plusYears(100));
           break;
         case MILLENNIUM:
-          timeValue = toMillis(tmpValue.plusYears(1000));
+          timeValue = DateTimes.toMillis(tmpValue.plusYears(1000));
           break;
         default:
           break;
@@ -471,100 +473,83 @@ class HistogramGenerator {
 
   @VisibleForTesting
   protected static LocalDateTime roundTime(
-      LocalDateTime tmpValue, TruncEvalEnum trucateTo, boolean isRoundDown) {
-    switch (trucateTo) {
+      LocalDateTime tmpValue, TruncEvalEnum truncateTo, boolean isRoundDown) {
+    if (isRoundDown) {
+      return roundDown(tmpValue, truncateTo);
+    } else {
+      return roundUp(tmpValue, truncateTo);
+    }
+  }
+
+  private static LocalDateTime roundDown(LocalDateTime dateTime, TruncEvalEnum truncateTo) {
+    switch (truncateTo) {
       case SECOND:
-        if (isRoundDown) {
-          return tmpValue.secondOfMinute().roundFloorCopy();
-        } else {
-          return tmpValue.secondOfMinute().roundCeilingCopy();
-        }
+        return dateTime.truncatedTo(ChronoUnit.SECONDS);
       case MINUTE:
-        if (isRoundDown) {
-          return tmpValue.minuteOfHour().roundFloorCopy();
-        } else {
-          return tmpValue.minuteOfHour().roundCeilingCopy();
-        }
+        return dateTime.truncatedTo(ChronoUnit.MINUTES);
       case HOUR:
-        if (isRoundDown) {
-          return tmpValue.hourOfDay().roundFloorCopy();
-        } else {
-          return tmpValue.hourOfDay().roundCeilingCopy();
-        }
+        return dateTime.truncatedTo(ChronoUnit.HOURS);
       case DAY:
-        if (isRoundDown) {
-          return tmpValue.dayOfMonth().roundFloorCopy();
-        } else {
-          return tmpValue.dayOfMonth().roundCeilingCopy();
-        }
+        return dateTime.truncatedTo(ChronoUnit.DAYS);
       case WEEK:
-        if (isRoundDown) {
-          return tmpValue.weekOfWeekyear().roundFloorCopy();
-        } else {
-          return tmpValue.weekOfWeekyear().roundCeilingCopy();
-        }
+        int dayOfWeek = dateTime.getDayOfWeek().getValue(); // 1 (Monday) to 7 (Sunday)
+        return dateTime.truncatedTo(ChronoUnit.DAYS).minusDays(dayOfWeek - 1);
       case MONTH:
-        if (isRoundDown) {
-          return tmpValue.monthOfYear().roundFloorCopy();
-        } else {
-          return tmpValue.monthOfYear().roundCeilingCopy();
-        }
+        return dateTime.withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
       case QUARTER:
-        if (isRoundDown) {
-          LocalDateTime roundeddown = tmpValue.monthOfYear().roundFloorCopy();
-          int month = roundeddown.getMonthOfYear();
-          int quarter = (month - 1) % 3;
-          return roundeddown.minusMonths(quarter);
-        } else {
-          LocalDateTime roundedUp = tmpValue.monthOfYear().roundCeilingCopy();
-          int month = roundedUp.getMonthOfYear();
-          int quarter = 3 - (month - 1) % 3;
-          return roundedUp.plusMonths(quarter);
-        }
+        int month = dateTime.getMonthValue();
+        int startMonth = ((month - 1) / 3) * 3 + 1;
+        return dateTime.withMonth(startMonth).withDayOfMonth(1).truncatedTo(ChronoUnit.DAYS);
       case YEAR:
-        if (isRoundDown) {
-          return tmpValue.year().roundFloorCopy();
-        } else {
-          return tmpValue.year().roundCeilingCopy();
-        }
+        return dateTime.withDayOfYear(1).truncatedTo(ChronoUnit.DAYS);
       case DECADE:
-        if (isRoundDown) {
-          LocalDateTime roundeddown = tmpValue.year().roundFloorCopy();
-          int year = roundeddown.getYear();
-          int roundedDownYear = year % 10;
-          return roundeddown.minusYears(roundedDownYear);
-        } else {
-          LocalDateTime roundedUp = tmpValue.year().roundCeilingCopy();
-          int year = roundedUp.getYear();
-          int roundedUpYear = 10 - year % 10;
-          return roundedUp.plusYears(roundedUpYear);
-        }
+        return roundDownToDays(dateTime, 10);
       case CENTURY:
-        if (isRoundDown) {
-          LocalDateTime roundeddown = tmpValue.year().roundFloorCopy();
-          int year = roundeddown.getYear();
-          int roundedDownYear = year % 100;
-          return roundeddown.minusYears(roundedDownYear);
-        } else {
-          LocalDateTime roundedUp = tmpValue.year().roundCeilingCopy();
-          int year = roundedUp.getYear();
-          int roundedUpYear = 100 - year % 100;
-          return roundedUp.plusYears(roundedUpYear);
-        }
+        return roundDownToDays(dateTime, 100);
       case MILLENNIUM:
-        if (isRoundDown) {
-          LocalDateTime roundeddown = tmpValue.year().roundFloorCopy();
-          int year = roundeddown.getYear();
-          int roundedDownYear = year % 1000;
-          return roundeddown.minusYears(roundedDownYear);
-        } else {
-          LocalDateTime roundedUp = tmpValue.year().roundCeilingCopy();
-          int year = roundedUp.getYear();
-          int roundedUpYear = 1000 - year % 1000;
-          return roundedUp.plusYears(roundedUpYear);
-        }
+        return roundDownToDays(dateTime, 1000);
       default:
-        return tmpValue;
+        return dateTime;
+    }
+  }
+
+  private static LocalDateTime roundDownToDays(LocalDateTime dateTime, int unitSizeInYears) {
+    int year = dateTime.getYear();
+    int startYear = (year / unitSizeInYears) * unitSizeInYears;
+    return dateTime.withYear(startYear).withDayOfYear(1).truncatedTo(ChronoUnit.DAYS);
+  }
+
+  private static LocalDateTime roundUp(LocalDateTime dateTime, TruncEvalEnum truncateTo) {
+    LocalDateTime roundedDown = roundDown(dateTime, truncateTo);
+    if (!dateTime.equals(roundedDown)) {
+      switch (truncateTo) {
+        case SECOND:
+          return roundedDown.plusSeconds(1);
+        case MINUTE:
+          return roundedDown.plusMinutes(1);
+        case HOUR:
+          return roundedDown.plusHours(1);
+        case DAY:
+          return roundedDown.plusDays(1);
+        case WEEK:
+          return roundedDown.plusWeeks(1);
+        case MONTH:
+          return roundedDown.plusMonths(1);
+        case QUARTER:
+          return roundedDown.plusMonths(3);
+        case YEAR:
+          return roundedDown.plusYears(1);
+        case DECADE:
+          return roundedDown.plusYears(10);
+        case CENTURY:
+          return roundedDown.plusYears(100);
+        case MILLENNIUM:
+          return roundedDown.plusYears(1000);
+        default:
+          return dateTime;
+      }
+    } else {
+      return dateTime;
     }
   }
 
@@ -736,7 +721,8 @@ class HistogramGenerator {
       }
     }
 
-    // Set the percent values once all rows in dataset preview output are examined.
+    // Set the percent values once all rows in dataset preview output are
+    // examined.
     for (CleanDataHistogramValue hgValue : values) {
       hgValue.setPercent((hgValue.getCount() * 100d) / total);
     }

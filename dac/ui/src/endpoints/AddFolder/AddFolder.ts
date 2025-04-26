@@ -45,7 +45,7 @@ export const handleAddFolder = (
   rootType: rootType,
   rootName: string,
   fullPath: string,
-  payload: { name: string },
+  payload: { name: string; storageUri?: string },
   params: versionContext,
 ): Promise<any> =>
   getApiContext()

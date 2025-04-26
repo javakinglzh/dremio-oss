@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.work.CacheManagerDatasetInfo;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -30,7 +30,7 @@ public class CacheManagerDatasetIterator implements Iterator<Object> {
   private CacheManagerStatsProvider cacheManagerStatsProvider;
   private RocksIterator dsIterator;
 
-  CacheManagerDatasetIterator(SabotContext sabotContext) {
+  CacheManagerDatasetIterator(PluginSabotContext sabotContext) {
     isCachedFileSystem =
         sabotContext.getFileSystemWrapper().isWrapperFor(CacheManagerStatsProvider.class);
 

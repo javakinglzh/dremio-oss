@@ -18,7 +18,8 @@
  * Dynamically import current browser locale
  */
 async function loadCurrentLocale(locale: string) {
-  if (locale === "en") return;
+  // DayJS already loads en
+  if (locale === "en" || locale === "en-us") return;
   try {
     await import(`dayjs/locale/${locale}.js`);
   } catch (e) {

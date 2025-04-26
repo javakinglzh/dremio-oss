@@ -17,10 +17,13 @@ package com.dremio.exec.planner.acceleration;
 
 import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.acceleration.descriptor.ReflectionInfo;
+import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.physical.visitor.CrelUniqifier;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.ReflectionType;
 import com.dremio.exec.record.BatchSchema;
 import com.google.common.base.Preconditions;
+import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttle;
 import org.apache.calcite.rel.logical.LogicalAggregate;
@@ -36,6 +39,7 @@ import org.apache.calcite.rel.logical.LogicalJoin;
  * Snowflake reflections, the planner may update the matching plans after seeing the user query.
  */
 public class DremioMaterialization {
+
   private final String materializationId;
   private final BatchSchema schema;
   private final long expirationTimestamp;
@@ -49,6 +53,7 @@ public class DremioMaterialization {
   private final boolean snowflake;
   private boolean hasJoin;
   private boolean hasAgg;
+  private final RelNode hashFragment;
 
   private int stripVersion;
 
@@ -64,7 +69,8 @@ public class DremioMaterialization {
       BatchSchema schema,
       long expirationTimestamp,
       boolean snowflake,
-      int stripVersion) {
+      int stripVersion,
+      @Nullable RelNode hashFragment) {
     this.tableRel = tableRel;
     this.queryRel = queryRel;
     this.strippedRel = strippedRel;
@@ -77,6 +83,7 @@ public class DremioMaterialization {
     this.expirationTimestamp = expirationTimestamp;
     this.snowflake = snowflake;
     this.stripVersion = stripVersion;
+    this.hashFragment = hashFragment;
 
     hasJoin = false;
     hasAgg = false;
@@ -144,7 +151,8 @@ public class DremioMaterialization {
         schema,
         expirationTimestamp,
         snowflake,
-        stripVersion);
+        stripVersion,
+        hashFragment);
   }
 
   public String getMaterializationId() {
@@ -171,6 +179,10 @@ public class DremioMaterialization {
     return new MaterializationTarget(this, queryRel, stripFragmentOnTableRel);
   }
 
+  public MaterializationTarget toHashMatchingTarget() {
+    return new MaterializationTarget(this, hashFragment, stripFragmentOnTableRel);
+  }
+
   public BatchSchema getSchema() {
     return schema;
   }
@@ -188,10 +200,34 @@ public class DremioMaterialization {
         schema,
         expirationTimestamp,
         snowflake,
-        stripVersion);
+        stripVersion,
+        hashFragment == null ? null : hashFragment.accept(shuttle));
   }
 
   public int getStripVersion() {
     return stripVersion;
+  }
+
+  public RelNode getHashFragment() {
+    return hashFragment;
+  }
+
+  public LayoutMaterializedViewProfile getLayoutMaterializedViewProfile(boolean verbose) {
+    return LayoutMaterializedViewProfile.newBuilder()
+        .setLayoutId(layoutInfo.getReflectionId())
+        .setName(layoutInfo.getName())
+        .setType(layoutInfo.getType())
+        .setMaterializationId(getMaterializationId())
+        .setMaterializationExpirationTimestamp(getExpirationTimestamp())
+        .addAllDimensions(layoutInfo.getDimensions())
+        .addAllMeasureColumns(layoutInfo.getMeasures())
+        .addAllSortedColumns(layoutInfo.getSortColumns())
+        .addAllPartitionedColumns(layoutInfo.getPartitionColumns())
+        .addAllDistributionColumns(layoutInfo.getDistributionColumns())
+        .addAllDisplayColumns(layoutInfo.getDisplayColumns())
+        .setPlan(AttemptObserver.toStringOrEmpty(getQueryRel(), verbose, false))
+        .setSnowflake(isSnowflake())
+        .setReflectionMode(layoutInfo.getReflectionMode())
+        .build();
   }
 }

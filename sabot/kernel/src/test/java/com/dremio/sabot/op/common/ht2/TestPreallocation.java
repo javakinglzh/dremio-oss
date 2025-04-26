@@ -156,14 +156,14 @@ public class TestPreallocation extends DremioTest {
         assertEquals(1, hashTable.blocks());
         assertEquals(1, hashTable.getFixedBlockBuffers().size());
         assertEquals(1, hashTable.getFixedBlockBuffers().size());
-        assertEquals(7, hashTable.getRecordsInBatch(0));
+        assertEquals(7, hashTable.getNumRecordsInBlock(0));
 
         final FieldVector sumOutput =
             ((SumAccumulators.IntSumAccumulator) (accumulators[0])).getAccumulatorVector(0);
         final FieldVector maxOutput =
             ((MaxAccumulators.IntMaxAccumulator) (accumulators[1])).getAccumulatorVector(0);
 
-        for (int i = 0; i < hashTable.getRecordsInBatch(0); i++) {
+        for (int i = 0; i < hashTable.getNumRecordsInBlock(0); i++) {
           assertEquals(expectedSum[i], sumOutput.getObject(i));
           assertEquals(expectedMax[i], maxOutput.getObject(i));
         }

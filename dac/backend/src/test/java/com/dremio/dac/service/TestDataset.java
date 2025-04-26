@@ -18,6 +18,7 @@ package com.dremio.dac.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.dremio.dac.api.Dataset;
+import com.dremio.dac.api.DatasetFields;
 import com.dremio.service.namespace.file.proto.ParquetFileConfig;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
@@ -58,17 +59,25 @@ public class TestDataset {
   }
 
   private Dataset createDataset() {
+    DatasetFields fields =
+        DatasetFields.builder()
+            .setFields(
+                ImmutableList.of(
+                    new Field("field", FieldType.notNullable(ArrowType.Bool.INSTANCE), null)))
+            .build();
+
     return new Dataset(
         "id",
         Dataset.DatasetType.PHYSICAL_DATASET,
         ImmutableList.of("@user", "table"),
-        ImmutableList.of(new Field("field", FieldType.notNullable(ArrowType.Bool.INSTANCE), null)),
+        fields,
         null,
         null,
         null,
         null,
         null,
         new ParquetFileConfig(),
-        null);
+        null,
+        false);
   }
 }

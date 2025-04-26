@@ -17,7 +17,6 @@ package com.dremio.exec.planner.physical;
 
 import com.dremio.exec.planner.logical.RelOptHelper;
 import com.dremio.exec.planner.logical.ValuesRel;
-import java.io.IOException;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 
@@ -34,16 +33,11 @@ public class ValuesPrule extends RelOptRule {
   @Override
   public void onMatch(final RelOptRuleCall call) {
     final ValuesRel rel = call.rel(0);
-    try {
-      call.transformTo(
-          new ValuesPrel(
-              rel.getCluster(),
-              rel.getTraitSet().plus(Prel.PHYSICAL).plus(DistributionTrait.SINGLETON),
-              rel.getRowType(),
-              rel.getTuplesAsJsonOptions(),
-              rel.estimateRowCount(rel.getCluster().getMetadataQuery())));
-    } catch (IOException e) {
-      logger.warn("Failure while converting JSONOptions.", e);
-    }
+    call.transformTo(
+        new ValuesPrel(
+            rel.getCluster(),
+            rel.getTraitSet().plus(Prel.PHYSICAL).plus(DistributionTrait.SINGLETON),
+            rel.getRowType(),
+            rel.getTuples()));
   }
 }

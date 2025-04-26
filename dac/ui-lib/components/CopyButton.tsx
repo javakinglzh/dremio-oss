@@ -26,6 +26,7 @@ type Props = {
   placement?: Placement;
   copyTooltipLabel?: string;
   portal?: boolean;
+  disabled?: boolean;
 };
 
 export const CopyButton = (props: Props) => {
@@ -36,6 +37,7 @@ export const CopyButton = (props: Props) => {
     placement,
     portal = true,
     copyTooltipLabel,
+    disabled,
   } = props;
   let copyButtonStyle;
   switch (size) {
@@ -60,7 +62,11 @@ export const CopyButton = (props: Props) => {
       copyTooltipLabel={copyTooltipLabel}
       portal={portal}
     >
-      <IconButton aria-label="Copy" className={className}>
+      <IconButton
+        aria-label="Copy"
+        className={className}
+        tabIndex={disabled ? -1 : 0}
+      >
         {/*@ts-ignore*/}
         <dremio-icon name="interface/copy" alt="" style={copyButtonStyle}>
           {/*@ts-ignore*/}

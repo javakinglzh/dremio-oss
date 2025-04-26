@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.dataplane.store;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
@@ -24,7 +25,6 @@ import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.nessiemetadata.cache.NessieDataplaneCaffeineCacheProvider;
 import io.protostuff.Tag;
 import java.util.List;
@@ -51,6 +51,11 @@ public class NessiePluginConfig extends AbstractDataplanePluginConfig {
   public SecretRef nessieAccessToken;
 
   // Tags 3 through 7 are defined in AbstractDataplanePluginConfig
+  @Tag(5)
+  @DisplayMetadata(label = "AWS root path")
+  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
+  // metadata impacting
+  public String awsRootPath;
 
   @Tag(8)
   @DisplayMetadata(label = "Authentication method")
@@ -81,6 +86,18 @@ public class NessiePluginConfig extends AbstractDataplanePluginConfig {
   public boolean secure = true;
 
   // Tags 17 through 31 are defined in AbstractDataplanePluginConfig
+  @Tag(19)
+  @DisplayMetadata(label = "Azure root path")
+  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
+  // metadata impacting
+  public String azureRootPath;
+
+  @Tag(26)
+  @DisplayMetadata(label = "Google root path")
+  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
+  // metadata impacting
+  public String googleRootPath;
+
   // Tags 32 through 36 are defined in AbstractLakehouseCatalogPluginConfig
   @Tag(37)
   @DisplayMetadata(label = "Client ID")
@@ -102,9 +119,30 @@ public class NessiePluginConfig extends AbstractDataplanePluginConfig {
 
   @Override
   public DataplanePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     return new NessiePlugin(
-        this, context, name, pluginIdProvider, new NessieDataplaneCaffeineCacheProvider(), null);
+        this,
+        pluginSabotContext,
+        name,
+        pluginIdProvider,
+        new NessieDataplaneCaffeineCacheProvider(),
+        null);
+  }
+
+  @Override
+  public String getRootPath() {
+    switch (getStorageProvider()) {
+      case AWS:
+        return awsRootPath;
+      case AZURE:
+        return azureRootPath;
+      case GOOGLE:
+        return googleRootPath;
+      default:
+        throw new IllegalStateException("Unexpected value: " + getStorageProvider());
+    }
   }
 
   @Override

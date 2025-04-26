@@ -27,6 +27,7 @@ export type ModalContainerProps = {
   close: () => void;
   children: JSX.Element | JSX.Element[];
   className?: string;
+  "aria-label"?: string;
 
   /**
    * Close on outside click should only be used when a dialog does not

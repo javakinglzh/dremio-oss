@@ -26,6 +26,7 @@ import static org.mockito.Mockito.when;
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.common.concurrent.bulk.BulkRequest;
 import com.dremio.common.concurrent.bulk.BulkResponse;
+import com.dremio.exec.store.SchemaConfig;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.collect.ImmutableList;
 import java.util.HashMap;
@@ -52,6 +53,8 @@ public class TestCachingCatalog {
   private Map<NamespaceKey, DremioTable> namespaceKeyToTableMap;
 
   @Mock private Catalog delegate;
+  @Mock private MetadataRequestOptions metadataRequestOptions;
+  @Mock private SchemaConfig schemaConfig;
   @Mock private DremioTable t1;
   @Mock private DremioTable t2;
 
@@ -63,6 +66,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableNoResolveWithNamespaceKey() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableNoResolve(eq(NAMESPACE_KEY_1))).thenReturn(t1);
     validateCaching(
@@ -72,6 +76,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableNoResolveWithEntityKey() {
+    setupCommonMocks();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(NAMESPACE_KEY_1);
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableNoResolve(eq(catalogEntityKey))).thenReturn(t1);
@@ -82,6 +87,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableNoColumnCount() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableNoColumnCount(eq(NAMESPACE_KEY_1))).thenReturn(t1);
     validateCaching(
@@ -91,6 +97,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableWithNamespaceKey() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTable(eq(NAMESPACE_KEY_1))).thenReturn(t1);
     validateCaching(
@@ -100,6 +107,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableWithEntityKey() {
+    setupCommonMocks();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(NAMESPACE_KEY_1);
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTable(eq(catalogEntityKey))).thenReturn(t1);
@@ -110,6 +118,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableWithDatasetId() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTable(eq("xx.a.b"))).thenReturn(t1);
     validateCaching(
@@ -118,6 +127,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableForQuery() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableForQuery(eq(NAMESPACE_KEY_1))).thenReturn(t1);
     validateCaching(
@@ -127,6 +137,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableSnapshotForQuery() {
+    setupCommonMocks();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(NAMESPACE_KEY_1);
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableSnapshotForQuery(eq(catalogEntityKey))).thenReturn(t1);
@@ -137,6 +148,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForGetTableSnapshot() {
+    setupCommonMocks();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(NAMESPACE_KEY_1);
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(delegate.getTableSnapshot(eq(catalogEntityKey))).thenReturn(t1);
@@ -147,6 +159,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testCachingForBulkGetTables() {
+    setupCommonMocks();
     when(t1.getPath()).thenReturn(NAMESPACE_KEY_1);
     when(t2.getPath()).thenReturn(NAMESPACE_KEY_2);
 
@@ -190,6 +203,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testUnexpectedExceptionDuringBulkTableLookup() {
+    setupCommonMocks();
     BulkRequest<NamespaceKey> request =
         BulkRequest.<NamespaceKey>builder().add(NAMESPACE_KEY_1).build();
 
@@ -203,6 +217,7 @@ public class TestCachingCatalog {
 
   @Test
   public void testNoResolveFunctionsDoNotCacheExceptions() {
+    setupCommonMocks();
     NamespaceKey namespaceKey = NAMESPACE_KEY_1;
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(namespaceKey);
 
@@ -241,6 +256,12 @@ public class TestCachingCatalog {
     verify(delegate, times(1)).getFunctions(eq(functionKey), eq(SimpleCatalog.FunctionType.SCALAR));
     verify(delegate, times(1))
         .getFunctions(eq(functionKeyDifferentCasing), eq(SimpleCatalog.FunctionType.SCALAR));
+  }
+
+  private void setupCommonMocks() {
+    when(delegate.getMetadataRequestOptions()).thenReturn(metadataRequestOptions);
+    when(metadataRequestOptions.getSchemaConfig()).thenReturn(schemaConfig);
+    when(schemaConfig.getCatalogAccessListener()).thenReturn(CatalogAccessListener.NO_OP);
   }
 
   private void validateCaching(Supplier<DremioTable> catalogLookup, Runnable verification) {

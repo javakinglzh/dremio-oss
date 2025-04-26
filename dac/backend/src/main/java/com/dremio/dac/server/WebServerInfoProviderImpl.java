@@ -20,24 +20,22 @@ import com.dremio.options.OptionManager;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.StringValidator;
 import com.google.common.base.Strings;
-import java.net.MalformedURLException;
-import java.net.URL;
+import java.net.URI;
+import java.net.URISyntaxException;
 import javax.inject.Provider;
 
 @Options
 public class WebServerInfoProviderImpl implements WebServerInfoProvider {
-  public static final StringValidator WEB_SERVER_BASE_URI =
+  public static final StringValidator WEB_SERVER_ISSUER_URL =
       new StringValidator("auth.oauth.issuer-url", "");
 
   private final Provider<String> clusterId;
   private final Provider<OptionManager> optionManager;
-  private final String fallbackHostname;
 
   public WebServerInfoProviderImpl(
-      Provider<String> clusterId, Provider<OptionManager> optionManager, String fallbackHostname) {
+      Provider<String> clusterId, Provider<OptionManager> optionManager) {
     this.clusterId = clusterId;
     this.optionManager = optionManager;
-    this.fallbackHostname = fallbackHostname;
   }
 
   @Override
@@ -46,15 +44,15 @@ public class WebServerInfoProviderImpl implements WebServerInfoProvider {
   }
 
   @Override
-  public URL getBaseURL() {
-    final String override = optionManager.get().getOption(WEB_SERVER_BASE_URI);
+  public URI getIssuer() {
+    final String override = optionManager.get().getOption(WEB_SERVER_ISSUER_URL);
 
     try {
-      return new URL(!Strings.isNullOrEmpty(override) ? override : fallbackHostname);
-    } catch (MalformedURLException e) {
+      return new URI(!Strings.isNullOrEmpty(override) ? override : clusterId.get());
+    } catch (URISyntaxException e) {
       throw new IllegalArgumentException(
           String.format(
-              "Value of '%s' option must be a valid URL", WEB_SERVER_BASE_URI.getOptionName()),
+              "Value of '%s' option must be a valid URL", WEB_SERVER_ISSUER_URL.getOptionName()),
           e);
     }
   }

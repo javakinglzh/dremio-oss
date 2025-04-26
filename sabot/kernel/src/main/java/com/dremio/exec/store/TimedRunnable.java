@@ -256,9 +256,9 @@ public abstract class TimedRunnable<V> implements Runnable {
               earliestStart / 1000.0,
               latestStart / 1000.0,
               avgStart);
-      if (elapsed < 2) {
-        logger.debug(line1);
-        logger.debug(line2);
+      if (elapsed > 2) {
+        logger.info(line1);
+        logger.info(line2);
       } else {
         logger.debug(line1);
         logger.debug(line2);

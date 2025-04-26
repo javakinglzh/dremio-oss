@@ -28,15 +28,14 @@ import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.extensions.SupportsAlteringDatasetMetadata;
 import com.dremio.connector.metadata.options.AlterMetadataOption;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.PartitionChunkListingImpl;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.service.namespace.NamespaceKey;
@@ -47,7 +46,6 @@ import com.dremio.service.namespace.source.proto.SourceConfig;
 import io.protostuff.Tag;
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import javax.inject.Provider;
@@ -66,7 +64,9 @@ public class TestAlterTableChangeColumnSetOptionHandler extends BaseTestQuery {
 
     @Override
     public ColumnOptionTestPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return new ColumnOptionTestPlugin(name, shouldChangeMetadata);
     }
   }
@@ -157,11 +157,6 @@ public class TestAlterTableChangeColumnSetOptionHandler extends BaseTestQuery {
     }
 
     @Override
-    public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-      return null;
-    }
-
-    @Override
     public Class<? extends StoragePluginRulesFactory> getRulesFactoryClass() {
       return StoragePluginRulesFactory.NoOpPluginRulesFactory.class;
     }
@@ -191,15 +186,15 @@ public class TestAlterTableChangeColumnSetOptionHandler extends BaseTestQuery {
 
   @BeforeClass
   public static void addPlugin() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
-
     SourceConfig conf1 = new SourceConfig();
     conf1.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
     conf1.setName("col_conf");
     final ColumnOptionTestConf colConf1 = new ColumnOptionTestConf();
     colConf1.shouldChangeMetadata = true;
     conf1.setConnectionConf(colConf1);
-    getCatalogService().getSystemUserCatalog().createSource(conf1);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(conf1, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     SourceConfig conf2 = new SourceConfig();
     conf2.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
@@ -207,7 +202,9 @@ public class TestAlterTableChangeColumnSetOptionHandler extends BaseTestQuery {
     final ColumnOptionTestConf colConf2 = new ColumnOptionTestConf();
     colConf2.shouldChangeMetadata = false;
     conf2.setConnectionConf(colConf2);
-    getCatalogService().getSystemUserCatalog().createSource(conf2);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(conf2, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @Test

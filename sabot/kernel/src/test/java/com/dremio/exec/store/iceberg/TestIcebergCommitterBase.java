@@ -18,8 +18,6 @@ package com.dremio.exec.store.iceberg;
 import static com.dremio.exec.store.iceberg.IcebergUtils.getPartitionStatsFiles;
 import static com.dremio.exec.store.iceberg.model.IcebergCommandType.INCREMENTAL_METADATA_REFRESH;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -34,6 +32,7 @@ import com.dremio.exec.store.iceberg.model.IcebergOpCommitter;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
 import com.dremio.exec.testing.ExecutionControls;
 import com.dremio.options.OptionManager;
+import com.dremio.sabot.exec.context.OpProfileDef;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.service.catalog.GetDatasetRequest;
@@ -49,6 +48,7 @@ import com.dremio.service.namespace.dataset.proto.UserDefinedSchemaSettings;
 import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.test.AllocatorRule;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
@@ -61,6 +61,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.iceberg.BaseTable;
@@ -80,26 +81,32 @@ import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.OutputFile;
 import org.junit.Before;
+import org.junit.Rule;
 
 public class TestIcebergCommitterBase extends BaseTestQuery
     implements SupportsTypeCoercionsAndUpPromotions {
 
+  @Rule public final AllocatorRule allocatorRule = AllocatorRule.defaultAllocator();
+
   protected final String folder = Files.createTempDir().getAbsolutePath();
   protected final DatasetCatalogGrpcClient client =
       new DatasetCatalogGrpcClient(getSabotContext().getDatasetCatalogBlockingStub().get());
+  protected BufferAllocator testAllocator;
   protected IcebergModel icebergModel;
   protected OperatorStats operatorStats;
   protected OperatorContext operatorContext;
+  protected static final String ID_COLUMN = "id";
+  protected static final String DATA_COLUMN = "data";
 
   protected final BatchSchema schema =
       BatchSchema.of(
-          Field.nullablePrimitive("id", new ArrowType.Int(64, true)),
-          Field.nullablePrimitive("data", new ArrowType.Utf8()));
+          Field.nullablePrimitive(ID_COLUMN, new ArrowType.Int(64, true)),
+          Field.nullablePrimitive(DATA_COLUMN, new ArrowType.Utf8()));
 
   @Before
   public void beforeTest() {
-    this.operatorStats = mock(OperatorStats.class);
-    doNothing().when(operatorStats).addLongStat(any(), anyLong());
+    this.testAllocator = allocatorRule.newAllocator("test-iceberg_committer", 0, Long.MAX_VALUE);
+    this.operatorStats = newStats();
     this.operatorContext = mock(OperatorContext.class);
     when(operatorContext.getStats()).thenReturn(operatorStats);
     ExecutionControls executionControls = mock(ExecutionControls.class);
@@ -317,5 +324,11 @@ public class TestIcebergCommitterBase extends BaseTestQuery
     }
 
     return partitionStatsFiles;
+  }
+
+  protected OperatorStats newStats() {
+    OpProfileDef prof = new OpProfileDef(1, 1, 1);
+    final OperatorStats operatorStats = new OperatorStats(prof, testAllocator);
+    return operatorStats;
   }
 }

@@ -20,6 +20,7 @@ import com.dremio.exec.catalog.VacuumOptions;
 import com.dremio.exec.planner.VacuumOutputSchema;
 import com.dremio.exec.planner.cost.DremioCost;
 import com.dremio.exec.planner.cost.iceberg.IcebergCostEstimates;
+import java.util.List;
 import org.apache.calcite.plan.Convention;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
@@ -34,31 +35,34 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
   private final VacuumOptions vacuumOptions;
   private final IcebergCostEstimates costEstimates;
   private final StoragePluginId storagePluginId;
-  private final String user;
+  private final String userName;
   private final String sourceName;
   private final String fsScheme;
   private final String schemeVariate;
+  private final List<String> excludedContentIDs;
 
   protected VacuumCatalogRelBase(
       Convention convention,
       RelOptCluster cluster,
       RelTraitSet traitSet,
       StoragePluginId storagePluginId,
-      String user,
+      String userName,
       String sourceName,
       IcebergCostEstimates costEstimates,
       VacuumOptions vacuumOptions,
       String fsScheme,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> excludedContentIDs) {
     super(cluster, traitSet);
     assert getConvention() == convention;
     this.storagePluginId = storagePluginId;
-    this.user = user;
+    this.userName = userName;
     this.sourceName = sourceName;
     this.vacuumOptions = vacuumOptions;
     this.costEstimates = costEstimates;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
+    this.excludedContentIDs = excludedContentIDs;
   }
 
   @Override
@@ -86,8 +90,8 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
     return this.storagePluginId;
   }
 
-  public String getUser() {
-    return this.user;
+  public String getUserName() {
+    return this.userName;
   }
 
   public String getSourceName() {
@@ -104,5 +108,9 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
 
   public String getFsScheme() {
     return fsScheme;
+  }
+
+  public List<String> getExcludedContentIDs() {
+    return excludedContentIDs;
   }
 }

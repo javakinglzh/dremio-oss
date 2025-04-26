@@ -68,7 +68,6 @@
           <execution>
             <id>install node and npm</id>
             <goals>
-              <goal>install-node-and-npm</goal>
               <goal>install-node-and-pnpm</goal>
             </goals>
             <phase>initialize</phase>

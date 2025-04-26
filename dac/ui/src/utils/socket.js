@@ -132,7 +132,7 @@ export class Socket {
   };
 
   _handleConnectionClose = () => {
-    console.info("SOCKET CONNECTION CLOSE");
+    // console.info("SOCKET CONNECTION CLOSE");
     setTimeout(() => {
       // defer because can't dispatch inside a reducer
       this.dispatch({ type: WS_CONNECTION_CLOSE });
@@ -140,7 +140,7 @@ export class Socket {
   };
 
   _handleConnectionEstablished = () => {
-    console.info("SOCKET CONNECTION OPEN");
+    // console.info("SOCKET CONNECTION OPEN");
     this._failureCount = 0;
     setTimeout(() => {
       // defer because can't dispatch inside a reducer
@@ -164,9 +164,9 @@ export class Socket {
     try {
       const data = JSON.parse(e.data);
       if (data.type === "connection-established") {
-        console.info("SOCKET CONNECTION SUCCESS");
+        // console.info("SOCKET CONNECTION SUCCESS");
       } else {
-        console.info(data);
+        // console.info(data);
       }
       this.dispatch({ type: data.type, payload: data.payload });
       this._notifyListeners({ type: data.type, payload: data.payload });

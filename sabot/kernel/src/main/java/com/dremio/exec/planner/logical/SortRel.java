@@ -26,34 +26,19 @@ import org.apache.calcite.rex.RexNode;
 public class SortRel extends SortRelBase implements Rel {
   /** Creates a SortRel with offset and fetch. */
   private SortRel(
-      RelOptCluster cluster,
-      RelTraitSet traits,
-      RelNode input,
-      RelCollation collation,
-      RexNode offset,
-      RexNode fetch) {
-    super(cluster, traits, input, collation, offset, fetch);
+      RelOptCluster cluster, RelTraitSet traits, RelNode input, RelCollation collation) {
+    super(cluster, traits, input, collation);
   }
 
   @Override
   public SortRel copy(
       RelTraitSet traitSet, RelNode input, RelCollation collation, RexNode offset, RexNode fetch) {
-    return SortRel.create(getCluster(), traitSet, input, collation, offset, fetch);
+    return SortRel.create(getCluster(), traitSet, input, collation);
   }
 
   public static SortRel create(
       RelOptCluster cluster, RelTraitSet traits, RelNode input, RelCollation collation) {
-    return create(cluster, traits, input, collation, null, null);
-  }
-
-  public static SortRel create(
-      RelOptCluster cluster,
-      RelTraitSet traits,
-      RelNode input,
-      RelCollation collation,
-      RexNode offset,
-      RexNode fetch) {
     final RelTraitSet adjustedTraits = adjustTraits(traits, collation);
-    return new SortRel(cluster, adjustedTraits, input, collation, offset, fetch);
+    return new SortRel(cluster, adjustedTraits, input, collation);
   }
 }

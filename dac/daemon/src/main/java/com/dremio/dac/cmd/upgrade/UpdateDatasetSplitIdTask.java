@@ -147,7 +147,7 @@ public class UpdateDatasetSplitIdTask extends UpgradeTask implements LegacyUpgra
       storeProvider.start();
 
       final UpgradeContext context =
-          new UpgradeContext(storeProvider, storeProvider.asLegacy(), null, null, null);
+          new UpgradeContext(storeProvider, storeProvider.asLegacy(), null, null, null, null);
       final UpdateDatasetSplitIdTask task = new UpdateDatasetSplitIdTask();
       task.upgrade(context);
     }

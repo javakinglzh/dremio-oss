@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { useEffect, useRef } from "react";
+import clsx from "clsx";
 import Immutable from "immutable";
 
 import { PureEntityIcon } from "../EntityIcon";
@@ -27,7 +29,6 @@ import { Wiki } from "#oss/pages/ExplorePage/components/Wiki/Wiki";
 import { ENTITY_TYPES } from "#oss/constants/Constants";
 import { getVersionContextFromId } from "dremio-ui-common/utilities/datasetReference.js";
 import { getExtraSummaryPanelIcon } from "dyn-load/utils/summary-utils";
-import { isNotSoftware } from "#oss/utils/versionUtils";
 
 import * as classes from "./CatalogDetailsPanel.module.less";
 
@@ -35,23 +36,54 @@ type CatalogDetailsPanelProps = {
   panelItem: Immutable.Map<any, any>;
   handleDatasetDetailsCollapse: () => void;
   handlePanelDetails: (dataset: any) => void;
+  panelWidth?: number | string;
+  focusOnOpen?: boolean;
+};
+
+// Temp util function to handle panel details to help keep behavior consistent
+// Eventually wiki panel will be replaced with a new component that uses react-query
+export const handlePanelDetails = (
+  dataset: any,
+  datasetDetails: any,
+  setDataset: (dataset: any) => void,
+) => {
+  if (dataset.get("error")) {
+    setDataset(datasetDetails.merge(dataset));
+  } else if (dataset?.get("entityId") !== datasetDetails?.get("entityId")) {
+    setDataset(dataset);
+  }
 };
 
 const CatalogDetailsPanel = ({
   panelItem,
   handleDatasetDetailsCollapse,
   handlePanelDetails,
+  panelWidth = 328,
+  focusOnOpen,
 }: CatalogDetailsPanelProps) => {
   const panelIsSource = panelItem?.get("entityType") === ENTITY_TYPES.source;
   const panelName = panelItem?.get("name") || panelItem?.get("fullPath").last();
   const versionContext = getVersionContextFromId(
     panelItem?.get("entityId") || panelItem?.get("id"),
   );
+  const closeRef = useRef<HTMLElement>();
+
+  useEffect(() => {
+    if (closeRef.current && focusOnOpen) {
+      (closeRef.current.firstChild as HTMLButtonElement)?.focus();
+    }
+  }, [panelName, focusOnOpen]);
+
   return (
-    <section
-      role="contentinfo"
-      aria-label={`Dataset details: ${panelName}`}
-      className={classes["catalog-details-panel"]}
+    <aside
+      aria-label={`Dataset details panel: ${panelName}`}
+      className={clsx(
+        "flex flex-col full-height shrink-0",
+        classes["catalog-details-panel"],
+      )}
+      style={{
+        width: panelWidth,
+      }}
     >
       <div className={classes["catalog-details-panel__header"]}>
         {panelIsSource ? (
@@ -83,17 +115,13 @@ const CatalogDetailsPanel = ({
             tooltip="Close details panel"
             onClick={handleDatasetDetailsCollapse}
             className={classes["catalog-details-panel__action-icon"]}
+            ref={closeRef}
           >
             <dremio-icon name="interface/close-big" alt="close" />
           </IconButton>
         </div>
       </div>
-      <div
-        style={{
-          height: `calc(100vh - 48px - ${isNotSoftware() ? 40 : 64}px)`,
-          overflow: "hidden",
-        }}
-      >
+      <div className="catalog-details-panel__content full-height flex-1 overflow-hidden">
         <Wiki
           entityId={panelItem.get("entityId") || panelItem.get("id")}
           isEditAllowed={isEntityWikiEditAllowed(panelItem)}
@@ -103,7 +131,7 @@ const CatalogDetailsPanel = ({
           isPanel
         />
       </div>
-    </section>
+    </aside>
   );
 };
 

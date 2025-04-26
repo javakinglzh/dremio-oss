@@ -62,7 +62,7 @@ public class TestIcebergHistoryFunction extends IcebergMetadataTestTable {
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("made_current_at"),
-            Types.required(TypeProtos.MinorType.TIMESTAMP)));
+            Types.required(TypeProtos.MinorType.TIMESTAMPMILLI)));
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("snapshot_id"), Types.required(TypeProtos.MinorType.BIGINT)));
@@ -86,7 +86,7 @@ public class TestIcebergHistoryFunction extends IcebergMetadataTestTable {
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("made_current_at"),
-            Types.required(TypeProtos.MinorType.TIMESTAMP)));
+            Types.required(TypeProtos.MinorType.TIMESTAMPMILLI)));
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("snapshot_id"), Types.required(TypeProtos.MinorType.BIGINT)));

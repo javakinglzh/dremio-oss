@@ -32,30 +32,7 @@
 
   <modules>
     <module>hive2-exec-shade</module>
+    <module>hive3-exec-shade</module>
+    <module>nessie-legacy-storage</module>
   </modules>
-
-  <profiles>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <modules>
-        <module>hive3-exec-shade</module>
-      </modules>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <modules>
-        <module>maprfs-shade</module>
-      </modules>
-    </profile>
-  </profiles>
 </project>

@@ -15,6 +15,12 @@
  */
 package com.dremio.plugins.elastic.planning.rels;
 
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.WrapperQuery;
+import co.elastic.clients.elasticsearch.core.SearchRequest;
+import co.elastic.clients.elasticsearch.core.search.SourceConfig;
+import co.elastic.clients.elasticsearch.core.search.SourceFilter;
+import co.elastic.clients.json.JsonpUtils;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.elastic.proto.ElasticReaderProto.ElasticTableXattr;
@@ -33,24 +39,13 @@ import com.dremio.plugins.elastic.planning.rules.PredicateAnalyzer;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.plan.RelOptTable;
-import org.elasticsearch.action.Action;
-import org.elasticsearch.action.ActionFuture;
-import org.elasticsearch.action.ActionListener;
-import org.elasticsearch.action.ActionRequest;
-import org.elasticsearch.action.ActionRequestBuilder;
-import org.elasticsearch.action.ActionResponse;
-import org.elasticsearch.action.search.SearchAction;
-import org.elasticsearch.action.search.SearchRequestBuilder;
-import org.elasticsearch.client.ElasticsearchClient;
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.WrapperQueryBuilder;
-import org.elasticsearch.threadpool.ThreadPool;
+import org.apache.commons.codec.binary.Base64;
 
 public class ScanBuilder {
   private static final org.slf4j.Logger logger =
@@ -159,41 +154,49 @@ public class ScanBuilder {
     return ImmutableMap.copyOf(map);
   }
 
-  protected void applyFilter(
-      SearchRequestBuilder searchRequest,
+  protected Query getFilters(
       ElasticIntermediateScanPrel scan,
       ElasticsearchFilter filter,
       ElasticTableXattr tableAttributes)
       throws ExpressionNotAnalyzableException {
 
-    QueryBuilder b = null;
+    Query query = null;
     if (tableAttributes.hasAliasFilter()) {
-      b = new WrapperQueryBuilder(tableAttributes.getAliasFilter());
+      // Wrapper query is required to be base64 encoded.
+      // See
+      // https://www.elastic.co/guide/en/elasticsearch/reference/7.17/query-dsl-wrapper-query.html
+      String base64Query =
+          Base64.encodeBase64String(
+              tableAttributes.getAliasFilter().getBytes(StandardCharsets.UTF_8));
+      query = WrapperQuery.of(wq -> wq.query(base64Query))._toQuery();
     }
 
     if (filter != null) {
-      QueryBuilder filterQuery =
+      Query filterQuery =
           PredicateAnalyzer.analyze(
               scan, filter.getCondition(), tableAttributes.getVariationDetected());
-      if (b != null) {
-        b = QueryBuilders.boolQuery().must(filterQuery).must(b);
+      if (query != null) {
+        query =
+            co.elastic.clients.elasticsearch._types.query_dsl.QueryBuilders.bool()
+                .must(filterQuery)
+                .must(query)
+                .build()
+                ._toQuery();
       } else {
-        b = filterQuery;
+        query = filterQuery;
       }
     }
-    if (b != null) {
-      searchRequest.setQuery(b);
+    if (query != null) {
+      return query;
     } else {
-      searchRequest.setQuery(QueryBuilders.matchAllQuery());
+      return co.elastic.clients.elasticsearch._types.query_dsl.QueryBuilders.matchAll()
+          .build()
+          ._toQuery();
     }
   }
 
-  protected int applyFetch(
-      SearchRequestBuilder searchRequest,
-      ElasticsearchConf config,
-      ElasticsearchLimit limit,
-      ElasticsearchFilter filter,
-      ElasticsearchSample sample) {
+  protected int getFetch(
+      ElasticsearchConf config, ElasticsearchLimit limit, ElasticsearchSample sample) {
     final int configuredFetchSize = config.getScrollSize();
     int fetch = configuredFetchSize;
     // If there is a limit or sample, add it to the search builder.
@@ -205,19 +208,16 @@ public class ScanBuilder {
 
     // make sure that limit 100000 doesn't create a fetch size beyond the configured fetch size.
     fetch = Math.min(fetch, configuredFetchSize);
-
-    searchRequest.setFrom(0).setSize(fetch);
     return fetch;
   }
 
-  protected void applyEdgeProjection(
-      SearchRequestBuilder searchRequest, ElasticIntermediateScanPrel scan) {
+  protected String[] getEdgeProjection(ElasticIntermediateScanPrel scan) {
     boolean edgeProject =
         PrelUtil.getPlannerSettings(scan.getCluster())
             .getOptions()
             .getOption(ExecConstants.ELASTIC_RULES_EDGE_PROJECT);
     if (!edgeProject) {
-      return;
+      return null;
     }
 
     final String[] includesOrderedByOriginalTable;
@@ -233,7 +233,7 @@ public class ScanBuilder {
 
     // canonicalize includes order so we don't get test variability.
     Arrays.sort(includesOrderedByOriginalTable);
-    searchRequest.setFetchSource(includesOrderedByOriginalTable, null);
+    return includesOrderedByOriginalTable;
   }
 
   public void setup(List<ElasticsearchPrel> stack, FunctionLookupContext functionLookupContext) {
@@ -241,8 +241,6 @@ public class ScanBuilder {
     validate(stack);
 
     try {
-      final SearchRequestBuilder searchRequest = buildRequestBuilder();
-
       final Map<Class<?>, ElasticsearchPrel> map = validate(stack);
 
       final ElasticIntermediateScanPrel scan =
@@ -252,75 +250,45 @@ public class ScanBuilder {
       final ElasticsearchSample sample = (ElasticsearchSample) map.get(ElasticsearchSample.class);
       final ElasticsearchLimit limit = (ElasticsearchLimit) map.get(ElasticsearchLimit.class);
 
-      applyEdgeProjection(searchRequest, scan);
-      applyFilter(searchRequest, scan, filter, tableAttributes);
+      // Get the edge projections
+      String[] edgeProjection = getEdgeProjection(scan);
+
+      // Get the filters
+      Query query = getFilters(scan, filter, tableAttributes);
+
+      // Get fetch, apply to search request
       final int fetch =
-          applyFetch(
-              searchRequest,
+          getFetch(
               ElasticsearchConf.createElasticsearchConf(scan.getPluginId().getConnectionConf()),
               limit,
-              filter,
               sample);
 
-      ElasticsearchScanSpec scanSpec =
+      // Build search request up using query dsl api
+      SearchRequest.Builder srb = new SearchRequest.Builder().from(0).size(fetch).query(query);
+
+      // Only add edge projection if not empty.  Only add includes element (excludes is not used)
+      if (edgeProjection != null && edgeProjection.length > 0) {
+        SourceFilter.Builder sfb = new SourceFilter.Builder();
+        sfb.includes(Arrays.asList(edgeProjection));
+        srb.source(SourceConfig.of(sc -> sc.filter(sfb.build())));
+      }
+
+      // Convert search request to string
+      String searchRequest = String.valueOf(JsonpUtils.toString(srb.build(), new StringBuilder()));
+
+      // Now create the scanspec with the search request as a string
+      this.spec =
           new ElasticsearchScanSpec(
               tableAttributes.getResource(),
-              searchRequest.toString(),
+              searchRequest,
               fetch,
               filter != null || sample != null || limit != null);
 
-      this.spec = scanSpec;
       this.scan = scan;
     } catch (ExpressionNotAnalyzableException e) {
       throw UserException.dataReadError(e)
           .message("Elastic pushdown failed. Too late to recover query.")
           .build(logger);
     }
-  }
-
-  protected SearchRequestBuilder buildRequestBuilder() {
-    SearchRequestBuilder searchRequestBuilder =
-        new SearchRequestBuilder(
-            new ElasticsearchClient() {
-              @Override
-              public <
-                      Request extends ActionRequest,
-                      Response extends ActionResponse,
-                      RequestBuilder extends
-                          ActionRequestBuilder<Request, Response, RequestBuilder>>
-                  ActionFuture<Response> execute(
-                      Action<Request, Response, RequestBuilder> action, Request request) {
-                return null;
-              }
-
-              @Override
-              public <
-                      Request extends ActionRequest,
-                      Response extends ActionResponse,
-                      RequestBuilder extends
-                          ActionRequestBuilder<Request, Response, RequestBuilder>>
-                  void execute(
-                      Action<Request, Response, RequestBuilder> action,
-                      Request request,
-                      ActionListener<Response> actionListener) {}
-
-              @Override
-              public <
-                      Request extends ActionRequest,
-                      Response extends ActionResponse,
-                      RequestBuilder extends
-                          ActionRequestBuilder<Request, Response, RequestBuilder>>
-                  RequestBuilder prepareExecute(Action<Request, Response, RequestBuilder> action) {
-                return null;
-              }
-
-              @Override
-              public ThreadPool threadPool() {
-                return null;
-              }
-            },
-            SearchAction.INSTANCE);
-
-    return searchRequestBuilder;
   }
 }

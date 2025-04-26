@@ -29,4 +29,14 @@ public interface BytesOutput {
    * @throws IOException if there are errors while writing
    */
   void writeTo(OutputStream os) throws IOException;
+
+  default byte[] toByteArray() {
+    try {
+      java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+      writeTo(baos);
+      return baos.toByteArray();
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
 }

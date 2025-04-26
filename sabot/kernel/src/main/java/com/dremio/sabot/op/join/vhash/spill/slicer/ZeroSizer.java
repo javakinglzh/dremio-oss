@@ -72,4 +72,7 @@ public class ZeroSizer implements Sizer {
   public int getSizeInBitsStartingFromOrdinal(int ordinal, int len) {
     return 0;
   }
+
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf arrowBuf, int recordCount) {}
 }

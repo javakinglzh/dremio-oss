@@ -21,6 +21,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.exec.physical.config.HashAggregate;
 import com.dremio.exec.record.RecordBatchData;
 import com.dremio.exec.record.VectorAccessible;
+import com.dremio.sabot.BaseTestOperator;
 import com.dremio.sabot.CustomHashAggDataGenerator;
 import com.dremio.sabot.Fixtures;
 import com.dremio.sabot.aggregate.hash.ITSpillingHashAgg;
@@ -29,7 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import org.junit.Test;
 
-public class ITVectorizedHashAggShrinkableStates extends ITSpillingHashAgg {
+public class ITVectorizedHashAggShrinkableStates extends BaseTestOperator {
 
   /**
    * Test spilling in OUTPUT_INMEMORY_PARTITIONS state
@@ -38,13 +39,11 @@ public class ITVectorizedHashAggShrinkableStates extends ITSpillingHashAgg {
    */
   @Test
   public void testOutputSpilling() throws Exception {
-    HashAggregate agg = getHashAggregate(1_000_000, Integer.MAX_VALUE);
+    HashAggregate agg = ITSpillingHashAgg.getHashAggregate(1_000_000, Integer.MAX_VALUE, 3968);
     final int shortLen = (120 * 1024);
     final List<RecordBatchData> data = new ArrayList<>();
 
-    try (AutoCloseable useSpillingAgg =
-            with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true);
-        CustomHashAggDataGenerator generator =
+    try (CustomHashAggDataGenerator generator =
             new CustomHashAggDataGenerator(10000, getTestAllocator(), shortLen);
         VectorizedHashAggOperator op = newOperator(VectorizedHashAggOperator.class, agg, 1000)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();

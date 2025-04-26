@@ -30,14 +30,14 @@ public final class IntervalYearArrayAggAccumulator extends ArrayAggAccumulator<I
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -53,7 +53,7 @@ public final class IntervalYearArrayAggAccumulator extends ArrayAggAccumulator<I
 
   @Override
   protected ArrayAggAccumulatorHolder<Integer> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new IntervalYearArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

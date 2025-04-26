@@ -54,7 +54,7 @@ class FabricMessageHandler {
       ByteBuf dBody,
       ResponseSender responseSender)
       throws RpcException {
-    final FabricMessage message = RpcBus.get(pBody, FabricMessage.PARSER);
+    final FabricMessage message = RpcBus.get(pBody, FabricMessage.parser());
     final int protocolId = message.getProtocolId();
     FabricProtocol protocol = getProtocol(protocolId);
 

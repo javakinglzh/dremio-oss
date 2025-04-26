@@ -15,12 +15,15 @@
  */
 package com.dremio.exec.expr;
 
+import static com.dremio.exec.exception.friendly.FriendlyExceptionHandler.makeExceptionFriendlyMaybe;
+
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.expression.SupportedEngines;
 import com.dremio.common.expression.visitors.ExpressionValidationException;
 import com.dremio.common.logical.data.NamedExpression;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.exception.friendly.ExceptionHandlers;
 import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorAccessibleComplexWriter;
@@ -241,32 +244,37 @@ class SplitStageExecutor implements AutoCloseable {
       Stopwatch javaCodeGenWatch,
       Stopwatch gandivaCodeGenWatch,
       ExpressionEvaluationOptions options)
-      throws GandivaException {
-    gandivaCodeGenWatch.start();
-    nativeProjectEvaluator = nativeProjectorBuilder.build(incoming.getSchema(), context.getStats());
-    gandivaCodeGenWatch.stop();
+      throws Exception {
+    try {
+      gandivaCodeGenWatch.start();
+      nativeProjectEvaluator =
+          nativeProjectorBuilder.build(incoming.getSchema(), context.getStats());
+      gandivaCodeGenWatch.stop();
 
-    javaCodeGenWatch.start();
-    javaProjector = cg.getCodeGenerator().getImplementationClass();
-    // CodeGenerator is no longer required since the code has been generated
-    // Releasing heap memory
-    cg = null;
-    javaProjector.setup(
-        context.getFunctionContext(),
-        incoming,
-        intermediateOutputs,
-        Lists.newArrayList(),
-        new Projector.ComplexWriterCreator() {
-          @Override
-          public ComplexWriter addComplexWriter(String name) {
-            VectorAccessibleComplexWriter vc = new VectorAccessibleComplexWriter(outgoing);
-            ComplexWriter writer = new ComplexWriterImpl(name, vc);
-            complexWriters.add(writer);
-            return writer;
-          }
-        },
-        options);
-    javaCodeGenWatch.stop();
+      javaCodeGenWatch.start();
+      javaProjector = cg.getCodeGenerator().getImplementationClass();
+      // CodeGenerator is no longer required since the code has been generated
+      // Releasing heap memory
+      cg = null;
+      javaProjector.setup(
+          context.getFunctionContext(),
+          incoming,
+          intermediateOutputs,
+          Lists.newArrayList(),
+          new Projector.ComplexWriterCreator() {
+            @Override
+            public ComplexWriter addComplexWriter(String name) {
+              VectorAccessibleComplexWriter vc = new VectorAccessibleComplexWriter(outgoing);
+              ComplexWriter writer = new ComplexWriterImpl(name, vc);
+              complexWriters.add(writer);
+              return writer;
+            }
+          },
+          options);
+      javaCodeGenWatch.stop();
+    } catch (Exception e) {
+      throw makeExceptionFriendlyMaybe(e, ExceptionHandlers.getHandlers());
+    }
   }
 
   // setup evaluation of projector for all splits
@@ -275,7 +283,7 @@ class SplitStageExecutor implements AutoCloseable {
       Stopwatch javaCodeGenWatch,
       Stopwatch gandivaCodeGenWatch,
       ExpressionEvaluationOptions options)
-      throws GandivaException {
+      throws Exception {
     for (ExpressionSplit split : Iterables.concat(javaSplits, gandivaSplits)) {
       if (split.isOriginalExpression()) {
         setupSplit(split, outgoing, gandivaSplits.contains(split));
@@ -421,7 +429,7 @@ class SplitStageExecutor implements AutoCloseable {
         writer.clear();
       }
 
-      throw e;
+      throw makeExceptionFriendlyMaybe(e, ExceptionHandlers.getHandlers());
     } finally {
       markSplitOutputAsRead();
     }
@@ -460,11 +468,15 @@ class SplitStageExecutor implements AutoCloseable {
 
   private String getGandivaFuncNamesSuffix() {
     StringBuilder name = new StringBuilder();
+    List<String> funcNames = Lists.newArrayList();
     for (ExpressionSplit gandivaSplit : gandivaSplits) {
       LogicalExpression gandivaFunction = gandivaSplit.getNamedExpression().getExpr();
       if (gandivaFunction instanceof FunctionHolderExpr) {
         String funcName = ((FunctionHolderExpr) gandivaFunction).getName();
-        name.append(" ").append(funcName);
+        if (!funcNames.contains(funcName)) {
+          funcNames.add(funcName);
+          name.append(",").append(funcName);
+        }
       }
     }
     return name.toString();

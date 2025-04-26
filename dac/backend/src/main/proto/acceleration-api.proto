@@ -263,19 +263,6 @@ message AccelerationInfoApiDescriptor {
   required int32 totalRequests = 6;
 }
 
-message SystemSettingsApiDescriptor {
-  // number of top accelerations to auto approve
-  required int32 limit = 1;
-  // whether system should auto approve aggregations layouts
-  required bool accelerateAggregation = 2;
-  // whether system should auto approve raw layouts
-  required bool accelerateRaw = 3;
-  // interval within which orphaned accelerations needs to be cleaned up
-  required uint64 orphanCleanupInterval = 4;
-  // failure threshold to stop refreshing a reflection
-  required int32 layoutRefreshMaxAttempts = 5;
-}
-
 // represents an individual acceleration vote
 message AccelerationRequestApiDescriptor {
   // user requesting acceleration

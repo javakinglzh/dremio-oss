@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import moize from "moize";
 import { RSAA } from "redux-api-middleware";
 import summaryDatasetSchema from "schemas/v2/summaryDataset";
 import schemaUtils from "utils/apiUtils/schemaUtils";
@@ -25,6 +26,49 @@ export const LOAD_SUMMARY_DATASET_START = "LOAD_SUMMARY_DATASET_START";
 export const LOAD_SUMMARY_DATASET_SUCCESS = "LOAD_SUMMARY_DATASET_SUCCESS";
 export const LOAD_SUMMARY_DATASET_FAILURE = "LOAD_SUMMARY_DATASET_FAILURE";
 
+const fetchSummaryDatasetMemo = moize(
+  (apiPath, meta, storageName, dispatch) => {
+    return dispatch({
+      [RSAA]: {
+        types: [
+          {
+            type: `${
+              storageName ? `${storageName}_START` : LOAD_SUMMARY_DATASET_START
+            }`,
+            meta,
+          },
+          schemaUtils.getSuccessActionTypeWithSchema(
+            `${
+              storageName
+                ? `${storageName}_SUCCESS`
+                : LOAD_SUMMARY_DATASET_SUCCESS
+            }`,
+            summaryDatasetSchema,
+            meta,
+          ),
+          {
+            type: `${
+              storageName
+                ? `${storageName}_FAILURE`
+                : LOAD_SUMMARY_DATASET_FAILURE
+            }`,
+            meta,
+          },
+        ],
+        method: "GET",
+        endpoint: apiPath,
+      },
+    });
+  },
+  // Add some caching to alleviate double fetches. DatasetSummaryOverlay needs to be refactored to use react-query
+  // Set short maxAge to avoid stale data
+  {
+    maxSize: 1,
+    isDeepEqual: true,
+    maxAge: 1000 * 30, // 30 seconds
+  },
+);
+
 // todo: can we nix this DS shape variation? (handle its needs with one of the other "DS" shapes)
 function fetchSummaryDataset(
   fullPath,
@@ -33,6 +77,7 @@ function fetchSummaryDataset(
   nodeExpanded,
   currNode,
   versionContext,
+  dispatch,
 ) {
   const meta = {
     viewId,
@@ -54,39 +99,10 @@ function fetchSummaryDataset(
   const apiCall = new APIV2Call()
     .paths("datasets/summary")
     .params(params)
-    .paths(fullPath);
+    .paths(fullPath)
+    .toString();
 
-  return {
-    [RSAA]: {
-      types: [
-        {
-          type: `${
-            storageName ? `${storageName}_START` : LOAD_SUMMARY_DATASET_START
-          }`,
-          meta,
-        },
-        schemaUtils.getSuccessActionTypeWithSchema(
-          `${
-            storageName
-              ? `${storageName}_SUCCESS`
-              : LOAD_SUMMARY_DATASET_SUCCESS
-          }`,
-          summaryDatasetSchema,
-          meta,
-        ),
-        {
-          type: `${
-            storageName
-              ? `${storageName}_FAILURE`
-              : LOAD_SUMMARY_DATASET_FAILURE
-          }`,
-          meta,
-        },
-      ],
-      method: "GET",
-      endpoint: apiCall,
-    },
-  };
+  fetchSummaryDatasetMemo(apiCall, meta, storageName, dispatch);
 }
 
 export const loadSummaryDataset =
@@ -106,15 +122,14 @@ export const loadSummaryDataset =
       }
     }
 
-    return dispatch(
-      fetchSummaryDataset(
-        joinedPath,
-        viewId,
-        storageName,
-        nodeExpanded,
-        currNode,
-        versionContext,
-      ),
+    return fetchSummaryDataset(
+      joinedPath,
+      viewId,
+      storageName,
+      nodeExpanded,
+      currNode,
+      versionContext,
+      dispatch,
     );
   };
 

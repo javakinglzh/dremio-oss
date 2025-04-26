@@ -23,12 +23,13 @@ import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.fragment.PlanningSet;
 import com.dremio.exec.planner.physical.Prel;
-import com.dremio.exec.planner.plancache.CachedPlan;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -103,16 +104,16 @@ public class AttemptObservers implements AttemptObserver {
   }
 
   @Override
-  public void planCacheUsed(int count) {
+  public void planStepLogging(String phaseName, String text, long millisTaken) {
     for (final AttemptObserver observer : observers) {
-      observer.planCacheUsed(count);
+      observer.planStepLogging(phaseName, text, millisTaken);
     }
   }
 
   @Override
-  public void addAccelerationProfileToCachedPlan(CachedPlan cachedPlan) {
+  public void addAccelerationProfileToCachedPlan(PlanCacheEntry planCacheEntry) {
     for (final AttemptObserver observer : observers) {
-      observer.addAccelerationProfileToCachedPlan(cachedPlan);
+      observer.addAccelerationProfileToCachedPlan(planCacheEntry);
     }
   }
 
@@ -179,9 +180,9 @@ public class AttemptObservers implements AttemptObserver {
   }
 
   @Override
-  public void planText(String text, long millisTaken) {
+  public void planFinalPhysical(String text, long millisTaken, List<PlannerPhaseRulesStats> stats) {
     for (final AttemptObserver observer : observers) {
-      observer.planText(text, millisTaken);
+      observer.planFinalPhysical(text, millisTaken, stats);
     }
   }
 
@@ -231,6 +232,13 @@ public class AttemptObservers implements AttemptObserver {
   public void planSubstituted(long millisTaken) {
     for (final AttemptObserver observer : observers) {
       observer.planSubstituted(millisTaken);
+    }
+  }
+
+  @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+    for (final AttemptObserver observer : observers) {
+      observer.planConsidered(profile, target);
     }
   }
 
@@ -293,6 +301,27 @@ public class AttemptObservers implements AttemptObserver {
   public void attemptCompletion(UserResult result) {
     for (final AttemptObserver observer : observers) {
       observer.attemptCompletion(result);
+    }
+  }
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {
+    for (final AttemptObserver observer : observers) {
+      observer.putExecutorProfile(nodeEndpoint);
+    }
+  }
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {
+    for (final AttemptObserver observer : observers) {
+      observer.removeExecutorProfile(nodeEndpoint);
+    }
+  }
+
+  @Override
+  public void queryClosed() {
+    for (final AttemptObserver observer : observers) {
+      observer.queryClosed();
     }
   }
 
@@ -403,6 +432,13 @@ public class AttemptObservers implements AttemptObserver {
   public void putProfileFailed() {
     for (final AttemptObserver observer : observers) {
       observer.putProfileFailed();
+    }
+  }
+
+  @Override
+  public void putProfileUpdateComplete() {
+    for (final AttemptObserver observer : observers) {
+      observer.putProfileUpdateComplete();
     }
   }
 

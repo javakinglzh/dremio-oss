@@ -26,18 +26,25 @@ import com.dremio.common.scanner.ClassPathScanner;
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.common.utils.ProtostuffUtil;
 import com.dremio.config.DremioConfig;
+import com.dremio.dac.daemon.KVStoreProviderHelper;
 import com.dremio.dac.homefiles.HomeFileConf;
 import com.dremio.dac.homefiles.HomeFileTool;
 import com.dremio.dac.proto.model.backup.BackupFileInfo;
 import com.dremio.dac.server.DACConfig;
+import com.dremio.datastore.ByteSerializerFactory;
 import com.dremio.datastore.CheckpointInfo;
-import com.dremio.datastore.CoreKVStore;
+import com.dremio.datastore.KVFormatInfo;
 import com.dremio.datastore.KVStoreInfo;
-import com.dremio.datastore.KVStoreTuple;
 import com.dremio.datastore.LocalKVStoreProvider;
+import com.dremio.datastore.Serializer;
 import com.dremio.datastore.api.Document;
+import com.dremio.datastore.api.KVFormatter;
+import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStore.PutOption;
+import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.datastore.format.Format;
 import com.dremio.exec.hadoop.HadoopFileSystem;
+import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.store.dfs.PseudoDistributedFileSystem;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
@@ -56,6 +63,7 @@ import com.google.common.base.Throwables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
+import io.opentracing.noop.NoopTracerFactory;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.DataInputStream;
@@ -66,6 +74,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.AccessMode;
 import java.nio.file.DirectoryStream;
@@ -100,6 +109,7 @@ import net.jpountz.lz4.LZ4BlockInputStream;
 import net.jpountz.lz4.LZ4BlockOutputStream;
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
+import org.jetbrains.annotations.NotNull;
 import org.xerial.snappy.SnappyInputStream;
 import org.xerial.snappy.SnappyOutputStream;
 
@@ -152,8 +162,7 @@ public final class BackupRestoreUtil {
   }
 
   public static CheckpointInfo createCheckpoint(
-      com.dremio.io.file.Path backupDirPath, LocalKVStoreProvider kvStoreProvider)
-      throws IOException {
+      com.dremio.io.file.Path backupDirPath, KVStoreProvider kvStoreProvider) throws IOException {
     final FileSystem fs = HadoopFileSystem.get(backupDirPath, new Configuration());
     // Checking if directory already exists and that the daemon can access it
     BackupRestoreUtil.checkOrCreateDirectory(fs, backupDirPath);
@@ -161,9 +170,16 @@ public final class BackupRestoreUtil {
   }
 
   public static CheckpointInfo createCheckpoint(
-      final Path backupDirAsPath, FileSystem fs, final LocalKVStoreProvider localKVStoreProvider)
+      final Path backupDirAsPath, FileSystem fs, final KVStoreProvider kvStoreProvider)
       throws IOException {
     logger.info("Backup Checkpoint has started");
+    final LocalKVStoreProvider localKVStoreProvider =
+        kvStoreProvider.unwrap(LocalKVStoreProvider.class);
+    if (localKVStoreProvider == null) {
+      throw new IllegalArgumentException(
+          "Only LocalKVStoreProvider is supported for checkpoint backups. Current provider is "
+              + kvStoreProvider.getClass().getName());
+    }
 
     try {
       final LocalDateTime now = LocalDateTime.now(ZoneId.of("UTC"));
@@ -181,7 +197,7 @@ public final class BackupRestoreUtil {
       FileSystem fs,
       Path backupRootDir,
       BackupFileInfo backupFileInfo,
-      CoreKVStore<K, V> coreKVStore,
+      KVStore<K, V> kvStore,
       boolean binary,
       Compression compression,
       String tblKey)
@@ -190,24 +206,25 @@ public final class BackupRestoreUtil {
         backupRootDir.resolve(
             format(
                 "%s%s",
-                backupFileInfo.getKvstoreInfo().getTablename(),
-                binary ? BACKUP_FILE_SUFFIX_BINARY : BACKUP_FILE_SUFFIX_JSON));
-    final Iterator<Document<KVStoreTuple<K>, KVStoreTuple<V>>> iterator =
-        coreKVStore.find().iterator();
+                kvStore.getName(), binary ? BACKUP_FILE_SUFFIX_BINARY : BACKUP_FILE_SUFFIX_JSON));
+    final KVFormatter<K, V> kvFormatter = kvStore.getKVFormatter();
+    final Serializer<K, byte[]> keySerializer = serializerForBackup(kvFormatter.getKeyFormat());
+    final Serializer<V, byte[]> valueSerializer = serializerForBackup(kvFormatter.getValueFormat());
+    final Iterator<Document<K, V>> iterator = kvStore.find().iterator();
     long records = 0;
 
     if (binary) {
       OutputStream fsout = compression.getOutputStream(fs.create(backupFile, true));
       try (final DataOutputStream bos = new DataOutputStream(fsout); ) {
         while (iterator.hasNext()) {
-          Document<KVStoreTuple<K>, KVStoreTuple<V>> keyval = iterator.next();
+          Document<K, V> document = iterator.next();
           {
-            byte[] key = keyval.getKey().getSerializedBytes();
+            byte[] key = toBytes(document.getKey(), keySerializer);
             bos.writeInt(key.length);
             bos.write(key);
           }
           {
-            byte[] value = keyval.getValue().getSerializedBytes();
+            byte[] value = toBytes(document.getValue(), valueSerializer);
             bos.writeInt(value.length);
             bos.write(value);
           }
@@ -222,13 +239,15 @@ public final class BackupRestoreUtil {
       final ObjectMapper objectMapper = new ObjectMapper();
       try (final BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(fsout))) {
         while (iterator.hasNext()) {
-          Document<KVStoreTuple<K>, KVStoreTuple<V>> keyval = iterator.next();
-          if (!tblKey.isEmpty() && !tblKey.equals(keyval.getKey().toJson())) {
+          Document<K, V> document = iterator.next();
+          if (!tblKey.isEmpty() && !tblKey.equals(toJson(document.getKey(), keySerializer))) {
             continue;
           }
           writer.write(
               objectMapper.writeValueAsString(
-                  new BackupRecord(keyval.getKey().toJson(), keyval.getValue().toJson())));
+                  new BackupRecord(
+                      toJson(document.getKey(), keySerializer),
+                      toJson(document.getValue(), valueSerializer))));
           writer.newLine();
           ++records;
         }
@@ -250,35 +269,38 @@ public final class BackupRestoreUtil {
 
   private static <K, V> void restoreTable(
       FileSystem fs,
-      CoreKVStore<K, V> coreKVStore,
+      KVStore<K, V> kvStore,
       Path filePath,
       boolean binary,
       long records,
       BackupFileInfo.Compression compressionValue)
       throws IOException {
+    final KVFormatter<K, V> kvFormatter = kvStore.getKVFormatter();
+    final Serializer<K, byte[]> keySerializer = serializerForBackup(kvFormatter.getKeyFormat());
+    final Serializer<V, byte[]> valueSerializer = serializerForBackup(kvFormatter.getValueFormat());
     if (binary) {
       Compression compression = Compression.valueOf(compressionValue.toString().toUpperCase());
       InputStream in = compression.getInputStream(fs.open(filePath));
       try (DataInputStream dis = new DataInputStream(in)) {
         for (long i = 0; i < records; i++) {
-          final KVStoreTuple<K> key = coreKVStore.newKey();
+          K key = null;
+          V value = null;
           {
             int keyLength = dis.readInt();
             byte[] keyBytes = new byte[keyLength];
             dis.readFully(keyBytes);
-            key.setSerializedBytes(keyBytes);
+            key = fromBytes(keyBytes, keySerializer);
           }
-          final KVStoreTuple<V> value = coreKVStore.newValue();
           {
             int valueLength = dis.readInt();
             byte[] valueBytes = new byte[valueLength];
             dis.readFully(valueBytes);
-            value.setSerializedBytes(valueBytes);
+            value = fromBytes(valueBytes, valueSerializer);
           }
           // Use the create flag to ensure OCC-enabled KVStore tables can retrieve an initial
           // version.
           // For non-OCC tables, this start version will get ignored and overwritten.
-          coreKVStore.put(key, value, PutOption.CREATE);
+          kvStore.put(key, value, PutOption.CREATE);
         }
       }
       return;
@@ -289,14 +311,13 @@ public final class BackupRestoreUtil {
       final ObjectMapper objectMapper = new ObjectMapper();
       String line;
       while ((line = reader.readLine()) != null) {
-        final KVStoreTuple<K> key = coreKVStore.newKey();
         final BackupRecord rec = objectMapper.readValue(line, BackupRecord.class);
-        key.setObject(key.fromJson(rec.getKey()));
-        final KVStoreTuple<V> value = coreKVStore.newValue();
-        value.setObject(value.fromJson(rec.getValue()));
+        K key = fromJson(rec.getKey(), keySerializer);
+        V value = fromJson(rec.getValue(), valueSerializer);
+
         // Use the create flag to ensure OCC-enabled KVStore tables can retrieve an initial version.
         // For non-OCC tables, this start version will get ignored and overwritten.
-        coreKVStore.put(key, value, PutOption.CREATE);
+        kvStore.put(key, value, PutOption.CREATE);
       }
     }
   }
@@ -570,7 +591,7 @@ public final class BackupRestoreUtil {
   public static BackupStats createBackup(
       FileSystem fs,
       BackupOptions options,
-      LocalKVStoreProvider localKVStoreProvider,
+      KVStoreProvider kvStoreProvider,
       @Nullable HomeFileConf homeFileStore,
       DremioConfig dremioConfig,
       @Nullable CheckpointInfo checkpointInfo,
@@ -603,8 +624,8 @@ public final class BackupRestoreUtil {
 
     try {
       List<CompletableFuture<Void>> futures = new ArrayList<>();
-      localKVStoreProvider.getStores().entrySet().stream()
-          .map((entry) -> asFuture(svc, entry, fs, backupDir, options, backupStats))
+      kvStoreProvider.stores().stream()
+          .map(store -> asFuture(svc, store, fs, backupDir, options, backupStats))
           .forEach(futures::add);
 
       // Files should not be backed up if the caller is performing an out-of-server process backup.
@@ -651,7 +672,7 @@ public final class BackupRestoreUtil {
 
   private static CompletableFuture<Void> asFuture(
       Executor e,
-      Map.Entry<KVStoreInfo, CoreKVStore<?, ?>> entry,
+      KVStore<?, ?> kvStore,
       FileSystem fs,
       Path backupDir,
       BackupOptions options,
@@ -659,8 +680,7 @@ public final class BackupRestoreUtil {
     return CompletableFuture.runAsync(
         () -> {
           try {
-            final KVStoreInfo kvstoreInfo = entry.getKey();
-            if (TokenStoreCreator.TOKENS_TABLE_NAME.equals(kvstoreInfo.getTablename())) {
+            if (TokenStoreCreator.TOKENS_TABLE_NAME.equals(kvStore.getName())) {
               // Skip creating a backup of tokens table
               // TODO: In the future, if there are other tables that should not be backed up, this
               // could be part of
@@ -668,16 +688,17 @@ public final class BackupRestoreUtil {
               return;
             }
 
-            if (LocalProfileKVStoreCreator.PROFILES_NAME.equals(kvstoreInfo.getTablename())
+            if (LocalProfileKVStoreCreator.PROFILES_NAME.equals(kvStore.getName())
                 && !options.isIncludeProfiles()) {
               return;
             }
 
-            if (!options.table.isEmpty() && !options.table.equals(kvstoreInfo.getTablename())) {
+            if (!options.table.isEmpty() && !options.table.equals(kvStore.getName())) {
               return;
             }
 
-            final BackupFileInfo backupFileInfo = new BackupFileInfo().setKvstoreInfo(kvstoreInfo);
+            final BackupFileInfo backupFileInfo =
+                new BackupFileInfo().setKvstoreInfo(createDefaultKVStoreInfo(kvStore));
             Compression compression = validateSupportedCompression(options);
             backupFileInfo.setCompression(
                 BackupFileInfo.Compression.valueOf(options.getCompression().toUpperCase()));
@@ -685,7 +706,7 @@ public final class BackupRestoreUtil {
                 fs,
                 backupDir,
                 backupFileInfo,
-                entry.getValue(),
+                kvStore,
                 options.isBinary(),
                 compression,
                 options.key);
@@ -721,15 +742,14 @@ public final class BackupRestoreUtil {
     final String dbDir = dacConfig.getConfig().getString(DremioConfig.DB_PATH_STRING);
     URI uploads = dacConfig.getConfig().getURI(DremioConfig.UPLOADS_PATH_STRING);
     File dbPath = new File(dbDir);
-    if (!isGoodRestoreLocation(dbPath)) {
-      throw new IllegalArgumentException(format("Path %s must be an empty directory.", dbDir));
-    }
 
-    final ScanResult scan = ClassPathScanner.fromPrescan(dacConfig.getConfig().getSabotConfig());
-
-    try (final LocalKVStoreProvider localKVStoreProvider =
-        new LocalKVStoreProvider(scan, dbDir, false, true)) {
-      localKVStoreProvider.start();
+    try (final KVStoreProvider kvStoreProvider = getKvStoreProvider(dacConfig, dbDir)) {
+      boolean localKVStore = isLocalKVStore(kvStoreProvider);
+      logger.info("Restoring backup to {} store", localKVStore ? "local" : "distributed");
+      if (localKVStore && !isGoodRestoreLocation(dbPath)) {
+        throw new IllegalArgumentException(format("Path %s must be an empty directory.", dbDir));
+      }
+      kvStoreProvider.start();
 
       // TODO after we add home file store type to configuration make sure we change homefile store
       // construction.
@@ -753,8 +773,7 @@ public final class BackupRestoreUtil {
                   () -> {
                     try {
                       BackupFileInfo info = tableToInfo.get(tableName);
-                      final CoreKVStore<?, ?> store =
-                          localKVStoreProvider.getStore(info.getKvstoreInfo());
+                      final KVStore<?, ?> store = getStore(kvStoreProvider, info);
                       try {
                         restoreTable(
                             bkpFs,
@@ -807,6 +826,26 @@ public final class BackupRestoreUtil {
       }
       return new RestorationResults(backupStats, restoreTableExceptions);
     }
+  }
+
+  private static KVStore<?, ?> getStore(KVStoreProvider kvStoreProvider, BackupFileInfo info) {
+    return kvStoreProvider.stores().stream()
+        .filter(store -> store.getName().equals(info.getKvstoreInfo().getTablename()))
+        .findFirst()
+        .orElseThrow(() -> new IllegalArgumentException("KVStore not found"));
+  }
+
+  private static @NotNull KVStoreProvider getKvStoreProvider(DACConfig dacConfig, String dbDir) {
+    ScanResult scanResult = ClassPathScanner.fromPrescan(dacConfig.getConfig().getSabotConfig());
+    // TODO: do we need BootStrapContext here for its startTelemetry() and registerMetrics() ?
+    BootStrapContext bootStrapContext = new BootStrapContext(dacConfig.getConfig(), scanResult);
+    return KVStoreProviderHelper.newKVStoreProvider(
+        dacConfig,
+        scanResult,
+        bootStrapContext.getAllocator(),
+        null,
+        null,
+        NoopTracerFactory.create());
   }
 
   /**
@@ -956,5 +995,46 @@ public final class BackupRestoreUtil {
 
   private static CompletableFuture<Void> runAsync(ThrowingRunnable task, Executor executor) {
     return runAsync(task, null, executor);
+  }
+
+  private static boolean isLocalKVStore(KVStoreProvider kvStoreProvider) {
+    return kvStoreProvider instanceof LocalKVStoreProvider;
+  }
+
+  private static KVStoreInfo createDefaultKVStoreInfo(KVStore<?, ?> kvStore) {
+    // Although the info is serialized to JSON, this information is never used.
+    // In the future this must be removed from the backup serialization.
+
+    final KVFormatInfo defaultFormat = new KVFormatInfo(KVFormatInfo.Type.BYTES);
+    return new KVStoreInfo(kvStore.getName(), defaultFormat, defaultFormat);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> Serializer<T, byte[]> serializerForBackup(Format<?> format) {
+    return (Serializer<T, byte[]>) format.apply(ByteSerializerFactory.INSTANCE);
+  }
+
+  private static <T> byte[] toBytes(T data, Serializer<T, byte[]> serializer) {
+    return serializer.serialize(data);
+  }
+
+  private static <T> String toJson(T data, Serializer<T, byte[]> serializer) {
+    try {
+      return serializer.toJson(data);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  private static <T> T fromBytes(byte[] bytes, Serializer<T, byte[]> serializer) {
+    return serializer.deserialize(bytes);
+  }
+
+  private static <T> T fromJson(String json, Serializer<T, byte[]> serializer) {
+    try {
+      return serializer.fromJson(json);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 }

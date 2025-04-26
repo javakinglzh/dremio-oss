@@ -40,7 +40,8 @@ public class TestQueriesClerk extends TestQueriesClerkBase {
   public void testQueriesClerk() throws Exception {
     WorkloadTicketDepot ticketDepot =
         new WorkloadTicketDepot(mockedRootAlloc, mock(SabotConfig.class), DUMMY_GROUP_MANAGER);
-    QueriesClerk clerk = makeClerk(ticketDepot);
+    ReservedResourceDepot reservedResourceDepot = new ReservedResourceDepot();
+    QueriesClerk clerk = makeClerk(ticketDepot, reservedResourceDepot, false);
     assertLivePhasesCount(clerk, 0);
     int baseNumAllocators = getNumAllocators();
 
@@ -92,7 +93,8 @@ public class TestQueriesClerk extends TestQueriesClerkBase {
   public void testGetFragmentTickets() throws Exception {
     WorkloadTicketDepot ticketDepot =
         new WorkloadTicketDepot(mockedRootAlloc, mock(SabotConfig.class), DUMMY_GROUP_MANAGER);
-    QueriesClerk clerk = makeClerk(ticketDepot);
+    ReservedResourceDepot reservedResourceDepot = new ReservedResourceDepot();
+    QueriesClerk clerk = makeClerk(ticketDepot, reservedResourceDepot, false);
 
     UserBitShared.QueryId queryId =
         UserBitShared.QueryId.newBuilder().setPart1(12).setPart2(23).build();

@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-import { createRequest } from "../_internal/createRequest.js";
+import { createRequest } from "../_internal/createRequest.ts";
 import type {
   Config,
   ResourceConfig,
   SonarV3Config,
   V3Config,
-} from "../_internal/types/Config.js";
-import { Resources } from "./resources.js";
+} from "../_internal/types/Config.ts";
+import { Resources } from "./resources.ts";
+import { HttpError } from "../common/HttpError.ts";
 
 const getSonarResourceConfig = (config: Config) => (projectId: string) => {
   const request = createRequest(config);
@@ -46,6 +47,7 @@ export const Dremio = (config: Config) => {
   };
 };
 
-export * from "../common/Query.js";
-
-export { Resources as _Resources };
+export * from "../common/Problem.ts";
+export * from "../common/Query.ts";
+export * from "./interfaces.ts";
+export { HttpError, Resources as _Resources };

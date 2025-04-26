@@ -15,13 +15,15 @@
  */
 package com.dremio.services.pubsub;
 
+import com.google.protobuf.Message;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Function;
 import org.immutables.value.Value;
 
 @Value.Immutable
-public interface MessageSubscriberOptions {
+public interface MessageSubscriberOptions<M extends Message> {
 
   /**
    * The maxAckPending setting specifies the maximum number of unacknowledged messages that a
@@ -50,4 +52,37 @@ public interface MessageSubscriberOptions {
    * <p>For the pub-sub, see https://cloud.google.com/pubsub/docs/lease-management
    */
   Optional<Duration> ackWait();
+
+  /**
+   * The subscriber group is used when creating a Subscription. All subscribers within the same
+   * group will consume events from a given topic in a round-robin fashion. If N subscribers are
+   * created with different groupName values, they will consume events independently, resulting in
+   * the same message being received by each subscriber. To achieve load balancing across N
+   * instances of your service, ensure all subscribers share the same groupName. This works
+   * similarly to Kafka's consumer_group concept. For independent applications consuming events from
+   * the same topic, use different groupName values.
+   *
+   * <p>If not set, a random group name will be generated for each of the subscribers.
+   */
+  Optional<String> subscriberGroupName();
+
+  /**
+   * The stream name is the name of the stream to which the subscriber is bound.
+   *
+   * <p>If not set, an exception will be thrown if using NATS implementation.
+   */
+  Optional<String> streamName();
+
+  /**
+   * By default messages are processed in order of their publishing. When supported, the pubsub
+   * client can use the function to parallelize across keys. The function returns parallelization
+   * key given a message.
+   *
+   * <p>Example 1: when the key is a random string (e.g. UUID.random().toString()), then all
+   * messages are processed concurrently.
+   *
+   * <p>Example 2: when the keys are the same for some messages, the messages are processed in
+   * order, but concurrently with messages that have different keys.
+   */
+  Optional<Function<M, String>> parallelizationKeyProvider();
 }

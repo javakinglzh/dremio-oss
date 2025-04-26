@@ -35,6 +35,13 @@ public interface ProjectConfig {
   DistPathConfig getScratchConfig();
 
   /**
+   * Get profile config
+   *
+   * @return config
+   */
+  DistPathConfig getProfileConfig();
+
+  /**
    * Get uploads config
    *
    * @return config

@@ -38,7 +38,6 @@ import com.dremio.exec.store.sys.udf.UserDefinedFunctionSerde;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.namespace.NamespaceService;
 import java.io.IOException;
 import java.sql.Timestamp;
 import java.util.ArrayList;
@@ -60,7 +59,6 @@ public class TestShowFunctionsHandler extends BaseTestQuery {
   @Mock private MockVersionedPlugin versionedPlugin;
   @Mock private UserSession userSession;
   @Mock private OptionManager optionManager;
-  @Mock private NamespaceService namespaceService;
   @Mock private CatalogService catalogService;
   private UserDefinedFunctionCatalogImpl userDefinedFunctionCatalog;
 
@@ -90,11 +88,7 @@ public class TestShowFunctionsHandler extends BaseTestQuery {
   public void setup() throws IOException {
     userDefinedFunctionCatalog =
         new UserDefinedFunctionCatalogImpl(
-            queryContext.getSchemaConfig(),
-            optionManager,
-            namespaceService,
-            catalogService,
-            catalog);
+            queryContext.getSchemaConfig(), optionManager, catalog, catalogService, catalog);
     when(queryContext.getUserDefinedFunctionCatalog()).thenReturn(userDefinedFunctionCatalog);
     when(queryContext.getCatalog()).thenReturn(catalog);
     when(queryContext.getSession()).thenReturn(userSession);
@@ -110,8 +104,7 @@ public class TestShowFunctionsHandler extends BaseTestQuery {
   public void testShowFunctionsWithoutVersionedPlugin() throws Exception {
     CatalogEntityKey catalogEntityKey =
         CatalogEntityKey.newBuilder().keyComponents(List.of()).build();
-    when(namespaceService.getFunctions())
-        .thenReturn(List.of(UserDefinedFunctionSerde.toProto(udf1)));
+    when(catalog.getFunctions()).thenReturn(List.of(UserDefinedFunctionSerde.toProto(udf1)));
     SqlShowFunctions showFunctions = new SqlShowFunctions(SqlParserPos.ZERO, null);
     final List<ShowFunctionsHandler.ShowFunctionResult> actualResults =
         showFunctionsHandler.toResult("foo", showFunctions);
@@ -125,8 +118,7 @@ public class TestShowFunctionsHandler extends BaseTestQuery {
     when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(true);
     when(catalog.getSource(anyString())).thenReturn(versionedPlugin);
     when(versionedPlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(namespaceService.getFunctions())
-        .thenReturn(List.of(UserDefinedFunctionSerde.toProto(udf2)));
+    when(catalog.getFunctions()).thenReturn(List.of(UserDefinedFunctionSerde.toProto(udf2)));
     when(catalogService.getAllVersionedPlugins()).thenReturn(Stream.of(versionedPlugin));
     when(versionedPlugin.getFunctions(any()))
         .thenReturn(List.of(UserDefinedFunctionSerde.toProto(udf1)));

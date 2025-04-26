@@ -15,13 +15,15 @@
  */
 import { PureComponent } from "react";
 import { compose } from "redux";
-import { withRouter } from "react-router";
+import { Link, withRouter } from "react-router";
 
 import LoginFormMixin from "@inject/pages/AuthenticationPage/components/LoginFormMixin";
 import localStorageUtils from "dyn-load/utils/storageUtils/localStorageUtils";
 import { renderSSOLoginToggleLink } from "dyn-load/utils/loginUtils";
 import LoginForm from "./LoginForm";
-import LoginTitle from "./LoginTitle";
+import { BetaTag } from "./BetaTag/BetaTag";
+
+const isBeta = process.env.DREMIO_BETA === "true";
 
 export class LoginFormContainer extends PureComponent {
   constructor(props) {
@@ -32,7 +34,9 @@ export class LoginFormContainer extends PureComponent {
   }
 
   componentDidMount() {
-    this.state.loginScreen === null ? this.setLoginScreen() : null;
+    if (this.state.loginScreen === null) {
+      this.setLoginScreen();
+    }
   }
 
   renderForm() {
@@ -48,13 +52,30 @@ export class LoginFormContainer extends PureComponent {
 
   render() {
     return (
-      <div id="login-form" style={styles.base}>
-        <LoginTitle
-          style={{ marginBottom: 10 }}
-          subTitle={laDeprecated("Welcome to Dremio, please log in.")}
-        />
-        {this.renderForm(this.state.loginScreen)}
-        {renderSSOLoginToggleLink(this.setLoginScreen.bind(this))}
+      <div className="login-form-wrapper">
+        <div id="login-form" className="drop-shadow-lg" style={styles.base}>
+          <h1 className="flex justify-center items-center dremio-typography-large dremio-typography-bold mb-3">
+            Log in
+            {isBeta && <BetaTag />}
+          </h1>
+          {this.renderForm({
+            loginType: this.state.loginScreen,
+            ssoPending: !!this.props.ssoPending,
+          })}
+          {renderSSOLoginToggleLink({
+            setScreenFn: this.setLoginScreen.bind(this),
+            ssoPending: !!this.props.ssoPending,
+          })}
+        </div>
+        <div className="flex justify-center mt-5 dremio-typography-small">
+          <Link
+            to="https://www.dremio.com/legal/privacy-policy"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {laDeprecated("Privacy policy")}
+          </Link>
+        </div>
       </div>
     );
   }
@@ -65,14 +86,11 @@ const styles = {
   base: {
     position: "relative",
     backgroundColor: "var(--fill--login--foreground)",
-    minWidth: 775,
-    height: 350,
-    maxWidth: 775,
-    maxHeight: 350,
+    width: 400,
     overflow: "hidden",
-    padding: 40,
+    padding: "var(--dremio--spacing--3)",
     display: "flex",
-    borderRadius: "8px",
+    borderRadius: "4px",
     flexDirection: "column",
   },
 };

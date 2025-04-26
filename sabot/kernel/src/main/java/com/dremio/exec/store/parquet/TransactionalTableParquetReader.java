@@ -109,9 +109,10 @@ public abstract class TransactionalTableParquetReader implements RecordReader {
     }
 
     // create output vector based on schema in parquet file
+    List<SchemaPath> projectedParquetColumns = columnResolver.getProjectedParquetColumns();
     for (Type parquetField : footer.getFileMetaData().getSchema().getFields()) {
       SchemaPath columnSchemaPath = SchemaPath.getCompoundPath(parquetField.getName());
-      for (SchemaPath projectedPath : columnResolver.getProjectedParquetColumns()) {
+      for (SchemaPath projectedPath : projectedParquetColumns) {
         String name = projectedPath.getRootSegment().getNameSegment().getPath();
         if (parquetField.getName().equalsIgnoreCase(name)) {
           if (parquetField.isPrimitive()) {
@@ -119,7 +120,7 @@ public abstract class TransactionalTableParquetReader implements RecordReader {
                 ParquetTypeHelper.createField(
                     columnResolver.getBatchSchemaColumnPath(columnSchemaPath),
                     parquetField.asPrimitiveType(),
-                    parquetField.getOriginalType(),
+                    parquetField.getLogicalTypeAnnotation(),
                     schemaHelper);
             final Class<? extends ValueVector> clazz = TypeHelper.getValueVectorClass(field);
             output.addField(field, clazz);

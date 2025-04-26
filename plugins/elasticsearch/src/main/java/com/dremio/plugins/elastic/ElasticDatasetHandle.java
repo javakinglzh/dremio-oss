@@ -17,7 +17,7 @@ package com.dremio.plugins.elastic;
 
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.EntityPath;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.plugins.elastic.ElasticConnectionPool.ElasticConnection;
 import com.dremio.plugins.elastic.mapping.ElasticMappingSet.ElasticMapping;
 import java.util.List;
@@ -29,7 +29,7 @@ public class ElasticDatasetHandle implements DatasetHandle {
 
   private final EntityPath name;
   private final ElasticConnection connection;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final ElasticsearchConf config;
   private final ElasticMapping mapping;
   private final List<String> aliasIndices;
@@ -38,7 +38,7 @@ public class ElasticDatasetHandle implements DatasetHandle {
   public ElasticDatasetHandle(
       EntityPath name,
       ElasticConnection connection,
-      SabotContext context,
+      PluginSabotContext context,
       ElasticsearchConf config,
       ElasticMapping mapping,
       List<String> aliasIndices,
@@ -58,7 +58,7 @@ public class ElasticDatasetHandle implements DatasetHandle {
     return connection;
   }
 
-  SabotContext getContext() {
+  PluginSabotContext getContext() {
     return context;
   }
 

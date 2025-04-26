@@ -26,6 +26,7 @@ import com.dremio.dac.model.sources.PhysicalDatasetPath;
 import com.dremio.dac.model.sources.SourceUI;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.jobs.JobRequest;
@@ -80,7 +81,10 @@ public class TestViewSchemaLearning extends BaseTestServer {
     source.setConfig(nasConf);
     sourceConfig =
         getSourceService()
-            .registerSourceWithRuntime(source.asSourceConfig(), SystemUser.SYSTEM_USERNAME);
+            .registerSourceWithRuntime(
+                source.asSourceConfig(),
+                SystemUser.SYSTEM_USERNAME,
+                SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     setSystemOption(VDS_AUTO_FIX_THRESHOLD, 0);
   }
@@ -93,14 +97,13 @@ public class TestViewSchemaLearning extends BaseTestServer {
 
     SourceUI source = new SourceUI();
     source.setName("source-vsl");
-    getSourceService().deleteSource(sourceConfig);
+    getSourceService().deleteSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   private void createPds(String fileName) throws NamespaceException {
     PhysicalDatasetPath datasetPath =
         new PhysicalDatasetPath(asList(sourceConfig.getName(), fileName));
     DatasetConfig dacSample1 = new DatasetConfig();
-    dacSample1.setCreatedAt(System.currentTimeMillis());
     dacSample1.setFullPathList(asList(sourceConfig.getName(), fileName));
     dacSample1.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
     dacSample1.setName(fileName);
@@ -147,7 +150,8 @@ public class TestViewSchemaLearning extends BaseTestServer {
             vds.getSql() + " -- SALT", // A little salt to make the SQL different
             null,
             null,
-            null);
+            null,
+            false);
     vds =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv3().path(CATALOG_PATH).path(updatedVDS.getId()))
@@ -215,7 +219,8 @@ public class TestViewSchemaLearning extends BaseTestServer {
             "select 1 as c1, 2 as c2",
             null,
             null,
-            null);
+            null,
+            false);
     vds =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv3().path(CATALOG_PATH).path(updatedVDS.getId()))

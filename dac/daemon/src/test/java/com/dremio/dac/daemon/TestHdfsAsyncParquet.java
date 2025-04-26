@@ -15,8 +15,6 @@
  */
 package com.dremio.dac.daemon;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
-import static com.dremio.common.TestProfileHelper.isMaprProfile;
 import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
 import static org.junit.Assert.assertEquals;
 
@@ -36,7 +34,7 @@ import com.dremio.dac.service.source.SourceService;
 import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.BaseTestMiniDFS;
-import com.dremio.exec.server.BootStrapContext;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.HDFSConf;
 import com.dremio.exec.util.TestUtilities;
@@ -142,7 +140,6 @@ public class TestHdfsAsyncParquet extends BaseTestMiniDFS {
 
   @BeforeClass
   public static void init() throws Exception {
-    assumeNonMaprProfile();
     startMiniDfsCluster(TestHdfsAsyncParquet.class.getName());
     String[] hostPort = dfsCluster.getNameNode().getHostAndPort().split(":");
     host = hostPort[0];
@@ -171,16 +168,6 @@ public class TestHdfsAsyncParquet extends BaseTestMiniDFS {
 
   @AfterClass
   public static void close() throws Exception {
-    /*
-    JUnit assume() call results in AssumptionViolatedException, which is handled by JUnit with a goal to ignore
-    the test having the assume() call. Multiple assume() calls, or other exceptions coupled with a single assume()
-    call, result in multiple exceptions, which aren't handled by JUnit, leading to test deemed to be failed.
-    We thus use isMaprProfile() check instead of assumeNonMaprProfile() here.
-    */
-    if (isMaprProfile()) {
-      return;
-    }
-
     try (Timer.TimedBlock b = Timer.time("TestHdfsAsyncParquet.@AfterClass")) {
       if (dremioDaemon != null) {
         dremioDaemon.close();
@@ -212,10 +199,10 @@ public class TestHdfsAsyncParquet extends BaseTestMiniDFS {
       source.setId(new EntityId(SOURCE_ID));
       source.setDescription(SOURCE_DESC);
       allocator =
-          l(BootStrapContext.class)
-              .getAllocator()
-              .newChildAllocator(getClass().getName(), 0, Long.MAX_VALUE);
-      l(CatalogService.class).getSystemUserCatalog().createSource(source);
+          l(BufferAllocator.class).newChildAllocator(getClass().getName(), 0, Long.MAX_VALUE);
+      l(CatalogService.class)
+          .getSystemUserCatalog()
+          .createSource(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 
@@ -239,7 +226,10 @@ public class TestHdfsAsyncParquet extends BaseTestMiniDFS {
                 null,
                 SampleDataPopulator.DEFAULT_USER_NAME,
                 null,
-                Integer.MAX_VALUE);
+                null,
+                null,
+                Integer.MAX_VALUE,
+                false);
     assertEquals(1, ns.getFolders().size());
     assertEquals(0, ns.getFiles().size());
     assertEquals(0, ns.getPhysicalDatasets().size());
@@ -254,7 +244,10 @@ public class TestHdfsAsyncParquet extends BaseTestMiniDFS {
                 new SourceFolderPath(SOURCE_NAME + ".parquet.schemalearn"),
                 SampleDataPopulator.DEFAULT_USER_NAME,
                 null,
-                Integer.MAX_VALUE);
+                null,
+                null,
+                Integer.MAX_VALUE,
+                false);
     assertEquals(0, ns.getFolders().size());
     assertEquals(2, ns.getFiles().size());
     assertEquals(0, ns.getPhysicalDatasets().size());

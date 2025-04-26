@@ -22,6 +22,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 
+import com.dremio.exec.store.hive.exec.HadoopFsCacheKeyPluginClassLoader;
 import org.apache.hadoop.classification.InterfaceAudience.LimitedPrivate;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.conf.Configuration;
@@ -81,7 +82,9 @@ public class HadoopFsWrapperWithCachePluginClassLoader extends FileSystem {
       @Override
       public void onRemoval(RemovalNotification<String, HadoopFsCacheWrapperPluginClassLoader> notification) {
         try {
-          notification.getValue().close();
+          if (notification.getValue() != null) {
+            notification.getValue().close();
+          }
         } catch (Exception e) {
           // Ignore
           logger.error("Unable to clean FS from HadoopFsCacheKeyPluginClassLoader", e);
@@ -1153,5 +1156,10 @@ public class HadoopFsWrapperWithCachePluginClassLoader extends FileSystem {
   public static IOException propagateFSError(FSError e) throws IOException {
     Throwables.propagateIfPossible(e.getCause(), IOException.class);
     return new IOException("Unexpected FSError", e);
+  }
+
+  @VisibleForTesting
+  protected LoadingCache<String, HadoopFsCacheWrapperPluginClassLoader> getCache() {
+    return cache;
   }
 }

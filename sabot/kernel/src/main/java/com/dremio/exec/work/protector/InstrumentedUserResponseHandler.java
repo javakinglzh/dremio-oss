@@ -35,7 +35,6 @@ public class InstrumentedUserResponseHandler implements CompletedUserResponseHan
   private int batchCount;
   private final SimpleTimedHistogram rpcLatencyTimer;
   private static final String METRIC_TAG_KEY_RPC_TYPE = "rpc.type";
-  private static final String METRIC_TAG_KEY_BATCH = "batch";
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(InstrumentedUserResponseHandler.class);
 
@@ -60,13 +59,7 @@ public class InstrumentedUserResponseHandler implements CompletedUserResponseHan
         new InstrumentedRpcOutcomeListener(
             outcomeListener,
             () -> {
-              sample
-                  .tags(
-                      METRIC_TAG_KEY_RPC_TYPE,
-                      RpcType.QUERY_DATA.toString(),
-                      METRIC_TAG_KEY_BATCH,
-                      String.valueOf(batchCount))
-                  .close();
+              sample.tags(METRIC_TAG_KEY_RPC_TYPE, RpcType.QUERY_DATA.toString()).close();
               logger.debug(
                   "Query data batch {} with row count {} for query id {} sent",
                   batchCount,

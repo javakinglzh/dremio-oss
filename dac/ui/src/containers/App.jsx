@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import Immutable from "immutable";
-import { Component, Fragment, StrictMode } from "react";
+import { Component, Fragment, Suspense } from "react";
 import { compose } from "redux";
 import PropTypes from "prop-types";
 import { connect } from "react-redux";
@@ -28,7 +28,7 @@ import DocumentTitle from "react-document-title";
 
 import { showAppError } from "#oss/actions/prodError";
 import { DnDContextDecorator } from "#oss/components/DragComponents/DnDContextDecorator";
-import { Suspense } from "#oss/components/Lazy";
+import LoadingOverlay from "#oss/components/LoadingOverlay";
 
 import socket from "@inject/utils/socket";
 import sentryUtil from "#oss/utils/sentryUtil";
@@ -54,7 +54,7 @@ import "../uiTheme/css/react-datepicker.css";
 import "../uiTheme/css/dialog-polyfill.css";
 import "../uiTheme/css/leantable.css";
 import "../uiTheme/css/fa.css";
-import { CatalogSearchModalContainer } from "@inject/catalogSearch/CatalogSearchModalContainer";
+import { AdditionalAppElements } from "@inject/AdditionalAppElements";
 
 DocumentTitle.join = (tokens) => {
   return [...tokens, formatMessage("App.Dremio")].filter(Boolean).join(" - ");
@@ -194,7 +194,7 @@ export class App extends Component {
     const { children } = this.props;
     return (
       <Fragment>
-        <Suspense>
+        <Suspense fallback={<LoadingOverlay />}>
           <LocationProvider location={this.props.location}>
             <StyledEngineProvider injectFirst>
               <ThemeProvider theme={theme}>{children}</ThemeProvider>
@@ -207,9 +207,7 @@ export class App extends Component {
             <ModalsContainer modals={{ AboutModal }} />
             <div className="popup-notifications" />
             <div className="conifrmation-container" />
-            <StrictMode>
-              <CatalogSearchModalContainer />
-            </StrictMode>
+            {AdditionalAppElements}
           </LocationProvider>
         </Suspense>
         <ProdErrorContainer />

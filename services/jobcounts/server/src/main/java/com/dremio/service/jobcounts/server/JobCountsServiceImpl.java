@@ -18,6 +18,7 @@ package com.dremio.service.jobcounts.server;
 import com.dremio.common.AutoCloseables;
 import com.dremio.service.jobcounts.DeleteJobCountsRequest;
 import com.dremio.service.jobcounts.GetJobCountsRequest;
+import com.dremio.service.jobcounts.GetJobCountsRequestDaily;
 import com.dremio.service.jobcounts.JobCounts;
 import com.dremio.service.jobcounts.JobCountsServiceGrpc;
 import com.dremio.service.jobcounts.UpdateJobCountsRequest;
@@ -57,6 +58,28 @@ public class JobCountsServiceImpl extends JobCountsServiceGrpc.JobCountsServiceI
       logger.error("Exception getting job counts: ", ex);
       responseObserver.onError(
           Status.INTERNAL.withDescription(ex.getMessage()).asRuntimeException());
+    }
+  }
+
+  @Override
+  public void getJobCountsDaily(
+      GetJobCountsRequestDaily request, StreamObserver<JobCounts> responseObserver) {
+    logger.debug("Got get job counts request daily {}", request);
+
+    try {
+      List<Integer> dailyCounts =
+          jobCountStore.getCountsDaily(
+              request.getIdsList().get(0), request.getType(), request.getJobCountsAgeInDays());
+      JobCounts.Builder jobCounts = JobCounts.newBuilder();
+      jobCounts.addAllCount(dailyCounts);
+      responseObserver.onNext(jobCounts.build());
+      responseObserver.onCompleted();
+    } catch (Exception ex) {
+      logger.error("Exception getting job counts daily for request {}: ", request, ex);
+      responseObserver.onError(
+          Status.INTERNAL
+              .withDescription("Error processing request: " + request + ", " + ex.getMessage())
+              .asRuntimeException());
     }
   }
 

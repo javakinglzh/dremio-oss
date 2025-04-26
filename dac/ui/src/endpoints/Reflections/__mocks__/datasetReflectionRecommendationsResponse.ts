@@ -19,7 +19,6 @@ export const aggReflectionRecommendationsResponse = {
     {
       type: "AGGREGATION",
       enabled: true,
-      arrowCachingEnabled: false,
       dimensionFields: [
         {
           name: "state",
@@ -43,7 +42,6 @@ export const rawReflectionRecommendationsResponse = {
     {
       type: "RAW",
       enabled: true,
-      arrowCachingEnabled: false,
       displayFields: [
         {
           name: "city",

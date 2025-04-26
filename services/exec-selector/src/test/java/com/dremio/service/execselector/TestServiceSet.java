@@ -100,6 +100,20 @@ public class TestServiceSet implements ServiceSet {
     }
   }
 
+  void testAddNode(CoordinationProtos.NodeEndpoint node) {
+    endpoints.add(node);
+    if (listener != null) {
+      listener.nodesRegistered(ImmutableSet.of(node));
+    }
+  }
+
+  void testRemoveNode(CoordinationProtos.NodeEndpoint node) {
+    endpoints.remove(node);
+    if (listener != null) {
+      listener.nodesUnregistered(ImmutableSet.of(node));
+    }
+  }
+
   void testAddNode(String address, String tag, int port) {
     CoordinationProtos.NodeEndpoint newNode =
         CoordinationProtos.NodeEndpoint.newBuilder()

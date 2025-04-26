@@ -57,7 +57,6 @@ import com.dremio.sabot.exec.FragmentTicket;
 import com.dremio.sabot.exec.FragmentWorkManager.ExecConnectionCreator;
 import com.dremio.sabot.exec.MaestroProxy;
 import com.dremio.sabot.exec.QueriesClerk;
-import com.dremio.sabot.exec.QueryStarter;
 import com.dremio.sabot.exec.QueryTicket;
 import com.dremio.sabot.exec.context.ContextInformation;
 import com.dremio.sabot.exec.context.ContextInformationFactory;
@@ -194,19 +193,6 @@ public class FragmentExecutorBuilder {
 
   public QueriesClerk getClerk() {
     return clerk;
-  }
-
-  /**
-   * Obtains a query ticket, then starts the query with this query ticket
-   *
-   * <p>The query might be built and started in the calling thread, *or*, it might be built and
-   * started by a worker thread
-   */
-  public void buildAndStartQuery(
-      PlanFragmentFull firstFragment,
-      final SchedulingInfo schedulingInfo,
-      final QueryStarter queryStarter) {
-    clerk.buildAndStartQuery(firstFragment, schedulingInfo, queryStarter);
   }
 
   public FragmentExecutor build(

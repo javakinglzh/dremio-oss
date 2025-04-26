@@ -45,7 +45,11 @@ public interface MaterializationInfo {
 
   Long getLastSuccessfulRefresh();
 
+  Long getLastRefreshDuration();
+
   Integer getNumFailures();
+
+  String reflectionMode();
 
   static ImmutableMaterializationInfo.Builder builder() {
     return new ImmutableMaterializationInfo.Builder();

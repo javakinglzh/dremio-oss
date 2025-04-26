@@ -34,6 +34,7 @@ import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -87,6 +88,26 @@ public class JobCountStoreImpl implements JobCountStore {
           System.currentTimeMillis() - TimeUnit.DAYS.toMillis(jobCountAgeInDays));
     }
     return 0;
+  }
+
+  @Override
+  public List<Integer> getCountsDaily(String id, JobCountType type, int jobCountAgeInDays) {
+    Document<String, JobCountInfo> doc = getStore().get(id);
+    if (doc != null) {
+      return calculateCountDaily(
+          doc.getValue(),
+          type,
+          System.currentTimeMillis() - TimeUnit.DAYS.toMillis(jobCountAgeInDays));
+    }
+    return new ArrayList<>(Collections.nCopies(jobCountAgeInDays, 0));
+  }
+
+  @Override
+  public int getCountForDay(String id, JobCountType type, int day) {
+    if (day <= 1) {
+      return getCount(id, type, day);
+    }
+    return getCount(id, type, day) - getCount(id, type, day - 1);
   }
 
   @Override
@@ -216,6 +237,30 @@ public class JobCountStoreImpl implements JobCountStore {
         break;
       }
     }
+    return res;
+  }
+
+  private List<Integer> calculateCountDaily(
+      JobCountInfo info, JobCountType type, long cutOffTsInMillis) {
+    List<Integer> res = new ArrayList<>(Collections.nCopies(COUNTS_SIZE, 0));
+    if (info == null) {
+      throw new IllegalArgumentException("JobCountInfo cannot be null");
+    }
+    for (int i = 0; i < COUNTS_SIZE; i++) {
+      DailyJobCount dailyJobCount = info.getDailyCount(i);
+      if (dailyJobCount == null || dailyJobCount.getTimeStamp() <= cutOffTsInMillis) {
+        continue;
+      }
+      // Get the count for the specified type
+      com.dremio.service.jobcounts.DailyJobCount.JobCountWithType typeCount =
+          dailyJobCount.getTypeCount(type.getNumber());
+      int count = (typeCount != null) ? typeCount.getCount() : 0;
+
+      // Update the result list
+      res.set(i, count);
+    }
+    // Reverse the list before returning
+    Collections.reverse(res);
     return res;
   }
 

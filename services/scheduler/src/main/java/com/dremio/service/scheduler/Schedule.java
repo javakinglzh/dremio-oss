@@ -30,6 +30,7 @@ import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoField;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjuster;
 import java.time.temporal.TemporalAdjusters;
 import java.time.temporal.TemporalAmount;
@@ -78,6 +79,20 @@ public interface Schedule extends Iterable<Instant> {
      * @return The schedule
      */
     B staggered(int seed, long staggerRange, TimeUnit timeUnit);
+
+    /**
+     * Allows modification of schedule of the task.
+     *
+     * <p>This allows to model a task with occasionally varying schedules as opposed to a chain of
+     * single shot schedules. For a clustered singleton especially this is the better pattern as
+     * this will also bring in internal efficiencies, such as a service instance retaining ownership
+     * for task across multiple schedules.
+     *
+     * @param scheduleModifier The modifier function that returns a new schedule. Return of a null
+     *     schedule by this function indicates that there is no modification.
+     * @return builder for fluency
+     */
+    B scheduleModifier(Function<Schedule, Schedule> scheduleModifier);
   }
 
   interface SingleShotBuilder
@@ -294,6 +309,37 @@ public interface Schedule extends Iterable<Instant> {
       return ((ScheduleBuilderImpl) everyMonths(months))
           .withAdjuster(sameOrNext(Period.ofMonths(1), combine(dayOfMonth(dayOfMonth), at)));
     }
+
+    /**
+     * Create a schedule builder where events are triggered every {@code interval chronoUnit}, e.g.
+     * "3 hours"
+     *
+     * @param chronoUnit one of { MILLIS, SECONDS, MINUTES, HOURS, DAYS, WEEKS, MONTHS }
+     * @param interval the number of {@code chronoUnit} between events
+     * @return a schedule builder generating events every {@code interval chronoUnit}
+     * @throws IllegalArgumentException if {@code interval} is negative
+     * @throws IllegalStateException if {@code chronoUnit} is not supported
+     */
+    static Builder every(ChronoUnit chronoUnit, long interval) {
+      switch (chronoUnit) {
+        case MILLIS:
+          return Builder.everyMillis(interval);
+        case SECONDS:
+          return Builder.everySeconds(interval);
+        case MINUTES:
+          return Builder.everyMinutes(interval);
+        case HOURS:
+          return Builder.everyHours((int) interval);
+        case DAYS:
+          return Builder.everyDays((int) interval);
+        case WEEKS:
+          return Builder.everyWeeks((int) interval);
+        case MONTHS:
+          return Builder.everyMonths((int) interval);
+        default:
+          throw new IllegalStateException("Unhandled chrono unit: " + chronoUnit);
+      }
+    }
   }
 
   interface ClusteredSingletonSingleShotBuilder
@@ -343,20 +389,6 @@ public interface Schedule extends Iterable<Instant> {
           "Modifications not allowed for schedules with temporal adjusters such as time of day");
       return new ClusteredSingletonBuilderImpl(old, newAmount);
     }
-
-    /**
-     * Allows modification of schedule of the task.
-     *
-     * <p>This is a better pattern for clustered singleton schedules as this allows to model a task
-     * with occasionally varying schedules as opposed to a chain of single shot schedules. For a
-     * clustered singleton this will also bring in internal efficiencies, such as a service instance
-     * retaining ownership for task across multiple schedules.
-     *
-     * @param scheduleModifier The modifier function that returns a new schedule. Return of a null
-     *     schedule by this function indicates that there is no modification.
-     * @return builder for fluency
-     */
-    ClusteredSingletonBuilder scheduleModifier(Function<Schedule, Schedule> scheduleModifier);
 
     /**
      * Adds a supplier that provides weight of the task.

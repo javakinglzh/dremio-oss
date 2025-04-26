@@ -19,7 +19,12 @@ import "./HomePageTop.less";
 
 export const HomePageTop = () => {
   return (
-    <div className="c-homePageTop">
+    <div
+      className="bg-secondary px-1 py-05 shrink-0 flex items-center flex-row"
+      style={{
+        height: "48px",
+      }}
+    >
       <div className="c-homePageTop__search">
         <SearchItem />
       </div>

@@ -27,10 +27,6 @@
   <artifactId>dremio-hive2-plugin-launcher</artifactId>
   <name>Storage Plugins - Hive 2.x Plugin Launcher</name>
 
-  <properties>
-    <src.dir>src/main/java</src.dir>
-  </properties>
-
   <dependencies>
     <dependency>
       <groupId>com.dremio</groupId>
@@ -57,46 +53,4 @@
       <artifactId>pf4j</artifactId>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-checkstyle-plugin</artifactId>
-        <configuration>
-          <sourceDirectories combine.children="append">
-            <sourceDirectory>${project.basedir}/${src.dir}</sourceDirectory>
-          </sourceDirectories>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>com.diffplug.spotless</groupId>
-        <artifactId>spotless-maven-plugin</artifactId>
-        <configuration>
-          <!-- See https://github.com/diffplug/spotless/tree/main/plugin-maven#java -->
-          <java>
-            <includes combine.children="append">
-              <include>${src.dir}/**/*.java</include>
-            </includes>
-          </java>
-        </configuration>
-      </plugin>
-    </plugins>
-    <sourceDirectory>${src.dir}</sourceDirectory>
-  </build>
-
-  <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <properties>
-        <src.dir>src/compat/java</src.dir>
-      </properties>
-    </profile>
-  </profiles>
-
 </project>

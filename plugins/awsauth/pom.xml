@@ -43,6 +43,10 @@
       <artifactId>apache-client</artifactId>
     </dependency>
     <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>regions</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.amazonaws</groupId>
       <artifactId>aws-java-sdk-sts</artifactId>
     </dependency>
@@ -84,6 +88,14 @@
           <artifactId>freemarker</artifactId>
         </exclusion>
       </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.common</groupId>
+      <artifactId>dremio-common-aws</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio</groupId>
+      <artifactId>dremio-common</artifactId>
     </dependency>
     <dependency>
       <groupId>com.dremio.sabot</groupId>

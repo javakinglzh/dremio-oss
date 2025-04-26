@@ -17,6 +17,8 @@ package com.dremio.service.scheduler;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableSchedulerThreadPool;
+import com.google.common.annotations.VisibleForTesting;
+import java.time.Clock;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Iterator;
@@ -26,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.inject.Provider;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -38,10 +41,17 @@ public class SimpleLocalSchedulerService implements SchedulerService {
   private static final String THREAD_NAME_PREFIX = "scheduler-";
   private final CloseableSchedulerThreadPool executorService;
   private final AtomicInteger idCounter;
+  private final Provider<Clock> clockProvider;
 
   public SimpleLocalSchedulerService(int corePoolSize) {
+    this(corePoolSize, Clock::systemUTC);
+  }
+
+  @VisibleForTesting
+  public SimpleLocalSchedulerService(int corePoolSize, Provider<Clock> clockProvider) {
     executorService = new CloseableSchedulerThreadPool(THREAD_NAME_PREFIX, corePoolSize);
     idCounter = new AtomicInteger(0);
+    this.clockProvider = clockProvider;
   }
 
   @Override
@@ -57,15 +67,17 @@ public class SimpleLocalSchedulerService implements SchedulerService {
 
   private class CancellableTask implements Cancellable, Runnable {
     private final AtomicBoolean cancelled = new AtomicBoolean(false);
-    private final Iterator<Instant> instants;
+    private final AtomicReference<Iterator<Instant>> instantsRef;
     private final AtomicReference<ScheduledFuture<?>> currentTask;
     private final int taskId;
     private final Runnable task;
     private volatile boolean taskDone;
+    private Schedule currentSchedule;
     private Instant lastRun = Instant.MIN;
 
     public CancellableTask(Schedule schedule, Runnable task, int taskId) {
-      this.instants = schedule.iterator();
+      this.instantsRef = new AtomicReference<>(schedule.iterator());
+      this.currentSchedule = schedule;
       this.task = task;
       this.taskDone = false;
       this.currentTask = new AtomicReference<>(null);
@@ -90,7 +102,7 @@ public class SimpleLocalSchedulerService implements SchedulerService {
         LOGGER.warn("Task `{}` execution failed", this, e);
       }
 
-      lastRun = Instant.now();
+      lastRun = instantNow();
       scheduleNext();
     }
 
@@ -100,14 +112,14 @@ public class SimpleLocalSchedulerService implements SchedulerService {
         return;
       }
 
-      Instant instant = nextInstant();
+      Instant instant = checkAndAdjustForScheduleModifications();
       // if instant == null - it is the end of the scheduling
       if (instant == null) {
         LOGGER.debug("This is the end of the task {}", this);
         taskDone = true;
         currentTask.set(getDefaultFuture());
       } else {
-        long delay = ChronoUnit.MILLIS.between(Instant.now(), instant);
+        long delay = ChronoUnit.MILLIS.between(instantNow(), instant);
         LOGGER.debug("Task {} is scheduled to run in {} milliseconds", this, delay);
         ScheduledFuture<?> future = executorService.schedule(this, delay, TimeUnit.MILLISECONDS);
         currentTask.set(future);
@@ -156,6 +168,7 @@ public class SimpleLocalSchedulerService implements SchedulerService {
 
     private Instant nextInstant() {
       Instant result = null;
+      final Iterator<Instant> instants = instantsRef.get();
       while (instants.hasNext()) {
         result = instants.next();
         if (!result.isBefore(lastRun)) {
@@ -163,6 +176,21 @@ public class SimpleLocalSchedulerService implements SchedulerService {
         }
       }
       return result;
+    }
+
+    private Instant checkAndAdjustForScheduleModifications() {
+      if (!lastRun.equals(Instant.MIN)) {
+        final Schedule newSchedule = currentSchedule.getScheduleModifier().apply(currentSchedule);
+        if (newSchedule != null) {
+          currentSchedule = newSchedule;
+          instantsRef.set(newSchedule.iterator());
+        }
+      }
+      return nextInstant();
+    }
+
+    private Instant instantNow() {
+      return Instant.now(clockProvider.get());
     }
 
     @Override

@@ -19,6 +19,7 @@ import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.FindByRange;
 import com.dremio.datastore.api.ImmutableFindByRange;
 import com.dremio.datastore.api.IncrementCounter;
+import com.dremio.datastore.api.KVFormatter;
 import com.dremio.datastore.api.KVStore;
 import com.google.common.base.Objects;
 import com.google.common.collect.Iterables;
@@ -30,9 +31,11 @@ import java.util.stream.Collectors;
 public class LocalKVStore<K, V> implements KVStore<K, V> {
 
   private final CoreKVStore<K, V> coreKVStore;
+  private final KVFormatter<K, V> formatter;
 
-  public LocalKVStore(CoreKVStore<K, V> coreKVStore) {
+  public LocalKVStore(CoreKVStore<K, V> coreKVStore, StoreBuilderHelper<K, V> helper) {
     this.coreKVStore = coreKVStore;
+    this.formatter = new KVFormatter<>(helper.getKeyFormat(), helper.getValueFormat());
   }
 
   protected KVStoreTuple<K> buildKey(K key) {
@@ -131,6 +134,11 @@ public class LocalKVStore<K, V> implements KVStore<K, V> {
       return null;
     }
     return new ConvertingDocument(input);
+  }
+
+  @Override
+  public KVFormatter<K, V> getKVFormatter() {
+    return formatter;
   }
 
   protected class ConvertingDocument implements Document<K, V> {

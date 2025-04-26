@@ -17,6 +17,9 @@ import { PureComponent } from "react";
 
 import PropTypes from "prop-types";
 
+/**
+ * @deprecated Import RealTimer from ui-common
+ */
 export default class RealTimeTimer extends PureComponent {
   static propTypes = {
     startTime: PropTypes.number.isRequired,

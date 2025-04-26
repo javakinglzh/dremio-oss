@@ -31,50 +31,25 @@
   <name>Plugins - Parent</name>
 
   <modules>
+    <module>awsauth</module>
+    <module>awsglue</module>
+    <module>azure</module>
     <module>common</module>
+    <module>dataplane</module>
+    <module>dataplane-tests</module>
     <module>elasticsearch</module>
+    <module>gcs</module>
     <module>hdfs</module>
     <module>hive</module>
     <module>hive-common</module>
     <module>hive-function-registry</module>
     <module>hive2</module>
+    <module>hive3</module>
+    <module>icebergcatalog</module>
     <module>mongo</module>
     <module>nas</module>
     <module>pdfs</module>
+    <module>s3</module>
     <module>sysflight</module>
   </modules>
-
-  <profiles>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <modules>
-        <module>adls</module>
-        <module>awsauth</module>
-        <module>awsglue</module>
-        <module>azure</module>
-        <module>dataplane</module>
-        <module>dataplane-tests</module>
-        <module>gcs</module>
-        <module>hive3</module>
-        <module>icebergcatalog</module>
-        <module>s3</module>
-      </modules>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <modules>
-        <module>maprfs</module>
-      </modules>
-    </profile>
-  </profiles>
 </project>

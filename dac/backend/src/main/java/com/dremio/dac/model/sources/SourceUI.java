@@ -89,6 +89,7 @@ public class SourceUI implements AddressableResource, DatasetContainer {
   private Boolean allowCrossSourceSelection;
   private Boolean disableMetadataValidityCheck;
   private SourceChangeState sourceChangeState;
+  private Long lastModifiedAt;
 
   public SourceUI setConfig(ConnectionConf<?, ?> sourceConfig) {
     this.config = sourceConfig;
@@ -309,6 +310,14 @@ public class SourceUI implements AddressableResource, DatasetContainer {
     this.sourceChangeState = sourceChangeState;
   }
 
+  public Long getLastModifiedAt() {
+    return lastModifiedAt;
+  }
+
+  public void setLastModifiedAt(Long lastModifiedAt) {
+    this.lastModifiedAt = lastModifiedAt;
+  }
+
   public Map<String, String> getLinks() {
     Map<String, String> links = new HashMap<>();
     String resourcePath = new SourcePath(new SourceName(name)).toUrlPath();
@@ -350,6 +359,7 @@ public class SourceUI implements AddressableResource, DatasetContainer {
     c.setAllowCrossSourceSelection(Boolean.TRUE.equals(allowCrossSourceSelection));
     c.setDisableMetadataValidityCheck(Boolean.TRUE.equals(disableMetadataValidityCheck));
     c.setSourceChangeState(sourceChangeState);
+    c.setLastModifiedAt(lastModifiedAt);
     return c;
   }
 
@@ -400,6 +410,7 @@ public class SourceUI implements AddressableResource, DatasetContainer {
     source.setAllowCrossSourceSelection(sourceConfig.getAllowCrossSourceSelection());
     source.setDisableMetadataValidityCheck(sourceConfig.getDisableMetadataValidityCheck());
     source.setSourceChangeState(sourceConfig.getSourceChangeState());
+    source.setLastModifiedAt(sourceConfig.getLastModifiedAt());
     return source;
   }
 

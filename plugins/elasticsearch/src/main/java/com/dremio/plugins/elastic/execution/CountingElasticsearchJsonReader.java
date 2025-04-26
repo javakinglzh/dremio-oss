@@ -16,22 +16,19 @@
 package com.dremio.plugins.elastic.execution;
 
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.sabot.exec.context.OperatorContext;
 import java.io.IOException;
 import java.util.List;
-import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ComplexWriter;
 import org.apache.calcite.util.Pair;
 
-/**
- * Overrides {@link ElasticsearchJsonReader} to just return count instead of parsing the whole
- * response.
- */
+/** Elasticsearch Counting Json Reader for ES7 Version. Overrides {@link ElasticsearchJsonReader} */
 public class CountingElasticsearchJsonReader extends ElasticsearchJsonReader {
 
   private long recordCount;
 
   public CountingElasticsearchJsonReader(
-      ArrowBuf managedBuf,
+      OperatorContext context,
       List<SchemaPath> columns,
       String resourceName,
       FieldReadDefinition rootDefinition,
@@ -41,7 +38,7 @@ public class CountingElasticsearchJsonReader extends ElasticsearchJsonReader {
       boolean metaTypeSelected,
       boolean metaIndexSelected) {
     super(
-        managedBuf,
+        context,
         columns,
         resourceName,
         rootDefinition,
@@ -49,7 +46,9 @@ public class CountingElasticsearchJsonReader extends ElasticsearchJsonReader {
         metaUIDSelected,
         metaIDSelected,
         metaTypeSelected,
-        metaIndexSelected);
+        metaIndexSelected,
+        false,
+        0);
   }
 
   @Override

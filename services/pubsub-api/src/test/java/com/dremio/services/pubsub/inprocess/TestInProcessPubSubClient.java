@@ -16,6 +16,8 @@
 package com.dremio.services.pubsub.inprocess;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -24,7 +26,10 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.options.OptionManager;
 import com.dremio.options.TypeValidators;
 import com.dremio.services.pubsub.ImmutableMessagePublisherOptions;
@@ -37,12 +42,20 @@ import com.dremio.services.pubsub.TestMessageConsumer;
 import com.dremio.services.pubsub.Topic;
 import com.google.protobuf.Parser;
 import com.google.protobuf.Timestamp;
+import com.google.protobuf.util.Timestamps;
 import io.opentelemetry.api.OpenTelemetry;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+import javax.inject.Provider;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -54,18 +67,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 public class TestInProcessPubSubClient {
+  @Mock private Provider<RequestContext> requestContextProvider;
   @Mock private OptionManager optionManager;
   @Mock private InProcessPubSubEventListener eventListener;
 
   private InProcessPubSubClient client;
   private MessagePublisher<Timestamp> publisher;
-  private MessageSubscriber<Timestamp> subscriber;
   private final TestMessageConsumer<Timestamp> messageConsumer = new TestMessageConsumer<>();
 
   @AfterEach
   public void tearDown() {
-    publisher.close();
-    subscriber.close();
+    if (client != null) {
+      client.close();
+    }
   }
 
   /** Default mocking of the {@link OptionManager}. */
@@ -79,16 +93,30 @@ public class TestInProcessPubSubClient {
         .getOption(any(TypeValidators.LongValidator.class));
   }
 
+  private void mockRequestContextProvider() {
+    when(requestContextProvider.get())
+        .thenReturn(
+            RequestContext.current()
+                .with(UserContext.CTX_KEY, UserContext.of(UUID.randomUUID().toString())));
+  }
+
   private void startClient() {
-    client = new InProcessPubSubClient(optionManager, OpenTelemetry.noop(), eventListener);
+    startClient(null);
+  }
+
+  private void startClient(@Nullable Function<Timestamp, String> parallelizationKeyProvider) {
+    client =
+        new InProcessPubSubClient(
+            requestContextProvider, optionManager, OpenTelemetry.noop(), eventListener);
     publisher =
         client.getPublisher(
             TestTopic.class, new ImmutableMessagePublisherOptions.Builder().build());
-    subscriber =
-        client.getSubscriber(
-            TestSubscription.class,
-            messageConsumer,
-            new ImmutableMessageSubscriberOptions.Builder().build());
+    var optionBuilder = new ImmutableMessageSubscriberOptions.Builder<Timestamp>();
+    if (parallelizationKeyProvider != null) {
+      optionBuilder.setParallelizationKeyProvider(parallelizationKeyProvider);
+    }
+    MessageSubscriber<Timestamp> subscriber =
+        client.getSubscriber(TestSubscription.class, messageConsumer, optionBuilder.build());
     subscriber.start();
   }
 
@@ -127,13 +155,14 @@ public class TestInProcessPubSubClient {
                 client.getSubscriber(
                     TestSubscription.class,
                     messageConsumer,
-                    new ImmutableMessageSubscriberOptions.Builder().build()));
+                    new ImmutableMessageSubscriberOptions.Builder<Timestamp>().build()));
     assertThat(e).hasMessage("Subscriber for subscription test is already registered");
   }
 
   @Test
   public void test_publishAndSubscribe() throws Exception {
     mockOptionManager();
+    mockRequestContextProvider();
     startClient();
 
     CountDownLatch consumerLatch = messageConsumer.initLatch(1);
@@ -168,9 +197,9 @@ public class TestInProcessPubSubClient {
             (args) -> {
               TypeValidators.LongValidator validator = args.getArgument(0);
               switch (validator.getOptionName()) {
-                case "dremio.pubsub.inprocess.min_delay_for_redelivery_seconds":
+                case "pubsub.inprocess.min_delay_for_redelivery_seconds":
                   return minDelaySeconds;
-                case "dremio.pubsub.inprocess.max_delay_for_redelivery_seconds":
+                case "pubsub.inprocess.max_delay_for_redelivery_seconds":
                   return maxDelaySeconds;
                 default:
                   return validator.getDefault().getNumVal();
@@ -178,6 +207,7 @@ public class TestInProcessPubSubClient {
             })
         .when(optionManager)
         .getOption(any(TypeValidators.LongValidator.class));
+    mockRequestContextProvider();
     startClient();
 
     CountDownLatch consumerLatch = messageConsumer.initLatch(1);
@@ -211,32 +241,39 @@ public class TestInProcessPubSubClient {
    * This tests that too many publishing requests with slow processing of messages results in
    * publisher being blocked until executor service frees up.
    */
-  @Test
-  public void test_blockIfTooManyInProcessing() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  public void test_blockIfTooManyInProcessing(boolean simulateTimeout) throws Exception {
     final long minDelaySeconds = 1;
     final long maxDelaySeconds = 2;
     final long maxMessagesInProcessing = 1;
     final long maxMessagesToPoll = 1;
+    final long simulatedPublishTimeoutMillis = 100;
     doAnswer(
             (args) -> {
               TypeValidators.LongValidator validator = args.getArgument(0);
               switch (validator.getOptionName()) {
-                case "dremio.pubsub.inprocess.min_delay_for_redelivery_seconds":
+                case "pubsub.inprocess.min_delay_for_redelivery_seconds":
                   return minDelaySeconds;
-                case "dremio.pubsub.inprocess.max_delay_for_redelivery_seconds":
+                case "pubsub.inprocess.max_delay_for_redelivery_seconds":
                   return maxDelaySeconds;
-                  // Set queue size and max processing count to the same value.
-                case "dremio.pubsub.inprocess.max_messages_in_queue":
-                case "dremio.pubsub.inprocess.max_messages_in_processing":
+                // Set queue size and max processing count to the same value.
+                case "pubsub.inprocess.max_messages_in_queue":
+                case "pubsub.inprocess.max_messages_in_processing":
                   return maxMessagesInProcessing;
-                case "dremio.pubsub.inprocess.max_messages_to_poll":
+                case "pubsub.inprocess.max_messages_to_poll":
                   return maxMessagesToPoll;
+                case "pubsub.inprocess.publish_timeout_milliseconds":
+                  return simulateTimeout
+                      ? simulatedPublishTimeoutMillis
+                      : validator.getDefault().getNumVal();
                 default:
                   return validator.getDefault().getNumVal();
               }
             })
         .when(optionManager)
         .getOption(any(TypeValidators.LongValidator.class));
+    mockRequestContextProvider();
     startClient();
 
     // Set processing delay.
@@ -245,7 +282,7 @@ public class TestInProcessPubSubClient {
 
     // Publish messages:
     //  - First message processing blocks for a second.
-    //  - Second message is put into the queue immediately but cannot get out of the queue because
+    //  - Second message is put into the queue quickly but cannot get out of the queue because
     //    too many messages are being processed.
     //  - Third message cannot be put into the blocking queue as it's full, so the call to publish
     //    blocks for delayMillis at least.
@@ -253,11 +290,21 @@ public class TestInProcessPubSubClient {
     Timestamp timestamp = Timestamp.newBuilder().setSeconds(1000L).build();
     publisher.publish(timestamp);
     publisher.publish(timestamp);
-    publisher.publish(timestamp);
+    String thirdMessageId = publisher.publish(timestamp).get();
     long afterPublishMillis = System.currentTimeMillis();
+    long elapsedMillis = afterPublishMillis - beforePublishMillis;
 
     // Verify delay.
-    assertThat(afterPublishMillis - beforePublishMillis).isBetween(delayMillis, 5 * delayMillis);
+    if (simulateTimeout) {
+      // Expect empty 3rd message id because of timeout.
+      assertThat(thirdMessageId).isEmpty();
+      // Expect the publish calls took at least the simulated publish timeout but less than the
+      // delay in processing.
+      assertThat(elapsedMillis).isBetween(simulatedPublishTimeoutMillis, (2 * delayMillis) / 3);
+    } else {
+      assertThat(thirdMessageId).isNotEmpty();
+      assertThat(elapsedMillis).isBetween(delayMillis, 5 * delayMillis);
+    }
   }
 
   /**
@@ -270,16 +317,21 @@ public class TestInProcessPubSubClient {
     doAnswer(
             (args) -> {
               TypeValidators.LongValidator validator = args.getArgument(0);
-              if (validator.getOptionName().equals("dremio.pubsub.inprocess.parallelism")) {
+              if (validator
+                  .getOptionName()
+                  .equals(
+                      InProcessPubSubClientOptions.MAX_MESSAGES_IN_PROCESSING.getOptionName())) {
                 return parallelism;
               }
               return validator.getDefault().getNumVal();
             })
         .when(optionManager)
         .getOption(any(TypeValidators.LongValidator.class));
+    mockRequestContextProvider();
     startClient();
 
     // Publish and wait for all to arrive.
+    long startTime = System.currentTimeMillis();
     int messagesToPublish = 10000;
     CountDownLatch latch = messageConsumer.initLatch(messagesToPublish);
     List<Long> expectedListOfSeconds = new ArrayList<>();
@@ -289,10 +341,13 @@ public class TestInProcessPubSubClient {
       publisher.publish(timestamp);
     }
 
-    // It takes ~200ms to run it, set 10x that timeout to avoid flakiness.
     // The default delay in queue processing is 10ms, which for 10K items
-    // would by far exceed 2s if excessive wait existed.
-    assertTrue(latch.await(2000, TimeUnit.MILLISECONDS));
+    // would by far exceed below times if excessive wait existed.
+    // The messages are processed sequentially w/o parallelizationKey so the times are comparable:
+    //   ELAPSED (1): 3826ms
+    //   ELAPSED (10): 3517ms
+    assertTrue(latch.await(30000, TimeUnit.MILLISECONDS));
+    System.err.printf("ELAPSED (%d): %dms\n", parallelism, System.currentTimeMillis() - startTime);
 
     // Verify that the messages were processed in order.
     List<Long> actualListOfSeconds =
@@ -311,6 +366,109 @@ public class TestInProcessPubSubClient {
         }
       }
     }
+  }
+
+  @Test
+  public void test_throughputWithConcurrentKey() throws Exception {
+    runConcurrentKeyTest(1);
+    runConcurrentKeyTest(10);
+    runConcurrentKeyTest(100);
+  }
+
+  private long runConcurrentKeyTest(long parallelism) throws Exception {
+    doAnswer(
+            (args) -> {
+              TypeValidators.LongValidator validator = args.getArgument(0);
+              if (validator
+                  .getOptionName()
+                  .equals(
+                      InProcessPubSubClientOptions.MAX_MESSAGES_IN_PROCESSING.getOptionName())) {
+                return parallelism;
+              }
+              return validator.getDefault().getNumVal();
+            })
+        .when(optionManager)
+        .getOption(any(TypeValidators.LongValidator.class));
+    mockRequestContextProvider();
+    startClient((t) -> Long.toString(Timestamps.toMicros(t)));
+
+    // Publish and wait for all to arrive.
+    messageConsumer.setProcessingDelayMillis(1);
+    long startTime = System.currentTimeMillis();
+    int messagesToPublish = 10000;
+    CountDownLatch latch = messageConsumer.initLatch(messagesToPublish);
+    Set<Long> expectedSeconds = new HashSet<>();
+    for (int i = 0; i < messagesToPublish; i++) {
+      Timestamp timestamp = Timestamp.newBuilder().setSeconds(1000L + i).build();
+      expectedSeconds.add(timestamp.getSeconds());
+      publisher.publish(timestamp);
+    }
+
+    // It takes ~200ms to run it, set 10x that timeout to avoid flakiness.
+    // The default delay in queue processing is 10ms, which for 10K items
+    // would by far exceed 2s if excessive wait existed.
+    // With 1ms delay, there is proportional decrease in processing time:
+    //   ELAPSED (1): 12689ms
+    //   ELAPSED (10): 1173ms
+    //   ELAPSED (100): 143ms
+    // With 10ms delay, there is proportional decrease in processing time:
+    //   ELAPSED (1): 102192ms
+    //   ELAPSED (10): 11360ms
+    //   ELAPSED (100): 1098ms
+    // With 100ms delay, there is proportional increase in processing time compared to 10ms:
+    //   ELAPSED (100): 10257ms
+    // Note that this timeout does not include blocks in publish calls above, they may be blocked.
+    assertTrue(latch.await(30000, TimeUnit.MILLISECONDS));
+    long elapsed = System.currentTimeMillis() - startTime;
+    System.err.printf("ELAPSED (%d): %dms\n", parallelism, elapsed);
+
+    // Verify that the messages were processed in order.
+    Set<Long> actualSeconds =
+        messageConsumer.getMessages().stream()
+            .map(m -> m.getMessage().getSeconds())
+            .collect(Collectors.toSet());
+    assertTrue(actualSeconds.equals(expectedSeconds));
+    return elapsed;
+  }
+
+  @Test
+  public void test_requestContextPropagates() throws InterruptedException {
+    mockOptionManager();
+
+    UserContext userContext = UserContext.of(UUID.randomUUID().toString());
+    when(requestContextProvider.get())
+        .thenReturn(RequestContext.current().with(UserContext.CTX_KEY, userContext));
+    AtomicReference<Throwable> throwable = new AtomicReference<>();
+    CountDownLatch latch = new CountDownLatch(1);
+    //noinspection resource
+    InProcessPubSubClient client =
+        new InProcessPubSubClient(
+            requestContextProvider, optionManager, OpenTelemetry.noop(), eventListener);
+    client
+        .getSubscriber(
+            TestSubscription.class,
+            message -> {
+              try {
+                assertNotNull(RequestContext.current().get(UserContext.CTX_KEY));
+                assertThat(RequestContext.current().get(UserContext.CTX_KEY))
+                    .isEqualTo(userContext);
+              } catch (Throwable e) {
+                throwable.set(e);
+              } finally {
+                latch.countDown();
+              }
+            },
+            new ImmutableMessageSubscriberOptions.Builder<Timestamp>().build())
+        .start();
+
+    client
+        .getPublisher(TestTopic.class, new ImmutableMessagePublisherOptions.Builder().build())
+        .publish(Timestamp.getDefaultInstance());
+
+    assertTrue(latch.await(30000, TimeUnit.MILLISECONDS));
+    assertNull(throwable.get());
+
+    client.close();
   }
 
   public static final class TestTopic implements Topic<Timestamp> {

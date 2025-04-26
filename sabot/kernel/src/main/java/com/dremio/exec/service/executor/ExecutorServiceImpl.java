@@ -16,6 +16,7 @@
 package com.dremio.exec.service.executor;
 
 import com.dremio.common.util.DremioVersionInfo;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.proto.CatalogRPC;
 import com.dremio.exec.proto.CoordExecRPC;
 import com.dremio.exec.proto.CoordinationProtos;
@@ -121,9 +122,11 @@ public class ExecutorServiceImpl extends ExecutorService {
     return getNodeStatsFromContext(context);
   }
 
-  public static CoordExecRPC.NodeStats getNodeStatsFromContext(SabotContext context) {
-    final ThreadsIterator threads = new ThreadsIterator(context);
-    final MemoryIterator memoryIterator = new MemoryIterator(context);
+  public static CoordExecRPC.NodeStats getNodeStatsFromContext(PluginSabotContext context) {
+    final ThreadsIterator threads =
+        new ThreadsIterator(context.getWorkStatsProvider().get(), context.getEndpoint());
+    final MemoryIterator memoryIterator =
+        new MemoryIterator(context.getEndpoint(), context.getAllocator());
     final WorkStats stats = context.getWorkStatsProvider().get();
     final CoordinationProtos.NodeEndpoint ep = context.getEndpoint();
     final double load = stats.getClusterLoad();

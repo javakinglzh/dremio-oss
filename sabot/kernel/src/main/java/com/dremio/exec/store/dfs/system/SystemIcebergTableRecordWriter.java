@@ -16,7 +16,6 @@
 package com.dremio.exec.store.dfs.system;
 
 import com.dremio.common.AutoCloseables;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.physical.base.IcebergWriterOptions;
 import com.dremio.exec.physical.base.ImmutableIcebergWriterOptions;
 import com.dremio.exec.physical.base.ImmutableTableFormatWriterOptions;
@@ -28,6 +27,7 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.WritePartition;
 import com.dremio.exec.store.dfs.IcebergTableProps;
+import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.parquet.ParquetFormatConfig;
 import com.dremio.exec.store.parquet.ParquetRecordWriter;
 import com.dremio.exec.store.parquet.ParquetWriter;
@@ -114,9 +114,11 @@ public class SystemIcebergTableRecordWriter implements AutoCloseable {
    * @return A ParquetWriter instance for writing data.
    */
   private ParquetWriter getWriter(
-      MutablePlugin plugin, String dataLocation, IcebergTableProps icebergTableProps) {
+      SupportsIcebergMutablePlugin plugin,
+      String dataLocation,
+      IcebergTableProps icebergTableProps) {
     return new ParquetWriter(
-        getOpProps(), null, dataLocation, getWriterOptions(icebergTableProps), plugin);
+        getOpProps(), null, dataLocation, getWriterOptions(icebergTableProps), plugin, null);
   }
 
   /**

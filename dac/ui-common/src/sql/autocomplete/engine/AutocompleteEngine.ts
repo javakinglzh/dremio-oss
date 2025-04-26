@@ -68,7 +68,7 @@ export class AutocompleteEngine {
       this.liveEditParsingEngine.run(linesContent);
 
     if (
-      errors.find((error) => error.type === "lexer") ||
+      errors.find((error: any) => error.type === "lexer") ||
       isInComment(queryPosition, tokenStream.getTokens(), lexer._mode)
     ) {
       return [];

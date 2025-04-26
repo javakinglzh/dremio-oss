@@ -53,6 +53,10 @@ public class DelegatingOperatorContext extends OperatorContext {
     this.delegate = Preconditions.checkNotNull(delegate);
   }
 
+  public OperatorContext getDelegate() {
+    return delegate;
+  }
+
   @Override
   public SabotConfig getConfig() {
     return delegate.getConfig();

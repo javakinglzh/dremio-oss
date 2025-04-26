@@ -95,11 +95,16 @@ class FieldWithError extends Component {
       labelClass,
       labelTooltip,
       labelEndChildren,
+      container,
     } = this.props;
     const { overLabel } = this.state;
 
     const hoverHelp = hoverHelpText ? (
-      <HoverHelp placement={hoverHelpPlacement} content={hoverHelpText} />
+      <HoverHelp
+        placement={hoverHelpPlacement}
+        content={hoverHelpText}
+        container={container}
+      />
     ) : null;
 
     // todo: <label> is not correctly associated with the input here (i.e. it is broken and doing nothing)

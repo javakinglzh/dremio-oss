@@ -19,9 +19,7 @@ import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.Wrapper;
-import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.store.ChangeInfo;
-import com.dremio.exec.store.NamespaceAlreadyExistsException;
 import com.dremio.exec.store.NoDefaultBranchException;
 import com.dremio.exec.store.ReferenceAlreadyExistsException;
 import com.dremio.exec.store.ReferenceConflictException;
@@ -30,6 +28,8 @@ import com.dremio.exec.store.ReferenceNotFoundByTimestampException;
 import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.ReferenceTypeConflictException;
 import com.dremio.exec.store.UnAuthenticatedException;
+import com.dremio.exec.store.iceberg.IcebergViewMetadata;
+import com.dremio.exec.store.iceberg.VersionedUdfMetadata;
 import com.dremio.plugins.ExternalNamespaceEntry;
 import com.dremio.plugins.MergeBranchOptions;
 import com.dremio.service.catalog.Schema;
@@ -37,16 +37,16 @@ import com.dremio.service.catalog.SearchQuery;
 import com.dremio.service.catalog.Table;
 import com.dremio.service.catalog.TableSchema;
 import com.dremio.service.catalog.View;
-import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.namespace.function.proto.FunctionConfig;
+import com.dremio.service.namespace.space.proto.FolderConfig;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 import javax.annotation.Nullable;
+import org.apache.iceberg.TableMetadata;
 import org.projectnessie.model.MergeResponse;
 
 /** Versioning-specific methods for the Catalog interface. */
-public interface VersionedPlugin extends Wrapper {
+public interface VersionedPlugin extends Wrapper, FunctionManagingPlugin, SupportsMutatingFolders {
   /** Supported version entity types in Sonar */
   enum EntityType {
     UNKNOWN,
@@ -54,6 +54,18 @@ public interface VersionedPlugin extends Wrapper {
     ICEBERG_VIEW,
     FOLDER,
     UDF
+  }
+
+  /** Nesting mode for getting the entries. */
+  enum NestingMode {
+    INCLUDE_NESTED_CHILDREN,
+    IMMEDIATE_CHILDREN_ONLY
+  }
+
+  /** Content mode for getting the entries. */
+  enum ContentMode {
+    ENTRY_WITH_CONTENT,
+    ENTRY_METADATA_ONLY
   }
 
   /**
@@ -147,52 +159,48 @@ public interface VersionedPlugin extends Wrapper {
    * List only entries under the given path for the given version. Streams entries.
    *
    * @param catalogPath Acts as the namespace filter. It will scope entries to this namespace.
-   * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
+   * @param version The resolved version context to use.
+   * @param nestingMode The nesting mode for getting the entries.
+   * @param contentMode Whether the actual entry content should be loaded
    * @throws ReferenceNotFoundException If the given reference cannot be found
    * @throws NoDefaultBranchException If the Nessie server does not have a default branch set
    * @throws ReferenceTypeConflictException If the requested version type does not match the server
    */
-  Stream<ExternalNamespaceEntry> listEntries(List<String> catalogPath, VersionContext version)
+  Stream<ExternalNamespaceEntry> listEntries(
+      List<String> catalogPath,
+      ResolvedVersionContext version,
+      NestingMode nestingMode,
+      ContentMode contentMode)
       throws ReferenceNotFoundException, NoDefaultBranchException, ReferenceConflictException;
 
   /**
    * List only entries under the given path for the given version.
    *
    * @param catalogPath Acts as the namespace filter. It will scope entries to this namespace.
-   * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
+   * @param version The resolved version context to use.
+   * @param nestingMode The nesting mode for getting the entries.
+   * @param contentMode Whether the actual entry content should be loaded
    * @param options Options, including pagination parameters.
    * @throws ReferenceNotFoundException If the given reference cannot be found
    * @throws NoDefaultBranchException If the Nessie server does not have a default branch set
    * @throws ReferenceTypeConflictException If the requested version type does not match the server
    */
   VersionedListResponsePage listEntriesPage(
-      List<String> catalogPath, VersionContext version, VersionedListOptions options)
+      List<String> catalogPath,
+      ResolvedVersionContext version,
+      NestingMode nestingMode,
+      ContentMode contentMode,
+      VersionedListOptions options)
       throws ReferenceNotFoundException, NoDefaultBranchException, ReferenceConflictException;
 
   /**
-   * List all entries under the given path and subpaths for the given version.
+   * Gets the path of changed entities between two commits. The chronological order of the commits
+   * does not matter.
    *
-   * @param catalogPath Acts as the namespace filter. It will act as the root namespace.
-   * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
-   * @throws ReferenceNotFoundException If the given reference cannot be found.
-   * @throws NoDefaultBranchException If the Nessie server does not have a default branch set.
-   * @throws ReferenceConflictException If the requested version does not match the server.
+   * @param fromCommitHash The commit hash to start from.
+   * @param toCommitHash The commit hash to end at.
    */
-  Stream<ExternalNamespaceEntry> listEntriesIncludeNested(
-      List<String> catalogPath, VersionContext version)
-      throws ReferenceNotFoundException, NoDefaultBranchException, ReferenceConflictException;
-
-  /**
-   * Create a namespace by the given path for the given version
-   *
-   * @param namespaceKey The namespacekey that is used to create a folder in Nessie.
-   * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
-   * @throws NamespaceAlreadyExistsException If the namespace already exists.
-   * @throws ReferenceNotFoundException If the given reference cannot be found.
-   * @throws NoDefaultBranchException If the Nessie server does not have a default branch set.
-   * @throws ReferenceConflictException If the requested version does not match the server.
-   */
-  void createNamespace(NamespaceKey namespaceKey, VersionContext version);
+  Stream<List<String>> listEntriesChangedBetween(String fromCommitHash, String toCommitHash);
 
   /**
    * Create a branch from the given source reference.
@@ -269,25 +277,14 @@ public interface VersionedPlugin extends Wrapper {
       throws ReferenceConflictException, ReferenceNotFoundException;
 
   /**
-   * Deletes an Empty Folder by the given path for the given version
-   *
-   * @param namespaceKey The namespacekey that is used to create a folder in Nessie.
-   * @param sourceVersion If the version is NOT_SPECIFIED, the default branch is used (if it
-   *     exists).
-   * @throws ReferenceNotFoundException If the given reference cannot be found.
-   * @throws UserException If the requested folder to be deleted is not empty.
-   */
-  void deleteFolder(NamespaceKey namespaceKey, VersionContext sourceVersion)
-      throws ReferenceNotFoundException, UserException;
-
-  /**
    * Gets the default branch for this plugin
    *
    * @throws NoDefaultBranchException If the default branch cannot be found .
    * @throws UnAuthenticatedException If Nessie configured with the plugin is unreachable due to
    *     authentication error.
    */
-  String getDefaultBranch() throws NoDefaultBranchException, UnAuthenticatedException;
+  ResolvedVersionContext getDefaultBranch()
+      throws NoDefaultBranchException, UnAuthenticatedException;
 
   /** Gets the name of this plugin */
   String getName();
@@ -297,7 +294,16 @@ public interface VersionedPlugin extends Wrapper {
     return null;
   }
 
-  Optional<FunctionConfig> getFunction(CatalogEntityKey functionKey);
+  Optional<FolderConfig> getFolder(CatalogEntityKey functionKey);
 
-  List<FunctionConfig> getFunctions(VersionContext versionContext);
+  TableMetadata getTableMetadata(String metadataLocation);
+
+  IcebergViewMetadata getIcebergViewMetadata(String metadataLocation);
+
+  /**
+   * Given the metadata location, resolve the entity and get the UDF metadata.
+   *
+   * @param metadataLocation url of the metadata
+   */
+  VersionedUdfMetadata getVersionedUdfMetadata(String metadataLocation);
 }

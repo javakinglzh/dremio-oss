@@ -21,12 +21,14 @@ import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.proto.UserSessionProtobuf;
 import com.dremio.exec.proto.UserSessionProtobuf.UserSessionRPC;
 import com.dremio.exec.work.user.SubstitutionSettings;
+import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Strings;
 import com.google.protobuf.ProtocolStringList;
+import java.util.HashMap;
 import java.util.Map;
 import org.apache.calcite.avatica.util.Quoting;
 import org.slf4j.Logger;
@@ -116,6 +118,51 @@ public final class GrpcUserSessionConverter {
     if (!Strings.isNullOrEmpty(session.getTargetUserName())) {
       sessionBuilder.setImpersonationTarget(session.getTargetUserName());
     }
+
+    final Map<String, SessionOptionValue> sessionOptionValueMap = session.getSessionOptionsMap();
+    com.dremio.exec.proto.UserSessionProtobuf.SessionOptions.Builder sessionOptionsBuilder =
+        UserSessionProtobuf.SessionOptions.newBuilder();
+    UserSessionProtobuf.SessionOptionValue.Builder sessionOptionsValueBuilder =
+        UserSessionProtobuf.SessionOptionValue.newBuilder();
+    if (sessionOptionValueMap != null) {
+      for (Map.Entry<String, SessionOptionValue> entry : sessionOptionValueMap.entrySet()) {
+        switch (entry.getValue().getOptionValueCase()) {
+          case STRING_VALUE:
+            sessionOptionsValueBuilder.setStringValue(entry.getValue().getStringValue());
+            break;
+          case BOOL_VALUE:
+            sessionOptionsValueBuilder.setBoolValue(entry.getValue().getBoolValue());
+            break;
+          case INT32_VALUE:
+            sessionOptionsValueBuilder.setInt32Value(entry.getValue().getInt32Value());
+            break;
+          case INT64_VALUE:
+            sessionOptionsValueBuilder.setInt64Value(entry.getValue().getInt64Value());
+            break;
+          case FLOAT_VALUE:
+            sessionOptionsValueBuilder.setFloatValue(entry.getValue().getFloatValue());
+            break;
+          case DOUBLE_VALUE:
+            sessionOptionsValueBuilder.setDoubleValue(entry.getValue().getDoubleValue());
+            break;
+          case STRING_LIST_VALUE:
+            sessionOptionsValueBuilder.setStringListValue(
+                UserSessionProtobuf.SessionOptionValue.StringListValue.newBuilder()
+                    .addAllValues(entry.getValue().getStringListValue()));
+            break;
+          default:
+            // This code should only be reached if a new OptionValueCase is defined
+            final String message =
+                String.format(
+                    "OptionValueCase %s is not valid", entry.getValue().getOptionValueCase());
+            logger.error(message);
+            throw new RuntimeException(message);
+        }
+        sessionOptionsBuilder.putSessionOptionsMap(
+            entry.getKey(), sessionOptionsValueBuilder.build());
+      }
+    }
+    sessionBuilder.setSessionOptions(sessionOptionsBuilder.build());
 
     return sessionBuilder.build();
   }
@@ -223,6 +270,67 @@ public final class GrpcUserSessionConverter {
 
     if (userSessionRPC.hasInitialQuoting()) {
       sessionBuilder.withInitialQuoting(Quoting.valueOf(userSessionRPC.getInitialQuoting()));
+    }
+
+    if (userSessionRPC.hasSessionOptions()) {
+      Map<String, SessionOptionValue> sessionOptionsValueMap = new HashMap<>();
+      for (Map.Entry<String, UserSessionProtobuf.SessionOptionValue> entry :
+          userSessionRPC.getSessionOptions().getSessionOptionsMapMap().entrySet()) {
+        final String key = entry.getKey();
+        final UserSessionProtobuf.SessionOptionValue value = entry.getValue();
+        switch (value.getOneOfValueCase()) {
+          case STRING_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setStringValue(value.getStringValue())
+                    .build());
+            break;
+          case BOOL_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder().setBoolValue(value.getBoolValue()).build());
+            break;
+          case INT32_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setInt32Value(value.getInt32Value())
+                    .build());
+            break;
+          case INT64_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setInt64Value(value.getInt64Value())
+                    .build());
+            break;
+          case FLOAT_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setFloatValue(value.getFloatValue())
+                    .build());
+            break;
+          case DOUBLE_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setDoubleValue(value.getDoubleValue())
+                    .build());
+            break;
+          case STRING_LIST_VALUE:
+            sessionOptionsValueMap.put(
+                key,
+                SessionOptionValue.Builder.newBuilder()
+                    .setStringListValue(value.getStringListValueOrBuilder().getValuesList())
+                    .build());
+            break;
+          default:
+            logger.error("OptionValueCase {} is not valid", value.getOneOfValueCase().getNumber());
+        }
+        sessionBuilder.withSessionOptions(sessionOptionsValueMap);
+      }
     }
 
     final UserSession session = sessionBuilder.build();

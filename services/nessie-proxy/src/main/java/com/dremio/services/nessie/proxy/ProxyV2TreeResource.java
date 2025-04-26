@@ -19,11 +19,14 @@ import static com.dremio.services.nessie.proxy.ProxyUtil.toReference;
 import static com.google.common.base.Preconditions.checkArgument;
 
 import com.fasterxml.jackson.annotation.JsonView;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.stream.Collectors;
 import javax.enterprise.context.RequestScoped;
 import javax.inject.Inject;
 import javax.ws.rs.Path;
+import javax.ws.rs.core.HttpHeaders;
 import org.projectnessie.api.v2.http.HttpTreeApi;
 import org.projectnessie.api.v2.params.BaseMergeTransplant;
 import org.projectnessie.api.v2.params.CommitLogParams;
@@ -46,6 +49,7 @@ import org.projectnessie.client.api.NessieApiV2;
 import org.projectnessie.client.api.TransplantCommitsBuilder;
 import org.projectnessie.error.NessieConflictException;
 import org.projectnessie.error.NessieNotFoundException;
+import org.projectnessie.model.CommitMeta;
 import org.projectnessie.model.CommitResponse;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.ContentResponse;
@@ -53,6 +57,7 @@ import org.projectnessie.model.DiffResponse;
 import org.projectnessie.model.EntriesResponse;
 import org.projectnessie.model.GetMultipleContentsRequest;
 import org.projectnessie.model.GetMultipleContentsResponse;
+import org.projectnessie.model.ImmutableCommitMeta;
 import org.projectnessie.model.ImmutableGetMultipleContentsRequest;
 import org.projectnessie.model.LogResponse;
 import org.projectnessie.model.MergeResponse;
@@ -67,10 +72,12 @@ import org.projectnessie.model.ser.Views;
 @Path("api/v2/trees")
 public class ProxyV2TreeResource implements HttpTreeApi {
   private final NessieApiV2 api;
+  private final HttpHeaders httpHeaders;
 
   @Inject
-  public ProxyV2TreeResource(NessieApiV2 api) {
+  public ProxyV2TreeResource(NessieApiV2 api, HttpHeaders httpHeaders) {
     this.api = api;
+    this.httpHeaders = httpHeaders;
   }
 
   private ParsedReference resolveRef(String refPathString) {
@@ -319,10 +326,26 @@ public class ProxyV2TreeResource implements HttpTreeApi {
       throws NessieNotFoundException, NessieConflictException {
 
     ParsedReference targetRef = resolveRef(branch);
+
+    boolean metaUsable = false;
+    ImmutableCommitMeta.Builder metaBuilder = CommitMeta.builder();
+    if (merge.getCommitMeta() != null) {
+      metaBuilder.from(merge.getCommitMeta());
+      metaUsable = true;
+    } else {
+      //noinspection deprecation
+      String msg = merge.getMessage();
+      if (msg != null) {
+        metaBuilder.message(msg);
+        metaUsable = true;
+      }
+    }
+
+    CommitMeta commitMeta = metaUsable ? commitMeta(metaBuilder).build() : null;
+
     MergeReferenceBuilder request =
         api.mergeRefIntoBranch()
-            .commitMeta(merge.getCommitMeta())
-            .message(merge.getMessage())
+            .commitMeta(commitMeta)
             .fromRefName(merge.getFromRefName())
             .fromHash(merge.getFromHash());
 
@@ -364,12 +387,63 @@ public class ProxyV2TreeResource implements HttpTreeApi {
       throws NessieNotFoundException, NessieConflictException {
 
     ParsedReference reference = resolveRef(branch);
+
+    CommitMeta commitMeta =
+        commitMeta(CommitMeta.builder().from(operations.getCommitMeta())).build();
+
     return api.commitMultipleOperations()
         .branchName(reference.name())
         .hash(reference.hashWithRelativeSpec())
-        .commitMeta(operations.getCommitMeta())
+        .commitMeta(commitMeta)
         .operations(operations.getOperations())
         .commitWithResponse();
+  }
+
+  private CommitMeta.Builder commitMeta(CommitMeta.Builder commitMeta) {
+    httpHeaders
+        .getRequestHeaders()
+        .forEach(
+            (k, v) -> {
+              if (!v.isEmpty()) {
+                String lower = k.toLowerCase(Locale.ROOT);
+                switch (lower) {
+                  case "nessie-commit-message":
+                    v.stream()
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .findFirst()
+                        .ifPresent(commitMeta::message);
+                    break;
+                  case "nessie-commit-authors":
+                    v.stream()
+                        .flatMap(s -> Arrays.stream(s.split(",")))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .forEach(commitMeta::addAllAuthors);
+                    break;
+                  case "nessie-commit-signedoffby":
+                    v.stream()
+                        .flatMap(s -> Arrays.stream(s.split(",")))
+                        .map(String::trim)
+                        .filter(s -> !s.isEmpty())
+                        .forEach(commitMeta::addAllSignedOffBy);
+                    break;
+                  default:
+                    if (lower.startsWith("nessie-commit-property-")) {
+                      String prop = lower.substring("nessie-commit-property-".length()).trim();
+                      commitMeta.putAllProperties(
+                          prop,
+                          v.stream()
+                              .map(String::trim)
+                              .filter(s -> !s.isEmpty())
+                              .collect(Collectors.toList()));
+                    }
+                    break;
+                }
+              }
+            });
+
+    return commitMeta;
   }
 
   @Override

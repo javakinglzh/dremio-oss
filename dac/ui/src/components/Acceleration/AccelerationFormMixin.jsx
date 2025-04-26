@@ -58,6 +58,12 @@ function AccelerationFormMixin(input) {
         </div>
       );
     },
+    hideBasicView() {
+      return false;
+    },
+    shouldSubmitReflection(reflection, initReflections) {
+      return true;
+    },
   });
   return input;
 }

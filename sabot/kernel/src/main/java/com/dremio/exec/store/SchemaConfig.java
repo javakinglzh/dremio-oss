@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store;
 
+import com.dremio.exec.catalog.CatalogAccessListener;
 import com.dremio.exec.catalog.CatalogIdentity;
 import com.dremio.exec.ops.ViewExpansionContext;
 import com.dremio.options.OptionManager;
@@ -35,6 +36,7 @@ public class SchemaConfig {
   private final OptionManager optionManager;
   private final ViewExpansionContext viewExpansionContext;
   private final Predicate<DatasetConfig> validityChecker;
+  private final CatalogAccessListener catalogAccessListener;
 
   private SchemaConfig(
       final AuthorizationContext authContext,
@@ -42,13 +44,15 @@ public class SchemaConfig {
       final OptionManager optionManager,
       final ViewExpansionContext viewExpansionContext,
       boolean exposeInternalSources,
-      Predicate<DatasetConfig> validityChecker) {
+      Predicate<DatasetConfig> validityChecker,
+      CatalogAccessListener catalogAccessListener) {
     this.authContext = authContext;
     this.viewExpansionContext = viewExpansionContext;
     this.defaultSchema = defaultSchema;
     this.optionManager = optionManager;
     this.exposeInternalSources = exposeInternalSources;
     this.validityChecker = validityChecker;
+    this.catalogAccessListener = catalogAccessListener;
   }
 
   /**
@@ -68,6 +72,7 @@ public class SchemaConfig {
     private OptionManager optionManager;
     private ViewExpansionContext viewExpansionContext;
     private Predicate<DatasetConfig> validityChecker = Predicates.alwaysTrue();
+    private CatalogAccessListener catalogAccessListener = CatalogAccessListener.NO_OP;
 
     private Builder(final CatalogIdentity subject) {
       this.subject = Preconditions.checkNotNull(subject);
@@ -110,6 +115,11 @@ public class SchemaConfig {
       return this;
     }
 
+    public Builder setCatalogAccessListener(CatalogAccessListener catalogAccessListener) {
+      this.catalogAccessListener = catalogAccessListener;
+      return this;
+    }
+
     public SchemaConfig build() {
       return new SchemaConfig(
           new AuthorizationContext(subject, ignoreAuthErrors),
@@ -117,7 +127,8 @@ public class SchemaConfig {
           optionManager,
           viewExpansionContext,
           exposeInternalSources,
-          validityChecker);
+          validityChecker,
+          catalogAccessListener);
     }
   }
 
@@ -168,5 +179,9 @@ public class SchemaConfig {
 
   public Predicate<DatasetConfig> getDatasetValidityChecker() {
     return validityChecker;
+  }
+
+  public CatalogAccessListener getCatalogAccessListener() {
+    return catalogAccessListener;
   }
 }

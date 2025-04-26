@@ -22,7 +22,8 @@ import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
 
 import com.dremio.cache.AuthorizationCacheException;
 import com.dremio.cache.AuthorizationCacheService;
-import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.common.config.LogicalPlanPersistence;
 import com.dremio.common.exceptions.InvalidMetadataErrorContext;
@@ -52,15 +53,21 @@ import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.datastore.LegacyProtobufSerializer;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.AlterTableOption;
+import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUser;
+import com.dremio.exec.catalog.CreateTableOptions;
 import com.dremio.exec.catalog.CurrentSchemaOption;
 import com.dremio.exec.catalog.DatasetSplitsPointer;
 import com.dremio.exec.catalog.FileConfigOption;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
-import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.RollbackOption;
 import com.dremio.exec.catalog.SortColumnsOption;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
+import com.dremio.exec.catalog.SupportsMutatingViews;
+import com.dremio.exec.catalog.SupportsSchemaLearning;
 import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.dotfile.DotFile;
@@ -71,9 +78,7 @@ import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.hadoop.HadoopFileSystemConfigurationAdapter;
 import com.dremio.exec.physical.base.OpProps;
-import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.ViewOptions;
-import com.dremio.exec.physical.base.Writer;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.planner.logical.CreateTableEntry;
@@ -84,9 +89,10 @@ import com.dremio.exec.planner.sql.handlers.refresh.AbstractRefreshPlanBuilder;
 import com.dremio.exec.planner.sql.handlers.refresh.FileSystemFullRefreshPlanBuilder;
 import com.dremio.exec.planner.sql.handlers.refresh.FileSystemRefreshIncrementalPlanBuilder;
 import com.dremio.exec.planner.sql.handlers.refresh.UnlimitedSplitsMetadataProvider;
+import com.dremio.exec.planner.sql.parser.SqlGrant;
 import com.dremio.exec.planner.sql.parser.SqlRefreshDataset;
+import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.BlockBasedSplitGenerator;
 import com.dremio.exec.store.ClassPathFileSystem;
 import com.dremio.exec.store.DatasetRetrievalOptions;
@@ -106,6 +112,7 @@ import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.IcebergExecutionDatasetAccessor;
 import com.dremio.exec.store.iceberg.IcebergModelCreator;
 import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
@@ -125,7 +132,6 @@ import com.dremio.exec.store.metadatarefresh.footerread.FooterReadTableFunction;
 import com.dremio.exec.store.parquet.ParquetScanTableFunction;
 import com.dremio.exec.store.parquet.ParquetSplitCreator;
 import com.dremio.exec.store.parquet.ScanTableFunction;
-import com.dremio.exec.store.sys.udf.UserDefinedFunction;
 import com.dremio.exec.util.FSHealthChecker;
 import com.dremio.io.CompressionCodecFactory;
 import com.dremio.io.file.FileAttributes;
@@ -139,6 +145,7 @@ import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.exec.store.easy.proto.EasyProtobuf.EasyDatasetSplitXAttr;
 import com.dremio.sabot.exec.store.parquet.proto.ParquetProtobuf.ParquetDatasetSplitXAttr;
 import com.dremio.service.namespace.DatasetHelper;
+import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
@@ -147,6 +154,7 @@ import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.TableInstance;
 import com.dremio.service.namespace.capabilities.BooleanCapabilityValue;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
@@ -160,6 +168,7 @@ import com.dremio.service.namespace.file.proto.FileType;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.dremio.service.users.SystemUser;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
@@ -216,29 +225,21 @@ import org.apache.iceberg.io.FileIO;
 /** Storage plugin for file system */
 public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     implements StoragePlugin,
-        MutablePlugin,
+        SupportsFsMutablePlugin,
+        SupportsMutatingViews,
         SupportsReadSignature,
         AuthorizationCacheService,
         SupportsInternalIcebergTable,
         SupportsIcebergRootPointer,
         SupportsIcebergMutablePlugin,
         SupportsTypeCoercionsAndUpPromotions,
-        SupportsMetadataVerify {
-  /**
-   * Default {@link Configuration} instance. Use this instance through {@link #getNewFsConf()} to
-   * create new copies of {@link Configuration} objects.
-   */
-  private static final Configuration DEFAULT_CONFIGURATION = new Configuration();
-
-  static {
-    DEFAULT_CONFIGURATION.set(
-        HadoopFileSystem.HADOOP_SECURITY_CREDENTIAL_PROVIDER_PATH,
-        HadoopFileSystem.DREMIO_CREDENTIAL_PROVIDER_PATH);
-  }
+        SupportsMetadataVerify,
+        SupportsSchemaLearning {
 
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(FileSystemPlugin.class);
 
+  private static final CompressionCodecFactory codecFactory = HadoopCompressionCodecFactory.DEFAULT;
   private static final BooleanCapabilityValue REQUIRES_HARD_AFFINITY =
       new BooleanCapabilityValue(SourceCapabilities.REQUIRES_HARD_AFFINITY, true);
 
@@ -254,7 +255,9 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
                 public void onRemoval(
                     RemovalNotification<String, org.apache.hadoop.fs.FileSystem> notification) {
                   try {
-                    notification.getValue().close();
+                    if (notification.getValue() != null) {
+                      notification.getValue().close();
+                    }
                   } catch (IOException e) {
                     // Ignore
                     logger.debug("Could not close filesystem", e);
@@ -302,7 +305,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   private final String name;
   private final LogicalPlanPersistence lpPersistance;
   private final C config;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final Path basePath;
 
   private final Provider<StoragePluginId> idProvider;
@@ -313,20 +316,19 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   private ArrayList<FormatMatcher> matchers;
   private ArrayList<FormatMatcher> layeredMatchers;
   private List<FormatMatcher> dropFileMatchers;
-  private CompressionCodecFactory codecFactory;
   protected FSHealthChecker fsHealthChecker;
 
   public FileSystemPlugin(
       final C config,
-      final SabotContext context,
+      final PluginSabotContext pluginSabotContext,
       final String name,
       Provider<StoragePluginId> idProvider) {
     this.name = name;
     this.config = config;
     this.idProvider = idProvider;
-    this.context = context;
-    this.fsConf = getNewFsConf();
-    this.lpPersistance = context.getLpPersistence();
+    this.context = pluginSabotContext;
+    this.fsConf = FileSystemConfigurationUtils.getNewFsConf(pluginSabotContext.getOptionManager());
+    this.lpPersistance = pluginSabotContext.getLpPersistence();
     this.basePath = config.getPath();
   }
 
@@ -400,7 +402,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       }
       final FileSelection fileSelection = optionalFileSelection.get();
 
-      FileSystem fs = createFS(user);
+      FileSystem fs = createFS(SupportsFsCreation.builder().userName(user));
       Optional<FileFormat> layeredFormat = findLayeredFormatMatch(fs, fileSelection);
       if (layeredFormat.isPresent()) { // ICEBERG or DELTALAKE
         return false;
@@ -440,10 +442,6 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
         : SourceCapabilities.NONE;
   }
 
-  public static final Configuration getNewFsConf() {
-    return new Configuration(DEFAULT_CONFIGURATION);
-  }
-
   protected Configuration getFsConf() {
     return fsConf;
   }
@@ -451,10 +449,6 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   @Override
   public Configuration getFsConfCopy() {
     return new Configuration(fsConf);
-  }
-
-  public CompressionCodecFactory getCompressionCodecFactory() {
-    return codecFactory;
   }
 
   @Override
@@ -492,48 +486,22 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   }
 
   /**
-   * Create a new {@link FileSystemWrapper} for a given user.
+   * Create a new {@link FileSystem} for a given user.
    *
-   * @param userName
+   * @param b - The SupportsFsCreation builder.
    * @return
    */
-  public FileSystem createFS(String userName) throws IOException {
-    return createFS(userName, null);
-  }
-
   @Override
-  public FileSystem createFS(String filePath, String userName, OperatorContext operatorContext)
-      throws IOException {
-    return createFS(userName, operatorContext);
-  }
-
-  @Override
-  public FileSystem createFSWithAsyncOptions(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFS(userName, operatorContext);
-  }
-
-  @Override
-  public FileSystem createFSWithoutHDFSCache(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFS(userName, operatorContext);
-  }
-
-  public FileSystem createFS(String userName, OperatorContext operatorContext) throws IOException {
-    return createFS(userName, operatorContext, false);
-  }
-
-  public FileSystem createFS(String userName, OperatorContext operatorContext, boolean metadata)
-      throws IOException {
+  public FileSystem createFS(Builder b) throws IOException {
     return context
         .getFileSystemWrapper()
         .wrap(
-            newFileSystem(userName, operatorContext),
+            newFileSystem(b.userName(), b.operatorContext()),
             name,
             config,
-            operatorContext,
-            isAsyncEnabledForQuery(operatorContext) && getConfig().isAsyncEnabled(),
-            metadata);
+            b.operatorContext(),
+            isAsyncEnabledForQuery(b.operatorContext()) && getConfig().isAsyncEnabled(),
+            b.isForMetadataRefresh());
   }
 
   protected FileSystem newFileSystem(String userName, OperatorContext operatorContext)
@@ -599,7 +567,8 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     try {
       Path fullPath = PathUtils.toFSPath(resolveTableNameToValidPath(table));
       try (DirectoryStream<FileAttributes> stream =
-          createFS(schemaConfig.getUserName()).list(fullPath, NO_HIDDEN_FILES)) {
+          createFS(SupportsFsCreation.builder().userName(schemaConfig.getUserName()))
+              .list(fullPath, NO_HIDDEN_FILES)) {
         // Need to copy the content of the stream before closing
         fileAttributesList = Lists.newArrayList(stream);
       }
@@ -648,20 +617,21 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   }
 
   @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
+  public Optional<ViewTable> getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
     if (!Boolean.getBoolean(DremioConfig.LEGACY_STORE_VIEWS_ENABLED)) {
-      return null;
+      return Optional.empty();
     }
 
     try {
       DotFile f = null;
       try {
         Path viewPath = getViewPath(tableSchemaPath);
-        FileSystem fileSystem = createFS(schemaConfig.getUserName());
+        FileSystem fileSystem =
+            createFS(SupportsFsCreation.builder().userName(schemaConfig.getUserName()));
         FileAttributes fileAttributes = fileSystem.getFileAttributes(viewPath);
         f = DotFile.create(fileSystem, fileAttributes);
       } catch (FileNotFoundException e) {
-        return null;
+        return Optional.empty();
       } catch (IOException e) {
         logger.warn(
             "Failure while trying to list view tables in workspace [{}]", tableSchemaPath, e);
@@ -669,11 +639,12 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
 
       if (f != null && f.getType() == DotFileType.VIEW) {
         try {
-          return new ViewTable(
-              new NamespaceKey(tableSchemaPath),
-              f.getView(lpPersistance),
-              CatalogUser.from(f.getOwner()),
-              null);
+          return Optional.of(
+              new ViewTable(
+                  new NamespaceKey(tableSchemaPath),
+                  f.getView(lpPersistance),
+                  CatalogUser.from(f.getOwner()),
+                  null));
         } catch (AccessControlException e) {
           if (!schemaConfig.getIgnoreAuthErrors()) {
             logger.debug(e.getMessage());
@@ -696,7 +667,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       logger.debug("The filesystem for this workspace does not support this operation.", e);
     }
 
-    return null;
+    return Optional.empty();
   }
 
   /**
@@ -788,7 +759,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       }
 
       FileSelection fileSelection = selection.get();
-      FileSystem fs = createFS(user);
+      FileSystem fs = createFS(SupportsFsCreation.builder().userName(user));
 
       FileDatasetHandle datasetAccessor = null;
 
@@ -944,18 +915,14 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     this.optionExtractor = new FormatPluginOptionExtractor(context.getClasspathScan());
     this.matchers = Lists.newArrayList();
     this.layeredMatchers = Lists.newArrayList();
-    this.formatCreator = new FormatCreator(context, config, context.getClasspathScan(), this);
-    // Use default Hadoop implementation
-    this.codecFactory = HadoopCompressionCodecFactory.DEFAULT;
+    this.formatCreator = new FormatCreator(context, context.getClasspathScan(), this);
 
     matchers.addAll(formatCreator.getFormatMatchers());
     layeredMatchers.addAll(formatCreator.getLayeredFormatMatchers());
 
-    //    boolean footerNoSeek =
-    // contetMutext.getOptionManager().getOption(ExecConstants.PARQUET_FOOTER_NOSEEK);
     // NOTE: Add fallback format matcher if given in the configuration. Make sure fileMatchers is an
     // order-preserving list.
-    this.systemUserFS = createFS(SYSTEM_USERNAME);
+    this.systemUserFS = createFS(SupportsFsCreation.builder().userName(SYSTEM_USERNAME));
     dropFileMatchers = matchers.subList(0, matchers.size());
     this.fsHealthChecker =
         FSHealthChecker.getInstance(config.getPath(), getConnection(), getFsConf())
@@ -1005,10 +972,10 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   }
 
   @Override
-  public FormatPlugin getFormatPlugin(FormatPluginConfig config) {
-    FormatPlugin plugin = formatCreator.getFormatPluginByConfig(config);
+  public FormatPlugin getFormatPlugin(FormatPluginConfig formatConfig) {
+    FormatPlugin plugin = formatCreator.getFormatPluginByConfig(formatConfig);
     if (plugin == null) {
-      plugin = formatCreator.newFormatPlugin(config);
+      plugin = formatCreator.newFormatPlugin(formatConfig);
     }
     return plugin;
   }
@@ -1019,7 +986,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       if (datasetConfig.getReadDefinition() != null) { // allow accessing partial datasets
         FileSystem userFs;
         try {
-          userFs = createFS(user);
+          userFs = createFS(SupportsFsCreation.builder().userName(user));
         } catch (IOException ioe) {
           throw new RuntimeException("Failed to check access permission", ioe);
         }
@@ -1064,7 +1031,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     try {
       fileUpdateKey =
           LegacyProtobufSerializer.parseFrom(
-              FileUpdateKey.PARSER,
+              FileUpdateKey.parser(),
               datasetConfig.getReadDefinition().getReadSignature().toByteArray());
     } catch (InvalidProtocolBufferException e) {
       throw new RuntimeException("Cannot read file update key", e);
@@ -1122,14 +1089,14 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
             filePath =
                 Path.of(
                     LegacyProtobufSerializer.parseFrom(
-                            ParquetDatasetSplitXAttr.PARSER,
+                            ParquetDatasetSplitXAttr.parser(),
                             split.getSplitExtendedProperty().toByteArray())
                         .getPath());
           } else {
             filePath =
                 Path.of(
                     LegacyProtobufSerializer.parseFrom(
-                            EasyDatasetSplitXAttr.PARSER,
+                            EasyDatasetSplitXAttr.parser(),
                             split.getSplitExtendedProperty().toByteArray())
                         .getPath());
           }
@@ -1201,7 +1168,6 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
    *
    * @return
    */
-  @Override
   public FileSystem getSystemUserFS() {
     return systemUserFS;
   }
@@ -1217,7 +1183,8 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   }
 
   protected boolean fileExists(String username, List<String> filePath) throws IOException {
-    return createFS(username).isFile(PathUtils.toFSPath(resolveTableNameToValidPath(filePath)));
+    return createFS(SupportsFsCreation.builder().userName(username))
+        .isFile(PathUtils.toFSPath(resolveTableNameToValidPath(filePath)));
   }
 
   protected boolean isAsyncEnabledForQuery(OperatorContext context) {
@@ -1238,7 +1205,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     return metadataStale ? MetadataValidity.VALID : MetadataValidity.INVALID;
   }
 
-  public SabotContext getContext() {
+  public PluginSabotContext getContext() {
     return context;
   }
 
@@ -1251,8 +1218,12 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
 
   @Override
   public boolean createOrUpdateView(
-      NamespaceKey tableSchemaPath, SchemaConfig schemaConfig, View view, ViewOptions viewOptions)
-      throws IOException {
+      NamespaceKey tableSchemaPath,
+      SchemaConfig schemaConfig,
+      View view,
+      ViewOptions viewOptions,
+      NamespaceAttribute... attributes)
+      throws IOException, CatalogUnsupportedOperationException {
     if (!Boolean.getBoolean(DremioConfig.LEGACY_STORE_VIEWS_ENABLED)) {
       throw UserException.parseError()
           .message("Unable to create or update view. Filesystem views are not supported.")
@@ -1267,7 +1238,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     }
 
     Path viewPath = getViewPath(tableSchemaPath.getPathComponents());
-    FileSystem fs = createFS(schemaConfig.getUserName());
+    FileSystem fs = createFS(SupportsFsCreation.builder().userName(schemaConfig.getUserName()));
     boolean replaced = fs.exists(viewPath);
     final Set<PosixFilePermission> viewPerms =
         MorePosixFilePermissions.fromOctalMode(
@@ -1281,7 +1252,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   @Override
   public void dropView(
       NamespaceKey tableSchemaPath, ViewOptions viewOptions, SchemaConfig schemaConfig)
-      throws IOException {
+      throws IOException, CatalogEntityNotFoundException {
     if (!Boolean.getBoolean(DremioConfig.LEGACY_STORE_VIEWS_ENABLED)) {
       throw UserException.parseError()
           .message("Unable to drop view. Filesystem views are not supported.")
@@ -1293,7 +1264,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
           .build(logger);
     }
 
-    createFS(schemaConfig.getUserName())
+    createFS(SupportsFsCreation.builder().userName(schemaConfig.getUserName()))
         .delete(getViewPath(tableSchemaPath.getPathComponents()), false);
   }
 
@@ -1369,7 +1340,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
 
     FileSystem fs;
     try {
-      fs = createFS(schemaConfig.getUserName());
+      fs = createFS(SupportsFsCreation.builder().userName(schemaConfig.getUserName()));
     } catch (IOException e) {
       throw UserException.ioExceptionError(e)
           .message("Failed to access filesystem: " + e.getMessage())
@@ -1487,7 +1458,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   public void deleteIcebergTableRootPointer(String userName, Path icebergTablePath) {
 
     try {
-      FileSystem fs = createFS(userName);
+      FileSystem fs = createFS(SupportsFsCreation.builder().userName(userName));
       FileIO fileIO = createIcebergFileIO(fs, null, null, null, null);
       IcebergModel icebergModel = getIcebergModel(fileIO, null);
       icebergModel.deleteTableRootPointer(
@@ -1609,21 +1580,31 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       SchemaConfig schemaConfig,
       ResolvedVersionContext versionContext,
       boolean saveInKvStore) {
-    if (IcebergUtils.isPrimaryKeySupported(datasetConfig)) {
-      return IcebergUtils.validateAndGeneratePrimaryKey(
-          this, context, table, datasetConfig, schemaConfig, versionContext, saveInKvStore);
-    } else {
+    if (!IcebergUtils.isPrimaryKeySupported(datasetConfig)) {
       return null;
     }
-  }
+    if (datasetConfig.getPhysicalDataset().getPrimaryKey() != null) {
+      return datasetConfig.getPhysicalDataset().getPrimaryKey().getColumnList();
+    }
 
-  @Override
-  public List<String> getPrimaryKeyFromMetadata(
-      NamespaceKey table,
-      DatasetConfig datasetConfig,
-      SchemaConfig schemaConfig,
-      ResolvedVersionContext versionContext,
-      boolean saveInKvStore) {
+    // Cache the PK in the KV store.
+    try {
+      if (saveInKvStore) { // If we are not going to save in KV store, no point of validating this
+        // Verify if the user has permission to write to the KV store.
+        MetadataRequestOptions options = MetadataRequestOptions.of(schemaConfig);
+
+        Catalog catalog = context.getCatalogService().getCatalog(options);
+        catalog.validatePrivilege(table, SqlGrant.Privilege.ALTER);
+      }
+    } catch (UserException | java.security.AccessControlException ex) {
+      if (ex instanceof java.security.AccessControlException
+          || ((UserException) ex).getErrorType()
+              == UserBitShared.DremioPBError.ErrorType.PERMISSION) {
+        return null; // The user does not have permission.
+      }
+      throw ex;
+    }
+
     final String userName = schemaConfig.getUserName();
     final IcebergModel icebergModel;
     final Path path;
@@ -1645,15 +1626,21 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     } else {
       return null;
     }
-    return IcebergUtils.getPrimaryKey(
-        icebergModel,
-        path.toString(),
-        table,
-        datasetConfig,
-        userName,
-        this,
-        context,
-        saveInKvStore);
+    List<String> primaryKey =
+        IcebergUtils.getPrimaryKey(
+            icebergModel, path.toString(), datasetConfig.getPhysicalDataset().getIcebergMetadata());
+
+    // This can happen if the table already had PK in the metadata, and we just promoted this table.
+    // The key will not be in the KV store for that.
+    // Even if PK is empty, we need to save to KV, so next time we know PK is unset and don't check
+    // from metadata again.
+    if (saveInKvStore) {
+      DatasetNamespaceService userNamespaceService = context.getNamespaceService(userName);
+      PrimaryKeyOperations.updatePrimaryKeyInNamespaceService(
+          table, datasetConfig, userNamespaceService, primaryKey);
+    }
+
+    return primaryKey;
   }
 
   @Override
@@ -1774,7 +1761,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   protected Path getPath(NamespaceKey table, String userName) {
     FileSystem fs;
     try {
-      fs = createFS(userName);
+      fs = createFS(SupportsFsCreation.builder().userName(userName));
     } catch (IOException e) {
       throw UserException.ioExceptionError(e)
           .message("Failed to access filesystem: " + e.getMessage())
@@ -1808,7 +1795,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   public SchemaEntity get(List<String> path, String userName) {
     try {
       final FileAttributes fileAttributes =
-          createFS(userName)
+          createFS(SupportsFsCreation.builder().userName(userName))
               .getFileAttributes(PathUtils.toFSPath(resolveTableNameToValidPath(path)));
 
       final Set<List<String>> tableNames = Sets.newHashSet();
@@ -1834,7 +1821,8 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     try {
       final List<FileAttributes> files =
           Lists.newArrayList(
-              createFS(userName).list(PathUtils.toFSPath(resolveTableNameToValidPath(folderPath))));
+              createFS(SupportsFsCreation.builder().userName(userName))
+                  .list(PathUtils.toFSPath(resolveTableNameToValidPath(folderPath))));
       final Set<List<String>> tableNames = Sets.newHashSet();
       final NamespaceService ns = context.getNamespaceService(userName);
       final NamespaceKey folderNSKey = new NamespaceKey(folderPath);
@@ -1981,7 +1969,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     if (!getMutability().hasMutationCapability(MutationType.TABLE, config.isSystemUser())) {
       throw UserException.parseError()
           .message(
@@ -2013,16 +2001,23 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     try {
       if (icebergTableProps == null
           || icebergTableProps.getIcebergOpType() == IcebergCommandType.CREATE) {
-        /**
-         * Do not check for existence of jobsResults table for Pdfs. The path includes a Unique UUID
-         * for storing jobResults, it is not necessary to check for existence for Pdfs. Pdfs's
-         * working set comprises of all executors(engines) and it verifies existence on all engines,
-         * irrespective of whether an engine is the engine on which query is being run or for even
-         * queries that are run only on the coordinator. The creates issues where the elastics
-         * engines that are not in use are being stopped/started. To avoid such cases, the check for
-         * existence of JobResults directory is not done.
-         */
-        if (!isResultsTable || !systemUserFS.isPdfs()) {
+        // Skip the file existence check for the following conditions:
+        //
+        // 1)
+        // Do not check for existence if explicitly requested.
+        //
+        // 2)
+        // Do not check for existence of jobsResults table for Pdfs. The path includes a Unique UUID
+        // for storing jobResults, it is not necessary to check for existence for Pdfs. Pdfs's
+        // working set comprises of all executors(engines) and it verifies existence on all engines,
+        // irrespective of whether an engine is the engine on which query is being run or for even
+        // queries that are run only on the coordinator. The creates issues where the elastics
+        // engines that are not in use are being stopped/started. To avoid such cases, the check for
+        // existence of JobResults directory is not done.
+        boolean skipExistenceCheck =
+            createTableOptions.skipFileExistenceCheck()
+                || (createTableOptions.isJobsResultsTable() && systemUserFS.isPdfs());
+        if (!skipExistenceCheck) {
           if (systemUserFS.exists(path)) {
             throw UserException.validationError()
                 .message("Folder already exists at path: %s.", tableSchemaPath)
@@ -2051,7 +2046,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
           "Unexpected state. UUID must be set");
       path = path.resolve(icebergTableProps.getUuid());
       return new CreateParquetTableEntry(
-          userName, this, path.toString(), icebergTableProps, writerOptions, tableSchemaPath);
+          userName, null, this, path.toString(), icebergTableProps, writerOptions, tableSchemaPath);
     }
 
     return new EasyFileSystemCreateTableEntry(
@@ -2062,14 +2057,6 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
         icebergTableProps,
         writerOptions,
         tableSchemaPath);
-  }
-
-  @Override
-  public Writer getWriter(
-      PhysicalOperator child, String location, WriterOptions options, OpProps props)
-      throws IOException {
-    throw new IllegalStateException(
-        "The ctas entry for a file system plugin should invoke get writer on the format plugin directly.");
   }
 
   @Override
@@ -2246,7 +2233,10 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
 
   @Override
   public TableOperations createIcebergTableOperations(
-      FileIO fileIO, String queryUserName, IcebergTableIdentifier tableIdentifier) {
+      FileIO fileIO,
+      IcebergTableIdentifier tableIdentifier,
+      @Nullable String queryUserName,
+      @Nullable String queryUserId) {
     return new IcebergHadoopTableOperations(
         new org.apache.hadoop.fs.Path(
             ((IcebergHadoopTableIdentifier) tableIdentifier).getTableFolder()),
@@ -2316,7 +2306,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
 
     final List<String> fullPath = resolveTableNameToValidPath(datasetPath.getPathComponents());
     List<String> parentSchemaPath = new ArrayList<>(fullPath.subList(0, fullPath.size() - 1));
-    FileSystem fs = createFS(user);
+    FileSystem fs = createFS(SupportsFsCreation.builder().userName(user));
     FileSelection fileSelection = FileSelection.createNotExpanded(fs, fullPath);
     String tableName = datasetPath.getName();
 
@@ -2366,26 +2356,6 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
         getFsConfCopy());
   }
 
-  @Override
-  public boolean createFunction(
-      CatalogEntityKey key, SchemaConfig schemaConfig, UserDefinedFunction userDefinedFunction) {
-    throw new UnsupportedOperationException(
-        "File System plugin doesn't support function creation via CREATE FUNCTION.");
-  }
-
-  @Override
-  public boolean updateFunction(
-      CatalogEntityKey key, SchemaConfig schemaConfig, UserDefinedFunction userDefinedFunction) {
-    throw new UnsupportedOperationException(
-        "File System plugin doesn't support function update via CREATE OR REPLACE FUNCTION.");
-  }
-
-  @Override
-  public void dropFunction(CatalogEntityKey key, SchemaConfig schemaConfig) {
-    throw new UnsupportedOperationException(
-        "File System plugin doesn't support function drop via DROP FUNCTION.");
-  }
-
   private Optional<DatasetHandle> getDatasetHandleForInternalMetadataTable(
       EntityPath datasetPath,
       FormatPluginConfig formatPluginConfig,
@@ -2414,7 +2384,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
         TimeTravelProcessors.getTableSchemaProvider(timeTravelRequest);
     FileSystem fs;
     try {
-      fs = createFS(SystemUser.SYSTEM_USERNAME);
+      fs = createFS(SupportsFsCreation.builder().userName(SystemUser.SYSTEM_USERNAME));
     } catch (Exception e) {
       Throwables.propagateIfPossible(e, ConnectorException.class);
       throw new ConnectorException(e);
@@ -2427,15 +2397,18 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
         new IcebergExecutionDatasetAccessor(
             datasetPath,
             tableSupplier,
-            this.getFsConfCopy(),
             formatPlugin,
             fs,
             tableSnapshotProvider,
-            this,
             tableSchemaProvider));
   }
 
   public String getConnection() {
     return config.getConnection();
+  }
+
+  @VisibleForTesting
+  protected LoadingCache<String, org.apache.hadoop.fs.FileSystem> getHadoopFS() {
+    return hadoopFS;
   }
 }

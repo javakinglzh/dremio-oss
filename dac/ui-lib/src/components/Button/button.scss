@@ -42,6 +42,15 @@
         @extend .bg-brand-400;
       }
     }
+    @media (prefers-contrast: more) {
+      &.--contained {
+        background-color: var(--color--brand--500);
+        &:hover {
+          border: none;
+          background-color: var(--color--brand--600);
+        }
+      }
+    }
 
     &.--outlined {
       background-color: var(--fill--primary);

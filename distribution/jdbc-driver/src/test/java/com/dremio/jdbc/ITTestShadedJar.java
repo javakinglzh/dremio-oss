@@ -17,6 +17,7 @@ package com.dremio.jdbc;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 
 import com.dremio.common.SuppressForbidden;
 import java.io.IOException;
@@ -94,6 +95,17 @@ public class ITTestShadedJar {
           }
         };
     return driver.connect(jdbcURL, props);
+  }
+
+  @Test
+  public void testNettySSLLoadedProperly() throws Exception {
+    Class<?> openSslClass =
+        classLoader.loadClass("com.dremio.jdbc.shaded.io.netty.handler.ssl.OpenSsl");
+
+    // ensureAvailability throws exception if native libraries failed to load
+    assertDoesNotThrow(
+        () -> openSslClass.getMethod("ensureAvailability").invoke(null),
+        "OpenSSL not loaded properly");
   }
 
   @Test
@@ -247,7 +259,7 @@ public class ITTestShadedJar {
     @Override
     protected void internalRun() throws Exception {
       Class<?> clazz = getClassLoader().loadClass("com.dremio.BaseTestQuery");
-      clazz.getMethod("closeClient").invoke(null);
+      clazz.getMethod("closeCluster").invoke(null);
     }
   }
 }

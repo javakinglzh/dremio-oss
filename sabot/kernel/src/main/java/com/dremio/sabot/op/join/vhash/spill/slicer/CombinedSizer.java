@@ -31,6 +31,10 @@ public class CombinedSizer implements Sizer {
     this.sizers = ImmutableList.copyOf(sizers);
   }
 
+  public int getVectorCount() {
+    return sizers.size();
+  }
+
   @Override
   public void reset() {
     sizers.forEach(Sizer::reset);
@@ -46,6 +50,11 @@ public class CombinedSizer implements Sizer {
     return sizers.stream()
         .mapToInt(s -> s.getSizeInBitsStartingFromOrdinal(ordinal, numberOfRecords))
         .sum();
+  }
+
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf arrowBuf, int recordCount) {
+    sizers.forEach(sizer -> sizer.accumulateFieldSizesInABuffer(arrowBuf, recordCount));
   }
 
   @Override

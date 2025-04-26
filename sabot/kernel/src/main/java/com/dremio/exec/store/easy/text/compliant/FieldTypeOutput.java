@@ -39,7 +39,8 @@ abstract class FieldTypeOutput extends TextOutput {
 
   protected boolean collect = true;
   protected boolean rowHasData = false;
-  int recordCount = 0;
+  private long recordCount;
+  private int batchIndex;
   protected int maxField = 0;
   protected boolean isValidationMode = false;
 
@@ -58,19 +59,29 @@ abstract class FieldTypeOutput extends TextOutput {
   /** Start a new record batch. Resets all pointers */
   @Override
   public void startBatch() {
-    this.recordCount = 0;
+    this.batchIndex = 0;
     this.currentFieldIndex = -1;
     this.collect = true;
     this.fieldOpen = false;
   }
 
-  protected int getIndexOf(List<String> outputColumns, String pathStr) {
+  protected int getIndexOf(
+      List<String> outputColumns, String pathStr, boolean failOnDuplicateNames) {
+    int index = -1;
     for (int i = 0; i < outputColumns.size(); i++) {
       if (outputColumns.get(i).equalsIgnoreCase(pathStr)) {
-        return i;
+        if (index < 0) {
+          index = i;
+          if (!failOnDuplicateNames) {
+            break;
+          }
+        } else {
+          throw new SchemaMismatchException(
+              String.format("Duplicate column name %s.", outputColumns.get(i)));
+        }
       }
     }
-    return -1;
+    return index;
   }
 
   @Override
@@ -104,7 +115,7 @@ abstract class FieldTypeOutput extends TextOutput {
 
     if (collect) {
       assert isValidationMode || currentVector != null;
-      writeValueInCurrentVector(recordCount, currentDataPointer);
+      writeValueInCurrentVector(batchIndex, currentDataPointer);
     }
 
     return currentFieldIndex < maxField;
@@ -125,6 +136,7 @@ abstract class FieldTypeOutput extends TextOutput {
       endField();
     }
 
+    batchIndex++;
     recordCount++;
   }
 
@@ -134,7 +146,7 @@ abstract class FieldTypeOutput extends TextOutput {
 
     for (int i = 0; i <= maxField; i++) {
       if (this.vectors[i] != null) {
-        this.vectors[i].setValueCount(recordCount);
+        this.vectors[i].setValueCount(batchIndex);
       }
     }
   }
@@ -157,5 +169,25 @@ abstract class FieldTypeOutput extends TextOutput {
   @Override
   public void setFieldCurrentDataPointer(int currentDataPointer) {
     this.currentDataPointer = currentDataPointer;
+  }
+
+  @Override
+  int currentFieldIndex() {
+    return currentFieldIndex;
+  }
+
+  @Override
+  int currentBatchIndex() {
+    return batchIndex;
+  }
+
+  @Override
+  boolean hasSelectedColumns() {
+    for (boolean selectedField : selectedFields) {
+      if (selectedField) {
+        return true;
+      }
+    }
+    return false;
   }
 }

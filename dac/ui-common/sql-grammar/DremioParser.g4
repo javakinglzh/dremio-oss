@@ -87,8 +87,6 @@ sqlStmt :
     | sqlTruncateTable
     | sqlAccel
     | sqlRefreshReflection
-    | sqlLoadMaterialization
-    | sqlCompactMaterialization
     | sqlExplainJson
     | sqlExplainQueryDML
     | sqlAlterClearPlanCache
@@ -225,15 +223,13 @@ vacuumTableRemoveOrphanFilesOptions : (OLDER_THAN EQ? stringLiteral)? (LOCATION 
 
 sqlVacuumTable : compoundIdentifier (EXPIRE SNAPSHOTS vacuumTableExpireSnapshotOptions | REMOVE ORPHAN FILES vacuumTableRemoveOrphanFilesOptions)  ;
 
-sqlVacuumCatalog : simpleIdentifier  ;
+sqlVacuumCatalog : simpleIdentifier (EXCLUDE LPAREN tableWithVersionContextCommaList RPAREN)?  ;
+
+tableWithVersionContextCommaList : compoundIdentifier tableWithVersionContext? (COMMA compoundIdentifier tableWithVersionContext)*  ;
 
 sqlTruncateTable : TRUNCATE TABLE? (IF EXISTS)? compoundIdentifier (AT BRANCH simpleIdentifier)?  ;
 
 sqlRefreshReflection : REFRESH REFLECTION stringLiteral AS stringLiteral  ;
-
-sqlLoadMaterialization : LOAD MATERIALIZATION METADATA compoundIdentifier  ;
-
-sqlCompactMaterialization : COMPACT MATERIALIZATION compoundIdentifier AS stringLiteral  ;
 
 sqlAnalyzeTableStatistics : ANALYZE TABLE compoundIdentifier FOR (ALL COLUMNS | COLUMNS parseOptionalFieldList) (COMPUTE STATISTICS | DELETE STATISTICS)  ;
 
@@ -269,6 +265,8 @@ sqlShowCreate : SHOW CREATE (VIEW | TABLE) compoundIdentifier (AT (REF | REFEREN
 
 sqlAlterEngine : ALTER ENGINE simpleIdentifier SET LPAREN (MIN_REPLICAS EQ unsignedNumericLiteral (COMMA MAX_REPLICAS EQ unsignedNumericLiteral)? | MAX_REPLICAS EQ unsignedNumericLiteral (COMMA MIN_REPLICAS EQ unsignedNumericLiteral)?)? RPAREN  ;
 
+tryConvertFromFunctionCall : TRY_CONVERT_FROM LPAREN expression AS dataType RPAREN  ;
+
 sqlAccel : ALTER (SOURCE simpleIdentifier (REFRESH STATUS | CLEAR PERMISSION CACHE) | SPACE simpleIdentifier ROUTE (ALL REFLECTIONS | REFLECTIONS) sqlAlterDatasetReflectionRouting | FOLDER compoundIdentifier ROUTE (ALL REFLECTIONS | REFLECTIONS) sqlAlterDatasetReflectionRouting | (TABLE | VDS | VIEW | PDS | DATASET) compoundIdentifier aTVersionSpec? (ADD ROW ACCESS POLICY policy | DROP ROW ACCESS POLICY policy | ADD PRIMARY KEY parseRequiredFieldList | DROP PRIMARY KEY | DROP CLUSTERING KEY | DROP LOCALSORT | ROUTE (ALL REFLECTIONS | REFLECTIONS) sqlAlterDatasetReflectionRouting | SET TBLPROPERTIES LPAREN parseTableProperty (COMMA parseTableProperty)* RPAREN | UNSET TBLPROPERTIES LPAREN stringLiteralCommaList RPAREN | ADD (COLUMNS tableElementList | PARTITION FIELD parsePartitionTransform) | (CHANGE | ALTER | MODIFY) COLUMN? simpleIdentifier (typedElement | SET MASKING POLICY policy | UNSET MASKING POLICY policyWithoutArgs | sqlSetOption) | DROP (REFLECTION sqlDropReflection | PARTITION FIELD parsePartitionTransform | COLUMN? simpleIdentifier) | CREATE (AGGREGATE REFLECTION simpleIdentifier sqlCreateAggReflection | RAW REFLECTION simpleIdentifier sqlCreateRawReflection | EXTERNAL REFLECTION simpleIdentifier sqlAddExternalReflection) | REFRESH REFLECTIONS | FORGET METADATA | REFRESH METADATA (FOR ALL (FILES | PARTITIONS) | FOR FILES parseRequiredFilesList | FOR PARTITIONS parseRequiredPartitionList)? (AUTO PROMOTION | AVOID PROMOTION)? (FORCE UPDATE | LAZY UPDATE)? (DELETE WHEN MISSING | MAINTAIN WHEN MISSING)? | ENABLE (SCHEMA LEARNING | APPROXIMATE STATS | (RAW | AGGREGATE) ACCELERATION) | DISABLE (SCHEMA LEARNING | APPROXIMATE STATS | (RAW | AGGREGATE) ACCELERATION) | LOCALSORT BY parseRequiredFieldList | CLUSTER BY parseRequiredFieldList | sqlSetOption))  ;
 
 parseRequiredFilesList : LPAREN stringLiteralCommaList RPAREN  ;
@@ -281,7 +279,7 @@ keyValueCommaList : keyValuePair (COMMA keyValuePair)*  ;
 
 keyValuePair : simpleIdentifier EQ (NULL | stringLiteral)  ;
 
-sqlCreateAggReflection : USING (DIMENSIONS parseFieldListWithGranularity)? (MEASURES parseFieldListWithMeasures)? (DISTRIBUTE BY parseRequiredFieldList)? ((STRIPED | CONSOLIDATED)? PARTITION BY parsePartitionTransformList)? (LOCALSORT BY parseRequiredFieldList)? (ARROW CACHE)?  ;
+sqlCreateAggReflection : USING (DIMENSIONS parseFieldListWithGranularity)? (MEASURES parseFieldListWithMeasures)? (DISTRIBUTE BY parseRequiredFieldList)? ((STRIPED | CONSOLIDATED)? PARTITION BY parsePartitionTransformList)? (LOCALSORT BY parseRequiredFieldList)?  ;
 
 parseFieldListWithGranularity : (LPAREN simpleIdentifierCommaListWithGranularity? RPAREN)?  ;
 
@@ -293,7 +291,7 @@ simpleIdentifierCommaListWithMeasures : simpleIdentifier (LPAREN measureList RPA
 
 measureList : (MIN | MAX | COUNT | SUM | (APPROXIMATE | APPROX) COUNT DISTINCT) (COMMA measureList)*  ;
 
-sqlCreateRawReflection : USING DISPLAY parseOptionalFieldList (DISTRIBUTE BY parseRequiredFieldList)? ((STRIPED | CONSOLIDATED)? PARTITION BY parsePartitionTransformList)? (LOCALSORT BY parseRequiredFieldList)? (ARROW CACHE)?  ;
+sqlCreateRawReflection : USING DISPLAY parseOptionalFieldList (DISTRIBUTE BY parseRequiredFieldList)? ((STRIPED | CONSOLIDATED)? PARTITION BY parsePartitionTransformList)? (LOCALSORT BY parseRequiredFieldList)?  ;
 
 sqlDropReflection : simpleIdentifier  ;
 
@@ -429,7 +427,7 @@ sqlDropTag : DROP TAG (IF EXISTS)? simpleIdentifier (AT COMMIT simpleIdentifier 
 
 sqlMergeBranch : MERGE BRANCH (DRY RUN)? simpleIdentifier (INTO simpleIdentifier)? (IN simpleIdentifier)? (ON CONFLICT getMergeBehavior (EXCEPT getMergeBehavior getTableKeys)? (EXCEPT getMergeBehavior getTableKeys)?)?  ;
 
-getMergeBehavior :
+getMergeBehavior : 
     OVERWRITE
     | DISCARD
     | CANCEL
@@ -457,7 +455,7 @@ aTVersionSpecWithoutTimeTravel : AT (BRANCH simpleIdentifier | TAG simpleIdentif
 
 sqlCopyInto : COPY INTO compoundIdentifier tableWithVersionContext? (LPAREN selectItem (COMMA selectItem)* RPAREN)? FROM (stringLiteral | LPAREN queryOrExpr FROM stringLiteral RPAREN) (FILES LPAREN literal (COMMA literal)* RPAREN | REGEX stringLiteral)? (FILE_FORMAT literal)? (LPAREN parseCopyIntoOptions (COMMA parseCopyIntoOptions)* RPAREN)?  ;
 
-parseCopyIntoOptions :
+parseCopyIntoOptions : 
     (DATE_FORMAT | TIME_FORMAT | TIMESTAMP_FORMAT | TRIM_SPACE | RECORD_DELIMITER | FIELD_DELIMITER | QUOTE_CHAR | ESCAPE_CHAR | EMPTY_AS_NULL | ON_ERROR | EXTRACT_HEADER | SKIP_LINES) literal
     | NULL_IF LPAREN literal (COMMA literal)* RPAREN
       ;
@@ -983,6 +981,7 @@ builtinFunctionCall :
     | TRIM LPAREN ((BOTH | TRAILING | LEADING)? expression? (FROM | RPAREN))? expression RPAREN
     | timestampAddFunctionCall
     | timestampDiffFunctionCall
+    | tryConvertFromFunctionCall
     | matchRecognizeFunctionCall
     | jsonExistsFunctionCall
     | jsonValueFunctionCall
@@ -1065,7 +1064,7 @@ matchRecognizeNavigationLogical : (RUNNING | FINAL)? (FIRST | LAST) LPAREN expre
 
 matchRecognizeNavigationPhysical : (PREV | NEXT) LPAREN expression (COMMA numericLiteral)? RPAREN  ;
 
-nullTreatment :
+nullTreatment : 
     IGNORE NULLS
     | RESPECT NULLS
       ;
@@ -1211,7 +1210,7 @@ prefixRowOperator :
     | EXISTS
       ;
 
-postfixRowOperator :
+postfixRowOperator : 
     IS (A SET | NOT (NULL | TRUE | FALSE | UNKNOWN | A SET | EMPTY | JSON VALUE | JSON OBJECT | JSON ARRAY | JSON SCALAR | JSON) | (NULL | TRUE | FALSE | UNKNOWN | EMPTY | JSON VALUE | JSON OBJECT | JSON ARRAY | JSON SCALAR | JSON))
     | FORMAT jsonRepresentation
       ;
@@ -1355,6 +1354,7 @@ nonReservedKeyWord0of3 :
     | TRANSACTIONS_ACTIVE
     | TRANSFORM
     | TRIGGER_CATALOG
+    | TRY_CONVERT_FROM
     | TYPE
     | UNCONDITIONAL
     | UPLOAD
@@ -1366,7 +1366,7 @@ nonReservedKeyWord0of3 :
     | XML
       ;
 
-nonReservedKeyWord1of3 :
+nonReservedKeyWord1of3 : 
     ABSENT
     | ACCESS
     | ADD
@@ -1384,6 +1384,8 @@ nonReservedKeyWord1of3 :
     | CHARACTERS
     | CHARACTER_SET_SCHEMA
     | CLOUD
+    | CLUSTER
+    | CLUSTERING
     | COLLATION_CATALOG
     | COLUMN
     | COMMAND_FUNCTION
@@ -1510,13 +1512,12 @@ nonReservedKeyWord1of3 :
     | ZONE
       ;
 
-nonReservedKeyWord2of3 :
+nonReservedKeyWord2of3 : 
     ABSOLUTE
     | ACTION
     | ADMIN
     | ALTER
     | APPLY
-    | ARROW
     | ASSERTION
     | ATTRIBUTES
     | BATCH

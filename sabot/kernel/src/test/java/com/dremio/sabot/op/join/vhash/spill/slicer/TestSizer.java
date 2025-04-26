@@ -25,6 +25,7 @@ import java.util.List;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.NullVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.StructVector;
@@ -162,7 +163,7 @@ public class TestSizer {
       addIntVectorsToContainer(inputData, container);
       container.setAllCount(10);
       CombinedSizer sizer = getSizer(container);
-      Assert.assertEquals(sizer.getMaxRowLengthInBatch(10), 8);
+      Assert.assertEquals(sizer.getMaxRowLengthInBatch(10), 12);
     }
   }
 
@@ -355,6 +356,15 @@ public class TestSizer {
       container.setAllCount(10);
       CombinedSizer sizer = getSizer(container);
       Assert.assertEquals(sizer.getMaxRowLengthInBatch(10), 7);
+    }
+  }
+
+  @Test
+  public void testNullSizer() {
+    try (NullVector vector = new NullVector("null", 10)) {
+      final Sizer sizer = new NullSizer(vector);
+      final long size = sizer.getSizeInBitsStartingFromOrdinal(0, vector.getValueCount());
+      Assert.assertEquals(size, 0);
     }
   }
 

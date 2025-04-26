@@ -15,8 +15,12 @@
  */
 package com.dremio.exec.planner.physical.relbuilder;
 
+import com.dremio.exec.planner.physical.DistributionTrait;
 import com.dremio.exec.planner.physical.FilterPrel;
+import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.ProjectPrel;
+import com.dremio.exec.planner.physical.SortPrel;
+import com.dremio.exec.planner.physical.ValuesPrel;
 import com.google.common.base.Preconditions;
 import java.util.ArrayList;
 import java.util.List;
@@ -42,5 +46,21 @@ public interface PrelFactories {
         final RelDataType type =
             RexUtil.createStructType(input.getCluster().getTypeFactory(), noExtend);
         return ProjectPrel.create(input.getCluster(), traits, input, noExtend, type);
+      };
+
+  RelFactories.SortFactory SORT =
+      (input, collation, offset, fetch) -> {
+        // TODO fix this
+        final RelTraitSet traits = input.getTraitSet().replace(collation);
+        return SortPrel.create(input.getCluster(), traits, input, collation);
+      };
+
+  RelFactories.ValuesFactory VALUES =
+      (cluster, rowType, tuples) -> {
+        final RelTraitSet traits =
+            RelTraitSet.createEmpty()
+                .plus(Prel.PHYSICAL)
+                .plus(DistributionTrait.SINGLETON); // should this be any
+        return new ValuesPrel(cluster, traits, rowType, tuples);
       };
 }

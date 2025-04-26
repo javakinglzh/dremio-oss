@@ -55,6 +55,7 @@ import com.dremio.service.reflection.proto.ReflectionGoalState;
 import com.dremio.service.reflection.proto.ReflectionId;
 import com.dremio.service.reflection.proto.ReflectionState;
 import com.dremio.service.reflection.store.MaterializationStore;
+import com.dremio.service.reflection.store.ReflectionChangeNotificationHandler;
 import com.dremio.service.reflection.store.ReflectionEntriesStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.google.common.collect.ImmutableList;
@@ -230,7 +231,8 @@ public class TestKVStoreReportService extends BaseTestServer {
     ReflectionEntriesStore reflectionEntriesStore =
         new ReflectionEntriesStore(legacyKVStoreProviderProvider);
     ReflectionGoalsStore reflectionGoalsStore =
-        new ReflectionGoalsStore(legacyKVStoreProviderProvider);
+        new ReflectionGoalsStore(
+            legacyKVStoreProviderProvider, () -> ReflectionChangeNotificationHandler.NO_OP);
     MaterializationStore materializationStore =
         new MaterializationStore(legacyKVStoreProviderProvider);
 
@@ -287,7 +289,8 @@ public class TestKVStoreReportService extends BaseTestServer {
         null,
         null,
         format,
-        null);
+        null,
+        false);
   }
 
   /** mock {@link com.dremio.dac.resource.KVStoreReportResource#doDownload(List)} method */
@@ -506,14 +509,12 @@ public class TestKVStoreReportService extends BaseTestServer {
           break;
 
         case KVStoreReportService.MATERIALIZATION + ".csv":
-          // verify if the single row in this zip entry contains the correct reflection id and
-          // number_partitions
+          // verify if the single row in this zip entry contains the correct reflection id
           try (BufferedReader bufferedReader =
               new BufferedReader(new InputStreamReader(zipFile.getInputStream(entry))); ) {
             String secondLine = checksecondLineMatchColumnsCount(bufferedReader);
             String[] secondLineValues = secondLine.split(",");
             assertEquals("reflection id is incorrect.", reflectionId.getId(), secondLineValues[1]);
-            assertEquals("num_partitions is incorrect.", "0", secondLineValues[9]);
           }
           break;
 

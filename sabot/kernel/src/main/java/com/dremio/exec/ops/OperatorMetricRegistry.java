@@ -28,6 +28,7 @@ import com.dremio.sabot.op.join.nlje.NLJEOperator;
 import com.dremio.sabot.op.join.vhash.HashJoinStats;
 import com.dremio.sabot.op.metrics.MongoStats;
 import com.dremio.sabot.op.project.ProjectorStats;
+import com.dremio.sabot.op.receiver.BridgeFileReaderOperator;
 import com.dremio.sabot.op.receiver.BridgeFileReaderReceiverOperator;
 import com.dremio.sabot.op.receiver.merging.MergingReceiverOperator;
 import com.dremio.sabot.op.receiver.unordered.UnorderedReceiverOperator;
@@ -112,6 +113,17 @@ public class OperatorMetricRegistry {
     register(builder, CoreOperatorType.TEXT_SUB_SCAN_VALUE, ScanOperator.Metric.class);
     register(builder, CoreOperatorType.ICEBERG_SNAPSHOTS_SUB_SCAN_VALUE, IcebergExpiryMetric.class);
     register(builder, CoreOperatorType.NESSIE_COMMITS_SUB_SCAN_VALUE, IcebergExpiryMetric.class);
+    register(builder, CoreOperatorType.ARROW_SUB_SCAN_VALUE, ScanOperator.Metric.class);
+    register(
+        builder, CoreOperatorType.BRIDGE_FILE_READER_VALUE, BridgeFileReaderOperator.Metric.class);
+    register(builder, CoreOperatorType.EXCEL_SUB_SCAN_VALUE, ScanOperator.Metric.class);
+    register(builder, CoreOperatorType.FLIGHT_SUB_SCAN_VALUE, ScanOperator.Metric.class);
+    register(
+        builder, CoreOperatorType.ICEBERG_MANIFEST_WRITER_VALUE, ParquetRecordWriter.Metric.class);
+    register(builder, CoreOperatorType.INFO_SCHEMA_SUB_SCAN_VALUE, ScanOperator.Metric.class);
+    register(builder, CoreOperatorType.JDBC_SUB_SCAN_VALUE, ScanOperator.Metric.class);
+    register(builder, CoreOperatorType.JSON_WRITER_VALUE, WriterOperator.Metric.class);
+    register(builder, CoreOperatorType.TEXT_WRITER_VALUE, WriterOperator.Metric.class);
     CORE_OPERATOR_TYPE_METRICS_MAP = builder.build();
   }
 

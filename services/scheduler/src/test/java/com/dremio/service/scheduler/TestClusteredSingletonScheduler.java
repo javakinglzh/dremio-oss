@@ -147,7 +147,8 @@ public class TestClusteredSingletonScheduler extends DremioTest {
 
   @Test
   public void testCleanupCalledOnCancel() throws Exception {
-    CountDownLatch latch = new CountDownLatch(1);
+    CountDownLatch cleanupLatch = new CountDownLatch(1);
+    CountDownLatch incrementerLatch = new CountDownLatch(1);
     AtomicInteger cleanupCount = new AtomicInteger();
     Schedule testSchedule =
         Schedule.Builder.everyHours(1)
@@ -156,7 +157,7 @@ public class TestClusteredSingletonScheduler extends DremioTest {
             .withCleanup(
                 () -> {
                   cleanupCount.incrementAndGet();
-                  latch.countDown();
+                  cleanupLatch.countDown();
                 })
             .build();
     Thread.sleep(200);
@@ -166,15 +167,22 @@ public class TestClusteredSingletonScheduler extends DremioTest {
       cancellables[i] =
           testClients[i]
               .getSingletonScheduler()
-              .schedule(testSchedule, incrementer::incrementAndGet);
+              .schedule(
+                  testSchedule,
+                  () -> {
+                    incrementer.incrementAndGet();
+                    incrementerLatch.countDown();
+                  });
       Thread.yield();
       Thread.yield();
       Thread.yield();
     }
     // incrementer should be called only once from only one of the schedulers.
+    incrementerLatch.await();
     Assert.assertEquals(incrementer.get(), 1);
     Arrays.stream(cancellables).forEach((c) -> c.cancel(true));
-    latch.await();
+    cleanupLatch.await();
+    Assert.assertEquals(incrementer.get(), 1);
     Assert.assertEquals(cleanupCount.get(), 1);
   }
 
@@ -245,6 +253,32 @@ public class TestClusteredSingletonScheduler extends DremioTest {
     }
     latch.await();
     Assertions.assertThat(incrementer.get()).isEqualTo(1);
+  }
+
+  @Test
+  public void testDuplicateNormalScheduling() throws Exception {
+    CountDownLatch latch = new CountDownLatch(1);
+    final AtomicInteger incrementer = new AtomicInteger();
+    Runnable task =
+        () -> {
+          incrementer.incrementAndGet();
+          latch.countDown();
+        };
+    final Schedule schedule =
+        Schedule.Builder.everyMillis(100).asClusteredSingleton(testName.getMethodName()).build();
+    for (int i = 0; i < NUM_TEST_CLIENTS; i++) {
+      testClients[i].getSingletonScheduler().schedule(schedule, task);
+    }
+    final Schedule schedule1 =
+        Schedule.Builder.everyMillis(1000).asClusteredSingleton(testName.getMethodName()).build();
+    try {
+      testClients[0].getSingletonScheduler().schedule(schedule1, task);
+      Assert.fail("Schedule recreation should fail for normal schedules");
+    } catch (Exception e) {
+      Assertions.assertThat(e.getMessage()).contains("Illegal schedule modification");
+    }
+    latch.await();
+    Assertions.assertThat(incrementer.get()).isGreaterThanOrEqualTo(1);
   }
 
   @Test

@@ -83,28 +83,28 @@ public class ElasticProjectRule extends RelOptRule {
    * <p>ProjectConverterVisitor is called when a new ElasticsearchProject has been pushed down, and
    * it will collapse all the projects in the subtree into a single project.
    */
-  class ProjectConverterVisitor extends ElasticRuleRelVisitor {
+  static class ProjectConverterVisitor extends ElasticRuleRelVisitor {
     ProjectConverterVisitor(Project project, RelNode input) {
       super(input);
-      projectExprs = project.getProjects();
-      projectDataType = project.getRowType();
+      setProjectExprs(project.getProjects());
+      setProjectDataType(project.getRowType());
     }
 
     @Override
     public void processFilter(ElasticsearchFilter filter) {
-      child = filter;
-      continueToChildren = false;
+      setChild(filter);
+      setContinueToChildren(false);
     }
 
     @Override
     public void processProject(ElasticsearchProject project) {
-      projectExprs = RelOptUtil.pushPastProject(projectExprs, project);
+      setProjectExprs(RelOptUtil.pushPastProject(getProjectExprs(), project));
       // projectDataType should not be set here, since we want to keep the top project's row type.
     }
 
     @Override
     public void processSample(ElasticsearchSample node) {
-      parents.add(node);
+      getParents().add(node);
     }
   }
 }

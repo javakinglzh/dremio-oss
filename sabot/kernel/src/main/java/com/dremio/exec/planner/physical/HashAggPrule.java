@@ -150,7 +150,6 @@ public class HashAggPrule extends AggPruleBase {
               traits,
               newInput,
               aggregate.getGroupSet(),
-              aggregate.getGroupSets(),
               getUpdatedPhase1AggregateCall(aggregate),
               OperatorPhase.PHASE_1of2);
 
@@ -208,7 +207,6 @@ public class HashAggPrule extends AggPruleBase {
               twoPhaseAggInput.getTraitSet(),
               twoPhaseAggInput,
               phase1Agg.getPhase2GroupSet(),
-              null,
               phase2Calls,
               OperatorPhase.PHASE_2of2);
       return phase2Agg;
@@ -227,7 +225,6 @@ public class HashAggPrule extends AggPruleBase {
             traits,
             convertedInput,
             aggregate.getGroupSet(),
-            aggregate.getGroupSets(),
             aggregate.getAggCallList(),
             OperatorPhase.PHASE_1of1);
 

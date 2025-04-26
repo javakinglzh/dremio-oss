@@ -54,14 +54,7 @@ public final class RelOptNamespaceTable implements RelOptTable {
     this.cluster = cluster;
 
     // rowType might be access frequently but computation is expensive.
-    rowType =
-        Suppliers.memoize(
-            new Supplier<RelDataType>() {
-              @Override
-              public RelDataType get() {
-                return table.getRowType(cluster.getTypeFactory());
-              }
-            });
+    rowType = Suppliers.memoize(() -> table.getRowType(cluster.getTypeFactory()));
   }
 
   @Override

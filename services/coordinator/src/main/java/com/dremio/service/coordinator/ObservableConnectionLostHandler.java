@@ -26,7 +26,7 @@ public interface ObservableConnectionLostHandler extends CoordinatorLostHandle {
           new ObservableConnectionLostHandler() {
             private final List<LostConnectionObserver> connectionLostObservers =
                 new CopyOnWriteArrayList<>();
-            private volatile boolean sessionLost = false;
+            private volatile boolean connectionLost = false;
 
             @Override
             public void attachObserver(LostConnectionObserver observer) {
@@ -38,14 +38,13 @@ public interface ObservableConnectionLostHandler extends CoordinatorLostHandle {
               if (connectionLostObservers.isEmpty()) {
                 return;
               }
-              if (ConnectionState.LOST.equals(state)) {
+              if (!state.isConnected()) {
                 connectionLostObservers.forEach(LostConnectionObserver::notifyLostConnection);
-                sessionLost = true;
-              }
-              if (sessionLost && state.isConnected()) {
+                connectionLost = true;
+              } else if (connectionLost) {
                 connectionLostObservers.forEach(
                     LostConnectionObserver::notifyConnectionRegainedAfterLost);
-                sessionLost = false;
+                connectionLost = false;
               }
             }
 

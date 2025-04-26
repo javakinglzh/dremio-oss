@@ -1343,13 +1343,34 @@ tableName = CompoundIdentifier();
 SqlNode SqlVacuumCatalog(SqlParserPos pos) :
 {
     SqlIdentifier catalogSource;
-    SqlNode exp;
+    SqlNodeList excludeTableList = new SqlNodeList(getPos());
 }
 {
     catalogSource = SimpleIdentifier()
+    [
+        <EXCLUDE>
+        <LPAREN>
+            TableWithVersionContextCommaList(excludeTableList)
+        <RPAREN>
+    ]
     {
-        return new SqlVacuumCatalog(pos, catalogSource);
+        return new SqlVacuumCatalog(pos, catalogSource, excludeTableList);
     }
+}
+
+void TableWithVersionContextCommaList(SqlNodeList tableList) :
+{
+    SqlNode tableWithVersionContext = null;
+}
+{
+    tableWithVersionContext = CompoundIdentifier()
+    [ tableWithVersionContext = TableWithVersionContext(tableWithVersionContext) ]
+    { tableList.add(tableWithVersionContext); }
+    (
+        <COMMA> tableWithVersionContext = CompoundIdentifier()
+        [ tableWithVersionContext = TableWithVersionContext(tableWithVersionContext) ]
+        { tableList.add(tableWithVersionContext); }
+    )*
 }
 
 /**
@@ -1399,46 +1420,6 @@ SqlNode SqlRefreshReflection() :
     { materializationId = StringLiteral(); }
     {
         return new SqlRefreshReflection(pos, reflectionId, materializationId);
-    }
-}
-
-/**
- * Parses a LOAD MATERIALIZATION statement
- *   $LOAD MATERIALIZATION METADATA materialization_path
- */
-SqlNode SqlLoadMaterialization() :
-{
-    SqlParserPos pos;
-    SqlIdentifier materializationPath;
-}
-{
-    <LOAD> { pos = getPos(); }
-    <MATERIALIZATION> <METADATA>
-    { materializationPath = CompoundIdentifier(); }
-    {
-        return new SqlLoadMaterialization(pos, materializationPath);
-    }
-}
-
-
-/**
- * Parses a COMPACT REFRESH statement
- *   $COMPACT MATERIALIZATION materialization_path AS materializationId
- */
-SqlNode SqlCompactMaterialization() :
-{
-    SqlParserPos pos;
-    SqlIdentifier materializationPath;
-    SqlNode newMaterializationId;
-}
-{
-    <COMPACT> { pos = getPos(); }
-    <MATERIALIZATION>
-    { materializationPath = CompoundIdentifier(); }
-    <AS>
-    { newMaterializationId = StringLiteral(); }
-    {
-        return new SqlCompactMaterialization(pos, materializationPath, newMaterializationId);
     }
 }
 
@@ -1901,5 +1882,21 @@ SqlNode SqlAlterEngine():
     <RPAREN>
     {
         return new SqlAlterEngine(pos, engineName, minReplicas, maxReplicas);
+    }
+}
+
+SqlNode TryConvertFromFunctionCall():
+{
+    Span s;
+    SqlNode e;
+    List<SqlNode> args;
+    SqlDataTypeSpec dt;
+}
+{
+    <TRY_CONVERT_FROM> { s = span(); }
+    <LPAREN> e = Expression(ExprContext.ACCEPT_SUB_QUERY) { args = startList(e); }
+    <AS> dt = DataType() { args.add(new SqlComplexDataTypeSpec(dt.withNullable(true))); }
+    <RPAREN> {
+        return DremioSqlOperatorTable.TRY_CONVERT_FROM.createCall(s.end(this), args);
     }
 }

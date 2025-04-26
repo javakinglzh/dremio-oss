@@ -32,6 +32,7 @@ import resourceTree from "./resourceTree";
 import currentSql from "./currentSql";
 import scriptUpdates from "./scriptUpdates";
 import scriptJobs from "./scriptJobs";
+import { telemetry } from "@inject/sagas/telemetry";
 
 export default function* rootSaga() {
   yield all([
@@ -52,5 +53,6 @@ export default function* rootSaga() {
     fork(currentSql),
     fork(scriptUpdates),
     fork(scriptJobs),
+    ...(telemetry && [fork(telemetry)]),
   ]);
 }

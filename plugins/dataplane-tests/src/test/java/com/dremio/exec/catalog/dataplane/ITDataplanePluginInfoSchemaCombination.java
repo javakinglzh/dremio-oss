@@ -116,7 +116,7 @@ public class ITDataplanePluginInfoSchemaCombination extends ITDataplanePluginTes
   private void createEntitiesForContainer(ContainerEntity container) throws Exception {
     switch (container.getType()) {
       case SOURCE:
-        // Intentional fallthrough
+      // Intentional fallthrough
       case IMPLICIT_FOLDER:
         break;
       case EXPLICIT_FOLDER:

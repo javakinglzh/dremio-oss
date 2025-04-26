@@ -25,7 +25,7 @@ public class TestIcebergCatalogTableProvider {
   @Test
   public void testInitIcebergCatalogTableProvider() {
     IcebergCatalogTableProvider provider =
-        new IcebergCatalogTableProvider(null, null, null, null, null, null, null);
+        new IcebergCatalogTableProvider(null, null, null, null, null);
     assertEquals(BytesOutput.NONE, provider.provideSignature(null));
   }
 }

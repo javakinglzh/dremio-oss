@@ -17,12 +17,12 @@ package com.dremio.exec.store;
 
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.MaterializedSplitsPointer;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.TableMetadataImpl;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.service.namespace.PartitionChunkMetadataImpl;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -59,7 +59,9 @@ public class TestNamespaceTable {
       extends ConnectionConf<TestConnectionConf, StoragePlugin> {
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
   }

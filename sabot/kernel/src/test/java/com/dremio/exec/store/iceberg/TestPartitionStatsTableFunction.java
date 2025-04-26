@@ -26,7 +26,6 @@ import static com.dremio.sabot.Fixtures.t;
 import static com.dremio.sabot.Fixtures.th;
 import static com.dremio.sabot.Fixtures.tr;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -52,6 +51,7 @@ import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.tablefunction.TableFunctionOperator;
 import com.dremio.service.catalog.DatasetCatalogServiceGrpc;
 import com.google.common.collect.ImmutableMap;
+import java.util.List;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.io.FileIO;
 import org.junit.Before;
@@ -79,7 +79,7 @@ public class TestPartitionStatsTableFunction extends BaseTestTableFunction {
     FileIO fileIO =
         new DremioFileIO(
             fs, null, null, null, null, new HadoopFileSystemConfigurationAdapter(CONF));
-    when(plugin.createFSWithAsyncOptions(anyString(), anyString(), any())).thenReturn(fs);
+    when(plugin.createFS(any())).thenReturn(fs);
     when(plugin.getFsConfCopy()).thenReturn(CONF);
     when(plugin.createIcebergFileIO(any(), any(), any(), any(), any())).thenReturn(fileIO);
     SabotContext context = mock(SabotContext.class);
@@ -280,6 +280,145 @@ public class TestPartitionStatsTableFunction extends BaseTestTableFunction {
     testTable.close();
   }
 
+  @Test
+  public void testExceedBatchSizeWithCarryForwardAndDataset() throws Exception {
+    Table testTable = IcebergTestTables.PARTITIONED_NATION.get();
+    Fixtures.Table input =
+        t(
+            th(
+                SystemSchemas.DATASET_FIELD,
+                SystemSchemas.FILE_PATH,
+                SystemSchemas.FILE_TYPE,
+                SystemSchemas.METADATA_FILE_PATH,
+                SystemSchemas.SNAPSHOT_ID,
+                SystemSchemas.MANIFEST_LIST_PATH),
+            tr(
+                NULL_VARCHAR,
+                "/tmp/iceberg/metadata-a.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation",
+                "/tmp/iceberg/metadata-b.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation_t1",
+                NULL_VARCHAR,
+                NULL_VARCHAR,
+                p("v3"),
+                4709042947025192029L,
+                "/tmp/iceberg/metadata/snap-4709042947025192029-1-348cabd1-9bc4-442c-92b4-7f8ac8e26a6d.avro"),
+            tr(
+                "iceberg.partitioned_nation_t2",
+                NULL_VARCHAR,
+                NULL_VARCHAR,
+                p("v4"),
+                4447362982003292979L,
+                "/tmp/iceberg/metadata/snap-4447362982003292979-1-9f0488cd-235e-44d2-b88b-c901424ee372.avro"));
+
+    Fixtures.Table output =
+        t(
+            th(
+                SystemSchemas.DATASET_FIELD,
+                SystemSchemas.FILE_PATH,
+                SystemSchemas.FILE_TYPE,
+                SystemSchemas.METADATA_FILE_PATH,
+                SystemSchemas.SNAPSHOT_ID,
+                SystemSchemas.MANIFEST_LIST_PATH),
+            // Carry forward entries
+            tr(
+                NULL_VARCHAR,
+                "/tmp/iceberg/metadata-a.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                NULL_VARCHAR,
+                "/tmp/iceberg/metadata-b.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+
+            // Entries from v3.metadata.json
+            tr(
+                NULL_VARCHAR,
+                "/tmp/iceberg/metadata/v3.metadata.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation_t1",
+                NULL_VARCHAR,
+                NULL_VARCHAR,
+                p("v3"),
+                4709042947025192029L,
+                "/tmp/iceberg/metadata/snap-4709042947025192029-1-348cabd1-9bc4-442c-92b4-7f8ac8e26a6d.avro"),
+            tr(
+                "iceberg.partitioned_nation_t1",
+                "file:///tmp/iceberg/metadata/dremio-partitionStatsMetadata-4709042947025192029.json",
+                IcebergFileType.PARTITION_STATS.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation_t1",
+                "file:///tmp/iceberg/metadata/dremio-partitionStats-0-348cabd1-9bc4-442c-92b4-7f8ac8e26a6d.avro",
+                IcebergFileType.PARTITION_STATS.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+
+            // Entries from v4.metadata.json
+            tr(
+                NULL_VARCHAR,
+                "/tmp/iceberg/metadata/v4.metadata.json",
+                METADATA_JSON.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation_t2",
+                NULL_VARCHAR,
+                NULL_VARCHAR,
+                p("v4"),
+                4447362982003292979L,
+                "/tmp/iceberg/metadata/snap-4447362982003292979-1-9f0488cd-235e-44d2-b88b-c901424ee372.avro"),
+            tr(
+                "iceberg.partitioned_nation_t2",
+                "file:///tmp/iceberg/metadata/dremio-partitionStatsMetadata-4447362982003292979.json",
+                IcebergFileType.PARTITION_STATS.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR),
+            tr(
+                "iceberg.partitioned_nation_t2",
+                "file:///tmp/iceberg/metadata/dremio-partitionStats-0-9f0488cd-235e-44d2-b88b-c901424ee372.avro",
+                IcebergFileType.PARTITION_STATS.name(),
+                NULL_VARCHAR,
+                NULL_BIGINT,
+                NULL_VARCHAR));
+
+    validateSingle(
+        getPop(
+            true,
+            SystemSchemas.ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(
+                SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA)),
+        TableFunctionOperator.class,
+        input,
+        output,
+        3);
+
+    testTable.close();
+  }
+
   private String p(String ver) throws Exception {
     return String.format("/tmp/iceberg/metadata/%s.metadata.json", ver);
   }
@@ -288,6 +427,10 @@ public class TestPartitionStatsTableFunction extends BaseTestTableFunction {
     BatchSchema schema =
         SystemSchemas.ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(
             SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA);
+    return getPop(enableCarryForward, schema);
+  }
+
+  private TableFunctionPOP getPop(boolean enableCarryForward, BatchSchema schema) {
     return new TableFunctionPOP(
         PROPS,
         null,
@@ -303,6 +446,7 @@ public class TestPartitionStatsTableFunction extends BaseTestTableFunction {
                     SchemaPath.getSimplePath(FILE_PATH)),
                 FILE_TYPE,
                 METADATA_JSON.name(),
-                IcebergUtils.getDefaultPathScheme(fs.getScheme(), CONF))));
+                IcebergUtils.getDefaultPathScheme(fs.getScheme(), CONF),
+                List.of())));
   }
 }

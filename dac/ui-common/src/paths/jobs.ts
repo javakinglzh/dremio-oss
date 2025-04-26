@@ -16,7 +16,6 @@
 import { projectBase } from "./common";
 
 type JobIdParam = { jobId: string };
-type OldJobIdParam = { jobid: string };
 type FilterParams = {
   filters?: Record<string, any> | string;
   order?: "ASCENDING" | "DESCENDING";
@@ -40,9 +39,4 @@ export const job = jobs.extend(
 );
 export const reflection = jobs.extend(
   (params: ReflectionParams) => `reflection/${params.reflectionId}`,
-);
-
-/** Old Job  */
-export const jobOld = jobs.extend(
-  (params: OldJobIdParam) => `job/${params.jobid}`,
 );

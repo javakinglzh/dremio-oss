@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -165,7 +166,7 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
                     fileFormat,
                     OnErrorAction.ABORT));
     assertThat(exception.getMessage())
-        .contains("Copy Into transformations is only supported for Parquet inputs");
+        .contains("Copy Into transformations is only supported for Parquet and text inputs");
 
     dropTable(targetTableName);
   }
@@ -535,7 +536,12 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
                       inputFileNames,
                       fileFormat,
                       onErrorAction));
-      assertThat(exception.getMessage()).contains("Copy Into transformation select list");
+      if (fileFormat.equals(FileFormat.PARQUET)) {
+        assertThat(exception.getMessage()).contains("Copy Into transformation select list");
+      } else if (fileFormat.equals(FileFormat.CSV)) {
+        assertThat(exception.getMessage())
+            .contains("No column name matches target schema [`not_existing_col_name`]");
+      }
       dropTable(targetTableName);
     }
   }
@@ -549,7 +555,7 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
     String targetTableName = "TypeError";
     List<Pair<String, String>> tableSchema =
         ImmutableList.of(Pair.of("new_name", "VARCHAR"), Pair.of("new_age", "int"));
-    String[] transformations = new String[] {"length(name), age - 4"};
+    String[] transformations = new String[] {"cast(length(name) as varchar), age - 4"};
     String[] inputFileNames = new String[] {"typeError"};
 
     for (FileFormat fileFormat : fileFormats) {
@@ -576,15 +582,31 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
             inputFileNames,
             fileFormat,
             onErrorAction);
+        new TestBuilder(allocator)
+            .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+            .expectsEmptyResultSet()
+            .go();
+      } else if (onErrorAction == OnErrorAction.CONTINUE) {
+        prepareInputAndRunCopyIntoTransformation(
+            source,
+            targetTableName,
+            tableSchema,
+            null,
+            transformations,
+            inputFileNames,
+            fileFormat,
+            onErrorAction);
+        new TestBuilder(allocator)
+            .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+            .unOrdered()
+            .jsonBaselineFile(
+                getCopyIntoResultFileLocation(
+                    "ITCopyIntoTransformationsTypeError.json", fileFormat))
+            .ignoreColumnTypes()
+            .go();
       } else {
         fail(String.format("Unknown on_error action %s", onErrorAction));
       }
-
-      new TestBuilder(allocator)
-          .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
-          .expectsEmptyResultSet()
-          .go();
-
       dropTable(targetTableName);
     }
   }
@@ -770,6 +792,191 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
     }
   }
 
+  static void testInvalidSelectList(
+      BufferAllocator allocator, String source, OnErrorAction onErrorAction, FileFormat fileFormat)
+      throws Exception {
+    String targetTableName = "tInvalidSelectList";
+    List<Pair<String, String>> tableSchema =
+        ImmutableList.of(Pair.of("new_name", "varchar"), Pair.of("brand", "varchar"));
+    String[] mappings = new String[] {"brand", "new_name"};
+    String[] transformations = new String[] {"\"type\"", "concat(\"size\", \"make\")"};
+    String[] inputFileNames = new String[] {"cars"};
+    if (onErrorAction == OnErrorAction.ABORT) {
+      UserException exception =
+          assertThrows(
+              UserException.class,
+              () ->
+                  prepareInputAndRunCopyIntoTransformation(
+                      source,
+                      targetTableName,
+                      tableSchema,
+                      mappings,
+                      transformations,
+                      inputFileNames,
+                      fileFormat,
+                      onErrorAction));
+      assertThat(exception.getMessage())
+          .contains("Copy Into transformation select list contains invalid column names");
+    } else if (onErrorAction == OnErrorAction.SKIP_FILE) {
+      prepareInputAndRunCopyIntoTransformation(
+          source,
+          targetTableName,
+          tableSchema,
+          mappings,
+          transformations,
+          inputFileNames,
+          fileFormat,
+          onErrorAction);
+
+      new TestBuilder(allocator)
+          .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+          .unOrdered()
+          .expectsEmptyResultSet()
+          .go();
+    }
+    dropTable(targetTableName);
+  }
+
+  static void testTransformationNoHeaderCsv(BufferAllocator allocator, String source)
+      throws Exception {
+    String targetTableName = "tInvalidSelectList";
+    List<Pair<String, String>> tableSchema =
+        ImmutableList.of(Pair.of("year", "int"), Pair.of("brand", "varchar"));
+    String[] mappings = new String[] {"brand", "year"};
+    String[] transformations = new String[] {"concat($2, ' something')", "$1 + 10"};
+    String[] inputFileNames = new String[] {"cars_noheader"};
+    prepareInputAndRunCopyIntoTransformation(
+        source,
+        targetTableName,
+        tableSchema,
+        mappings,
+        transformations,
+        inputFileNames,
+        FileFormat.CSV,
+        OnErrorAction.ABORT,
+        "EXTRACT_HEADER 'false'");
+
+    new TestBuilder(allocator)
+        .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+        .unOrdered()
+        .jsonBaselineFile(
+            getCopyIntoResultFileLocation(
+                "ITCopyIntoTransformationsNoHeaderCsv.json", FileFormat.CSV))
+        .ignoreColumnTypes()
+        .go();
+
+    dropTable(targetTableName);
+  }
+
+  static void testCaseWhenThenCsv(BufferAllocator allocator, String source) throws Exception {
+    String targetTableName = "tCaseWhenThen";
+    List<Pair<String, String>> tableSchema =
+        ImmutableList.of(
+            Pair.of("Index", "int"), Pair.of("Height", "double"), Pair.of("Weight", "double"));
+    String[] transformations =
+        new String[] {
+          "Index",
+          "CASE WHEN Height = '' THEN NULL ELSE CAST(Height AS DOUBLE) END",
+          "CASE WHEN CAST(Weight AS DOUBLE) < 120.0 THEN 100 WHEN CAST(Weight AS DOUBLE) >= 120.0 THEN 200 ELSE NULL END"
+        };
+    String[] inputFileNames = new String[] {"emptyvalues"};
+    prepareInputAndRunCopyIntoTransformation(
+        source,
+        targetTableName,
+        tableSchema,
+        null,
+        transformations,
+        inputFileNames,
+        FileFormat.CSV,
+        OnErrorAction.ABORT,
+        "TRIM_SPACE 'true'");
+
+    new TestBuilder(allocator)
+        .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+        .unOrdered()
+        .jsonBaselineFile(
+            getCopyIntoResultFileLocation(
+                "ITCopyIntoTransformationsCaseWhenElse.json", FileFormat.CSV))
+        .ignoreColumnTypes()
+        .go();
+
+    dropTable(targetTableName);
+  }
+
+  static void testEmptyAsNullCsv(BufferAllocator allocator, String source) throws Exception {
+    String targetTableName = "tEmptyAsNull";
+    List<Pair<String, String>> tableSchema =
+        ImmutableList.of(
+            Pair.of("Index", "int"), Pair.of("Height", "double"), Pair.of("Weight", "double"));
+    String[] transformations =
+        new String[] {"Index", "2 * CAST(Height as double)", "Weight AS weight"};
+    String[] inputFileNames = new String[] {"emptyvalues"};
+    prepareInputAndRunCopyIntoTransformation(
+        source,
+        targetTableName,
+        tableSchema,
+        null,
+        transformations,
+        inputFileNames,
+        FileFormat.CSV,
+        OnErrorAction.ABORT,
+        "TRIM_SPACE 'true'");
+
+    new TestBuilder(allocator)
+        .sqlQuery("SELECT * FROM %s.%s", TEMP_SCHEMA, targetTableName)
+        .unOrdered()
+        .jsonBaselineFile(
+            getCopyIntoResultFileLocation(
+                "ITCopyIntoTransformationsEmptyAsNull.json", FileFormat.CSV))
+        .ignoreColumnTypes()
+        .go();
+
+    try {
+      // test same file with EMPTY_AS_NULL false, expecting empty strings to cause error
+      prepareInputAndRunCopyIntoTransformation(
+          source,
+          targetTableName,
+          tableSchema,
+          null,
+          transformations,
+          inputFileNames,
+          FileFormat.CSV,
+          OnErrorAction.ABORT,
+          "TRIM_SPACE 'true'",
+          "EMPTy_AS_NuLL 'FalSe'");
+      fail("Expected error to be thrown for empty string values during COPY INTO.");
+    } catch (Exception e) {
+      // different error messages for java vs gandiva evaluation
+      assertTrue(
+          e.getMessage().contains("String index out of range: 0")
+              || e.getMessage().contains("Failed to cast the string  to double"));
+    }
+
+    dropTable(targetTableName);
+  }
+
+  static void testUnsupportedFormatOption(BufferAllocator allocator, String source)
+      throws Exception {
+    String targetTableName = "tUnsupportedOptions";
+    List<Pair<String, String>> tableSchema = ImmutableList.of(Pair.of("Index", "int"));
+    String[] transformations = new String[] {"Index"};
+    String[] inputFileNames = new String[] {"emptyvalues"};
+
+    prepareInputAndRunCopyIntoTransformation(
+        source,
+        targetTableName,
+        tableSchema,
+        null,
+        transformations,
+        inputFileNames,
+        FileFormat.CSV,
+        OnErrorAction.ABORT,
+        "TRIM_SPACE 'true'",
+        "DATE_FORMAT 'YYYY-MM-DD'");
+
+    dropTable(targetTableName);
+  }
+
   private static void prepareInputAndRunCopyIntoTransformation(
       String source,
       String targetTableName,
@@ -778,7 +985,8 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
       String[] transformations,
       String[] inputFileNames,
       FileFormat fileFormat,
-      OnErrorAction onErrorAction)
+      OnErrorAction onErrorAction,
+      String... formatOptions)
       throws Exception {
     File inputFilesLocation = createTempLocation();
     String[] inputFileNamesWithExtension =
@@ -801,7 +1009,8 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
         transformations,
         inputFileNamesWithExtension,
         fileFormat,
-        onErrorAction);
+        onErrorAction,
+        formatOptions);
 
     Arrays.stream(newSourceFiles).forEach(f -> assertThat(f.delete()).isTrue());
   }
@@ -814,7 +1023,8 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
       String[] transformations,
       String[] fileNames,
       FileFormat fileFormat,
-      CopyIntoTableContext.OnErrorAction onErrorAction)
+      CopyIntoTableContext.OnErrorAction onErrorAction,
+      String... formatOptions)
       throws Exception {
     String storageLocation = "'@" + source + "/" + inputFilesLocation.getName() + "'";
     StringBuilder copyIntoQuery =
@@ -841,9 +1051,28 @@ public class CopyIntoTransformationTests extends ITCopyIntoBase {
         .append(" FILE_FORMAT '")
         .append(fileFormat.name())
         .append("'");
+    String[] combinedOptions;
     if (onErrorAction != null) {
-      copyIntoQuery.append(" (ON_ERROR '").append(onErrorAction.name()).append("')");
+      String onErrorActionOption = "ON_ERROR '" + onErrorAction.name() + "'";
+      combinedOptions = new String[formatOptions.length + 1];
+      System.arraycopy(formatOptions, 0, combinedOptions, 0, formatOptions.length);
+      combinedOptions[formatOptions.length] = onErrorActionOption;
+    } else {
+      combinedOptions = formatOptions;
     }
+    addFormatOptionsToQuery(copyIntoQuery, combinedOptions);
     test(copyIntoQuery.toString());
+  }
+
+  private static void addFormatOptionsToQuery(StringBuilder queryBuilder, String[] formatOptions) {
+    if (formatOptions.length == 0) {
+      return;
+    }
+    queryBuilder.append(" (");
+    for (String formatOption : formatOptions) {
+      queryBuilder.append(formatOption).append(", ");
+    }
+    queryBuilder.setLength(queryBuilder.length() - 2);
+    queryBuilder.append(") ");
   }
 }

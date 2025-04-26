@@ -93,6 +93,7 @@ public final class SystemIcebergTableOpUtils {
                 catalog.getTable(targetTablePath),
                 SqlCopyIntoTable.OPERATOR,
                 null,
+                null,
                 CatalogUtil.resolveVersionContext(
                     catalog,
                     targetTablePath.getRootEntity(),

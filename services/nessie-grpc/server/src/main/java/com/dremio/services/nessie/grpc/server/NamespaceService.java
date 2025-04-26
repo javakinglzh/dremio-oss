@@ -29,6 +29,7 @@ import com.dremio.services.nessie.grpc.api.NamespaceUpdateRequest;
 import com.google.common.collect.ImmutableSet;
 import io.grpc.stub.StreamObserver;
 import java.util.function.Supplier;
+import org.projectnessie.versioned.RequestMeta;
 
 /** The gRPC service implementation for the RefLog-API. */
 public class NamespaceService extends NamespaceServiceImplBase {
@@ -47,7 +48,10 @@ public class NamespaceService extends NamespaceServiceImplBase {
             toProto(
                 bridge
                     .get()
-                    .createNamespace(request.getNamedRef(), fromProto(request.getNamespace()))),
+                    .createNamespace(
+                        request.getNamedRef(),
+                        fromProto(request.getNamespace()),
+                        RequestMeta.API_WRITE)),
         observer);
   }
 
@@ -100,7 +104,8 @@ public class NamespaceService extends NamespaceServiceImplBase {
                   request.getNamespaceRequest().getNamedRef(),
                   fromProto(request.getNamespaceRequest().getNamespace()),
                   request.getPropertyUpdatesMap(),
-                  ImmutableSet.<String>builder().addAll(request.getPropertyRemovalsList()).build());
+                  ImmutableSet.<String>builder().addAll(request.getPropertyRemovalsList()).build(),
+                  RequestMeta.API_WRITE);
           return Empty.getDefaultInstance();
         },
         observer);

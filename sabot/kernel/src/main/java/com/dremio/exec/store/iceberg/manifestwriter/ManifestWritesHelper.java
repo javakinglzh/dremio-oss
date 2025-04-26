@@ -35,12 +35,12 @@ import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.SchemaConverter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf;
-import com.dremio.service.users.SystemUser;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -169,10 +169,15 @@ public class ManifestWritesHelper {
     this.schema = tableProps.getFullSchema().serialize();
     this.listOfFilesCreated = Lists.newArrayList();
     try {
+      // TODO(DX-96947): specify dataset for createFS
       fs =
           writer
               .getPlugin()
-              .createFS(tableProps.getTableLocation(), SystemUser.SYSTEM_USERNAME, null);
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(tableProps.getTableLocation())
+                      .datasetFromIcebergTableProps(tableProps)
+                      .withSystemUserName());
     } catch (IOException e) {
       throw new RuntimeException("Unable to create File System", e);
     }
@@ -446,7 +451,7 @@ public class ManifestWritesHelper {
     try {
       IcebergProtobuf.IcebergDatasetXAttr icebergDatasetXAttr =
           LegacyProtobufSerializer.parseFrom(
-              IcebergProtobuf.IcebergDatasetXAttr.PARSER, extendedProperty.toByteArray());
+              IcebergProtobuf.IcebergDatasetXAttr.parser(), extendedProperty.toByteArray());
       List<IcebergProtobuf.IcebergSchemaField> icebergColumnIDs =
           icebergDatasetXAttr.getColumnIdsList();
       Map<String, Integer> icebergColumns = new HashMap<>();

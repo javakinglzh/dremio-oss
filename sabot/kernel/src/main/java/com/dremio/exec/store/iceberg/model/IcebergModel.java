@@ -17,6 +17,7 @@ package com.dremio.exec.store.iceberg.model;
 
 import com.dremio.exec.catalog.AlterTableOption;
 import com.dremio.exec.catalog.RollbackOption;
+import com.dremio.exec.physical.base.ClusteringOptions;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.dfs.ColumnOperations;
 import com.dremio.exec.store.dfs.IcebergTableProps;
@@ -166,7 +167,8 @@ public interface IcebergModel {
       Long minInputFilesBeforeOptimize,
       Long snapshotId,
       IcebergTableProps icebergTableProps,
-      FileSystem fs);
+      FileSystem fs,
+      ClusteringOptions clusteringOptions);
 
   /** Utility to register an existing table to the catalog */
   void registerTable(IcebergTableIdentifier tableIdentifier, TableMetadata tableMetadata);

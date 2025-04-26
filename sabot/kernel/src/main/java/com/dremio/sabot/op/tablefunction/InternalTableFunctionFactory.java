@@ -28,6 +28,10 @@ import com.dremio.exec.store.dfs.SplitAssignmentTableFunction;
 import com.dremio.exec.store.dfs.SplitGenTableFunction;
 import com.dremio.exec.store.easy.EasyScanTableFunction;
 import com.dremio.exec.store.easy.triggerpipe.TriggerPipeEasyScanTableFunction;
+import com.dremio.exec.store.iceberg.ClusteringIndexingTableFunction;
+import com.dremio.exec.store.iceberg.ClusteringInfoTableFunction;
+import com.dremio.exec.store.iceberg.DataFileDataRangeConverterTableFunction;
+import com.dremio.exec.store.iceberg.DataFileGroupingTableFunction;
 import com.dremio.exec.store.iceberg.DeletedFilesMetadataTableFunction;
 import com.dremio.exec.store.iceberg.IcebergDeleteFileAggTableFunction;
 import com.dremio.exec.store.iceberg.IcebergDmlMergeDuplicateCheckTableFunction;
@@ -45,6 +49,7 @@ import com.dremio.exec.store.iceberg.ManifestListScanTableFunction;
 import com.dremio.exec.store.iceberg.ManifestScanTableFunction;
 import com.dremio.exec.store.iceberg.OptimizeManifestsTableFunction;
 import com.dremio.exec.store.iceberg.PartitionStatsScanTableFunction;
+import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.metadatarefresh.dirlisting.DirListingTableFunction;
 import com.dremio.exec.store.metadatarefresh.schemaagg.SchemaAggTableFunction;
@@ -90,8 +95,8 @@ public class InternalTableFunctionFactory implements TableFunctionFactory {
       throws ExecutionSetupException {
     switch (functionConfig.getType()) {
       case DATA_FILE_SCAN:
-        SupportsInternalIcebergTable plugin =
-            IcebergUtils.getSupportsInternalIcebergTablePlugin(
+        SupportsIcebergRootPointer plugin =
+            IcebergUtils.getSupportsIcebergRootPointerPlugin(
                 fec, functionConfig.getFunctionContext().getPluginId());
         return plugin.createScanTableFunction(fec, context, props, functionConfig);
       case EASY_DATA_FILE_SCAN:
@@ -153,6 +158,14 @@ public class InternalTableFunctionFactory implements TableFunctionFactory {
         return new IcebergMergeOnReadRowSplitterTableFunction(context, functionConfig);
       case MANIFEST_FILE_DUPLICATE_REMOVE:
         return new ManifestFileDuplicateRemoveTableFunction(context, functionConfig);
+      case DATA_FILE_GROUPING:
+        return new DataFileGroupingTableFunction(fec, context, props, functionConfig);
+      case CLUSTERING_INDEXING:
+        return new ClusteringIndexingTableFunction(fec, context, props, functionConfig);
+      case DATA_FILE_DATA_RANGE_CONVERTER:
+        return new DataFileDataRangeConverterTableFunction(fec, context, props, functionConfig);
+      case CLUSTERING_INFORMATION:
+        return new ClusteringInfoTableFunction(fec, context, props, functionConfig);
       case UNKNOWN:
       default:
         throw new UnsupportedOperationException(

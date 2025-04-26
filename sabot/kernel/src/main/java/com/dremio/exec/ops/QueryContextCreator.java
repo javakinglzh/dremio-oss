@@ -16,7 +16,7 @@
 package com.dremio.exec.ops;
 
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.exec.planner.plancache.LegacyPlanCache;
+import com.dremio.exec.planner.plancache.PlanCacheProvider;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
 import com.dremio.partitionstats.cache.PartitionStatsCache;
@@ -32,7 +32,7 @@ public interface QueryContextCreator {
       final UserProtos.QueryPriority priority,
       final long maxAllocation,
       final Predicate<DatasetConfig> datasetValidityChecker,
-      final LegacyPlanCache planCache,
+      final PlanCacheProvider planCacheProvider,
       final PartitionStatsCache partitionStatsCache);
 
   QueryContext createNewQueryContext(
@@ -41,7 +41,7 @@ public interface QueryContextCreator {
       final UserProtos.QueryPriority priority,
       final long maxAllocation,
       final Predicate<DatasetConfig> datasetValidityChecker,
-      final LegacyPlanCache planCache,
+      final PlanCacheProvider planCacheProvider,
       final PartitionStatsCache partitionStatsCache,
       final Catalog catalog);
 }

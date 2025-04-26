@@ -35,10 +35,7 @@ import { getCurrentFormatUrl } from "#oss/selectors/home";
 import { loadFileFormat } from "#oss/actions/modals/addFileModal";
 import { getVersionContextFromId } from "dremio-ui-common/utilities/datasetReference.js";
 import AccelerationUpdatesForm from "./AccelerationUpdatesForm";
-import {
-  LIVE_REFLECTION_ENABLED,
-  REFLECTION_SCHEDULER_POLICY,
-} from "#oss/exports/endpoints/SupportFlags/supportFlagConstants";
+import { LIVE_REFLECTION_ENABLED } from "#oss/exports/endpoints/SupportFlags/supportFlagConstants";
 import { getSupportFlags } from "#oss/selectors/supportFlags";
 
 const VIEW_ID = "AccelerationUpdatesController";
@@ -67,7 +64,6 @@ export class AccelerationUpdatesController extends Component {
     updateFormDirtyState: PropTypes.func,
     accelerationSettings: PropTypes.instanceOf(Immutable.Map),
     updateViewState: PropTypes.func.isRequired, // (viewState) => void
-    isSchedulerEnabled: PropTypes.bool,
     isLiveReflectionsEnabled: PropTypes.bool,
   };
 
@@ -161,10 +157,6 @@ export class AccelerationUpdatesController extends Component {
   }
 
   submit = (form) => {
-    if (!this.props.isSchedulerEnabled) {
-      delete form.accelerationActivePolicyType;
-      delete form.accelerationRefreshSchedule;
-    }
     if (
       !this.props.isLiveReflectionsEnabled ||
       form.accelerationRefreshOnDataChanges != null
@@ -252,7 +244,6 @@ function mapStateToProps(state, ownProps) {
       fullPath,
       "datasetAccelerationSettings",
     ),
-    isSchedulerEnabled: getSupportFlags?.(state)?.[REFLECTION_SCHEDULER_POLICY],
     isLiveReflectionsEnabled:
       getSupportFlags?.(state)?.[LIVE_REFLECTION_ENABLED],
   };

@@ -16,9 +16,9 @@
 package com.dremio.exec.store.dfs;
 
 import com.dremio.connector.impersonation.extensions.SupportsImpersonation;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
-import com.dremio.exec.server.SabotContext;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -37,9 +37,11 @@ public class HDFSStoragePlugin extends FileSystemPlugin<HDFSConf> implements Sup
   private static final String HDFS_DFS_DOMAIN_SOCKET_PATH_KEY = "dfs.domain.socket.path";
 
   public HDFSStoragePlugin(
-      HDFSConf config, SabotContext context, String name, Provider<StoragePluginId> idProvider) {
+      HDFSConf config,
+      PluginSabotContext context,
+      String name,
+      Provider<StoragePluginId> idProvider) {
     super(config, context, name, idProvider);
-    // TODO Auto-generated constructor stub
   }
 
   @Override

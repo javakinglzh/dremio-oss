@@ -24,6 +24,7 @@ import com.dremio.dac.service.catalog.CatalogServiceHelper;
 import com.dremio.dac.service.errors.ConflictException;
 import com.dremio.dac.service.errors.ReflectionNotFound;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
+import com.dremio.service.reflection.ChangeCause;
 import com.dremio.service.reflection.proto.ReflectionGoal;
 import java.util.ConcurrentModificationException;
 import java.util.Optional;
@@ -84,7 +85,6 @@ public class ReflectionResource {
     }
     final ReflectionGoal newReflection =
         reflectionServiceHelper.createReflection(reflection.toReflectionGoal());
-    final String id = newReflection.getId().getId();
 
     return reflectionServiceHelper.newReflection(newReflection);
   }
@@ -100,7 +100,8 @@ public class ReflectionResource {
       reflection.setId(id);
 
       final ReflectionGoal reflectionGoal =
-          reflectionServiceHelper.updateReflection(reflection.toReflectionGoal());
+          reflectionServiceHelper.updateReflection(
+              reflection.toReflectionGoal(), ChangeCause.REST_UPDATE_BY_USER_CAUSE);
       return reflectionServiceHelper.newReflection(reflectionGoal);
     } catch (ConcurrentModificationException e) {
       throw new ConflictException(
@@ -115,7 +116,7 @@ public class ReflectionResource {
     if (SupportContext.isSupportUser()) {
       throw new ForbiddenException("Permission denied. A support user cannot delete a reflection");
     }
-    reflectionServiceHelper.removeReflection(id);
+    reflectionServiceHelper.removeReflection(id, ChangeCause.REST_DROP_BY_USER_CAUSE);
     return Response.ok().build();
   }
 }

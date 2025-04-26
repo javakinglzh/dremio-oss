@@ -38,8 +38,26 @@ public final class NamespaceOptions {
    * Maximum number of dataset versions to keep per dataset. The versions are trimmed in a periodic
    * scan of the dataVersions collection.
    */
-  public static final TypeValidators.LongValidator DATASET_VERSIONS_LIMIT =
-      new TypeValidators.LongValidator("store.dataset.versions.limit", 50);
+  public static final TypeValidators.PositiveLongValidator DATASET_VERSIONS_LIMIT =
+      new TypeValidators.PositiveLongValidator("store.dataset.versions.limit", 10000, 50);
+
+  /**
+   * By default dataset version trimmer deletes versions past the limit and older than the age of
+   * the jobs. This value overrides the job's age. Only used if the value is greater than 0.
+   */
+  public static final TypeValidators.LongValidator DATASET_VERSIONS_MIN_AGE_OVERRIDE_SECONDS =
+      new TypeValidators.LongValidator("store.dataset.versions.min_age_override_seconds", 0);
+
+  /** Whether to enable dataset version trimmer runs. */
+  public static final TypeValidators.BooleanValidator DATASET_VERSION_TRIMMER_ENABLED =
+      new TypeValidators.BooleanValidator("store.dataset.versions.trimmer.enabled", true);
+
+  /**
+   * Whether to enable dataset version orphan deletion. Orphans are temporary dataset versions
+   * created by jobs, when jobs are expired these versions are not referenced by any other object.
+   */
+  public static final TypeValidators.BooleanValidator DATASET_VERSION_ORPHAN_DELETION_ENABLED =
+      new TypeValidators.BooleanValidator("store.dataset.versions.delete_orphans.enabled", true);
 
   /** How often to run dataset version trimmer in seconds. */
   public static final TypeValidators.RangeLongValidator DATASET_VERSIONS_TRIMMER_SCHEDULE_SECONDS =

@@ -24,4 +24,10 @@ public interface CompletionListener {
       long lastNodeCompletionRpcStartedAt);
 
   void failed(Exception ex);
+
+  void putExecutorProfile(String nodeEndpoint);
+
+  void removeExecutorProfile(String nodeEndpoint);
+
+  void queryClosed();
 }

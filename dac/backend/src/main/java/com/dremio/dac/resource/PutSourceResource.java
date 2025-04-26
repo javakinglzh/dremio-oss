@@ -25,6 +25,8 @@ import com.dremio.dac.model.sources.SourceUI;
 import com.dremio.dac.server.UserExceptionMapper;
 import com.dremio.dac.service.errors.SourceNotFoundException;
 import com.dremio.dac.service.source.SourceService;
+import com.dremio.exec.catalog.SourceRefreshOption;
+import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.source.proto.SourceConfig;
@@ -51,14 +53,18 @@ public class PutSourceResource {
   private final SourceService sourceService;
   private final SourceName sourceName;
   private final SourcePath sourcePath;
+  private final CatalogService catalogService;
 
   @Inject
   public PutSourceResource(
-      SourceService sourceService, @PathParam("sourceName") SourceName sourceName)
+      SourceService sourceService,
+      @PathParam("sourceName") SourceName sourceName,
+      CatalogService catalogService)
       throws SourceNotFoundException {
     this.sourceService = sourceService;
     this.sourceName = sourceName;
     this.sourcePath = new SourcePath(sourceName);
+    this.catalogService = catalogService;
   }
 
   @PUT
@@ -70,10 +76,12 @@ public class PutSourceResource {
       // Following are set at server side.
       source.setName(sourceName.getName());
 
-      SourceConfig sourceConfig = sourceService.registerSourceWithRuntime(source);
+      SourceConfig sourceConfig =
+          sourceService.registerSourceWithRuntime(
+              source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
       final SourceState sourceState =
-          sourceService.getSourceState(sourcePath.getSourceName().getName());
+          catalogService.getSourceState(sourcePath.getSourceName().getName());
       if (sourceState == null) {
         throw new SourceNotFoundException(sourcePath.getSourceName().getName());
       }
@@ -81,6 +89,7 @@ public class PutSourceResource {
       source.setTag(sourceConfig.getTag());
       source.setId(sourceConfig.getId().getId());
       source.setCtime(sourceConfig.getCtime());
+      source.setLastModifiedAt(sourceConfig.getLastModifiedAt());
       source.clearSecrets();
       return source;
     } catch (ExecutionSetupException e) {

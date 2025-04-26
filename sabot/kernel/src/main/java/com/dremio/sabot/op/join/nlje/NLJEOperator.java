@@ -16,10 +16,13 @@
 package com.dremio.sabot.op.join.nlje;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.FunctionCall;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.ValueExpressions.BooleanExpression;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.physical.config.NestedLoopJoinPOP;
 import com.dremio.exec.planner.physical.NestedLoopJoinPrel;
 import com.dremio.exec.record.ExpandableHyperContainer;
@@ -30,6 +33,7 @@ import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.MetricDef;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.copier.CopierFactory;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.DualInputOperator;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
@@ -41,8 +45,10 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.util.TransferPair;
 import org.apache.calcite.rel.core.JoinRelType;
 
@@ -70,11 +76,15 @@ public class NLJEOperator implements DualInputOperator {
           .put("geo_beyond", "com.dremio.joust.geo.NearbyBeyond")
           .put("all", "com.dremio.sabot.op.join.nlje.AllVectorFunction")
           .build();
+  private static final long INT_SIZE = 4;
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(NLJEOperator.class);
 
   private final OperatorContext context;
   private final JoinRelType joinType;
   private final NestedLoopJoinPOP config;
-
+  private final int rowSizeLimit;
+  private final boolean rowSizeLimitEnabled;
   private State state = State.NEEDS_SETUP;
 
   private VectorAccessible buildIncoming;
@@ -91,6 +101,10 @@ public class NLJEOperator implements DualInputOperator {
   private List<FieldVector> buildOutputVectors;
   private List<TransferPair> probeOutputTransfers;
   private CopierFactory copierFactory;
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private boolean rowSizeLimitEnabledForThisOperator;
 
   public NLJEOperator(OperatorContext context, NestedLoopJoinPOP config) {
     this.context = context;
@@ -115,6 +129,11 @@ public class NLJEOperator implements DualInputOperator {
             .message("Joins of type %s using NLJ are not currently supported.", joinType.name())
             .buildSilently();
     }
+    this.rowSizeLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
+    this.rowSizeLimit =
+        Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
   }
 
   @Override
@@ -126,6 +145,10 @@ public class NLJEOperator implements DualInputOperator {
   @Override
   public void close() throws Exception {
     AutoCloseables.close(build, joinMatcher, output);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -166,6 +189,19 @@ public class NLJEOperator implements DualInputOperator {
     copierFactory = CopierFactory.getInstance(context.getConfig(), context.getOptions());
     state = State.CAN_CONSUME_R;
 
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(output);
+      if (!VectorContainerHelper.isVarLenColumnPresent(output)) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(output, false);
+      }
+    }
     return output;
   }
 
@@ -276,6 +312,7 @@ public class NLJEOperator implements DualInputOperator {
     output.setAllCount(records);
 
     updateStats();
+    checkForRowSizeOverLimit(records);
 
     return records;
   }
@@ -303,6 +340,34 @@ public class NLJEOperator implements DualInputOperator {
   public void noMoreToConsumeLeft() throws Exception {
     // TODO: add right/outer support.
     state = State.DONE;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        output,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   public enum Metric implements MetricDef {

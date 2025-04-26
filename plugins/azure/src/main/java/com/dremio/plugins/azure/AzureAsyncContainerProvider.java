@@ -76,7 +76,7 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
   private final String account;
   private final boolean isSecure;
   private final AsyncHttpClient asyncHttpClient;
-  private final int requestTimeoutSeconds = DEFAULT_REQUEST_TIMEOUT / 1_000;
+  private final long requestTimeoutSeconds = DEFAULT_REQUEST_TIMEOUT.toSeconds();
   private final Retryer retryer;
   private final String azureEndpoint;
   private ImmutableList<String> whitelistedContainers = ImmutableList.of();
@@ -144,25 +144,37 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
   @Override
   public void assertContainerExists(final String containerName) {
     // API: https://docs.microsoft.com/en-gb/rest/api/storageservices/datalakestoragegen2/path/list
+    final String sasSignature = authProvider.getSasSignature(true);
     logger.debug("Checking for missing azure container " + account + ":" + containerName);
-    final Request req =
-        new RequestBuilder(HttpConstants.Methods.GET)
-            .addHeader("x-ms-date", toHttpDateFormat(System.currentTimeMillis()))
-            .addHeader("x-ms-version", XMS_VERSION)
-            .addHeader("x-ms-client-request-id", UUID.randomUUID().toString())
-            .addHeader("Content-Length", 0)
-            .setUrl(
-                AzureAsyncHttpClientUtils.getBaseEndpointURL(azureEndpoint, account, true)
-                    + "/"
-                    + containerName)
-            .addQueryParam("recursive", "false")
-            .addQueryParam("resource", "filesystem")
-            .addQueryParam("directory", (rootPath == null ? "/" : rootPath))
-            .addQueryParam("maxresults", "1")
-            .addQueryParam("timeout", String.valueOf(requestTimeoutSeconds))
-            .build();
 
-    req.getHeaders().add("Authorization", authProvider.getAuthzHeaderValue(req));
+    RequestBuilder requestBuilder = new RequestBuilder(HttpConstants.Methods.GET);
+    if (sasSignature.isEmpty()) {
+      // SHARED ACCESS TOKEN authentication
+      requestBuilder
+          .addHeader("x-ms-date", toHttpDateFormat(System.currentTimeMillis()))
+          .addHeader("x-ms-version", XMS_VERSION)
+          .addHeader("x-ms-client-request-id", UUID.randomUUID().toString())
+          .addHeader("Content-Length", 0)
+          .setUrl(
+              AzureAsyncHttpClientUtils.getBaseEndpointURL(azureEndpoint, account, true)
+                  + "/"
+                  + containerName)
+          .addQueryParam("recursive", "false")
+          .addQueryParam("resource", "filesystem")
+          .addQueryParam("directory", (rootPath == null ? "/" : rootPath))
+          .addQueryParam("maxresults", "1")
+          .addQueryParam("timeout", String.valueOf(requestTimeoutSeconds));
+    } else {
+      // SAS SIGNATURE authentication
+      requestBuilder.setUrl(
+          AzureAsyncHttpClientUtils.getBaseEndpointURL(azureEndpoint, account, true)
+              + "/"
+              + sasSignature);
+    }
+    final Request req = requestBuilder.build();
+    if (sasSignature.isEmpty()) {
+      req.getHeaders().add("Authorization", authProvider.getAuthorizationHeader(req));
+    }
     retryer.call(
         () -> {
           Response response = asyncHttpClient.executeRequest(req).get();
@@ -270,7 +282,9 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
           () -> {
             try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
               final Request request = buildRequest();
-              request.getHeaders().add("Authorization", authProvider.getAuthzHeaderValue(request));
+              request
+                  .getHeaders()
+                  .add("Authorization", authProvider.getAuthorizationHeader(request));
               final Response response =
                   asyncHttpClient
                       .executeRequest(request, new BAOSBasedCompletionHandler(baos))

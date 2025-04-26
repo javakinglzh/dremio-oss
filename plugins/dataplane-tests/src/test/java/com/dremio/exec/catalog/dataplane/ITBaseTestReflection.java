@@ -171,7 +171,6 @@ public abstract class ITBaseTestReflection extends ITBaseTestVersioned {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(

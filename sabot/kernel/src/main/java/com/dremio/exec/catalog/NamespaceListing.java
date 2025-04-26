@@ -21,7 +21,6 @@ import com.dremio.connector.metadata.DatasetHandleListing;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.SourceMetadata;
 import com.dremio.exec.store.DatasetRetrievalOptions;
-import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
@@ -57,14 +56,7 @@ public class NamespaceListing implements DatasetHandleListing {
 
   @Override
   public Iterator<? extends DatasetHandle> iterator() {
-    final Iterator<NamespaceKey> keyIterator;
-    try {
-      keyIterator = Sets.newHashSet(namespaceService.getAllDatasets(sourceKey)).iterator();
-    } catch (NamespaceException e) {
-      throw new RuntimeException(e);
-    }
-
-    return newIterator(keyIterator);
+    return newIterator(Sets.newHashSet(namespaceService.getAllDatasets(sourceKey)).iterator());
   }
 
   @VisibleForTesting
@@ -106,7 +98,8 @@ public class NamespaceListing implements DatasetHandleListing {
       return handle;
     }
 
-    private void populateNextHandle() {
+    private void populateNextHandle()
+        throws DatasetMetadataTooLargeException, ConnectorRuntimeException {
       if (nextHandle.isPresent()) {
         return;
       }
@@ -119,8 +112,6 @@ public class NamespaceListing implements DatasetHandleListing {
           currentConfig = namespaceService.getDataset(nextKey);
         } catch (NamespaceNotFoundException ignored) {
           continue; // race condition
-        } catch (NamespaceException e) {
-          throw new RuntimeException(e);
         }
 
         final EntityPath entityPath;
@@ -138,7 +129,7 @@ public class NamespaceListing implements DatasetHandleListing {
         } catch (DatasetMetadataTooLargeException e) {
           throw new DatasetMetadataTooLargeException(nextKey.getSchemaPath(), e);
         } catch (ConnectorException e) {
-          throw new RuntimeException(e);
+          throw new ConnectorRuntimeException(e);
         }
 
         if (!handle.isPresent()) {

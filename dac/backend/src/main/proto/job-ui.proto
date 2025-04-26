@@ -52,7 +52,7 @@ message JobInfoUI {
   optional string description = 21;
   optional MaterializationSummary materializationFor = 22;
   optional double original_cost = 23 [default = 1.0];
-  repeated string partitions = 24;
+  repeated string partitions = 24 [deprecated = true];
   repeated ScanPath scanPaths = 25;
   optional JoinAnalysis joinAnalysis = 27;
   repeated string context = 28;

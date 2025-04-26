@@ -52,7 +52,7 @@ public class SchemaAggTableFunction extends AbstractTableFunction
 
   private VarBinaryVector outputFileSchemaVector;
   private VarBinaryVector inputFileSchemaVector;
-  private BatchSchema reconciledSchema = new BatchSchema(Collections.EMPTY_LIST);
+  private BatchSchema reconciledSchema = new BatchSchema(Collections.emptyList());
   private BatchSchema currentSchema;
   private boolean processedRow;
   private List<TransferPair> transferPairs = new ArrayList<>();

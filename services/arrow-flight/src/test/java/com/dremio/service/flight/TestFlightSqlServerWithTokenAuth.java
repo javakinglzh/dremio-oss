@@ -23,7 +23,6 @@ import com.dremio.service.flight.impl.FlightWorkManager;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.flight.CallOption;
 import org.junit.BeforeClass;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.experimental.runners.Enclosed;
 import org.junit.rules.TestRule;
@@ -44,14 +43,13 @@ public class TestFlightSqlServerWithTokenAuth {
   }
 
   /** Query execution tests. */
-  @Ignore("DX-91148")
   public static class QueryExecutionTests extends AbstractTestFlightSqlServer {
     public QueryExecutionTests(ExecutionMode executionMode) {
       super(executionMode);
     }
 
     @BeforeClass
-    public static void setup() throws Exception {
+    public static void setupDefaultTestCluster() throws Exception {
       TestFlightSqlServerWithTokenAuth.setup();
     }
 
@@ -70,7 +68,7 @@ public class TestFlightSqlServerWithTokenAuth {
   /** Catalog methods tests. */
   public static class CatalogMethodsTests extends AbstractTestFlightSqlServerCatalogMethods {
     @BeforeClass
-    public static void setup() throws Exception {
+    public static void setupDefaultTestCluster() throws Exception {
       TestFlightSqlServerWithTokenAuth.setup();
     }
 

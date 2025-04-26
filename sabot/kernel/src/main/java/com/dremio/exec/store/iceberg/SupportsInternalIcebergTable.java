@@ -23,7 +23,6 @@ import com.dremio.exec.planner.sql.handlers.refresh.AbstractRefreshPlanBuilder;
 import com.dremio.exec.planner.sql.handlers.refresh.UnlimitedSplitsMetadataProvider;
 import com.dremio.exec.planner.sql.parser.SqlRefreshDataset;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.store.BlockBasedSplitGenerator;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.metadatarefresh.SupportsUnlimitedSplits;
 import com.dremio.exec.store.metadatarefresh.committer.FullRefreshReadSignatureProvider;
@@ -32,14 +31,12 @@ import com.dremio.exec.store.metadatarefresh.committer.PartialRefreshReadSignatu
 import com.dremio.exec.store.metadatarefresh.committer.ReadSignatureProvider;
 import com.dremio.exec.store.metadatarefresh.dirlisting.DirListingRecordReader;
 import com.dremio.exec.store.metadatarefresh.footerread.FooterReadTableFunction;
-import com.dremio.exec.store.parquet.ScanTableFunction;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.dremio.service.namespace.dirlist.proto.DirListInputSplitProto;
 import com.google.protobuf.ByteString;
-import java.io.IOException;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -48,40 +45,9 @@ import java.util.function.Predicate;
  * is used to provide information from such storage plugins that supports reading/writing from
  * internally created Iceberg Tables by Dremio.
  */
-public interface SupportsInternalIcebergTable extends SupportsUnlimitedSplits {
+public interface SupportsInternalIcebergTable extends SupportsUnlimitedSplits, SupportsFsCreation {
 
   String QUERY_TYPE_METADATA_REFRESH = "METADATA_REFRESH";
-
-  /**
-   * Creates a new FileSystem instance for a given user using the file path provided.
-   *
-   * @param filePath file path
-   * @param userName user
-   * @return file system, not null
-   */
-  FileSystem createFS(String filePath, String userName, OperatorContext operatorContext)
-      throws IOException;
-
-  /**
-   * Creates a new FileSystem instance for a given user using the file path provided.
-   *
-   * @param filePath file path
-   * @param userName user
-   * @return file system, not null
-   */
-  FileSystem createFSWithAsyncOptions(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException;
-
-  /**
-   * Creates a new FileSystem instance for a given user using the file path provided. It doesn't use
-   * hadoop fs cache
-   *
-   * @param filePath file path
-   * @param userName user
-   * @return file system, not null
-   */
-  FileSystem createFSWithoutHDFSCache(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException;
 
   /**
    * Indicates that the plugin supports getting dataset metadata (partition spec, partition values,
@@ -94,17 +60,6 @@ public interface SupportsInternalIcebergTable extends SupportsUnlimitedSplits {
 
   /** Resolves the table name to a valid path. */
   List<String> resolveTableNameToValidPath(List<String> tableSchemaPath);
-
-  /** Creates the plugin-specific split creator. */
-  BlockBasedSplitGenerator.SplitCreator createSplitCreator(
-      OperatorContext context, byte[] extendedBytes, boolean isInternalIcebergTable);
-
-  /** Creates the plugin-specific Scan Table Function. */
-  ScanTableFunction createScanTableFunction(
-      FragmentExecutionContext fec,
-      OperatorContext context,
-      OpProps props,
-      TableFunctionConfig functionConfig);
 
   /** Creates the plugin-specific footer reader Table Function. */
   FooterReadTableFunction getFooterReaderTableFunction(

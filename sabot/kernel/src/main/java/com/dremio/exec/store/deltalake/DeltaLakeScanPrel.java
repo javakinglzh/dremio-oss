@@ -325,7 +325,7 @@ public class DeltaLakeScanPrel extends ScanRelBase
             false,
             false,
             tableMetadata.getApproximateRecordCount(),
-            Collections.EMPTY_LIST);
+            Collections.emptyList());
 
     return new TableFunctionPrel(
         getCluster(),
@@ -633,7 +633,6 @@ public class DeltaLakeScanPrel extends ScanRelBase
           hashToRandomExchangePrel.getTraitSet(),
           hashToRandomExchangePrel,
           groupSet,
-          ImmutableList.of(groupSet),
           ImmutableList.of(aggByMaxVersion),
           null);
     } catch (InvalidRelException e) {

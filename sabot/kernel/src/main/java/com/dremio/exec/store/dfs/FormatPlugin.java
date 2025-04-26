@@ -18,11 +18,11 @@ package com.dremio.exec.store.dfs;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.connector.metadata.options.TimeTravelOption;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.physical.base.AbstractWriter;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.WriterOptions;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.file.proto.FileProtobuf.FileUpdateKey;
 import com.dremio.io.file.FileAttributes;
@@ -36,27 +36,16 @@ import java.nio.file.DirectoryStream;
 
 /** Similar to a storage engine but built specifically to work within a FileSystem context. */
 public interface FormatPlugin {
-  public boolean supportsRead();
-
-  public boolean supportsWrite();
-
   // Is a layer on top of other single/multiple file formats.
   default boolean isLayered() {
     return false;
   }
 
-  public SabotContext getContext();
+  PluginSabotContext getContext();
 
-  /**
-   * Indicates whether this FormatPlugin supports auto-partitioning for CTAS statements
-   *
-   * @return true if auto-partitioning is supported
-   */
-  public boolean supportsAutoPartitioning();
+  FormatMatcher getMatcher();
 
-  public FormatMatcher getMatcher();
-
-  public AbstractWriter getWriter(
+  AbstractWriter getWriter(
       PhysicalOperator child,
       String location,
       FileSystemPlugin<?> plugin,
@@ -64,9 +53,9 @@ public interface FormatPlugin {
       OpProps props)
       throws IOException;
 
-  public FormatPluginConfig getConfig();
+  FormatPluginConfig getConfig();
 
-  public String getName();
+  String getName();
 
   FileDatasetHandle getDatasetAccessor(
       DatasetType type,
@@ -80,7 +69,7 @@ public interface FormatPlugin {
       TimeTravelOption.TimeTravelRequest timeTravelRequest);
 
   /** Get a record reader specifically for the purposes of previews. */
-  public RecordReader getRecordReader(
+  RecordReader getRecordReader(
       final OperatorContext context, final FileSystem dfs, final FileAttributes attributes)
       throws ExecutionSetupException;
 

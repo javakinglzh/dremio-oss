@@ -380,7 +380,6 @@ SqlNode SqlCreateAggReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
     SqlNodeList partitionTransformList;
     SqlNodeList distributionList;
     SqlNodeList sortList;
-    SqlLiteral arrowCachingEnabled;
     PartitionDistributionStrategy partitionDistributionStrategy;
 }
 {
@@ -390,7 +389,6 @@ SqlNode SqlCreateAggReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
         distributionList = SqlNodeList.EMPTY;
         partitionTransformList =  SqlNodeList.EMPTY;
         sortList = SqlNodeList.EMPTY;
-        arrowCachingEnabled = SqlLiteral.createBoolean(false, SqlParserPos.ZERO);
         partitionDistributionStrategy = PartitionDistributionStrategy.UNSPECIFIED;
     }
     <USING>
@@ -427,12 +425,9 @@ SqlNode SqlCreateAggReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
     (   <LOCALSORT> <BY>
         sortList = ParseRequiredFieldList("Sort")
     )?
-    (   <ARROW> <CACHE>
-        { arrowCachingEnabled = SqlLiteral.createBoolean(true, pos); }
-    )?
     {
         return SqlCreateReflection.createAggregation(pos, tblName, dimensionList, measureList, distributionList,
-          partitionTransformList, sortList, arrowCachingEnabled, partitionDistributionStrategy, name, sqlTableVersionSpec);
+          partitionTransformList, sortList, partitionDistributionStrategy, name, sqlTableVersionSpec);
     }
 }
 
@@ -548,7 +543,6 @@ SqlNode SqlCreateRawReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
     SqlNodeList distributionList;
     SqlNodeList partitionTransformList;
     SqlNodeList sortList;
-    SqlLiteral arrowCachingEnabled;
     PartitionDistributionStrategy partitionDistributionStrategy;
 }
 {
@@ -557,7 +551,6 @@ SqlNode SqlCreateRawReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
         distributionList = SqlNodeList.EMPTY;
         partitionTransformList =  SqlNodeList.EMPTY;
         sortList = SqlNodeList.EMPTY;
-        arrowCachingEnabled = SqlLiteral.createBoolean(false, SqlParserPos.ZERO);
         partitionDistributionStrategy = PartitionDistributionStrategy.UNSPECIFIED;
     }
     <USING>
@@ -584,12 +577,9 @@ SqlNode SqlCreateRawReflection(SqlParserPos pos, SqlIdentifier tblName, SqlIdent
     (   <LOCALSORT> <BY>
         sortList = ParseRequiredFieldList("Sort")
     )?
-    (   <ARROW> <CACHE>
-        { arrowCachingEnabled = SqlLiteral.createBoolean(true, pos); }
-    )?
     {
         return SqlCreateReflection.createRaw(pos, tblName, displayList, distributionList, partitionTransformList, sortList,
-          arrowCachingEnabled, partitionDistributionStrategy, name, sqlTableVersionSpec);
+          partitionDistributionStrategy, name, sqlTableVersionSpec);
     }
 }
 
@@ -715,7 +705,11 @@ DremioSqlColumnDeclaration TypedElement() :
 {
     id = SimpleIdentifier()
     type = DataType()
-    nullable = NullableOptDefaultTrue()
+    (
+        <DROP> <NOT> <NULL> { nullable = true; }
+        |
+        { nullable = false; }
+    )
     {
         return new DremioSqlColumnDeclaration(s.add(id).end(this), new SqlColumnPolicyPair(id.getParserPosition(), id, null),
                 new SqlComplexDataTypeSpec(type.withNullable(nullable)), null);

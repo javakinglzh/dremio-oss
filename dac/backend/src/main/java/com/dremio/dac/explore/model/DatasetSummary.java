@@ -18,7 +18,13 @@ package com.dremio.dac.explore.model;
 import static com.dremio.common.utils.PathUtils.encodeURIComponent;
 
 import com.dremio.dac.api.JsonISODateTime;
+import com.dremio.dac.model.common.RootEntity;
+import com.dremio.dac.model.folder.FolderName;
 import com.dremio.dac.model.job.JobFilters;
+import com.dremio.dac.model.sources.SourceName;
+import com.dremio.dac.model.spaces.HomeName;
+import com.dremio.dac.model.spaces.SpaceName;
+import com.dremio.dac.model.spaces.TempSpace;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.service.jobs.JobIndexKeys;
 import com.dremio.service.namespace.NamespaceKey;
@@ -28,15 +34,17 @@ import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.IcebergViewAttributes;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
-import com.dremio.service.users.User;
+import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Dataset summary for overlay */
 @JsonIgnoreProperties(
@@ -52,15 +60,12 @@ public class DatasetSummary {
   private final Map<String, VersionContextReq> references;
   private final List<String> tags;
   private final String entityId;
-  private Boolean hasReflection;
-  private final String ownerName;
-  private final String ownerEmail;
-  private final String lastModifyingUserName;
-  private final String lastModifyingUserEmail;
+  private final Boolean hasReflection;
   @JsonISODateTime private final Long createdAt;
   @JsonISODateTime private final Long lastModified;
   private final String viewSpecVersion;
   private final Boolean schemaOutdated;
+  private final NameSpaceContainer.Type rootContainerType;
   private final String viewDialect;
 
   public DatasetSummary(
@@ -74,14 +79,11 @@ public class DatasetSummary {
       @JsonProperty("references") Map<String, VersionContextReq> references,
       @JsonProperty("entityId") String entityId,
       @JsonProperty("hasReflection") Boolean hasReflection,
-      @JsonProperty("ownerName") String ownerName,
-      @JsonProperty("ownerEmail") String ownerEmail,
-      @JsonProperty("lastModifyingUserName") String lastModifyingUserName,
-      @JsonProperty("lastModifyingUserEmail") String lastModifyingUserEmail,
       @JsonProperty("createdAt") Long createdAt,
       @JsonProperty("lastModified") Long lastModified,
       @JsonProperty("viewSpecVersion") String viewSpecVersion,
       @JsonProperty("schemaOutdated") Boolean schemaOutdated,
+      @JsonProperty("rootContainerType") NameSpaceContainer.Type rootContainerType,
       @JsonProperty("viewDialect") String viewDialect) {
     this.fullPath = fullPath;
     this.jobCount = jobCount;
@@ -93,14 +95,11 @@ public class DatasetSummary {
     this.references = references;
     this.entityId = entityId;
     this.hasReflection = hasReflection;
-    this.ownerName = ownerName;
-    this.ownerEmail = ownerEmail;
-    this.lastModifyingUserName = lastModifyingUserName;
-    this.lastModifyingUserEmail = lastModifyingUserEmail;
     this.createdAt = createdAt;
     this.lastModified = lastModified;
     this.viewSpecVersion = viewSpecVersion;
     this.schemaOutdated = schemaOutdated;
+    this.rootContainerType = rootContainerType;
     this.viewDialect = viewDialect;
   }
 
@@ -111,8 +110,7 @@ public class DatasetSummary {
       Map<String, VersionContextReq> references,
       List<String> tags,
       Boolean hasReflection,
-      User owner,
-      User lastModifyingUser) {
+      NameSpaceContainer.Type containerType) {
     List<String> fullPath = datasetConfig.getFullPathList();
 
     DatasetType datasetType = datasetConfig.getType();
@@ -157,12 +155,6 @@ public class DatasetSummary {
     }
 
     final String entityId = datasetConfig.getId() == null ? null : datasetConfig.getId().getId();
-    final String ownerName = owner != null ? owner.getUserName() : null;
-    final String ownerEmail = owner != null ? owner.getEmail() : null;
-    final String lastModifyingUserName =
-        lastModifyingUser != null ? lastModifyingUser.getUserName() : null;
-    final String lastModifyingUserEmail =
-        lastModifyingUser != null ? lastModifyingUser.getEmail() : null;
     final Long createdAt = datasetConfig.getCreatedAt();
     final Long lastModified = datasetConfig.getLastModified();
 
@@ -177,14 +169,11 @@ public class DatasetSummary {
         references,
         entityId,
         hasReflection,
-        ownerName,
-        ownerEmail,
-        lastModifyingUserName,
-        lastModifyingUserEmail,
         createdAt,
         lastModified,
         viewSpecVersion,
         NamespaceUtils.isSchemaOutdated(datasetConfig),
+        containerType,
         viewDialect);
   }
 
@@ -228,22 +217,6 @@ public class DatasetSummary {
     return hasReflection;
   }
 
-  public String getOwnerName() {
-    return ownerName;
-  }
-
-  public String getOwnerEmail() {
-    return ownerEmail;
-  }
-
-  public String getLastModifyingUserName() {
-    return lastModifyingUserName;
-  }
-
-  public String getLastModifyingUserEmail() {
-    return lastModifyingUserEmail;
-  }
-
   public Long getCreatedAt() {
     return createdAt;
   }
@@ -254,6 +227,10 @@ public class DatasetSummary {
 
   public String getViewSpecVersion() {
     return viewSpecVersion;
+  }
+
+  public NameSpaceContainer.Type getRootContainerType() {
+    return rootContainerType;
   }
 
   public String getViewDialect() {
@@ -268,20 +245,25 @@ public class DatasetSummary {
   // TODO make this consistent with DatasetUI.createLinks. In ideal case, both methods should use
   // the same util method
   public Map<String, String> getLinks() {
-    DatasetPath datasetPath = new DatasetPath(fullPath);
+    List<String> components = new ArrayList<>(fullPath);
+    String leafName = components.remove(fullPath.size() - 1);
+    String rootName = components.remove(0);
+    DatasetPath datasetPath =
+        new DatasetPath(
+            getRootEntity(rootName, rootContainerType),
+            components.stream().map(FolderName::new).collect(Collectors.toList()),
+            new DatasetName(leafName));
+
     Map<String, String> links = new HashMap<>();
 
     links.put("self", datasetPath.toUrlPath());
     links.put("query", datasetPath.getQueryUrlPath());
     links.put("jobs", this.getJobsUrl());
+
     if (datasetType == DatasetType.VIRTUAL_DATASET) {
-      links.put(
-          "edit",
-          datasetPath.getQueryUrlPath()
-              + "?mode=edit&version="
-              + (datasetVersion == null
-                  ? datasetVersion
-                  : encodeURIComponent(datasetVersion.toString())));
+      String versionValue =
+          (datasetVersion != null) ? encodeURIComponent(datasetVersion.toString()) : null;
+      links.put("edit", datasetPath.getQueryUrlPath() + "?mode=edit&version=" + versionValue);
     }
     return links;
   }
@@ -293,5 +275,20 @@ public class DatasetSummary {
             .addFilter(JobIndexKeys.ALL_DATASETS, datasetPath.toString())
             .addFilter(JobIndexKeys.QUERY_TYPE, JobIndexKeys.UI, JobIndexKeys.EXTERNAL);
     return jobFilters.toUrl();
+  }
+
+  private static RootEntity getRootEntity(String name, NameSpaceContainer.Type rootContainerType) {
+    if (TempSpace.isTempSpace(name)) {
+      return TempSpace.impl();
+    } else if (NamespaceUtils.isHomeSpace(name)) {
+      return new HomeName(name);
+    } else if (rootContainerType == NameSpaceContainer.Type.SOURCE) {
+      return new SourceName(name);
+    } else if (rootContainerType == NameSpaceContainer.Type.SPACE) {
+      return new SpaceName(name);
+    } else {
+      throw new IllegalArgumentException(
+          "Unexpected rootContainerType: " + rootContainerType + " for name: " + name);
+    }
   }
 }

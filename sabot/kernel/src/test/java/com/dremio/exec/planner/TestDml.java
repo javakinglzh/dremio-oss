@@ -51,6 +51,7 @@ import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.StreamAggPrel;
 import com.dremio.exec.planner.physical.TableFunctionPrel;
 import com.dremio.exec.planner.physical.UnionAllPrel;
+import com.dremio.exec.planner.physical.UnionExchangePrel;
 import com.dremio.exec.planner.physical.WriterCommitterPrel;
 import com.dremio.exec.planner.physical.WriterPrel;
 import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
@@ -99,6 +100,10 @@ import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
@@ -106,18 +111,47 @@ import org.mockito.Mockito;
 /** Tests Advanced DML - DELETE, UPDATE, and MERGE */
 public class TestDml extends TestTableManagementBase {
 
+  // template table to acquire iceberg table schema
+  protected static String TEMPLATE_TABLE = "dfs_test.iceberg_Template_COW";
+  private static final String TARGET_TABLE = "dfs_test.iceberg_target_table_COW";
+
+  @BeforeClass
+  public static void setup() throws Exception {
+    createOrdersTable(TEMPLATE_TABLE);
+    userColumnList = getOriginalFieldList(TEMPLATE_TABLE);
+    userColumnCount = userColumnList.size();
+
+    // table has at least one column
+    assertThat(userColumnCount).isGreaterThan(0);
+  }
+
+  @AfterClass
+  public static void close() throws Exception {
+    runSQL("DROP TABLE %s", TEMPLATE_TABLE);
+  }
+
+  @Before
+  public void setupTable() throws Exception {
+    createAndPopulateOrdersTable(TARGET_TABLE);
+  }
+
+  @After
+  public void dropTable() throws Exception {
+    runSQL("DROP TABLE %s", TARGET_TABLE);
+  }
+
   // ===========================================================================
   // Test Cases
   // ===========================================================================
   @Test
   public void testExtendedDelete() throws Exception {
-    testExtendedTable(String.format("DELETE FROM %s", table.getTableName()));
+    testExtendedTable(String.format("DELETE FROM %s", TARGET_TABLE));
   }
 
   @Test
   public void testExtendedUpdate() throws Exception {
     String testColumn = userColumnList.get(0).getName();
-    testExtendedTable(String.format("UPDATE %s SET %s = 0", table.getTableName(), testColumn));
+    testExtendedTable(String.format("UPDATE %s SET %s = 0", TARGET_TABLE, testColumn));
   }
 
   @Test
@@ -126,16 +160,16 @@ public class TestDml extends TestTableManagementBase {
     testExtendedTable(
         String.format(
             "MERGE INTO %s USING (SELECT * FROM %s) AS s ON (%s = %s) WHEN MATCHED THEN UPDATE SET %s = 0",
-            table.getTableName(),
-            table.getTableName(),
-            table.getTableName() + '.' + testColumn,
+            TARGET_TABLE,
+            TARGET_TABLE,
+            TARGET_TABLE + '.' + testColumn,
             "s." + testColumn,
             testColumn));
   }
 
   @Test
   public void testDmlPlanCleaner() throws Exception {
-    final String query = String.format("DELETE FROM %s", table.getTableName());
+    final String query = String.format("DELETE FROM %s", TARGET_TABLE);
     final SqlNode node = converter.parse(query);
     PhysicalPlan plan =
         DeleteHandler.class.getDeclaredConstructor().newInstance().getPlan(config, query, node);
@@ -175,7 +209,7 @@ public class TestDml extends TestTableManagementBase {
     when(mockConfig.getContext()).thenReturn(mockQueryContext);
     when(mockQueryContext.getOptions()).thenReturn(mockOptionManager);
 
-    String sql = "Delete from " + table.getTableName() + " where order_id > 10";
+    String sql = "Delete from " + TARGET_TABLE + " where order_id > 10";
     final SqlNode node = converter.parse(sql);
     NamespaceKey path = SqlNodeUtil.unwrap(node, SqlDeleteFromTable.class).getPath();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(path);
@@ -189,7 +223,7 @@ public class TestDml extends TestTableManagementBase {
             () ->
                 DmlHandler.validateDmlRequest(
                     mockCatalog, mockConfig, catalogEntityKey, SqlDeleteFromTable.OPERATOR))
-        .hasMessageContaining("Source [dfs_static_test_hadoop] does not support this operation");
+        .hasMessageContaining("Source [dfs_test] does not support this operation");
   }
 
   @Test
@@ -201,7 +235,7 @@ public class TestDml extends TestTableManagementBase {
     UserSession mockUserSession = Mockito.mock(UserSession.class);
     DremioTable dremioTable = Mockito.mock(DremioTable.class);
 
-    String sql = "TRUNCATE " + table.getTableName();
+    String sql = "TRUNCATE " + TARGET_TABLE;
     final SqlNode node = converter.parse(sql);
     NamespaceKey path = SqlNodeUtil.unwrap(node, SqlTruncateTable.class).getPath();
 
@@ -220,7 +254,7 @@ public class TestDml extends TestTableManagementBase {
         .thenReturn(org.apache.calcite.schema.Schema.TableType.TABLE);
     UserExceptionAssert.assertThatThrownBy(
             () -> new TruncateTableHandler(mockConfig).toResult(sql, node))
-        .hasMessageContaining("Source [dfs_static_test_hadoop] does not support this operation");
+        .hasMessageContaining("Source [dfs_test] does not support this operation");
   }
 
   @Test
@@ -233,12 +267,9 @@ public class TestDml extends TestTableManagementBase {
 
     when(mockConfig.getContext()).thenReturn(mockQueryContext);
     when(mockQueryContext.getOptions()).thenReturn(mockOptionManager);
+
     String sql =
-        "INSERT INTO "
-            + table.getTableName()
-            + " SELECT * FROM "
-            + table.getTableName()
-            + " where order_id > 10";
+        "INSERT INTO " + TARGET_TABLE + " SELECT * FROM " + TARGET_TABLE + " where order_id > 10";
     final SqlNode node = converter.parse(sql);
     NamespaceKey path = SqlNodeUtil.unwrap(node, SqlInsertTable.class).getPath();
     CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(path);
@@ -252,14 +283,14 @@ public class TestDml extends TestTableManagementBase {
             () ->
                 InsertTableHandler.validateDmlRequest(
                     mockCatalog, mockConfig, catalogEntityKey, node))
-        .hasMessageContaining("Source [dfs_static_test_hadoop] does not support this operation");
+        .hasMessageContaining("Source [dfs_test] does not support this operation");
   }
 
   @Test
   public void testInsertIntoGeneratingLogicalValuesForCast() throws Exception {
     final String insert =
         "INSERT INTO "
-            + table.getTableName()
+            + TARGET_TABLE
             + " VALUES "
             + "(1, 37, '1996-01-02', 'foo', CAST('131251.81' AS DOUBLE)), "
             + "(5, 46, '1994-07-30', 'bar', CAST('86615.25' AS DOUBLE))";
@@ -274,11 +305,11 @@ public class TestDml extends TestTableManagementBase {
   public void testInsertIntoGeneratingUnionForSubquery() throws Exception {
     final String insert =
         "INSERT INTO "
-            + table.getTableName()
+            + TARGET_TABLE
             + " VALUES "
             + "(1, 37, '1996-01-02', 'foo', CAST('131251.81' AS DOUBLE)), "
             + "(5, 46, '1994-07-30', 'bar', (select amount from "
-            + table.getTableName()
+            + TARGET_TABLE
             + " s where order_id = s.order_id))";
 
     String plan = getInsertPlan(insert);
@@ -289,7 +320,7 @@ public class TestDml extends TestTableManagementBase {
 
   @Test
   public void testDelete() throws Exception {
-    final String delete = "Delete from " + table.getTableName() + " where order_id > 10";
+    final String delete = "Delete from " + TARGET_TABLE + " where order_id > 10";
 
     Prel plan = getDmlPlan(delete);
 
@@ -304,7 +335,7 @@ public class TestDml extends TestTableManagementBase {
 
   @Test
   public void testDeleteAll() throws Exception {
-    final String delete = "Delete from " + table.getTableName();
+    final String delete = "Delete from " + TARGET_TABLE;
 
     Prel plan = getDmlPlan(delete);
 
@@ -319,7 +350,7 @@ public class TestDml extends TestTableManagementBase {
 
   @Test
   public void testUpdate() throws Exception {
-    final String update = "Update " + table.getTableName() + " set order_id = -1";
+    final String update = "Update " + TARGET_TABLE + " set order_id = -1";
 
     Prel plan = getDmlPlan(update);
 
@@ -337,11 +368,11 @@ public class TestDml extends TestTableManagementBase {
   public void testMerge_updateOnly() throws Exception {
     final String mergeUpdateOnly =
         "merge into "
-            + table.getTableName()
+            + TARGET_TABLE
             + " using "
-            + table.getTableName()
+            + TARGET_TABLE
             + " as s on "
-            + table.getTableName()
+            + TARGET_TABLE
             + ".order_id = s.order_id when matched then update set order_id = -1";
 
     testMerge(mergeUpdateOnly, 1, MergeType.UPDATE_ONLY);
@@ -351,11 +382,11 @@ public class TestDml extends TestTableManagementBase {
   public void testMerge_insertOnly() throws Exception {
     final String query =
         "merge into "
-            + table.getTableName()
+            + TARGET_TABLE
             + " using "
-            + table.getTableName()
+            + TARGET_TABLE
             + " as s on "
-            + table.getTableName()
+            + TARGET_TABLE
             + ".order_id = s.order_id when not matched then INSERT(order_id) VALUES(-1)";
 
     testMerge(query, 0, MergeType.INSERT_ONLY);
@@ -365,11 +396,11 @@ public class TestDml extends TestTableManagementBase {
   public void testMerge_updateWithInsert() throws Exception {
     final String mergeUpdateWithInsert =
         "merge into "
-            + table.getTableName()
+            + TARGET_TABLE
             + " using "
-            + table.getTableName()
+            + TARGET_TABLE
             + " as s on "
-            + table.getTableName()
+            + TARGET_TABLE
             + ".order_id = s.order_id when matched then update set order_id = -1 WHEN NOT MATCHED THEN INSERT(order_id) VALUES(-3) ";
 
     testMerge(mergeUpdateWithInsert, 1, MergeType.UPDATE_INSERT);
@@ -455,7 +486,7 @@ public class TestDml extends TestTableManagementBase {
                 "dremio.iceberg.single_manifest_writer.enabled",
                 true));
 
-    final String delete = "Delete from " + table.getTableName() + " where order_id > 10";
+    final String delete = "Delete from " + TARGET_TABLE + " where order_id > 10";
     Prel plan = getDmlPlan(delete);
     IcebergManifestWriterPrel manifestWriterPrel =
         findSingleNode(plan, IcebergManifestWriterPrel.class, null);
@@ -620,7 +651,10 @@ public class TestDml extends TestTableManagementBase {
     WriterCommitterPrel writerCommitterPrel = findSingleNode(plan, WriterCommitterPrel.class, null);
 
     RelNode union = writerCommitterPrel.getInput();
-
+    // UnionExchange is on top of UnionAll optionally
+    if (union instanceof UnionExchangePrel) {
+      union = union.getInput(0);
+    }
     assertThat(union).isInstanceOf(UnionAllPrel.class);
     UnionAllPrel unionAllPrel = (UnionAllPrel) union;
 

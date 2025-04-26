@@ -20,7 +20,6 @@ import com.dremio.dac.explore.model.VirtualDatasetUIMixin;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.util.JSONUtil;
 import com.dremio.exec.catalog.ConnectionReader;
-import com.dremio.exec.server.BootStrapContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider;
 import java.io.IOException;
@@ -48,8 +47,8 @@ public class DACJacksonJaxbJsonFeature implements Feature {
 
     @Inject
     public DACJacksonJaxbJsonProvider(
-        Configuration configuration, BootStrapContext context, ConnectionReader connectionReader) {
-      this.setMapper(newObjectMapper(configuration, context.getClasspathScan(), connectionReader));
+        Configuration configuration, ScanResult scanResult, ConnectionReader connectionReader) {
+      this.setMapper(newObjectMapper(configuration, scanResult, connectionReader));
     }
 
     @Override

@@ -18,6 +18,7 @@ package com.dremio.exec;
 import static org.junit.Assert.assertEquals;
 
 import com.dremio.PlanTestBase;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.dotfile.DotFileType;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.InternalFileConf;
@@ -106,7 +107,9 @@ public class BaseTestMiniDFS extends PlanTestBase {
     config.setConnectionConf(conf);
     config.setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE);
 
-    getCatalogService().getSystemUserCatalog().createSource(config);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     miniDfsSourceConfig = config;
   }
 
@@ -129,7 +132,9 @@ public class BaseTestMiniDFS extends PlanTestBase {
     try {
       // if we created a source clean it up first
       if (miniDfsSourceConfig != null) {
-        getCatalogService().getSystemUserCatalog().deleteSource(miniDfsSourceConfig);
+        getCatalogService()
+            .getSystemUserCatalog()
+            .deleteSource(miniDfsSourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
       }
       if (dfsCluster != null) {
         dfsCluster.shutdown();

@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.server.options.SabotConfigIterable;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValue;
@@ -39,7 +39,8 @@ public class OptionIterator implements Iterator<Object> {
   private final OptionManager fragmentOptions;
   private final Iterator<OptionValue> mergedOptions;
 
-  public OptionIterator(final SabotContext dbContext, OperatorContext context, Mode mode) {
+  public OptionIterator(
+      final PluginSabotContext pluginSabotContext, OperatorContext context, Mode mode) {
     final SabotConfigIterable configOptions = new SabotConfigIterable(context.getConfig());
     fragmentOptions = context.getOptions();
     final Iterator<OptionValue> optionList;

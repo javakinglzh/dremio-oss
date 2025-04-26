@@ -223,11 +223,9 @@ public class DownloadUtil {
       byte[] buf = new byte[4096];
       int bytesRead = input.read(buf);
       while (bytesRead >= 0) {
-        if (bytesRead < buf.length) {
-          output.write(Arrays.copyOf(buf, bytesRead));
-        } else {
-          output.write(buf);
-        }
+        // Send a buffer copy to ChunkedOutput to ensure enqueued buffers remain unmodified until
+        // they are processed, starting after the context is set in the ChunkedOutput object.
+        output.write(Arrays.copyOf(buf, bytesRead));
         bytesRead = input.read(buf);
       }
     }

@@ -14,10 +14,10 @@
  * limitations under the License.
  */
 import { Err, Ok } from "ts-results-es";
-import type { ResourceConfig, V3Config } from "../../_internal/types/Config.js";
-import { Project } from "./Project.js";
-import { projectEntityToProperties } from "./utils.js";
-import type { SignalParam } from "../../_internal/types/Params.js";
+import type { ResourceConfig, V3Config } from "../../_internal/types/Config.ts";
+import { Project } from "./Project.ts";
+import { projectEntityToProperties } from "./utils.ts";
+import type { SignalParam } from "../../_internal/types/Params.ts";
 
 export const ProjectsResource = (config: ResourceConfig & V3Config) => {
   const deleteProject = (id: string) =>

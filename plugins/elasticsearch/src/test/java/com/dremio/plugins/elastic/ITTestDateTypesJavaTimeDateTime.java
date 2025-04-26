@@ -16,7 +16,6 @@
 package com.dremio.plugins.elastic;
 
 import static com.dremio.plugins.elastic.ElasticsearchType.DATE;
-import static org.junit.Assume.assumeFalse;
 
 import com.dremio.common.util.TestTools;
 import com.google.common.collect.ImmutableMap;
@@ -68,12 +67,6 @@ public class ITTestDateTypesJavaTimeDateTime extends ElasticBaseTestQuery {
 
   @Test
   public void runTestZonedDateTime() throws Exception {
-    // Format with prefix 8 is applicable for ES 6.8 and ES 7 only.
-    assumeFalse((format.startsWith("8")) && !(enable7vFeatures || enable68vFeatures));
-    // Format with "u" as year is applicable for ES 7 only.
-    assumeFalse((format.contains("u")) && !(enable7vFeatures));
-    // Format with "X" as offset is applicable for ES 7 only.
-    assumeFalse((format.endsWith("X")) && !(enable7vFeatures));
     final LocalDateTime dt1 =
         LocalDateTime.of(LocalDate.of(2021, 07, 21), LocalTime.of(13, 00, 05));
     final LocalDateTime dt2 = dt1.plusYears(1);

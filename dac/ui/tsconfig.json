@@ -8,8 +8,8 @@
     "isolatedModules": true,
     "jsx": "react-jsx",
     "lib": ["ESNext", "DOM"],
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
+    "module": "Preserve",
+    "moduleResolution": "Bundler",
     "noEmit": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {

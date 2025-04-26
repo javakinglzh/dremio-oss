@@ -55,7 +55,7 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
       org.slf4j.LoggerFactory.getLogger(AdaptiveVectorizedPartitionSenderOperator.class);
 
   // partition value and corresponding counters for current fragment
-  private final Map<Integer, Long> partitionCounters = new HashMap<>();
+  private final Map<Integer, long[]> partitionCounters = new HashMap<>();
 
   private int dop;
 
@@ -149,8 +149,9 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
       return batch;
     }
 
-    long partitionValueCount =
-        partitionCounters.put(partition, partitionCounters.computeIfAbsent(partition, p -> 0L) + 1);
+    long[] count = partitionCounters.computeIfAbsent(partition, p -> new long[] {0});
+    long partitionValueCount = count[0];
+    count[0]++;
 
     if (partitionCounters.size() > MAX_PARTITION_COUNT) {
       allowAdaptiveHash = false;
@@ -183,13 +184,13 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
     try {
       ExecProtos.HashDistributionValueCounts.Builder partitionValueCountsBuilder =
           ExecProtos.HashDistributionValueCounts.newBuilder();
-      PriorityQueue<Map.Entry<Integer, Long>> pq = getTopNPartitionCounts();
+      PriorityQueue<Map.Entry<Integer, long[]>> pq = getTopNPartitionCounts();
       while (!pq.isEmpty()) {
-        Map.Entry<Integer, Long> partitionCountPair = pq.poll();
+        Map.Entry<Integer, long[]> partitionCountPair = pq.poll();
         ExecProtos.HashDistributionValueCount partitionValueCount =
             ExecProtos.HashDistributionValueCount.newBuilder()
                 .setHashDistributionKey(partitionCountPair.getKey())
-                .setCount(partitionCountPair.getValue())
+                .setCount(partitionCountPair.getValue()[0])
                 .build();
         partitionValueCountsBuilder.addHashDistributionValueCounts(partitionValueCount);
       }
@@ -236,7 +237,7 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
     oobReceives++;
 
     final ExecProtos.HashDistributionValueCounts partitionValueCounts =
-        message.getPayload(ExecProtos.HashDistributionValueCounts.PARSER);
+        message.getPayload(ExecProtos.HashDistributionValueCounts.parser());
 
     participantsPartitionCounters.put(message.getSendingMinorFragmentId(), partitionValueCounts);
 
@@ -313,7 +314,7 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
     // since each fragment only send its top N partition values. We could use the max count from all
     // fragments as the lower bound estimate
     long uniquePartitionValueCountLowerBound = 0;
-    Map<Long, Long> mergedPartitionCounters = new HashMap<>();
+    Map<Long, long[]> mergedPartitionCounters = new HashMap<>();
     for (ExecProtos.HashDistributionValueCounts participantsPartitionCounter :
         participantsPartitionCounters) {
       totalSeenRecords += participantsPartitionCounter.getTotalSeenRecords();
@@ -323,10 +324,10 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
               participantsPartitionCounter.getUniqueValueCount());
       for (ExecProtos.HashDistributionValueCount valueCount :
           participantsPartitionCounter.getHashDistributionValueCountsList()) {
-        mergedPartitionCounters.put(
-            valueCount.getHashDistributionKey(),
-            mergedPartitionCounters.computeIfAbsent(valueCount.getHashDistributionKey(), p -> 0L)
-                + valueCount.getCount());
+        long[] count =
+            mergedPartitionCounters.computeIfAbsent(
+                valueCount.getHashDistributionKey(), p -> new long[] {0});
+        count[0] += valueCount.getCount();
       }
     }
     uniquePartitionValueCountLowerBound =
@@ -338,9 +339,9 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
     }
 
     // sort by partition value count in ascending order
-    PriorityQueue<Map.Entry<Long, Long>> pq =
-        new PriorityQueue<>((a, b) -> (int) (a.getValue() - b.getValue()));
-    for (Map.Entry<Long, Long> entry : mergedPartitionCounters.entrySet()) {
+    PriorityQueue<Map.Entry<Long, long[]>> pq =
+        new PriorityQueue<>((a, b) -> (int) (a.getValue()[0] - b.getValue()[0]));
+    for (Map.Entry<Long, long[]> entry : mergedPartitionCounters.entrySet()) {
       pq.offer(entry);
       if (pq.size() > topNPartitions) {
         pq.poll();
@@ -349,7 +350,7 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
 
     long topNPartitionCountSum = 0;
     while (!pq.isEmpty()) {
-      topNPartitionCountSum += pq.poll().getValue();
+      topNPartitionCountSum += pq.poll().getValue()[0];
     }
 
     if ((double) topNPartitionCountSum / totalSeenRecords > dataSkewRatio) {
@@ -359,12 +360,12 @@ public class AdaptiveVectorizedPartitionSenderOperator extends VectorizedPartiti
     return initialDop;
   }
 
-  private PriorityQueue<Map.Entry<Integer, Long>> getTopNPartitionCounts() {
+  private PriorityQueue<Map.Entry<Integer, long[]>> getTopNPartitionCounts() {
     // sort by partition value count in ascending order
-    PriorityQueue<Map.Entry<Integer, Long>> pq =
-        new PriorityQueue<>((a, b) -> (int) (a.getValue() - b.getValue()));
+    PriorityQueue<Map.Entry<Integer, long[]>> pq =
+        new PriorityQueue<>((a, b) -> (int) (a.getValue()[0] - b.getValue()[0]));
 
-    for (Map.Entry<Integer, Long> entry : partitionCounters.entrySet()) {
+    for (Map.Entry<Integer, long[]> entry : partitionCounters.entrySet()) {
       pq.offer(entry);
       if (pq.size() > TOP_N_PARTITIONS) {
         pq.poll();

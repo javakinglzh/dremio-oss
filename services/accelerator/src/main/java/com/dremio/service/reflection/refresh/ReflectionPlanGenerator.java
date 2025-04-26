@@ -24,6 +24,7 @@ import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.EntityExplorer;
 import com.dremio.exec.ops.SnapshotDiffContext;
 import com.dremio.exec.planner.events.FunctionDetectedEvent;
+import com.dremio.exec.planner.events.HashGeneratedEvent;
 import com.dremio.exec.planner.events.PlannerEventBus;
 import com.dremio.exec.planner.events.PlannerEventHandler;
 import com.dremio.exec.planner.normalizer.NormalizerException;
@@ -91,7 +92,7 @@ public class ReflectionPlanGenerator {
   private final boolean matchingPlanOnly;
 
   private RefreshDecisionWrapper refreshDecisionWrapper;
-  private ByteString matchingPlanBytes;
+  private SerializedMatchingInfo serializedMatchingInfo;
 
   public ReflectionPlanGenerator(
       SqlHandlerConfig sqlHandlerConfig,
@@ -134,10 +135,12 @@ public class ReflectionPlanGenerator {
             new NonIncrementalRefreshFunctionDetectedEventHandler();
     UnmaterializeableFunctionDetectedEventHandler unmaterializeableFunctionDetectedEventHandler =
         new UnmaterializeableFunctionDetectedEventHandler();
+    HashGeneratedEventHandler hashGeneratedEventHandler = new HashGeneratedEventHandler();
     try (Closeable ignored =
         plannerEventBus.register(
             nonIncrementalRefreshFunctionDetectedEventHandler,
-            unmaterializeableFunctionDetectedEventHandler)) {
+            unmaterializeableFunctionDetectedEventHandler,
+            hashGeneratedEventHandler)) {
       ReflectionPlanNormalizer planNormalizer =
           new ReflectionPlanNormalizer(
               sqlHandlerConfig,
@@ -152,7 +155,8 @@ public class ReflectionPlanGenerator {
               forceFullUpdate,
               matchingPlanOnly,
               refreshDecisionWrapper,
-              nonIncrementalRefreshFunctionDetectedEventHandler);
+              nonIncrementalRefreshFunctionDetectedEventHandler,
+              hashGeneratedEventHandler);
       // retrieve reflection's dataset
       final EntityExplorer catalog = sqlHandlerConfig.getContext().getCatalog();
       DatasetConfig datasetConfig = CatalogUtil.getDatasetConfig(catalog, goal.getDatasetId());
@@ -180,7 +184,7 @@ public class ReflectionPlanGenerator {
               .build(logger);
         }
         this.refreshDecisionWrapper = planNormalizer.getRefreshDecisionWrapper();
-        this.matchingPlanBytes = planNormalizer.getMatchingPlanBytes();
+        serializedMatchingInfo = planNormalizer.getSerializedMatchingInfo();
         return converted.getConvertedNode();
       } catch (ForemanSetupException
           | RelConversionException
@@ -249,8 +253,33 @@ public class ReflectionPlanGenerator {
         null);
   }
 
-  public ByteString getMatchingPlanBytes() {
-    return matchingPlanBytes;
+  public SerializedMatchingInfo getSerializedMatchingInfo() {
+    return serializedMatchingInfo;
+  }
+
+  public static final class SerializedMatchingInfo {
+    private ByteString matchingPlanBytes;
+    private String matchingHash;
+    private ByteString hashFragment;
+
+    public SerializedMatchingInfo(
+        ByteString matchingPlanBytes, String matchingHash, ByteString hashFragment) {
+      this.matchingPlanBytes = matchingPlanBytes;
+      this.matchingHash = matchingHash;
+      this.hashFragment = hashFragment;
+    }
+
+    public ByteString getMatchingPlanBytes() {
+      return matchingPlanBytes;
+    }
+
+    public String getMatchingHash() {
+      return matchingHash;
+    }
+
+    public ByteString getHashFragment() {
+      return hashFragment;
+    }
   }
 
   // Simple class to hold everything related to how a reflection will be refreshed
@@ -345,6 +374,32 @@ public class ReflectionPlanGenerator {
 
     public List<SqlOperator> getUnmaterializableFunctions() {
       return unmaterializableFunctions;
+    }
+  }
+
+  static final class HashGeneratedEventHandler implements PlannerEventHandler<HashGeneratedEvent> {
+    private String hash;
+    private RelNode query;
+
+    public HashGeneratedEventHandler() {}
+
+    @Override
+    public void handle(HashGeneratedEvent event) {
+      hash = event.getHash();
+      query = event.getQuery();
+    }
+
+    @Override
+    public Class<HashGeneratedEvent> supports() {
+      return HashGeneratedEvent.class;
+    }
+
+    public String getHash() {
+      return hash;
+    }
+
+    public RelNode getQuery() {
+      return query;
     }
   }
 }

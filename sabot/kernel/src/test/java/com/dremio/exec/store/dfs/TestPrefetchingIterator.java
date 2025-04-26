@@ -47,6 +47,7 @@ import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
 import com.dremio.exec.store.dfs.implicit.ConstantColumnPopulators;
 import com.dremio.exec.store.dfs.implicit.NameValuePair;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.InputStreamProvider;
 import com.dremio.exec.store.parquet.InputStreamProviderFactory;
 import com.dremio.exec.store.parquet.MutableParquetMetadata;
@@ -418,7 +419,7 @@ public class TestPrefetchingIterator {
             any(BufferAllocator.class), any(SplitAndPartitionInfo.class)))
         .thenReturn(getMatchingNameValuePairs());
 
-    List<SplitReaderCreator> creators = Collections.EMPTY_LIST;
+    List<SplitReaderCreator> creators = Collections.emptyList();
     OperatorContext ctx = getCtx();
     PrefetchingIterator it = new PrefetchingIterator(createSplitReaderCreatorIterator(creators));
     try (AutoCloseables.RollbackCloseable closer = new AutoCloseables.RollbackCloseable()) {
@@ -654,7 +655,7 @@ public class TestPrefetchingIterator {
             OptionValue.createString(
                 OptionValue.OptionType.SYSTEM, QUERY_EXEC_OPTION_KEY, "Gandiva"));
     when(fragmentExecutionContext.getStoragePlugin(any())).thenReturn(fileSystemPlugin);
-    when(fileSystemPlugin.createFS(any(), any(), any())).thenReturn(fs);
+    when(fileSystemPlugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
     when(fs.supportsPath(any())).thenReturn(true);
     when(fs.supportsAsync()).thenReturn(true);
     when(config.getPluginId()).thenReturn(storagePluginId);

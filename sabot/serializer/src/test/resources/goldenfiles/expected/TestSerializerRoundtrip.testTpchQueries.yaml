@@ -4926,3 +4926,4 @@
      - "            LogicalProject($f0=[1:BIGINT])"
      - "              LogicalFilter(condition=[=($1, $cor0.C_CUSTKEY)])"
      - "                LogicalTableScan(table=[[cp, tpch/orders.parquet]])"
+

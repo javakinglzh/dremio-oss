@@ -82,4 +82,9 @@ public class FixedTTLTransientStore<K, V> implements TransientStore<K, V> {
   public Iterable<Document<K, V>> find(String pattern, KVStore.GetOption... options) {
     return delegate.find(pattern, options);
   }
+
+  @Override
+  public void deleteAll() {
+    delegate.deleteAll();
+  }
 }

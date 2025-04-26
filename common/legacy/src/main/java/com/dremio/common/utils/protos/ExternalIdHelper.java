@@ -25,6 +25,7 @@ import java.util.concurrent.ThreadLocalRandom;
 public final class ExternalIdHelper {
 
   public static final long MASK = 0xFFFFFFFFFFFFFF00L;
+  public static final long INT_MAX_IN_HEX = 0x7FFFFFFF;
 
   public static QueryWritableBatch replaceQueryId(QueryWritableBatch batch, ExternalId externalId) {
     final QueryData header =
@@ -66,6 +67,13 @@ public final class ExternalIdHelper {
     p2 = p2 << 8;
 
     return ExternalId.newBuilder().setPart1(p1).setPart2(p2).build();
+  }
+
+  // uses the fact that first four bytes of QueryId is a timestamp
+  public static long getTimeStamp(QueryId queryId) {
+    String[] parts = QueryIdHelper.getJobId(queryId).split("-", 2);
+    String firstPart = parts[0];
+    return (INT_MAX_IN_HEX - Long.parseLong(firstPart, 16)) * 1000;
   }
 
   public static QueryId toQueryId(final ExternalId externalId) {

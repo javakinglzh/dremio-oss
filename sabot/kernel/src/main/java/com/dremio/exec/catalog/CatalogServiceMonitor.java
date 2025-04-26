@@ -37,6 +37,10 @@ interface CatalogServiceMonitor {
     return this;
   }
 
+  default boolean isActiveSourceChange() {
+    throw new UnsupportedOperationException();
+  }
+
   default void onWakeup() {}
 
   default void startAdhocRefreshWithLock() {}

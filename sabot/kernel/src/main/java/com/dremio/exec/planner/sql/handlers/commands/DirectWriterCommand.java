@@ -25,6 +25,7 @@ import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.Writer;
 import com.dremio.exec.physical.base.WriterOptions;
+import com.dremio.exec.planner.ResultWriterUtils;
 import com.dremio.exec.planner.fragment.EndpointsIndex;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.planner.observer.AttemptObserver;
@@ -223,7 +224,11 @@ public class DirectWriterCommand<T> implements CommandRunner<Object> {
             .getCatalog()
             .resolveCatalog(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
             .createNewTable(
-                new NamespaceKey(storeTable), null, WriterOptions.DEFAULT, storageOptions, true);
+                new NamespaceKey(storeTable),
+                null,
+                WriterOptions.DEFAULT,
+                storageOptions,
+                ResultWriterUtils.CREATE_TABLE_OPTIONS);
     return createTableEntry.getWriter(
         new OpProps(
             0,

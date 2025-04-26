@@ -24,6 +24,7 @@ package com.dremio.exec.store.dfs;
 public abstract class MayBeDistFileSystemConf<
         C extends FileSystemConf<C, P>, P extends FileSystemPlugin<C>>
     extends FileSystemConf<C, P> {
+
   public abstract String getAccessKey();
 
   public abstract String getSecretKey();

@@ -15,6 +15,10 @@
  */
 package com.dremio.exec.planner;
 
+import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_MERGE_RULE;
+import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_PHASE;
+import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_SIMPLE_JOIN_RULE;
+
 import com.dremio.exec.ops.OptimizerRulesContext;
 import com.dremio.exec.planner.logical.AggregateRule;
 import com.dremio.exec.planner.logical.BridgeExchangePrule;
@@ -29,10 +33,10 @@ import com.dremio.exec.planner.logical.DremioSortMergeRule;
 import com.dremio.exec.planner.logical.EmptyRule;
 import com.dremio.exec.planner.logical.EmptyValuesRule;
 import com.dremio.exec.planner.logical.EnhancedFilterJoinRule;
+import com.dremio.exec.planner.logical.EnhancedFilterJoinRuleV2;
+import com.dremio.exec.planner.logical.EnhancedFilterJoinRuleV3;
 import com.dremio.exec.planner.logical.ExpansionDrule;
-import com.dremio.exec.planner.logical.FilterFlattenTransposeRule;
 import com.dremio.exec.planner.logical.FilterRule;
-import com.dremio.exec.planner.logical.FilterWindowTransposeRule;
 import com.dremio.exec.planner.logical.FlattenRule;
 import com.dremio.exec.planner.logical.InClauseCommonSubexpressionEliminationRule;
 import com.dremio.exec.planner.logical.JoinBooleanRewriteRule;
@@ -43,6 +47,7 @@ import com.dremio.exec.planner.logical.LimitRule;
 import com.dremio.exec.planner.logical.MergeProjectForFlattenRule;
 import com.dremio.exec.planner.logical.MergeProjectRule;
 import com.dremio.exec.planner.logical.ProjectRule;
+import com.dremio.exec.planner.logical.PushFilterPastExpansionRule;
 import com.dremio.exec.planner.logical.PushFilterPastFlattenrule;
 import com.dremio.exec.planner.logical.PushFilterPastProjectRule;
 import com.dremio.exec.planner.logical.PushJoinFilterIntoProjectRule;
@@ -79,6 +84,7 @@ import com.dremio.exec.planner.physical.NestedLoopJoinPrule;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.ProjectPrule;
 import com.dremio.exec.planner.physical.PushLimitToTopN;
+import com.dremio.exec.planner.physical.ResultWriterPrule;
 import com.dremio.exec.planner.physical.SamplePrule;
 import com.dremio.exec.planner.physical.SampleToLimitPrule;
 import com.dremio.exec.planner.physical.ScreenPrule;
@@ -98,10 +104,15 @@ import com.dremio.exec.planner.physical.rule.computation.NestedLoopJoinComputati
 import com.dremio.exec.planner.rules.DremioCoreRules;
 import com.dremio.exec.planner.tablefunctions.ExternalQueryScanPrule;
 import com.dremio.exec.planner.tablefunctions.ExternalQueryScanRule;
+import com.dremio.exec.planner.transpose.FilterFlattenTransposeRule;
+import com.dremio.exec.planner.transpose.FilterWindowTransposeRule;
 import com.dremio.exec.store.mfunctions.MFunctionQueryScanPrule;
 import com.dremio.exec.store.mfunctions.MFunctionQueryScanRule;
+import com.dremio.exec.tablefunctions.clusteringinfo.ClusteringInfoPrule;
+import com.dremio.exec.tablefunctions.clusteringinfo.ClusteringInfoRule;
 import com.dremio.exec.tablefunctions.copyerrors.CopyErrorsPrule;
 import com.dremio.exec.tablefunctions.copyerrors.CopyErrorsRule;
+import com.dremio.options.OptionResolver;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import java.util.ArrayList;
@@ -142,7 +153,14 @@ public enum PlannerPhase {
     }
   },
 
-  DEFAULT_RAW_REFLECTION("Default Raw Reflection") {
+  DEFAULT_HASH_MATCHING("Default Hash Matching") {
+    @Override
+    public RuleSet getRules(OptimizerRulesContext context) {
+      throw new RuntimeException();
+    }
+  },
+
+  DEFAULT_RAW_MATCHING("Default Raw Matching") {
     @Override
     public RuleSet getRules(OptimizerRulesContext context) {
       throw new RuntimeException();
@@ -234,7 +252,7 @@ public enum PlannerPhase {
           DremioCoreRules.JOIN_PROJECT_TRANSPOSE_LEFT,
           DremioCoreRules.JOIN_PROJECT_TRANSPOSE_RIGHT,
           CoreRules.AGGREGATE_PROJECT_MERGE,
-          DremioCoreRules.FILTER_MERGE_CALCITE_RULE,
+          DremioCoreRules.FILTER_MERGE_CRULE_ALLOW_CORRELATIONS,
           CoreRules.PROJECT_MERGE,
           DremioCoreRules.UNION_MERGE_RULE);
     }
@@ -259,10 +277,30 @@ public enum PlannerPhase {
           PushFilterPastProjectRule.CALCITE_NO_CHILD_CHECK,
           JoinFilterCanonicalizationRule.INSTANCE,
           DremioCoreRules.FILTER_AGGREGATE_TRANSPOSE_CALCITE_RULE,
-          DremioCoreRules.FILTER_MERGE_CALCITE_RULE,
           FilterWindowTransposeRule.INSTANCE,
-          DremioCoreRules.LOGICAL_FILTER_CORRELATE_RULE,
+          PushFilterPastExpansionRule.INSTANCE,
           DremioCoreRules.FILTER_SORT_TRANSPOSE_RULE);
+
+      boolean enableCorrelatedFilterPushdown =
+          context
+              .getPlannerSettings()
+              .options
+              .getOption(PlannerSettings.ENABLE_CORRELATED_FILTER_PUSHDOWN);
+
+      b.add(
+          enableCorrelatedFilterPushdown
+              ? DremioCoreRules.FILTER_MERGE_CRULE_ALLOW_CORRELATIONS
+              : DremioCoreRules.FILTER_MERGE_RULE_DISALLOW_CORRELATIONS);
+
+      b.add(
+          enableCorrelatedFilterPushdown
+              ? DremioCoreRules.FILTER_CORRELATE_RULE_ALLOW_CORRELATION
+              : DremioCoreRules.FILTER_CORRELATE_RULE_DISALLOW_CORRELATION);
+
+      if (!enableCorrelatedFilterPushdown) {
+        b.add(DremioCoreRules.FILTER_CORRELATED_FILTER_TRANSPOSE_RULE);
+        b.add(DremioCoreRules.CORRELATED_FILTER_SPLIT_RULE);
+      }
 
       if (ps.isPushFilterPastFlattenEnabled()) {
         b.add(PushFilterPastFlattenrule.INSTANCE);
@@ -275,14 +313,18 @@ public enum PlannerPhase {
       }
 
       if (ps.isEnhancedFilterJoinPushdownEnabled()) {
-        b.add(
-            EnhancedFilterJoinRule.Config.WITH_FILTER
-                .withUseGuardRail(ps.useEnhancedFilterJoinGuardRail())
-                .toRule());
-        b.add(
-            EnhancedFilterJoinRule.Config.WITHOUT_FILTER
-                .withUseGuardRail(ps.useEnhancedFilterJoinGuardRail())
-                .toRule());
+        if (ps.useEnhancedFilterJoinGuardRail()) {
+          if (ps.options.getOption(PlannerSettings.USE_ENHANCED_FILTER_JOIN_GUARDRAIL_FOR_JOIN)) {
+            b.add(EnhancedFilterJoinRuleV3.WITH_FILTER);
+            b.add(EnhancedFilterJoinRuleV3.NO_FILTER);
+          } else {
+            b.add(EnhancedFilterJoinRuleV2.WITH_FILTER);
+            b.add(EnhancedFilterJoinRuleV2.NO_FILTER);
+          }
+        } else {
+          b.add(EnhancedFilterJoinRule.WITH_FILTER);
+          b.add(EnhancedFilterJoinRule.NO_FILTER);
+        }
       }
 
       if (ps.isTransitiveFilterPushdownEnabled()) {
@@ -337,6 +379,12 @@ public enum PlannerPhase {
         b.add(CountOnScanToValuesRule.AGG_ON_PROJ_ON_SCAN_INSTANCE);
         b.add(CountOnScanToValuesRule.AGG_ON_SCAN_INSTANCE);
       }
+      if (context
+          .getPlannerSettings()
+          .options
+          .getOption(PlannerSettings.USE_ENHANCED_FILTER_JOIN_GUARDRAIL_FOR_JOIN)) {
+        b.add(JoinFilterCanonicalizationRule.INSTANCE);
+      }
       b.add(DremioCoreRules.PUSH_PROJECT_PAST_JOIN_CALCITE_RULE);
       return RuleSets.ofList(b.build());
     }
@@ -356,17 +404,27 @@ public enum PlannerPhase {
     }
   },
 
-  AGG_JOIN_PUSHDOWN("Agg-Join Pushdown") {
+  AGG_PUSHDOWN("Agg-Join Pushdown") {
     @Override
     public RuleSet getRules(OptimizerRulesContext context) {
-      List<RelOptRule> rules = new ArrayList<>();
-      if (context.getPlannerSettings().isSimpleAggJoinEnabled()) {
-        if (context.getPlannerSettings().isSimpleAggJoinEnabled()) {
-          rules.add(DremioCoreRules.AGGREGATE_JOIN_TRANSPOSE_RULE);
-          rules.add(DremioCoreRules.AGGREGATE_PROJECT_MERGE_RULE);
-          rules.add(DremioCoreRules.PROJECT_REMOVE_DRULE);
-        }
+
+      OptionResolver optionResolver = context.getOptions();
+
+      if (!optionResolver.getOption(AGG_PUSH_DOWN_PHASE)) {
+        return RuleSets.ofList();
       }
+
+      List<RelOptRule> rules = new ArrayList<>();
+      rules.add(DremioCoreRules.PROJECT_REMOVE_DRULE);
+      rules.add(DremioCoreRules.AGGREGATE_PROJECT_MERGE_RULE);
+
+      if (optionResolver.getOption(AGG_PUSH_DOWN_SIMPLE_JOIN_RULE)) {
+        rules.add(DremioCoreRules.AGGREGATE_JOIN_TRANSPOSE_RULE);
+      }
+      if (optionResolver.getOption(AGG_PUSH_DOWN_MERGE_RULE)) {
+        rules.add(DremioCoreRules.AGGREGATE_MERGE_DRULE);
+      }
+
       return RuleSets.ofList(rules);
     }
   },
@@ -395,7 +453,7 @@ public enum PlannerPhase {
           DremioCoreRules.FILTER_MULTIJOIN_MERGE_RULE,
           MergeProjectRule.LOGICAL_INSTANCE,
           DremioCoreRules.PROJECT_REMOVE_DRULE,
-          DremioCoreRules.FILTER_MERGE_DRULE);
+          DremioCoreRules.FILTER_MERGE_DRULE_ALLOW_CORRELATIONS);
     }
   },
 
@@ -476,6 +534,7 @@ public enum PlannerPhase {
       moreRules.add(ExternalQueryScanRule.INSTANCE);
       moreRules.add(MFunctionQueryScanRule.INSTANCE);
       moreRules.add(CopyErrorsRule.INSTANCE);
+      moreRules.add(ClusteringInfoRule.INSTANCE);
 
       if (context.getPlannerSettings().pushArrayColumnsIntoScan()) {
         moreRules.add(PushProjectIntoScanRule.INSTANCE);
@@ -518,7 +577,7 @@ public enum PlannerPhase {
       final ImmutableList.Builder<RelOptRule> rules = ImmutableList.builder();
       rules.add(InClauseCommonSubexpressionEliminationRule.INSTANCE);
       rules.add(RollupWithBridgeExchangeRule.INSTANCE);
-      if (context.getPlannerSettings().isSimpleAggJoinEnabled()) {
+      if (context.getOptions().getOption(AGG_PUSH_DOWN_PHASE)) {
         rules
             .add(DremioCoreRules.PROJECT_REMOVE_DRULE)
             .add(DremioCoreRules.PUSH_PROJECT_INPUT_REF_PAST_FILTER_LOGICAL_INSTANCE)
@@ -632,7 +691,7 @@ public enum PlannerPhase {
 
                   DremioCoreRules.FILTER_SET_OP_TRANSPOSE_CALCITE_RULE,
                   DremioCoreRules.FILTER_AGGREGATE_TRANSPOSE_CALCITE_RULE,
-                  DremioCoreRules.FILTER_MERGE_CALCITE_RULE,
+                  DremioCoreRules.FILTER_MERGE_CRULE_ALLOW_CORRELATIONS,
 
                   /*
                    * Project pushdown rules.
@@ -698,6 +757,10 @@ public enum PlannerPhase {
     ruleList.add(SamplePrule.INSTANCE);
     ruleList.add(SampleToLimitPrule.INSTANCE);
     ruleList.add(WriterPrule.INSTANCE);
+    ruleList.add(
+        ResultWriterPrule.Config.DEFAULT
+            .withOptionResolver(optimizerRulesContext.getOptions())
+            .toRule());
     ruleList.add(IncrementalRefreshByPartitionWriterPrule.INSTANCE);
     ruleList.add(WindowPrule.INSTANCE);
     ruleList.add(PushLimitToTopN.INSTANCE);
@@ -741,6 +804,7 @@ public enum PlannerPhase {
     ruleList.add(new FileSystemTableModifyPrule(optimizerRulesContext));
     ruleList.add(new CopyIntoTablePrule(optimizerRulesContext));
     ruleList.add(new CopyErrorsPrule(optimizerRulesContext));
+    ruleList.add(new ClusteringInfoPrule(optimizerRulesContext));
 
     return RuleSets.ofList(ImmutableSet.copyOf(ruleList));
   }

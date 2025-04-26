@@ -54,6 +54,7 @@ export default class SelectConnectionButton extends Component {
       onClick,
       sampleSource = false,
       isSampleDB = false,
+      iconSrc,
     } = this.props;
 
     const buttonClass = classNames({
@@ -77,7 +78,11 @@ export default class SelectConnectionButton extends Component {
         }
       >
         <div className={iconContainer}>
-          <SourceIcon dremioIcon={dremioIcon} style={styles.iconStyle} />
+          <SourceIcon
+            src={iconSrc} // This is required for ARP connectors since they send icon src as inline-svg
+            dremioIcon={dremioIcon}
+            style={styles.iconStyle}
+          />
         </div>
         <h3 className={connectionLabel}>{label}</h3>
         {pillText && (

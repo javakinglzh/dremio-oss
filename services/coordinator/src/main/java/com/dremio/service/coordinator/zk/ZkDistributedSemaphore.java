@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.locks.InterProcessSemaphoreV2;
 import org.apache.curator.framework.recipes.locks.Lease;
@@ -30,31 +31,38 @@ import org.apache.curator.utils.ZKPaths;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
-import org.apache.zookeeper.Watcher.Event.EventType;
-import org.apache.zookeeper.Watcher.Event.KeeperState;
 
 class ZkDistributedSemaphore implements DistributedSemaphore {
 
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ZkDistributedSemaphore.class);
+  private static final int WATCHER_CHECK_GAP_MILLIS = 60 * 1000;
 
   private final InterProcessSemaphoreV2 semaphore;
   private final Map<UpdateListener, Void> listeners =
       Collections.synchronizedMap(new WeakHashMap<UpdateListener, Void>());
   private final String path;
   private final CuratorFramework client;
+  private final AtomicBoolean childWatchEnabled;
+  private volatile long lastWatcherCheckedAtMillis;
 
   ZkDistributedSemaphore(CuratorFramework client, String path, int numberOfLeases)
       throws Exception {
     this.semaphore = new InterProcessSemaphoreV2(client, path, numberOfLeases);
     this.path = ZKPaths.makePath(path, "leases");
     this.client = client;
+    this.childWatchEnabled = new AtomicBoolean(false);
+    this.lastWatcherCheckedAtMillis = 0;
   }
 
   private boolean setWatcher() throws Exception {
     if (client.checkExists().forPath(path) != null) {
-      client.getChildren().usingWatcher((Watcher) t -> onEvent(t)).forPath(path);
-      logger.debug("watcher set for path: {}", path);
+      if (childWatchEnabled.compareAndSet(false, true)) {
+        client.getChildren().usingWatcher((Watcher) this::onEvent).forPath(path);
+        logger.debug("watcher set for path: {}", path);
+      } else {
+        logger.debug("watcher already set for path: {}", path);
+      }
       return true;
     } else {
       logger.debug("path {} not found", path);
@@ -63,18 +71,12 @@ class ZkDistributedSemaphore implements DistributedSemaphore {
   }
 
   private void onEvent(WatchedEvent event) {
-
+    // typically watcher is triggered only once. Let us make sure watcher is set again
+    childWatchEnabled.set(false);
     if (event.getType() == Watcher.Event.EventType.NodeChildrenChanged) {
       Collection<UpdateListener> col = new ArrayList<>(listeners.keySet());
       for (UpdateListener l : col) {
         l.updated();
-      }
-    } else if (event.getType() == EventType.None && event.getState() == KeeperState.SyncConnected) {
-      // re set the watcher after a disconnect.
-      try {
-        setWatcher();
-      } catch (Exception e) {
-        logger.error("Failure while re-setting watcher after reconnect.", e);
       }
     }
   }
@@ -94,6 +96,54 @@ class ZkDistributedSemaphore implements DistributedSemaphore {
     }
   }
 
+  /**
+   * This is a workaround for a rare curator leak of a lease path if it is interrupted due to a
+   * cancellation, while it is waiting inside the acquire call.
+   *
+   * @param expectedNodeData identifies the node to be deleted
+   */
+  @Override
+  public void forceDeleteParticipantNode(String expectedNodeData) {
+    try {
+      for (String participantNode : semaphore.getParticipantNodes()) {
+        final String leasePath = ZKPaths.makePath(path, participantNode);
+        try {
+          final byte[] nodeBytes = client.getData().forPath(leasePath);
+          if (nodeBytes != null && new String(nodeBytes).equals(expectedNodeData)) {
+            logger.warn(
+                "Forcefully deleting a leaked permit for path {} that contains {}",
+                leasePath,
+                expectedNodeData);
+            client.delete().guaranteed().forPath(leasePath);
+          }
+        } catch (Exception e) {
+          if (e instanceof KeeperException.NoNodeException) {
+            logger.debug("Lease path {} no longer exists", leasePath, e);
+          } else {
+            logger.warn("Unable to read or delete lease path {}", leasePath, e);
+          }
+        }
+      }
+    } catch (Exception e) {
+      if (e instanceof KeeperException.NoNodeException) {
+        logger.debug("Semaphore path no longer exists for {}", expectedNodeData, e);
+      } else {
+        logger.warn(
+            "Exception occurred while trying to get semaphore participant node for {}.",
+            expectedNodeData,
+            e);
+      }
+    }
+  }
+
+  @Override
+  public DistributedLease acquire(long time, TimeUnit unit, byte[] nodeData) throws Exception {
+    if (nodeData != null) {
+      semaphore.setNodeData(nodeData);
+    }
+    return acquire(1, time, unit);
+  }
+
   @Override
   public DistributedLease acquire(int numPermits, long time, TimeUnit unit) throws Exception {
     Collection<Lease> leases = semaphore.acquire(numPermits, time, unit);
@@ -108,14 +158,14 @@ class ZkDistributedSemaphore implements DistributedSemaphore {
 
     // if this is the first add, add it here.
     boolean set = true;
-    synchronized (this) {
-      if (listeners.isEmpty()) {
-        try {
-          set = setWatcher();
-        } catch (Exception e) {
-          logger.warn("Exception occurred while registering listener", e);
-        }
+    try {
+      var currentTimeMillis = System.currentTimeMillis();
+      if (currentTimeMillis > lastWatcherCheckedAtMillis + WATCHER_CHECK_GAP_MILLIS) {
+        set = setWatcher();
+        lastWatcherCheckedAtMillis = currentTimeMillis;
       }
+    } catch (Exception e) {
+      logger.warn("Exception occurred while registering listener", e);
     }
     listeners.put(
         () -> {

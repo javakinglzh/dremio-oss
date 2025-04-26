@@ -61,6 +61,7 @@ public class DACJobResultsSerializer extends AbstractRowBasedRecordWriter {
 
   public DACJobResultsSerializer(final JsonGenerator jsonGenerator, final SerializationContext currentRowContext,
       final int recordSizeLimit, final boolean convertNumbersToStrings) {
+    super(null);
     this.currentRowContext = currentRowContext;
     this.recordSizeLimit = recordSizeLimit;
     this.gen = new DataJsonOutput(jsonGenerator, convertNumbersToStrings);

@@ -13,13 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import LinkWithRef from "#oss/components/LinkWithRef/LinkWithRef";
+import { browserHistory } from "react-router";
 import { IconButton } from "dremio-ui-lib/components";
 import { getSettingsLocation } from "components/Menus/HomePage/DatasetMenu";
 import { addProjectBase as wrapBackendLink } from "dremio-ui-common/utilities/projectBase.js";
 import { getVersionContextFromId } from "dremio-ui-common/utilities/datasetReference.js";
 import { shouldUseNewDatasetNavigation } from "#oss/utils/datasetNavigationUtils";
 import * as sqlPaths from "dremio-ui-common/paths/sqlEditor.js";
+import { Tooltip } from "@dremio/design-system/components";
 
 export default function (input) {
   Object.assign(input.prototype, {
@@ -27,13 +30,14 @@ export default function (input) {
     renderConvertButton(_, folderModalButton) {
       return (
         <div className="main-settings-btn convert-to-dataset">
-          <IconButton
-            as={LinkWithRef}
-            to={folderModalButton.to ? folderModalButton.to : "."}
-            tooltip={folderModalButton.tooltip}
-          >
-            {folderModalButton.icon}
-          </IconButton>
+          <Tooltip content={folderModalButton.tooltip}>
+            <LinkWithRef
+              className="dremio-icon-button"
+              to={folderModalButton.to ? folderModalButton.to : "."}
+            >
+              {folderModalButton.icon}
+            </LinkWithRef>
+          </Tooltip>
         </div>
       );
     },
@@ -47,7 +51,7 @@ export default function (input) {
       const resourceId = item.getIn(["fullPathList", 0]);
       const newFullPath = JSON.stringify(item.get("fullPathList").toJS());
       const isQueryOnClickEnabled = shouldUseNewDatasetNavigation();
-
+      const location = browserHistory.getCurrentLocation();
       const allBtns = [
         // edit button - for views
         {
@@ -91,7 +95,7 @@ export default function (input) {
         {
           label: this.getInlineIcon("interface/settings"),
           tooltip: "Common.Settings",
-          link: getSettingsLocation(this.context.location, item, entityType),
+          link: getSettingsLocation(location, item, entityType),
           type: btnTypes.settings,
           isShown: true,
         },

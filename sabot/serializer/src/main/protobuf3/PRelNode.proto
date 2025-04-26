@@ -70,6 +70,7 @@ message PScanCrel {
   repeated string partition_fields = 6;
   string dataset_version = 7;
   string version_context = 8;
+  repeated string column_names = 9;
 }
 
 message PExternalQueryScanCrel {
@@ -87,6 +88,13 @@ message PExpansionNode {
   string version_context = 5;
 }
 
+message PExpansionLeafNode {
+  repeated string path = 1;
+  PRelDataType row_type = 2;
+  bool isDefault = 3;
+  string version_context = 4;
+}
+
 message PDefaultExpansionNode {
   int32 input = 1;
   repeated string path = 2;
@@ -98,14 +106,15 @@ message PRelList {
   repeated google.protobuf.Any node = 1;
 }
 
-message PLogicalValueRecord {
-  repeated PRexNode literal = 2;
-}
 
 message PLogicalValues {
+  message PLogicalValueTuple {
+    repeated PRexNode literal = 2;
+  }
+
   PProps props = 1;
   repeated PRelDataTypeField fields = 2;
-  repeated PLogicalValueRecord record = 3;
+  repeated PLogicalValueTuple tuples = 3;
 }
 
 message PLogicalFilter {
@@ -121,13 +130,6 @@ message PLogicalProject {
 }
 
 message PLogicalJoin {
-  enum PJoinType {
-    UNKNOWN = 0;
-    INNER = 1;
-    LEFT = 2;
-    RIGHT = 3;
-    FULL = 4;
-  }
 
   int32 left_input = 1;
   int32 right_input = 2;
@@ -166,22 +168,6 @@ message PLogicalAggregate {
   bool indicator = 3;
   PGroupSet group_set = 4;
   repeated PGroupSet group_sets = 5;
-}
-
-message PGroupSet {
-  repeated int32 group = 1;
-}
-
-message PAggregateCall {
-  bool distinct = 1;
-  bool approximate = 2;
-  PSqlOperator operator = 3;
-  PRelDataType type = 4;
-  google.protobuf.StringValue name = 5;
-  repeated int32 arg = 6;
-  int32 filter_arg = 7;
-  PRelCollationImpl rel_collation_legacy = 8;
-  PRelCollation rel_collation = 9;
 }
 
 message PLogicalSort {

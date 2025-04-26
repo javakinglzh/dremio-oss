@@ -28,6 +28,7 @@
     "com.dremio.catalog.model.dataset.TableVersionType",
     "com.dremio.exec.tablefunctions.TableMacroNames",
     "com.dremio.exec.util.*",
+    "com.dremio.exec.planner.sql.DremioSqlOperatorTable",
     "com.dremio.exec.planner.sql.parser.SqlCreateReflection.MeasureType",
     "com.dremio.exec.tablefunctions.MetadataFunctionsMacro",
     "java.util.*"
@@ -72,12 +73,10 @@
     "VDS",
     "DATASET",
     "STATUS",
-    "LOAD",
     "MATERIALIZATION",
     "APPROXIMATE",
     "APPROX",
     "STATS",
-    "COMPACT",
     "AUTO",
     "AVOID",
     "PROMOTION",
@@ -192,7 +191,8 @@
     "MAX_REPLICAS",
     "CLUSTER",
     "CLUSTERING",
-    "CONCURRENT"
+    "CONCURRENT",
+    "TRY_CONVERT_FROM"
   ]
 
   nonReservedKeywords: [
@@ -246,6 +246,8 @@
     "CLASS_ORIGIN"
     "CLEAR"
     "CLOUD"
+    "CLUSTER"
+    "CLUSTERING"
     "COBOL"
     "COLLATION"
     "COLLATION_CATALOG"
@@ -592,6 +594,8 @@
     "TRIGGER_CATALOG"
     "TRIGGER_NAME"
     "TRIGGER_SCHEMA"
+    "TUMBLE"
+    "TRY_CONVERT_FROM"
     "TYPE"
     "UNBOUNDED"
     "UNCOMMITTED"
@@ -648,8 +652,6 @@
     "SqlTruncateTable()",
     "SqlAccel()",
     "SqlRefreshReflection()",
-    "SqlLoadMaterialization()",
-    "SqlCompactMaterialization()",
     "SqlExplainJson()",
     "SqlExplainQueryDML()",
     "SqlAlterClearPlanCache()",
@@ -754,6 +756,7 @@
   # Return type of method implementation should be "SqlNode".
   # Example: DateFunctionCall().
   builtinFunctionCallMethods: [
+    "TryConvertFromFunctionCall()"
   ]
 
   # Posix ~, ~*, !~, !~* are not supported

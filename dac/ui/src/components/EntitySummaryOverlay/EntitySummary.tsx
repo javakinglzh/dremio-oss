@@ -64,7 +64,7 @@ const EntitySummary = ({
           <div className={summaryHeaderClasses["dataset-item-header"]}>
             {isLoading ? (
               <Skeleton width="4ch" />
-            ) : type === ENTITY_TYPES.source ? (
+            ) : type?.toLowerCase() === ENTITY_TYPES.source ? (
               <PureEntityIcon
                 disableHoverListener
                 entityType={type}

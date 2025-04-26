@@ -23,8 +23,7 @@ import com.dremio.dac.util.BackupRestoreUtil;
 import com.dremio.dac.util.BackupRestoreUtil.BackupOptions;
 import com.dremio.dac.util.BackupRestoreUtil.BackupStats;
 import com.dremio.datastore.CheckpointInfo;
-import com.dremio.datastore.LocalKVStoreProvider;
-import com.dremio.datastore.api.LegacyKVStoreProvider;
+import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.io.file.FileSystem;
 import com.dremio.service.namespace.NamespaceException;
@@ -47,24 +46,23 @@ import org.immutables.value.Value;
 public class BackupResource {
   private final Provider<HomeFileTool> fileStore;
 
-  private final Provider<LocalKVStoreProvider> localKVStoreProvider;
+  private final Provider<KVStoreProvider> kvStoreProvider;
   private final DremioConfig dremioConfig;
 
   @Inject
   public BackupResource(
       DremioConfig dremioConfig,
-      Provider<LegacyKVStoreProvider> kvStoreProviderProvider,
+      Provider<KVStoreProvider> kvStoreProviderProvider,
       Provider<HomeFileTool> fileStore) {
     this.dremioConfig = dremioConfig;
-    this.localKVStoreProvider =
-        () -> kvStoreProviderProvider.get().unwrap(LocalKVStoreProvider.class);
+    this.kvStoreProvider = kvStoreProviderProvider;
     this.fileStore = fileStore;
   }
 
   @POST
   public BackupStats createBackup(BackupOptions options)
       throws IOException, NamespaceException, GeneralSecurityException {
-    final LocalKVStoreProvider kvStoreProvider = getLocalKVStoreProvider();
+    final KVStoreProvider kvStoreProvider = getKvStoreProvider();
 
     final com.dremio.io.file.Path backupDirPath = options.getBackupDirAsPath();
     final FileSystem fs = HadoopFileSystem.get(backupDirPath, new Configuration());
@@ -77,7 +75,7 @@ public class BackupResource {
   @POST
   @Path("/checkpoint")
   public CheckpointInfo prepareCheckpoint(BackupOptions options) throws IOException {
-    final LocalKVStoreProvider kvStoreProvider = getLocalKVStoreProvider();
+    final KVStoreProvider kvStoreProvider = getKvStoreProvider();
     return BackupRestoreUtil.createCheckpoint(options.getBackupDirAsPath(), kvStoreProvider);
   }
 
@@ -89,8 +87,8 @@ public class BackupResource {
         dremioConfig, options.getBackupDestinationDirectory(), fileStore.get());
   }
 
-  private LocalKVStoreProvider getLocalKVStoreProvider() {
-    final LocalKVStoreProvider kvStoreProvider = localKVStoreProvider.get();
+  private KVStoreProvider getKvStoreProvider() {
+    final KVStoreProvider kvStoreProvider = this.kvStoreProvider.get();
     if (kvStoreProvider == null) {
       throw new IllegalArgumentException("backups are created only on master node.");
     }

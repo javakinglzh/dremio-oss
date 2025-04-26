@@ -17,12 +17,13 @@
 import { intl } from "#oss/utils/intl";
 import { SearchField } from "#oss/components/Fields";
 import { CatalogListingTable } from "dremio-ui-common/sonar/components/CatalogListingTable/CatalogListingTable.js";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import Mousetrap from "mousetrap";
 import { debounce } from "lodash";
 import EmptyStateContainer from "../EmptyStateContainer";
 
 import * as classes from "./CatalogListingView.module.less";
+import { IconButton } from "dremio-ui-lib/components";
 
 type CatalogListingViewProps = {
   title: React.ReactNode;
@@ -50,6 +51,7 @@ const CatalogListingView = ({
   leftHeaderStyles = {},
 }: CatalogListingViewProps) => {
   const searchFieldRef = useRef<any>();
+  const [searchExpanded, setSearchExpanded] = useState(false);
 
   useEffect(() => {
     Mousetrap.bind(["command+f", "ctrl+f"], () => {
@@ -65,7 +67,7 @@ const CatalogListingView = ({
   const debounceFilter = debounce((val: string) => onFilter?.(val), 250);
 
   return (
-    <div className={classes["catalog-listing-view"]}>
+    <div className={classes["catalog-listing-view"]} id="main" role="main">
       <div className={classes["catalog-listing-view__header"]}>
         <div
           className={classes["catalog-listing-view__header-left"]}
@@ -79,7 +81,17 @@ const CatalogListingView = ({
               {leftHeaderButtons}
             </div>
           )}
-          {onFilter && (
+          {onFilter && !searchExpanded && (
+            <IconButton
+              tooltip={intl.formatMessage({
+                id: "Dataset.FilterEllipsis",
+              })}
+              onClick={() => setSearchExpanded(true)}
+            >
+              <dremio-icon name="interface/search" />
+            </IconButton>
+          )}
+          {onFilter && searchExpanded && (
             <SearchField
               ref={(searchField) => (searchFieldRef.current = searchField)}
               onChange={debounceFilter}
@@ -108,11 +120,11 @@ const CatalogListingView = ({
                 }
               }
               style={{ marginRight: 6, width: 240 }}
-              className={`${classes["catalog-listing-view__search-field"]} ${
-                showButtonDivider &&
-                classes["catalog-listing-view__search-field-divider"]
-              }`}
+              className={`${classes["catalog-listing-view__search-field"]}`}
             />
+          )}
+          {showButtonDivider && (
+            <div className={classes["catalog-listing-view__divider"]} />
           )}
           {rightHeaderButtons && (
             <div className="flex items-center flex-row gp-1">
@@ -126,9 +138,7 @@ const CatalogListingView = ({
           <div className={classes["catalog-listing-view__empty"]}>
             <EmptyStateContainer
               icon="interface/empty-content"
-              title={intl.formatMessage({
-                id: "Catalog.Source.Empty.Title",
-              })}
+              title="Catalog.Source.Empty.Title"
             >
               {searchFieldRef.current?.state.value
                 ? intl.formatMessage(

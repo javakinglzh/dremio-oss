@@ -144,7 +144,7 @@ public final class DataplaneTestDefines {
   }
 
   public static String generateUniqueRawRefName() {
-    return DEFAULT_TABLE_NAME_PREFIX + uniqueInt();
+    return DEFAULT_RAW_REF_NAME_PREFIX + uniqueInt();
   }
 
   public static List<String> generateEntityPathWithNFolders(final String entityName, int nFolders) {

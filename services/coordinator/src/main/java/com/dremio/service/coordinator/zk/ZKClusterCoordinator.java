@@ -47,6 +47,7 @@ public class ZKClusterCoordinator extends ClusterCoordinator {
   }
 
   private final ZKClusterServiceSetManager zkClusterServiceSetManager;
+  private final int sessionTimeoutMillis;
 
   private volatile boolean closed = false;
 
@@ -59,17 +60,20 @@ public class ZKClusterCoordinator extends ClusterCoordinator {
   }
 
   public ZKClusterCoordinator(SabotConfig config, Provider<Integer> localPort) throws IOException {
-    this.zkClusterServiceSetManager =
-        new ZKClusterServiceSetManager(new ZKSabotConfig(config), localPort);
+    var sabotConfig = new ZKSabotConfig(config);
+    this.zkClusterServiceSetManager = new ZKClusterServiceSetManager(sabotConfig, localPort);
+    this.sessionTimeoutMillis = sabotConfig.getSessionTimeoutMilliSecs();
   }
 
   public ZKClusterCoordinator(ZKClusterConfig zkClusterConfig, Provider<Integer> localPort)
       throws IOException {
     this.zkClusterServiceSetManager = new ZKClusterServiceSetManager(zkClusterConfig, localPort);
+    this.sessionTimeoutMillis = zkClusterConfig.getSessionTimeoutMilliSecs();
   }
 
   public ZKClusterCoordinator(ZKClusterConfig zkClusterConfig, String connect) throws IOException {
     this.zkClusterServiceSetManager = new ZKClusterServiceSetManager(zkClusterConfig, connect);
+    this.sessionTimeoutMillis = zkClusterConfig.getSessionTimeoutMilliSecs();
   }
 
   @VisibleForTesting
@@ -129,6 +133,11 @@ public class ZKClusterCoordinator extends ClusterCoordinator {
   @Override
   public LinearizableHierarchicalStore getHierarchicalStore() {
     return zkClusterServiceSetManager.getZkClient().getHierarchicalStore();
+  }
+
+  @Override
+  public int getSessionTimeoutMillis() {
+    return sessionTimeoutMillis;
   }
 
   @Override

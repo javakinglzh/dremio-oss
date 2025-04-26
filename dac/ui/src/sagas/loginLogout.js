@@ -29,6 +29,7 @@ import { isAuthorized } from "@inject/sagas/utils/isAuthorized";
 import { default as handleAppInitHelper } from "@inject/sagas/utils/handleAppInit";
 import { appInitComplete } from "#oss/actions/app";
 import { removeLastSession, setLastSession } from "#oss/utils/lastSession";
+import { queryClient } from "#oss/queryClient";
 
 //#region Route constants. Unfortunately should store these constants here (not in routes.js) to
 // avoid module circular references
@@ -38,7 +39,7 @@ export const LOGIN_PATH = "/login";
 export const SSO_LANDING_PATH = "/login/sso/landing";
 
 export function getLoginUrl(preserveRedirect = false) {
-  if (!preserveRedirect) {
+  if (!preserveRedirect || window.location.pathname === "/") {
     return LOGIN_PATH;
   }
   return `${LOGIN_PATH}?redirect=${encodeURIComponent(
@@ -66,6 +67,7 @@ export function* handleLogin({ payload }) {
   yield call([localStorageUtils, localStorageUtils.setUserData], payload);
   setLastSession({ username: payload.userName });
   yield call(handleAppInit);
+  queryClient.resetQueries(["session-introspection"]);
 }
 
 // export for testing only

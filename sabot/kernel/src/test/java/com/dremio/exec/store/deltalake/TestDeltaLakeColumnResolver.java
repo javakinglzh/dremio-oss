@@ -75,6 +75,26 @@ public class TestDeltaLakeColumnResolver extends BaseTestQuery {
         "col-3acba239-44fb-454c-be60-bfb27b478625", resolver.getParquetColumnName("c_map"));
     assertEquals(
         "col-3ea47a86-00a4-44c2-8f54-57855bfea0ce", resolver.getParquetColumnName("c_struct"));
+    assertEquals(
+        "col-6a1cbf5a-b017-4ec3-b610-60ea048e1ea1.list.element",
+        resolver.getParquetColumnName("c_array.list.element"));
+    assertEquals(
+        "col-3acba239-44fb-454c-be60-bfb27b478625.key_value",
+        resolver.getParquetColumnName("c_map.entries"));
+    assertEquals(
+        "col-3acba239-44fb-454c-be60-bfb27b478625.key_value.key",
+        resolver.getParquetColumnName("c_map.entries.key"));
+    assertEquals(
+        "col-3acba239-44fb-454c-be60-bfb27b478625.key_value.value",
+        resolver.getParquetColumnName("c_map.entries.value"));
+    assertEquals(
+        "col-3ea47a86-00a4-44c2-8f54-57855bfea0ce.col-4483f2d6-7aee-4ccb-a0ea-5c1a9e2fbaa9",
+        resolver.getParquetColumnName("c_struct.i"));
+    assertEquals(
+        "col-3ea47a86-00a4-44c2-8f54-57855bfea0ce.col-5098abb0-b7e0-416b-a9f7-304220e69ce0",
+        resolver.getParquetColumnName("c_struct.s"));
+    assertEquals("col-4483f2d6-7aee-4ccb-a0ea-5c1a9e2fbaa9", resolver.getParquetColumnName("i"));
+    assertEquals("col-5098abb0-b7e0-416b-a9f7-304220e69ce0", resolver.getParquetColumnName("s"));
 
     assertEquals(
         "id", resolver.getBatchSchemaColumnName("col-9ea0f164-86ea-4862-be27-becce5bec908"));
@@ -130,6 +150,38 @@ public class TestDeltaLakeColumnResolver extends BaseTestQuery {
         "col-c350e179-5aca-43ef-80cd-8f86b5aeb3f0", resolver.getParquetColumnName("c_map"));
     assertEquals(
         "col-63fffbb9-55b1-4f1f-930f-bbb115031f62", resolver.getParquetColumnName("c_struct"));
+    assertEquals(
+        "col-cfc8907e-b152-4685-b348-dc1f1c70bb27.list.element",
+        resolver.getParquetColumnName("c_array.list.element"));
+    assertEquals(
+        "col-cfc8907e-b152-4685-b348-dc1f1c70bb27.list.element.key_value",
+        resolver.getParquetColumnName("c_array.list.element.entries"));
+    assertEquals(
+        "col-cfc8907e-b152-4685-b348-dc1f1c70bb27.list.element.key_value.key",
+        resolver.getParquetColumnName("c_array.list.element.entries.key"));
+    assertEquals(
+        "col-cfc8907e-b152-4685-b348-dc1f1c70bb27.list.element.key_value.value",
+        resolver.getParquetColumnName("c_array.list.element.entries.value"));
+    assertEquals(
+        "col-c350e179-5aca-43ef-80cd-8f86b5aeb3f0.key_value",
+        resolver.getParquetColumnName("c_map.entries"));
+    assertEquals(
+        "col-c350e179-5aca-43ef-80cd-8f86b5aeb3f0.key_value.key",
+        resolver.getParquetColumnName("c_map.entries.key"));
+    assertEquals(
+        "col-c350e179-5aca-43ef-80cd-8f86b5aeb3f0.key_value.value",
+        resolver.getParquetColumnName("c_map.entries.value"));
+    assertEquals(
+        "col-63fffbb9-55b1-4f1f-930f-bbb115031f62.list.element",
+        resolver.getParquetColumnName("c_struct.list.element"));
+    assertEquals(
+        "col-63fffbb9-55b1-4f1f-930f-bbb115031f62.list.element.col-803266e8-7e28-41a0-b8f0-9c6f8bbf617a",
+        resolver.getParquetColumnName("c_struct.list.element.i"));
+    assertEquals(
+        "col-63fffbb9-55b1-4f1f-930f-bbb115031f62.list.element.col-da9a198d-a2c8-4d3e-9a80-7df4285ac291",
+        resolver.getParquetColumnName("c_struct.list.element.s"));
+    assertEquals("col-803266e8-7e28-41a0-b8f0-9c6f8bbf617a", resolver.getParquetColumnName("i"));
+    assertEquals("col-da9a198d-a2c8-4d3e-9a80-7df4285ac291", resolver.getParquetColumnName("s"));
 
     assertEquals(
         "id", resolver.getBatchSchemaColumnName("col-d134036f-a15b-40b3-8345-8ce9a86dc6c5"));

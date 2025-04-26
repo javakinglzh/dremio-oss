@@ -23,20 +23,26 @@ public interface UriSchemes {
   String FILE_SCHEME = "file";
   String S3_SCHEME = "s3";
   String S3A_SCHEME = "s3a";
-  String AZURE_SCHEME = "wasbs";
-  String AZURE_ABFS_SCHEME = "abfss";
+  String AZURE_ABFSS_SCHEME = "abfss";
+
+  /** Dremio does not write tables with the unsecure option */
+  String AZURE_ABFS_SCHEME = "abfs";
+
+  String AZURE_WASBS_SCHEME = "wasbs";
+
+  /** Dremio does not write tables with the unsecure option */
+  String AZURE_WASB_SCHEME = "wasb";
+
   String GCS_SCHEME = "gs";
-  String ADL_SCHEME = "adl";
 
   String DREMIO_GCS_SCHEME = "dremiogcs";
   String DREMIO_S3_SCHEME = "dremioS3";
   String DREMIO_AZURE_SCHEME = "dremioAzureStorage";
   String DREMIO_HDFS_SCHEME = HDFS_SCHEME;
-  String DREMIO_ADLS_SCHEME = "dremioAdl";
 
   String LOCALHOST_LOOPBACK = "localhost";
   String CLASS_PATH_FILE_SYSTEM = "classpath";
-  String NAS_FILE_SYSTEM = "pdfs";
+  String LEGACY_PDFS_SCHEME = "pdfs";
 
   String SCHEME_SEPARATOR = "://";
 }

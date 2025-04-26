@@ -32,17 +32,17 @@ public class V1FileHistorySchemaDefinition implements SchemaDefinition {
   protected final long schemaVersion;
 
   public static final ColumnDefinition EVENT_TIMESTAMP_COL =
-      new ColumnDefinition("event_timestamp", 1, Types.TimestampType.withZone(), false, false);
+      new ColumnDefinition("event_timestamp", 1, Types.TimestampType.withZone(), true, false);
   public static final ColumnDefinition JOB_ID_COL =
-      new ColumnDefinition("job_id", 2, Types.StringType.get(), false, false);
+      new ColumnDefinition("job_id", 2, Types.StringType.get(), true, false);
   public static final ColumnDefinition FILE_PATH_COL =
-      new ColumnDefinition("file_path", 3, Types.StringType.get(), false, false);
+      new ColumnDefinition("file_path", 3, Types.StringType.get(), true, false);
   public static final ColumnDefinition FILE_STATE_COL =
-      new ColumnDefinition("file_state", 4, Types.StringType.get(), false, false);
+      new ColumnDefinition("file_state", 4, Types.StringType.get(), true, false);
   public static final ColumnDefinition RECORDS_LOADED_COUNT_COL =
-      new ColumnDefinition("records_loaded_count", 5, Types.LongType.get(), false, false);
+      new ColumnDefinition("records_loaded_count", 5, Types.LongType.get(), true, false);
   public static final ColumnDefinition RECORDS_REJECTED_COUNT_COL =
-      new ColumnDefinition("records_rejected_count", 6, Types.LongType.get(), false, false);
+      new ColumnDefinition("records_rejected_count", 6, Types.LongType.get(), true, false);
   protected List<ColumnDefinition> columns =
       ImmutableList.of(
           EVENT_TIMESTAMP_COL,

@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.work.protector;
 
+import static com.dremio.datastore.transientstore.CommonTags.TAG_STORE_NAME_KEY;
 import static com.dremio.exec.ExecConstants.JOB_PROFILE_PLANNING_UPDATE_INTERVAL_SECONDS;
 import static com.dremio.exec.ExecConstants.MAX_FOREMEN_PER_COORDINATOR;
 import static com.dremio.proto.model.PartitionStats.PartitionStatsKey;
@@ -35,13 +36,17 @@ import com.dremio.config.DremioConfig;
 import com.dremio.context.RequestContext;
 import com.dremio.datastore.WarningTimer;
 import com.dremio.datastore.format.Format;
+import com.dremio.distributedplancache.transientstore.DistributedPlanCacheStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.maestro.MaestroForwarder;
 import com.dremio.exec.maestro.MaestroService;
 import com.dremio.exec.planner.observer.OutOfBandQueryObserver;
 import com.dremio.exec.planner.observer.QueryObserver;
-import com.dremio.exec.planner.plancache.CachedPlan;
 import com.dremio.exec.planner.plancache.LegacyPlanCache;
+import com.dremio.exec.planner.plancache.PlanCacheProvider;
+import com.dremio.exec.planner.plancache.PlanCacheProviderImpl;
+import com.dremio.exec.planner.plancache.distributable.DistributedPlanCacheManager;
+import com.dremio.exec.planner.plancache.distributable.PlanCacheEntryMarshaller;
 import com.dremio.exec.planner.sql.handlers.commands.PreparedPlan;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared;
@@ -86,13 +91,8 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.RemovalListener;
-import com.google.common.cache.RemovalNotification;
-import com.google.common.cache.Weigher;
-import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Multimaps;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.Empty;
@@ -109,6 +109,7 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import javax.inject.Provider;
 import org.apache.arrow.memory.ArrowBuf;
@@ -159,12 +160,14 @@ public class ForemenWorkManager implements Service, SafeExit {
   private UserWorker userWorker;
   private LocalQueryExecutor localQueryExecutor;
   private CloseableSchedulerThreadPool profileSender;
-  private Cache<String, CachedPlan> cachedPlans;
   private LegacyPlanCache legacyPlanCache;
+  private PlanCacheProvider planCacheProvider;
   private final Provider<RequestContext> requestContextProvider;
   private final Provider<PartitionStatsCacheStoreProvider> transientStoreProvider;
+  private final Provider<DistributedPlanCacheStoreProvider> distributedPlanCacheStoreProvider;
   private PartitionStatsCache partitionStatsCache;
   private final CloseableExecutorService jobSubmissionExecutorService;
+  private final AtomicBoolean canAcceptQueries;
 
   public ForemenWorkManager(
       final Provider<FabricService> fabric,
@@ -175,7 +178,9 @@ public class ForemenWorkManager implements Service, SafeExit {
       final Provider<MaestroForwarder> forwarder,
       final Provider<RuleBasedEngineSelector> ruleBasedEngineSelector,
       final Provider<RequestContext> requestContextProvider,
-      final Provider<PartitionStatsCacheStoreProvider> transientStoreProvider) {
+      final Provider<PartitionStatsCacheStoreProvider> transientStoreProvider,
+      final Provider<DistributedPlanCacheStoreProvider> distributedPlanCacheStoreProvider) {
+    this.canAcceptQueries = new AtomicBoolean(true);
     this.dbContext = dbContext;
     this.fabric = fabric;
     this.commandPool = commandPool;
@@ -189,6 +194,7 @@ public class ForemenWorkManager implements Service, SafeExit {
     this.queryCancelTool = new QueryCancelToolImpl();
     this.requestContextProvider = requestContextProvider;
     this.transientStoreProvider = transientStoreProvider;
+    this.distributedPlanCacheStoreProvider = distributedPlanCacheStoreProvider;
     this.jobSubmissionExecutorService =
         new ContextMigratingCloseableExecutorService<>(
             CloseableThreadPool.newFixedThreadPool("job-submission-", VM.availableProcessors()));
@@ -196,6 +202,14 @@ public class ForemenWorkManager implements Service, SafeExit {
 
   public ExecToCoordResultsHandler getExecToCoordResultsHandler() {
     return execToCoordResultsHandler;
+  }
+
+  public void stopAcceptingQueries() {
+    this.canAcceptQueries.set(false);
+  }
+
+  public void resumeAcceptingQueries() {
+    this.canAcceptQueries.set(true);
   }
 
   public ForemenTool getForemenTool() {
@@ -218,8 +232,8 @@ public class ForemenWorkManager implements Service, SafeExit {
     return localQueryExecutor;
   }
 
-  public LegacyPlanCache getLegacyPlanCache() {
-    return legacyPlanCache;
+  public PlanCacheProvider getPlanCacheCreator() {
+    return planCacheProvider;
   }
 
   @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
@@ -227,6 +241,7 @@ public class ForemenWorkManager implements Service, SafeExit {
   public void start() throws Exception {
     newGauge("jobs.active", externalIdToForeman::size);
 
+    DremioConfig dremioConfig = dbContext.get().getDremioConfig();
     this.jobResultsAllocator =
         dbContext
             .get()
@@ -257,30 +272,33 @@ public class ForemenWorkManager implements Service, SafeExit {
             new ProfileSenderOptionsChangeListener(dbContext.get().getOptionManager()));
 
     // cache for physical plans.
-    cachedPlans =
-        CacheBuilder.newBuilder()
-            .maximumWeight(
-                dbContext.get().getDremioConfig().getLong(DremioConfig.PLAN_CACHE_MAX_ENTRIES))
-            .weigher(
-                (Weigher<String, CachedPlan>) (key, cachedPlan) -> cachedPlan.getEstimatedSize())
-            // plan caches are memory intensive. If there is memory pressure,
-            // let GC release them as last resort before running OOM.
-            .softValues()
-            .removalListener(
-                new RemovalListener<String, CachedPlan>() {
-                  @Override
-                  public void onRemoval(RemovalNotification<String, CachedPlan> notification) {
-                    legacyPlanCache.clearDatasetMapOnCacheGC(notification.getKey());
-                  }
-                })
-            .expireAfterAccess(
-                dbContext.get().getDremioConfig().getLong(DremioConfig.PLAN_CACHE_TIMEOUT_MINUTES),
-                TimeUnit.MINUTES)
-            .build();
 
     legacyPlanCache =
-        new LegacyPlanCache(
-            cachedPlans, Multimaps.synchronizedListMultimap(ArrayListMultimap.create()));
+        LegacyPlanCache.create(
+            dbContext.get().getDremioConfig().getLong(DremioConfig.PLAN_CACHE_MAX_ENTRIES),
+            dbContext.get().getDremioConfig().getLong(DremioConfig.PLAN_CACHE_TIMEOUT_MINUTES));
+    Class<? extends PlanCacheEntryMarshaller.Factory> factoryClass =
+        dbContext
+            .get()
+            .getConfig()
+            .getClass(
+                PlanCacheEntryMarshaller.PLANNING_PATH,
+                PlanCacheEntryMarshaller.Factory.class,
+                PlanCacheEntryMarshaller.Factory.class);
+
+    // Get the store for DPC with given configuration of max size and TTL.
+    DistributedPlanCacheManager distributedPlanCacheManager =
+        DistributedPlanCacheManager.create(
+            factoryClass,
+            dremioConfig.getLong(DremioConfig.PLAN_CACHE_MAX_ENTRIES),
+            dremioConfig.getLong(DremioConfig.PLAN_CACHE_TIMEOUT_MINUTES),
+            this.distributedPlanCacheStoreProvider
+                .get()
+                .provideStore(
+                    dremioConfig.getLong(DremioConfig.PLAN_CACHE_MAX_SIZE_BYTES),
+                    dremioConfig.getLong(DremioConfig.PLAN_CACHE_TIMEOUT_MINUTES)));
+
+    planCacheProvider = new PlanCacheProviderImpl(distributedPlanCacheManager, legacyPlanCache);
 
     partitionStatsCache =
         new PartitionStatsCache(
@@ -292,7 +310,9 @@ public class ForemenWorkManager implements Service, SafeExit {
                     dbContext
                         .get()
                         .getDremioConfig()
-                        .getInt(DremioConfig.PARTITION_STATS_CACHE_TTL)));
+                        .getInt(DremioConfig.PARTITION_STATS_CACHE_TTL),
+                    TAG_STORE_NAME_KEY,
+                    PartitionStatsCache.class.getSimpleName()));
   }
 
   @Override
@@ -308,7 +328,7 @@ public class ForemenWorkManager implements Service, SafeExit {
   private boolean canAcceptWork() {
     final long foremenLimit =
         dbContext.get().getOptionManager().getOption(MAX_FOREMEN_PER_COORDINATOR);
-    return externalIdToForeman.size() < foremenLimit;
+    return this.canAcceptQueries.get() && externalIdToForeman.size() < foremenLimit;
   }
 
   public void submit(
@@ -334,7 +354,7 @@ public class ForemenWorkManager implements Service, SafeExit {
             config,
             attemptHandler,
             preparedHandles,
-            legacyPlanCache,
+            planCacheProvider,
             partitionStatsCache);
     final ManagedForeman managed = new ManagedForeman(registry, foreman);
     externalIdToForeman.put(foreman.getExternalId(), managed);
@@ -357,7 +377,7 @@ public class ForemenWorkManager implements Service, SafeExit {
       OptionProvider config,
       ReAttemptHandler attemptHandler,
       Cache<Long, PreparedPlan> preparedPlans,
-      LegacyPlanCache planCache,
+      PlanCacheProvider planCacheProvider,
       PartitionStatsCache partitionStatsCache) {
     return new Foreman(
         dbContext.get(),
@@ -371,11 +391,15 @@ public class ForemenWorkManager implements Service, SafeExit {
         config,
         attemptHandler,
         preparedPlans,
-        planCache,
+        planCacheProvider,
         maestroService.get(),
         jobTelemetryClient.get(),
         ruleBasedEngineSelector.get(),
         partitionStatsCache);
+  }
+
+  public LegacyPlanCache getLegacyPlanCache() {
+    return legacyPlanCache;
   }
 
   /** Internal class that allows ForemanManager to indirectly reference its wrapper object. */

@@ -31,12 +31,25 @@ public class APIFieldDescriber {
     private final JsonGenerator generator;
     private final TypeDescriber typeDescriber;
     private final Field field;
+    private final Boolean isPartitionedField;
+    private final Boolean isSortedField;
     private boolean skipName;
 
     public FieldDescriber(JsonGenerator jsonGenerator, Field field, boolean skipName) {
+      this(jsonGenerator, field, null, null, skipName);
+    }
+
+    public FieldDescriber(
+        JsonGenerator jsonGenerator,
+        Field field,
+        Boolean isPartitionedField,
+        Boolean isSortedField,
+        boolean skipName) {
       generator = jsonGenerator;
       typeDescriber = new TypeDescriber(jsonGenerator);
       this.field = field;
+      this.isPartitionedField = isPartitionedField;
+      this.isSortedField = isSortedField;
       this.skipName = skipName;
     }
 
@@ -56,6 +69,16 @@ public class APIFieldDescriber {
         generator.writeFieldName("name");
         type.accept(typeDescriber);
         generator.writeEndObject();
+
+        if (isPartitionedField != null) {
+          generator.writeFieldName("isPartitioned");
+          generator.writeBoolean(isPartitionedField);
+        }
+
+        if (isSortedField != null) {
+          generator.writeFieldName("isSorted");
+          generator.writeBoolean(isSortedField);
+        }
 
         generator.writeEndObject();
       } catch (IOException e) {
@@ -156,6 +179,11 @@ public class APIFieldDescriber {
     }
 
     @Override
+    public Void visit(ArrowType.ListView list) {
+      return writeString("LISTVIEW");
+    }
+
+    @Override
     public Void visit(ArrowType.FixedSizeList fixedSizeList) {
       return writeString("LIST");
     }
@@ -186,8 +214,18 @@ public class APIFieldDescriber {
     }
 
     @Override
+    public Void visit(ArrowType.Utf8View utf8) {
+      return writeString("VARCHARVIEW");
+    }
+
+    @Override
     public Void visit(ArrowType.Binary binary) {
       return writeString("VARBINARY");
+    }
+
+    @Override
+    public Void visit(ArrowType.BinaryView binary) {
+      return writeString("VARBINARYVIEW");
     }
 
     @Override
@@ -240,6 +278,16 @@ public class APIFieldDescriber {
     @Override
     public Void visit(ArrowType.LargeList largeList) {
       throw new UnsupportedOperationException("LargeList is not supported");
+    }
+
+    @Override
+    public Void visit(ArrowType.LargeListView param) {
+      throw new UnsupportedOperationException("LargeListView is not supported");
+    }
+
+    @Override
+    public Void visit(ArrowType.RunEndEncoded param) {
+      throw new UnsupportedOperationException("RunEndEncoded is not supported");
     }
 
     @Override

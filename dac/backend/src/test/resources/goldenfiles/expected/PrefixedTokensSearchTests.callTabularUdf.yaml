@@ -495,3 +495,4 @@
      - "SELECT * FROM TABLE ( myTabularUdf ( 1 ) AT TAG myIdentifier "
      - "SELECT * FROM TABLE ( myTabularUdf ( 1 ) AT REF myIdentifier "
      - "SELECT * FROM TABLE ( myTabularUdf ( 1 ) AT REFERENCE myIdentifier "
+

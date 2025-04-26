@@ -141,20 +141,56 @@ public final class ExpressionConverter {
                       .setValue(Long.parseLong(bifunc.literal)))
               .build();
 
-          // Lucene doesn't handle NOT expressions well in some cases.
-          //      case NOT:
-          //        if(subs == null || subs.size() != 1) {
-          //          return null;
-          //        }
-          //        SearchQuery q = subs.get(0);
-          //        return SearchQueryUtils.not(subs.get(0));
-          //
-          //      case NOT_EQUALS:
-          //        if(bifunc == null) {
-          //          return null;
-          //        }
-          //        return SearchQueryUtils.not(SearchQueryUtils.newTermQuery(bifunc.field,
-          // bifunc.literal));
+        case GREATER_THAN_OR_EQUAL:
+          if (bifunc == null) {
+            return null;
+          }
+
+          return SearchQuery.newBuilder()
+              .setGreaterThanOrEqual(
+                  SearchQuery.GreaterThanOrEqual.newBuilder()
+                      .setField(bifunc.field)
+                      .setValue(Long.parseLong(bifunc.literal)))
+              .build();
+
+        case LESS_THAN:
+          if (bifunc == null) {
+            return null;
+          }
+
+          return SearchQuery.newBuilder()
+              .setLessThan(
+                  SearchQuery.LessThan.newBuilder()
+                      .setField(bifunc.field)
+                      .setValue(Long.parseLong(bifunc.literal)))
+              .build();
+
+        case LESS_THAN_OR_EQUAL:
+          if (bifunc == null) {
+            return null;
+          }
+
+          return SearchQuery.newBuilder()
+              .setLessThanOrEqual(
+                  SearchQuery.LessThanOrEqual.newBuilder()
+                      .setField(bifunc.field)
+                      .setValue(Long.parseLong(bifunc.literal)))
+              .build();
+
+        // Lucene doesn't handle NOT expressions well in some cases.
+        //      case NOT:
+        //        if(subs == null || subs.size() != 1) {
+        //          return null;
+        //        }
+        //        SearchQuery q = subs.get(0);
+        //        return SearchQueryUtils.not(subs.get(0));
+        //
+        //      case NOT_EQUALS:
+        //        if(bifunc == null) {
+        //          return null;
+        //        }
+        //        return SearchQueryUtils.not(SearchQueryUtils.newTermQuery(bifunc.field,
+        // bifunc.literal));
 
         case LIKE:
           return handleLike(call);
@@ -180,7 +216,7 @@ public final class ExpressionConverter {
           } else {
             return null;
           }
-          // fall through
+        // fall through
 
         case 2:
           RexNode op1 = operands.get(0);

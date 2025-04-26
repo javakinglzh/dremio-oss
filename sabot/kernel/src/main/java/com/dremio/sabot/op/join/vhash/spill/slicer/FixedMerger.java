@@ -91,7 +91,10 @@ public class FixedMerger implements Merger {
 
   private void mergeBitType(
       List<ValueVector> src, Page dst, int recordCount, List<FieldVector> vectorOutput) {
-    final FieldVector outgoing = (FieldVector) src.get(0).getTransferPair(allocator).getTo();
+    ValueVector firstValueVector = src.get(0);
+    final FieldVector outgoing =
+        (FieldVector)
+            firstValueVector.getTransferPair(firstValueVector.getField(), allocator).getTo();
     vectorOutput.add(outgoing);
 
     final int validityLen = RoundUtil.round64up(recordCount) / BYTE_SIZE_BITS;

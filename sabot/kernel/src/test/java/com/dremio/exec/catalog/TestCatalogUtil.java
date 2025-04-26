@@ -85,7 +85,6 @@ public class TestCatalogUtil {
     final DatasetConfig datasetConfig = new DatasetConfig();
 
     datasetConfig.setId(new EntityId().setId(UUID.randomUUID().toString()));
-    datasetConfig.setCreatedAt(System.currentTimeMillis());
     datasetConfig.setName(ds.getDatasetPath().getName());
     datasetConfig.setFullPathList(ds.getDatasetPath().getComponents());
     datasetConfig.setType(DatasetType.PHYSICAL_DATASET);

@@ -49,5 +49,5 @@ export const monitor = admin.extend(() => "monitor");
 export const monitorCatalogUsage = monitor.extend(() => "catalog-usage");
 export const monitorJobs = monitor.extend(() => "jobs");
 export const monitorReflections = monitor.extend(() => "reflections");
-export const monitorResources = monitor.extend(() => "resource-usage");
+export const monitorResources = monitor.extend(() => "resources");
 export const errorHandling = admin.extend(() => "*");

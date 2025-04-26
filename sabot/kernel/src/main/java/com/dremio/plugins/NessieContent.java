@@ -15,6 +15,8 @@
  */
 package com.dremio.plugins;
 
+import static com.dremio.plugins.NessieClient.Properties.NAMESPACE_URI_LOCATION;
+
 import com.dremio.exec.catalog.VersionedPlugin.EntityType;
 import java.util.List;
 import java.util.Objects;
@@ -23,6 +25,7 @@ import javax.annotation.Nullable;
 import org.projectnessie.model.Content;
 import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.IcebergView;
+import org.projectnessie.model.Namespace;
 import org.projectnessie.model.UDF;
 
 public final class NessieContent {
@@ -31,18 +34,21 @@ public final class NessieContent {
   private final EntityType entityType;
   private final @Nullable String metadataLocation;
   private final @Nullable String viewDialect;
+  private final @Nullable String storageUri;
 
   public NessieContent(
       List<String> catalogKey,
       String contentId,
       EntityType entityType,
       @Nullable String metadataLocation,
-      @Nullable String viewDialect) {
+      @Nullable String viewDialect,
+      @Nullable String storageUri) {
     this.catalogKey = catalogKey;
     this.contentId = contentId;
     this.entityType = entityType;
     this.metadataLocation = metadataLocation;
     this.viewDialect = viewDialect;
+    this.storageUri = storageUri;
   }
 
   public List<String> getCatalogKey() {
@@ -67,13 +73,27 @@ public final class NessieContent {
     return Optional.ofNullable(viewDialect);
   }
 
+  @Nullable
+  public String getStorageUri() {
+    return storageUri;
+  }
+
   public static NessieContent buildFromRawContent(List<String> catalogKey, Content rawContent) {
     return new NessieContent(
         catalogKey,
         rawContent.getId(),
         extractVersionedEntityType(rawContent),
         extractMetadataLocation(rawContent),
-        extractViewDialect(rawContent));
+        extractViewDialect(rawContent),
+        extractNamespaceStorageUri(rawContent));
+  }
+
+  private static String extractNamespaceStorageUri(Content rawContent) {
+    Namespace namespace = rawContent.unwrap(Namespace.class).orElse(null);
+    if (namespace != null) {
+      return namespace.getProperties().get(NAMESPACE_URI_LOCATION);
+    }
+    return null;
   }
 
   private static EntityType extractVersionedEntityType(Content content) {

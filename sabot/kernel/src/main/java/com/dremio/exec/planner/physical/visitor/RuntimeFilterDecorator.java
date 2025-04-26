@@ -32,6 +32,7 @@ import com.dremio.exec.planner.physical.UnionPrel;
 import com.dremio.exec.planner.physical.filter.RuntimeFilterId;
 import com.dremio.exec.planner.physical.filter.RuntimeFilteredRel;
 import com.dremio.exec.store.TableMetadata;
+import com.dremio.sabot.op.fromjson.ConvertFromJsonPrel;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
@@ -206,6 +207,8 @@ public class RuntimeFilterDecorator {
     @Override
     public List<ColumnOriginScan> visitPrel(Prel prel, Integer idx) {
       if (prel instanceof SelectionVectorRemoverPrel) {
+        return visitRel(prel.getInput(0), idx);
+      } else if (prel instanceof ConvertFromJsonPrel) {
         return visitRel(prel.getInput(0), idx);
       } else {
         return ImmutableList.of();

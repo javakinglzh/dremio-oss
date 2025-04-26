@@ -15,8 +15,6 @@
  */
 import Immutable from "immutable";
 
-import { SET_JOB_LIST_CLUSTER_TYPE } from "actions/joblist/jobList";
-
 import jobsListReducer from "./jobList";
 
 describe("jobs reducer", () => {
@@ -38,19 +36,5 @@ describe("jobs reducer", () => {
   it("returns unaltered state by default", () => {
     const result = jobsListReducer(initialState, { type: "bla" });
     expect(result).to.equal(initialState);
-  });
-
-  describe("SET_JOB_LIST_CLUSTER_TYPE", () => {
-    it("should update cluster type", () => {
-      const result = jobsListReducer(initialState, {
-        type: SET_JOB_LIST_CLUSTER_TYPE,
-        payload: {
-          clusterType: "yarn",
-          isSupport: true,
-        },
-      });
-      expect(result.get("clusterType")).to.eql("yarn");
-      expect(result.get("isSupport")).to.eql(true);
-    });
   });
 });

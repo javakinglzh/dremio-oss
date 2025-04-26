@@ -19,8 +19,15 @@
   padding: 8px;
   cursor: pointer;
 
-  &:hover {
+  &:hover,
+  &:focus-visible {
     background-color: var(--fill--primary--hover);
+    .function-item__add-icon {
+      display: flex !important;
+    }
+  }
+
+  &:focus-within {
     .function-item__add-icon {
       display: flex !important;
     }
@@ -46,7 +53,8 @@
     padding: 0;
     color: var(--icon--primary) !important;
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
       color: var(--icon--hover) !important;
     }
 

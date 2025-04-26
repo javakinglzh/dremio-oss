@@ -31,5 +31,8 @@ public class JobSearchUtils {
           .put("Status".toLowerCase(), JobIndexKeys.JOB_STATE)
           .put("Query_Type".toLowerCase(), JobIndexKeys.QUERY_TYPE)
           .put("Submitted_Epoch_Millis".toLowerCase(), JobIndexKeys.START_TIME)
+          .put("Final_State_Epoch_Millis".toLowerCase(), JobIndexKeys.END_TIME)
+          .put("Query".toLowerCase(), JobIndexKeys.SQL)
+          .put("Queue_Name".toLowerCase(), JobIndexKeys.QUEUE_NAME)
           .build();
 }

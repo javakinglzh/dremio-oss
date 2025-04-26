@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.physical;
 
 import com.google.common.collect.ImmutableList;
+import java.util.Objects;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelTrait;
 import org.apache.calcite.plan.RelTraitDef;
@@ -136,8 +137,16 @@ public class DistributionTrait implements RelTrait {
     /** 0-based index of field being DISTRIBUTED. */
     private final int fieldId;
 
+    private final boolean notNull;
+
     public DistributionField(int fieldId) {
       this.fieldId = fieldId;
+      this.notNull = false;
+    }
+
+    public DistributionField(int fieldId, boolean notNull) {
+      this.fieldId = fieldId;
+      this.notNull = notNull;
     }
 
     @Override
@@ -146,20 +155,27 @@ public class DistributionTrait implements RelTrait {
         return false;
       }
       DistributionField other = (DistributionField) obj;
-      return this.fieldId == other.fieldId;
+      return this.fieldId == other.fieldId && this.notNull == other.notNull;
     }
 
     @Override
     public int hashCode() {
-      return this.fieldId;
+      return Objects.hash(fieldId, notNull);
     }
 
     public int getFieldId() {
       return this.fieldId;
     }
 
+    public boolean notNull() {
+      return notNull;
+    }
+
     @Override
     public String toString() {
+      if (notNull) {
+        return String.format("[$%s NOT NULL]", this.fieldId);
+      }
       return String.format("[$%s]", this.fieldId);
     }
   }

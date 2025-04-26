@@ -68,7 +68,13 @@ type ModalFormProps = {
   isLoading?: boolean;
   isCustomTabDirty?: boolean; // used if a custom tab is dirty
   error?: { id: string; message: string };
+  // for providing custom errors to specific fields
+  errorConfig?: Map<string, { fields: string[]; message: string }>;
+  onErrorDismiss?: () => void;
+  infoMessage?: string;
   isSaveDisabled?: boolean;
+  confirmLabel?: string;
+  className?: string;
 };
 
 const ModalForm = ({
@@ -83,7 +89,12 @@ const ModalForm = ({
   isCustomTabDirty,
   isSubmitting,
   error,
+  errorConfig,
+  onErrorDismiss,
+  infoMessage,
   isSaveDisabled,
+  confirmLabel,
+  className,
 }: ModalFormProps) => {
   const { t } = getIntlContext();
   const [tab, setTab] = useState(0);
@@ -98,11 +109,32 @@ const ModalForm = ({
     resolver: validationSchema ? zodResolver(validationSchema) : undefined,
   });
 
-  const { handleSubmit, formState, reset } = methods;
+  const { handleSubmit, formState, reset, setError, clearErrors } = methods;
+
+  const isSaving = isSubmitting || formState.isSubmitting;
 
   useEffect(() => {
     reset(defaultValues);
   }, [defaultValues, reset]);
+
+  useEffect(() => {
+    if (error?.id && errorConfig?.get(error.id)) {
+      const errorFromConfig = errorConfig.get(error.id);
+
+      if (!isSaving) {
+        errorFromConfig?.fields.forEach((field) => {
+          setError(field, {
+            type: "custom",
+            message: errorFromConfig.message,
+          });
+        });
+      } else {
+        errorFromConfig?.fields.forEach((field) => {
+          clearErrors(field);
+        });
+      }
+    }
+  }, [error?.id, errorConfig, isSaving, clearErrors, setError]);
 
   const handleTabChange = (newTab: number) => {
     if (isCustomTabDirty) {
@@ -122,8 +154,6 @@ const ModalForm = ({
   const onSubmit = (values: any) => {
     submit(values);
   };
-
-  const isSaving = isSubmitting || formState.isSubmitting;
 
   return (
     <>
@@ -145,7 +175,7 @@ const ModalForm = ({
                   <dremio-icon name="interface/close-big" alt="Close Button" />
                 </IconButton>
               }
-              className={classes["modal-form"]}
+              className={clsx(classes["modal-form"], className)}
               actions={
                 <div className="dremio-button-group">
                   <Button variant="secondary" onClick={handleCloseDialog}>
@@ -156,7 +186,11 @@ const ModalForm = ({
                     type="submit"
                     disabled={isLoading || isSaveDisabled}
                   >
-                    {isSaving ? <Spinner /> : t("Common.Actions.Save")}
+                    {isSaving ? (
+                      <Spinner />
+                    ) : (
+                      confirmLabel || t("Common.Actions.Save")
+                    )}
                   </Button>
                 </div>
               }
@@ -172,13 +206,25 @@ const ModalForm = ({
                       changeTab={handleTabChange}
                       activeTab={tab}
                       className={classes["modal-form__navPanel"]}
+                      orientation="vertical"
                     />
                     <div className="flex flex-col flex-1">
-                      {error && (
+                      {!!infoMessage && (
+                        <Message
+                          message={infoMessage}
+                          isDismissable={false}
+                          style={{ marginBottom: 0 }}
+                          messageTextStyle={{
+                            paddingRight: "var(--dremio--spacing--1)",
+                          }}
+                        />
+                      )}
+                      {error && !errorConfig?.get(error.id) && (
                         <Message
                           messageId={error.id}
                           message={error.message}
                           messageType="error"
+                          onDismiss={onErrorDismiss}
                           style={{ marginBottom: 0 }}
                         />
                       )}
@@ -229,6 +275,8 @@ export const FormInputController = ({
   element: FormComponent;
   disabled: boolean;
 }) => {
+  const [showCollapsedSection, setShowCollapsedSection] =
+    useState<boolean>(false);
   const { watch, control } = useFormContext();
   const getWatchingDependencies = (dependencies: string[]) => {
     const watching: Record<string, string> = {};
@@ -281,6 +329,9 @@ export const FormInputController = ({
                 field={field}
                 error={error}
                 disabled={disabled}
+                {...(element.dependencies && {
+                  dependencies: getWatchingDependencies(element.dependencies),
+                })}
               />
             </div>
           );
@@ -289,28 +340,30 @@ export const FormInputController = ({
     );
   };
 
-  if (element.formInputType === "multi" && element.components) {
-    return (
-      <>
-        {element.sectionLabel && (
-          <p className="text-lg text-semibold">{element.sectionLabel}</p>
-        )}
-        <div className="flex flex-col">
-          <div className={clsx("flex flex-row gap-2")}>
-            {element.components.map((comp) => renderController(comp))}
-          </div>
-          {element.helpText && (
-            <p className="pt-2">
-              {typeof element.helpText === "object"
-                ? element.helpText.getText?.(
-                    getWatchingDependencies(element.helpText.dependencies),
-                  )
-                : element.helpText}
-            </p>
-          )}
+  const renderMultiInput = (element: FormComponent) => (
+    <>
+      {element.sectionLabel && (
+        <p className="text-lg text-semibold">{element.sectionLabel}</p>
+      )}
+      <div className="flex flex-col">
+        <div className="flex flex-row gap-2">
+          {element.components?.map((comp) => renderController(comp))}
         </div>
-      </>
-    );
+        {element.helpText && (
+          <p className="pt-2">
+            {typeof element.helpText === "object"
+              ? element.helpText.getText?.(
+                  getWatchingDependencies(element?.dependencies || []),
+                )
+              : element.helpText}
+          </p>
+        )}
+      </div>
+    </>
+  );
+
+  if (element.formInputType === "multi" && element.components) {
+    return renderMultiInput(element);
   } else if (
     element.formInputType === "checkbox-subsection" &&
     element.components
@@ -319,9 +372,7 @@ export const FormInputController = ({
     return (
       <>
         {element.sectionLabel && (
-          <p className="text-lg text-semibold pt-2 pb-1">
-            {element.sectionLabel}
-          </p>
+          <p className="text-lg text-semibold pt-1">{element.sectionLabel}</p>
         )}
         <div className="flex flex-col">
           {renderController(element, "flex-row justify-between pb-2")}
@@ -332,6 +383,42 @@ export const FormInputController = ({
           )}
         </div>
       </>
+    );
+  } else if (
+    element.formInputType === "collapsible-section" &&
+    element.components
+  ) {
+    return (
+      <div className="flex flex-col gap-2">
+        <div
+          className="flex items-center cursor-pointer text-semibold"
+          onClick={() => setShowCollapsedSection(!showCollapsedSection)}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.code === "Enter" || e.code === "Space") {
+              setShowCollapsedSection(!showCollapsedSection);
+            }
+          }}
+          role="button"
+        >
+          <dremio-icon
+            name="interface/right-chevron"
+            class={clsx(
+              "h-3 w-3 icon-primary animate-icon-rotate",
+              showCollapsedSection && "rotate-90",
+            )}
+          />
+          {element.sectionLabel}
+        </div>
+        {showCollapsedSection &&
+          element.components.map((comp) => {
+            if (comp.formInputType === "multi") {
+              return renderMultiInput(comp);
+            }
+
+            return renderController(comp);
+          })}
+      </div>
     );
   } else if (
     element.formInputType === "custom" &&
@@ -354,15 +441,33 @@ const ElementInput = ({
   field,
   error,
   disabled,
+  dependencies,
 }: {
   component: FormComponent;
   field: ControllerRenderProps<FieldValues, string>;
   error?: FieldError;
   disabled?: boolean;
+  dependencies?: Record<string, string>;
 }) => {
   const { defaultValue, ...compProps } =
     (component.typeProps as FormTypeProps) ?? {};
   const selectOptions = useSelect(field.value ?? defaultValue ?? "");
+
+  useEffect(() => {
+    if (component.formInputType === "select") {
+      if (field.value !== selectOptions.value) {
+        selectOptions.onChange(field.value);
+      }
+    }
+  }, [component.formInputType, field.value, selectOptions]);
+
+  let options = [] as { value: string; label: string | JSX.Element }[];
+  if (component.formInputType === "select") {
+    options =
+      (compProps as SelectTypeProps)?.getOptions?.(dependencies) ||
+      (compProps as SelectTypeProps)?.options ||
+      [];
+  }
 
   switch (component.formInputType) {
     case "input":
@@ -385,6 +490,7 @@ const ElementInput = ({
                 });
               },
             })}
+            className={clsx(!!error?.message && "border-danger-bold")}
           />
           {error && <p className="pt-05 text-error text-sm">{error.message}</p>}
         </>
@@ -410,13 +516,16 @@ const ElementInput = ({
             selectOptions.onChange(value as string);
           }}
           renderButtonLabel={(option) =>
-            (compProps as SelectTypeProps).options.find(
-              (opt) => opt.value === option,
-            )?.label ?? option
+            (compProps as SelectTypeProps).labelFormatter?.(
+              option,
+              dependencies,
+            ) ??
+            options.find((opt) => opt.value === option)?.label ??
+            option
           }
           disabled={disabled}
         >
-          {(compProps as SelectTypeProps).options.map((opt) => (
+          {options.map((opt) => (
             <SelectOption key={opt.value} value={opt.value}>
               {opt.label}
             </SelectOption>

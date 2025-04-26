@@ -29,6 +29,7 @@ import com.dremio.common.util.TestTools;
 import com.dremio.config.DremioConfig;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogServiceImpl;
+import com.dremio.exec.catalog.SourceUpdateType;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
 import com.dremio.exec.store.CatalogService;
@@ -841,7 +842,7 @@ public class TestExampleQueries extends PlanTestBase {
         .refreshSource(
             new NamespaceKey("dfs_test"),
             CatalogService.REFRESH_EVERYTHING_NOW,
-            CatalogServiceImpl.UpdateType.FULL);
+            SourceUpdateType.FULL);
     try {
       test("select * from dfs_test.emptyList");
     } catch (Exception e) {
@@ -2768,8 +2769,8 @@ public class TestExampleQueries extends PlanTestBase {
         .sqlQuery(query)
         .ordered()
         .baselineColumns("C0")
-        .baselineValues(2L)
-        .baselineValues(5L)
+        .baselineValues(2)
+        .baselineValues(5)
         .build()
         .run();
   }

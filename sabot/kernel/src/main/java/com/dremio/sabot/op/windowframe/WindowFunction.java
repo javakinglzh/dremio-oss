@@ -411,11 +411,20 @@ public abstract class WindowFunction {
         /*
           if remaining rows < offset that means - value for row will be in next batch batch
         */
-        JConditional ifCondition = cg.getEvalBlock()._if(remaining.lt(JExpr.lit(offset)));
-        ifCondition
-            ._then()
-            .block()
-            .directStatement("inIndex =(int)(" + offset + " - partition.getRemaining() - 1);");
+        final JExpression indexCondition =
+            JExpr.direct("inIndex")
+                .gte(JExpr.lit(0))
+                .cand(JExpr.direct("inIndex").lt(JExpr.direct("b2.getRecordCount()")));
+        final JExpression samePartition =
+            JExpr.direct(
+                "isSamePartition(inIndex, incoming, partition.getCurrentRowInPartition(), b2)");
+        cg.getEvalBlock()
+            .directStatement(
+                "inIndex = partition.leadIndex (" + offset + ", b2.getRecordCount());");
+
+        JConditional ifCondition =
+            cg.getEvalBlock()
+                ._if(remaining.lt(JExpr.lit(offset)).cand(indexCondition).cand(samePartition));
         cg.nestEvalBlock(ifCondition._then());
         cg.addExpr(writeInputToLead, BlockCreateMode.MERGE);
         cg.unNestEvalBlock();
@@ -469,7 +478,7 @@ public abstract class WindowFunction {
         final WindowPOP pop,
         boolean frameEndReached,
         boolean partitionEndReached) {
-      return partitionEndReached || numBatchesAvailable > 1;
+      return partitionEndReached;
     }
 
     @Override
@@ -479,7 +488,6 @@ public abstract class WindowFunction {
   }
 
   static class Lag extends WindowFunction {
-    private LogicalExpression writeLagToLag;
     private LogicalExpression writeInputToLag;
     private int offset;
 
@@ -510,8 +518,6 @@ public abstract class WindowFunction {
       final TypedFieldId outputId = batch.getValueVectorId(ne.getRef());
 
       writeInputToLag = new ValueVectorWriteExpression(outputId, input, true);
-      writeLagToLag =
-          new ValueVectorWriteExpression(outputId, new ValueVectorReadExpression(outputId), true);
       offset = offsetExpression(call);
       return true;
     }
@@ -535,19 +541,34 @@ public abstract class WindowFunction {
     @Override
     void generateCode(ClassGenerator<WindowFramer> cg) {
       {
-        // generating lag copyFromInternal
         final GeneratorMapping mapping =
-            GeneratorMapping.create("setupCopyFromInternal", "copyFromInternal", null, null);
+            GeneratorMapping.create("setupCopyFromPastBatch", "copyFromPastBatch", null, null);
         final MappingSet mappingSet = new MappingSet("inIndex", "outIndex", mapping, mapping);
 
         cg.setMappingSet(mappingSet);
         final JExpression currentIndex = JExpr.direct("partition.getCurrentRowInPartition()");
         final JExpression partitionStart = JExpr.direct("partition.getFirstRowInPartition()");
+        final JExpression indexCondition =
+            JExpr.direct("inIndex")
+                .gte(JExpr.lit(0))
+                .cand(JExpr.direct("inIndex").lt(JExpr.direct("incoming.getRecordCount()")));
+        final JExpression samePartition =
+            JExpr.direct(
+                "isSamePartition(inIndex, incoming, partition.getCurrentRowInPartition(), b2)");
         //  (currentIndex - offset) > start of partition, copy value (if exist) from internal holder
+        cg.getEvalBlock()
+            .directStatement(
+                "inIndex = partition.lagIndex (" + offset + ", incoming.getRecordCount());");
         JConditional ifCondition =
-            cg.getEvalBlock()._if(currentIndex.minus(JExpr.lit(offset)).lt(partitionStart));
+            cg.getEvalBlock()
+                ._if(
+                    currentIndex
+                        .minus(JExpr.lit(offset))
+                        .lt(partitionStart)
+                        .cand(indexCondition)
+                        .cand(samePartition));
         cg.nestEvalBlock(ifCondition._then());
-        cg.addExpr(writeLagToLag, BlockCreateMode.MERGE);
+        cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
         cg.unNestEvalBlock();
       }
 
@@ -569,24 +590,6 @@ public abstract class WindowFunction {
         cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
         cg.unNestEvalBlock();
       }
-
-      {
-        final GeneratorMapping mapping =
-            GeneratorMapping.create("setupCopyToNextBatch", "copyToNextBatch", null, null);
-        final MappingSet copyFirstMapping = new MappingSet("inIndex", "outIndex", mapping, mapping);
-        cg.setMappingSet(copyFirstMapping);
-
-        final JExpression remaining = JExpr.direct("partition.getRemaining()");
-        // if remaining rows less than offset we need to copy these values to internal holder
-        // because they will be used for next batch
-        JConditional ifCondition = cg.getEvalBlock()._if(remaining.lt(JExpr.lit(offset)));
-        JBlock jbThen = ifCondition._then().block();
-        jbThen.directStatement("outIndex = (int) (" + offset + "- partition.getRemaining() - 1);");
-
-        cg.nestEvalBlock(ifCondition._then());
-        cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
-        cg.unNestEvalBlock();
-      }
     }
 
     @Override
@@ -602,7 +605,7 @@ public abstract class WindowFunction {
         boolean partitionEndReached) {
       assert numBatchesAvailable > 0
           : "canDoWork() should not be called when numBatchesAvailable == 0";
-      return true;
+      return partitionEndReached;
     }
 
     @Override

@@ -80,7 +80,7 @@ public class ParquetGroupScan extends AbstractGroupScan {
                   try {
                     fullXAttr =
                         LegacyProtobufSerializer.parseFrom(
-                            ParquetDatasetSplitXAttr.PARSER,
+                            ParquetDatasetSplitXAttr.parser(),
                             split.getDatasetSplitInfo().getExtendedProperty());
                   } catch (InvalidProtocolBufferException e) {
                     throw new RuntimeException(

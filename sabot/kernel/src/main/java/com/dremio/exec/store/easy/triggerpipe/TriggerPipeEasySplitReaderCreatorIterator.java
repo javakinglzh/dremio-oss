@@ -16,10 +16,10 @@
 package com.dremio.exec.store.easy.triggerpipe;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.physical.config.copyinto.IngestionProperties;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.SplitReaderCreator;
 import com.dremio.exec.store.easy.EasySplitReaderCreatorIterator;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -95,7 +95,7 @@ public class TriggerPipeEasySplitReaderCreatorIterator extends EasySplitReaderCr
             tablePath,
             columns,
             formatPlugin,
-            ((FileSystemPlugin<?>) this.plugin).getCompressionCodecFactory(),
+            HadoopCompressionCodecFactory.DEFAULT,
             extendedFormatOptions,
             extendedProperty);
     if (splitAndPartitionInfoIterator.hasNext() && ingestionPropertiesIterator.hasNext()) {

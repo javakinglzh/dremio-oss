@@ -24,21 +24,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.dremio.exec.catalog.dataplane.test.ITDataplanePluginTestSetup;
 import java.util.List;
 import org.jetbrains.annotations.NotNull;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 
 public class ITDataplanePluginFunctionBase extends ITDataplanePluginTestSetup {
-
-  @BeforeEach
-  public void beforeEach() {
-    enableVersionedSourceUdf();
-  }
-
-  @AfterEach
-  public void afterEach() {
-    //noinspection resource
-    disableVersionedSourceUdf();
-  }
 
   @NotNull
   protected static List<String> generateFunctionKeyWithFunctionInFolder() {

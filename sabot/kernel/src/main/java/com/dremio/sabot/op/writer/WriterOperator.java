@@ -16,17 +16,28 @@
 
 package com.dremio.sabot.op.writer;
 
+import static com.dremio.exec.planner.physical.WriterPrel.BUCKET_NUMBER_FIELD;
+import static com.dremio.exec.planner.physical.WriterPrel.PARTITION_COMPARATOR_FIELD;
+import static com.dremio.exec.planner.physical.visitor.WriterUpdater.requireSortBeforeWriteForClustering;
+import static com.dremio.exec.store.SystemSchemas.CLUSTERING_INDEX;
+import static com.dremio.exec.store.SystemSchemas.FILE_GROUP_INDEX;
+import static com.dremio.exec.store.SystemSchemas.SEGMENT_COMPARATOR_FIELD;
+import static com.dremio.exec.store.SystemSchemas.SYSTEM_COLUMNS;
 import static com.dremio.exec.store.iceberg.IcebergUtils.isIncrementalRefresh;
 import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.proto.ExecProtos.FragmentHandle;
+import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
+import com.dremio.exec.record.VectorWrapper;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.RecordWriter.OutputEntryListener;
 import com.dremio.exec.store.RecordWriter.WriteStatsListener;
+import com.dremio.exec.store.SystemSchemas.SystemColumnStatistics;
 import com.dremio.exec.store.WritePartition;
 import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
@@ -36,13 +47,18 @@ import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableMap;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarBinaryVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.complex.ListVector;
@@ -81,6 +97,8 @@ public class WriterOperator implements SingleInputOperator {
   private BigIntVector rejectedRecordVector;
   private VarBinaryVector referencedDataFilesVector;
 
+  private VarBinaryVector clusteringIndexVector;
+
   private PartitionWriteManager partitionManager;
 
   private WritePartition partition = null;
@@ -89,6 +107,11 @@ public class WriterOperator implements SingleInputOperator {
 
   private final long writtenRecordLimit;
   private boolean reachedOutputLimit = false;
+  private BigIntVector fileGroupIndexVector;
+
+  private boolean writeAsClustering = false;
+
+  private Long lastFileGroupIndex = null;
 
   public enum Metric implements MetricDef {
     BYTES_WRITTEN, // Number of bytes written to the output file(s)
@@ -113,6 +136,22 @@ public class WriterOperator implements SingleInputOperator {
     this.writtenRecordLimit = options.getRecordLimit();
   }
 
+  private VectorContainer getMaskedContainer(VectorAccessible incoming) {
+    VectorContainer maskedContainer = new VectorContainer();
+    for (VectorWrapper<?> wrapper : incoming) {
+      if (wrapper.getField().getName().equalsIgnoreCase(CLUSTERING_INDEX)
+          || wrapper.getField().getName().equalsIgnoreCase(FILE_GROUP_INDEX)
+          || wrapper.getField().getName().equalsIgnoreCase(SEGMENT_COMPARATOR_FIELD)
+          || wrapper.getField().getName().equalsIgnoreCase(PARTITION_COMPARATOR_FIELD)
+          || wrapper.getField().getName().equalsIgnoreCase(BUCKET_NUMBER_FIELD)) {
+        continue;
+      }
+      maskedContainer.add(wrapper.getValueVector());
+    }
+    maskedContainer.buildSchema();
+    return maskedContainer;
+  }
+
   @Override
   public VectorAccessible setup(VectorAccessible incoming) throws Exception {
     state.is(State.NEEDS_SETUP);
@@ -124,7 +163,36 @@ public class WriterOperator implements SingleInputOperator {
       this.maskedContainer = partitionManager.getMaskedContainer();
       recordWriter.setup(maskedContainer, listener, statsListener);
     } else {
-      recordWriter.setup(incoming, listener, statsListener);
+      if (options.isWriteAsClustering()
+          && (options.getCombineSmallFileOptions() == null
+              || !options.getCombineSmallFileOptions().getIsSmallFileWriter())) {
+        final TypedFieldId fileGroupIndexField =
+            incoming.getValueVectorId(SchemaPath.getSimplePath(FILE_GROUP_INDEX));
+        writeAsClustering = (fileGroupIndexField != null);
+        if (writeAsClustering) {
+          fileGroupIndexVector =
+              incoming
+                  .getValueAccessorById(BigIntVector.class, fileGroupIndexField.getFieldIds())
+                  .getValueVector();
+
+          final TypedFieldId clusteringIndexField =
+              incoming.getValueVectorId(SchemaPath.getSimplePath(CLUSTERING_INDEX));
+          clusteringIndexVector =
+              incoming
+                  .getValueAccessorById(VarBinaryVector.class, clusteringIndexField.getFieldIds())
+                  .getValueVector();
+
+          Map<String, ValueVector> systemColumnStatisticsSource =
+              ImmutableMap.of(CLUSTERING_INDEX, clusteringIndexVector);
+
+          // only add column statistics if the data has been ordered by clustering
+          if (requireSortBeforeWriteForClustering(options)) {
+            statsListener.setup(systemColumnStatisticsSource);
+          }
+        }
+      }
+      this.maskedContainer = getMaskedContainer(incoming);
+      recordWriter.setup(maskedContainer, listener, statsListener);
     }
 
     // Create the RecordWriter.SCHEMA vectors.
@@ -151,8 +219,13 @@ public class WriterOperator implements SingleInputOperator {
   public void consumeData(final int records) throws Exception {
     state.is(State.CAN_CONSUME);
 
+    // always need to keep the masked container in alignment.
+    if (maskedContainer != null) {
+      maskedContainer.setRecordCount(records);
+    }
+
     // no partitions.
-    if (!options.hasPartitions() && !options.hasDistributions()) {
+    if (!options.hasPartitions() && !options.hasDistributions() && !writeAsClustering) {
       if (partition == null) {
         partition = WritePartition.NONE;
         recordWriter.startPartition(partition);
@@ -171,19 +244,31 @@ public class WriterOperator implements SingleInputOperator {
     }
 
     // we're partitioning.
-    // always need to keep the masked container in alignment.
-    maskedContainer.setRecordCount(records);
-
     int pointer = 0;
     int start = 0;
+    if (writeAsClustering) {
+      this.partition = WritePartition.NONE;
+    }
     while (pointer < records) {
-      final WritePartition newPartition = partitionManager.getExistingOrNewPartition(pointer);
-      if (newPartition != partition) {
+      boolean changingValue = false;
+      if (writeAsClustering) {
+        Long currentFileGroupIndex = fileGroupIndexVector.get(pointer);
+        if (lastFileGroupIndex == null || !lastFileGroupIndex.equals(currentFileGroupIndex)) {
+          changingValue = true;
+        }
+        lastFileGroupIndex = currentFileGroupIndex;
+      } else {
+        final WritePartition newPartition = partitionManager.getExistingOrNewPartition(pointer);
+        changingValue = newPartition != partition;
+        this.partition = newPartition;
+      }
+
+      if (changingValue) {
         int length = pointer - start;
         if (length > 0) {
           recordWriter.writeBatch(start, length);
+          updateSystemColumnUpperBounds(pointer - 1);
         }
-        this.partition = newPartition;
         start = pointer;
         recordWriter.startPartition(partition);
         moveToCanProduceStateIfOutputExists();
@@ -193,8 +278,15 @@ public class WriterOperator implements SingleInputOperator {
 
     // write any remaining to existing partition.
     recordWriter.writeBatch(start, pointer - start);
-
+    updateSystemColumnUpperBounds(pointer - 1);
     moveToCanProduceStateIfOutputExists();
+  }
+
+  private void updateSystemColumnUpperBounds(int offset) {
+    if (writeAsClustering) {
+      statsListener.setBatchOffset(offset);
+      statsListener.updateSystemColumnUpperBounds();
+    }
   }
 
   @Override
@@ -400,9 +492,60 @@ public class WriterOperator implements SingleInputOperator {
   }
 
   private class StatsListener implements WriteStatsListener {
+    private Map<String, ValueVector> systemColumnValueSources;
+    private final Map<String, SystemColumnStatistics> systemColumnStatistics = new HashMap<>();
+    private int batchOffset = -1;
+
+    public void setup(Map<String, ValueVector> systemColumnValueSources) {
+      this.systemColumnValueSources = systemColumnValueSources;
+    }
+
     @Override
     public void bytesWritten(long byteCount) {
       stats.addLongStat(Metric.BYTES_WRITTEN, byteCount);
+    }
+
+    private void updateColumnStatsByBatchOffset(boolean isLowerBound) {
+      if (systemColumnValueSources == null) {
+        return;
+      }
+
+      // get system column values by the offset in current batch
+      Preconditions.checkState(batchOffset >= 0);
+      for (Map.Entry<String, ValueVector> entry : systemColumnValueSources.entrySet()) {
+        String systemColumn = entry.getKey();
+        ValueVector valueVector = entry.getValue();
+        Preconditions.checkState(batchOffset < valueVector.getValueCount());
+        Object value = valueVector.getObject(batchOffset);
+        SystemColumnStatistics columnStatistics =
+            systemColumnStatistics.computeIfAbsent(
+                systemColumn, key -> new SystemColumnStatistics(SYSTEM_COLUMNS.get(systemColumn)));
+        if (isLowerBound) {
+          columnStatistics.setLowerBound(value);
+        } else {
+          columnStatistics.setUpperBound(value);
+        }
+      }
+    }
+
+    @Override
+    public void updateSystemColumnLowerBounds() {
+      updateColumnStatsByBatchOffset(true);
+    }
+
+    @Override
+    public void updateSystemColumnUpperBounds() {
+      updateColumnStatsByBatchOffset(false);
+    }
+
+    @Override
+    public List<SystemColumnStatistics> getSystemColumnStatistics() {
+      return systemColumnStatistics.values().stream().collect(Collectors.toList());
+    }
+
+    @Override
+    public void setBatchOffset(int offset) {
+      batchOffset = offset;
     }
   }
 

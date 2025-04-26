@@ -79,12 +79,25 @@
     }
 
     img {
-      max-width: 100% // fit image to wiki width
-;
+      max-width: 100%; // fit image to wiki width
     }
   }
   // -------------------------------------------
   :global {
+    .CodeMirror pre {
+      padding: 0 4px;
+    }
+
+    .CodeMirror-wrap pre {
+      word-wrap: break-word;
+      white-space: pre-wrap;
+      word-break: normal;
+    }
+
+    .EasyMDEContainer {
+      height: 100%;
+    }
+
     .editor-toolbar {
       display: flex;
       align-items: center;
@@ -99,13 +112,20 @@
 
       @size: 24px;
       @icon-size: 12px;
-      a {
+      button {
         width: @size;
+        min-width: @size;
         height: @size;
         border: none;
         font-size: @icon-size;
         &:before {
           line-height: @size;
+        }
+        &:hover,
+        &:focus-visible {
+          i::before {
+            background: var(--icon--hover) !important;
+          }
         }
       }
 
@@ -140,10 +160,6 @@
       .clear-fix-mixin();
     }
 
-    .max-width() {
-      max-width: 800px;
-    }
-
     .CodeMirror,
     .CodeMirror-scroll {
       min-height: 0;
@@ -172,18 +188,11 @@
       pre {
         background: var(--fill--secondary);
       }
-      // need apply max width to all children, not to a preview, as preview is a single div, which is absolutely
-      // positioned above code mirror. If width more tham 800 code mirror become visible, especcially
-      // it's scroll
-      > * {
-        .max-width();
-      }
     }
 
     .CodeMirror-lines {
       // paddding for edit mode
       padding: @vert-padding + 15px @horiz-padding + 15px;
-      .max-width();
     }
 
     // code mirror use a container with class to render a content.

@@ -86,6 +86,19 @@ public class JobResultsStore implements Service {
         .orElse(Arrays.asList(storageName, jobId.getId()));
   }
 
+  public List<String> getOutputTablePath(final JobId jobId, final JobResult jobResult) {
+    Optional<JobResult> jobResultOptional = Optional.ofNullable(jobResult);
+    return jobResultOptional
+        .map(result -> getLastAttempt(result).getOutputTableList())
+        .orElse(Arrays.asList(storageName, jobId.getId()));
+  }
+
+  private Path getJobOutputDir(final JobId jobId, final JobResult jobResult) {
+    List<String> outputTablePath = getOutputTablePath(jobId, jobResult);
+
+    return jobStoreLocation.resolve(Iterables.getLast(outputTablePath));
+  }
+
   /** Helper method to get the job output directory */
   private Path getJobOutputDir(final JobId jobId) {
     List<String> outputTablePath = getOutputTablePath(jobId);
@@ -93,8 +106,14 @@ public class JobResultsStore implements Service {
     return jobStoreLocation.resolve(Iterables.getLast(outputTablePath));
   }
 
-  public boolean cleanup(JobId jobId) {
-    final Path jobOutputDir = getJobOutputDir(jobId);
+  public boolean cleanup(JobId jobId, JobResult jobResult) {
+    Path jobOutputDir = null;
+    try {
+      jobOutputDir = getJobOutputDir(jobId, jobResult);
+    } catch (Exception e) {
+      logger.warn("Could not resolve job output directory for JobId: {}", jobId.getId(), e);
+      return false;
+    }
     try {
       if (doesQueryResultsDirExists(jobOutputDir, jobId)) {
         deleteQueryResults(jobOutputDir, true, jobId);
@@ -103,8 +122,8 @@ public class JobResultsStore implements Service {
         logger.debug("Output dir doesn't exist {}", jobOutputDir);
       }
       return true;
-    } catch (IOException e) {
-      logger.warn("Could not delete job output directory : " + jobOutputDir, e);
+    } catch (Exception e) {
+      logger.warn("Could not delete job output directory : {}", jobOutputDir, e);
       return false;
     }
   }

@@ -15,9 +15,16 @@
  */
 package com.dremio.catalog.exception;
 
-@SuppressWarnings("serial")
+import javax.ws.rs.BadRequestException;
+import javax.ws.rs.WebApplicationException;
+
 public class SourceAlreadyExistsException extends CatalogException {
   public SourceAlreadyExistsException(String message) {
     super(message);
+  }
+
+  @Override
+  public WebApplicationException toRestApiException() {
+    return new BadRequestException(getMessage(), this);
   }
 }

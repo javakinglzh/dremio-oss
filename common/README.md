@@ -2,7 +2,7 @@
 
 ## Modules
 - core
-  - Lightweight utilities that can be safely added as a dependency to any module
+  - Lightweight utilities that can be safely added as a dependency to any module.
 - legacy
   - Previously the only module, but grew too large. We plan to migrate these to appropriately scoped submodules.
 

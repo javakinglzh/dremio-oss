@@ -17,19 +17,12 @@ import { createSelector } from "reselect";
 import Immutable from "immutable";
 import { getExploreState } from "./explore";
 
-const getJobsList = (state) => state.jobs.jobs.get("jobs") || Immutable.List();
 const getDataWithItemsForFiltersMap = (state) =>
   state.jobs.jobs.get("dataForFilter") || Immutable.Map();
-const getImmutableJobList = (state) =>
-  state.jobs.jobs.get("jobList") || Immutable.List();
 const getDataWithItemsForJobListFiltersMap = (state) =>
   state.jobList.jobList.get("dataForFilter") || Immutable.Map();
 const getUpdatedQueryStatuses = (state) =>
   getExploreState(state).view.queryStatuses || []; // TODO TABS: Pass in actual tabId
-
-export const getJobs = createSelector([getJobsList], (jobs) => {
-  return jobs;
-});
 
 export const getDataWithItemsForFilters = createSelector(
   [getDataWithItemsForFiltersMap],
@@ -37,10 +30,6 @@ export const getDataWithItemsForFilters = createSelector(
     return filtersData;
   },
 );
-
-export const getJobList = createSelector([getImmutableJobList], (jobList) => {
-  return jobList;
-});
 
 export const getQueryStatuses = createSelector(
   [getUpdatedQueryStatuses],

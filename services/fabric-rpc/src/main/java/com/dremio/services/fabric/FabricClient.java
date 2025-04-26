@@ -61,7 +61,7 @@ class FabricClient
         eventLoop,
         RpcType.HANDSHAKE,
         FabricHandshake.class,
-        FabricHandshake.PARSER,
+        FabricHandshake.parser(),
         engineFactory,
         Optional.empty());
     this.localIdentity = localIdentity;

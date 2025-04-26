@@ -15,71 +15,52 @@
  */
 package com.dremio.service.nessie;
 
-import static org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToCommitLogEntry;
-import static org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToKeyList;
-import static org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToRepoDescription;
-import static org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.toProto;
-import static org.projectnessie.versioned.persist.adapter.spi.DatabaseAdapterUtil.hashCollisionDetected;
+import static com.dremio.legacy.org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToCommitLogEntry;
+import static com.dremio.legacy.org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToKeyList;
+import static com.dremio.legacy.org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.protoToRepoDescription;
+import static com.dremio.legacy.org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization.toProto;
+import static com.dremio.legacy.org.projectnessie.versioned.persist.adapter.spi.DatabaseAdapterUtil.hashCollisionDetected;
 
-import com.dremio.common.SuppressForbidden;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.KVStore;
-import com.google.common.collect.ImmutableMap;
+import com.dremio.legacy.org.projectnessie.nessie.relocated.protobuf.InvalidProtocolBufferException;
+import com.dremio.legacy.org.projectnessie.versioned.CommitResult;
+import com.dremio.legacy.org.projectnessie.versioned.Hash;
+import com.dremio.legacy.org.projectnessie.versioned.NamedRef;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceConflictException;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceNotFoundException;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.CommitLogEntry;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.CommitParams;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyListEntity;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyListEntry;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.RepoDescription;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.events.AdapterEventConsumer;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapter;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalOperationContext;
+import com.dremio.legacy.org.projectnessie.versioned.persist.serialize.AdapterTypes;
+import com.dremio.legacy.org.projectnessie.versioned.persist.serialize.AdapterTypes.GlobalStateLogEntry;
+import com.dremio.legacy.org.projectnessie.versioned.persist.serialize.AdapterTypes.GlobalStatePointer;
 import com.google.common.collect.Streams;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.Lock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import org.projectnessie.nessie.relocated.protobuf.ByteString;
-import org.projectnessie.nessie.relocated.protobuf.InvalidProtocolBufferException;
-import org.projectnessie.versioned.CommitResult;
-import org.projectnessie.versioned.GetNamedRefsParams;
-import org.projectnessie.versioned.Hash;
-import org.projectnessie.versioned.NamedRef;
-import org.projectnessie.versioned.ReferenceConflictException;
-import org.projectnessie.versioned.ReferenceInfo;
-import org.projectnessie.versioned.ReferenceNotFoundException;
-import org.projectnessie.versioned.persist.adapter.CommitLogEntry;
-import org.projectnessie.versioned.persist.adapter.CommitParams;
-import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
-import org.projectnessie.versioned.persist.adapter.ImmutableCommitLogEntry;
-import org.projectnessie.versioned.persist.adapter.KeyListEntity;
-import org.projectnessie.versioned.persist.adapter.KeyListEntry;
-import org.projectnessie.versioned.persist.adapter.RepoDescription;
-import org.projectnessie.versioned.persist.adapter.RepoMaintenanceParams;
-import org.projectnessie.versioned.persist.adapter.events.AdapterEventConsumer;
-import org.projectnessie.versioned.persist.adapter.serialize.ProtoSerialization;
-import org.projectnessie.versioned.persist.adapter.spi.DatabaseAdapterUtil;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapter;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalOperationContext;
-import org.projectnessie.versioned.persist.serialize.AdapterTypes;
-import org.projectnessie.versioned.persist.serialize.AdapterTypes.GlobalStateLogEntry;
-import org.projectnessie.versioned.persist.serialize.AdapterTypes.GlobalStatePointer;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /** Datastore Database Adapter for Embedded Nessie. */
-@SuppressForbidden // This impl. of a Nessie Database Adapter has to use Nessie's relocated protobuf
-// classes.
 public class DatastoreDatabaseAdapter
     extends NonTransactionalDatabaseAdapter<NonTransactionalDatabaseAdapterConfig> {
 
-  private static final Logger logger = LoggerFactory.getLogger(DatastoreDatabaseAdapter.class);
   private final NessieDatastoreInstance db;
   private final String keyPrefix;
   private final String globalPointerKey;
@@ -680,134 +661,5 @@ public class DatastoreDatabaseAdapter
     } finally {
       lock.unlock();
     }
-  }
-
-  @Override
-  public Map<String, Map<String, String>> repoMaintenance(RepoMaintenanceParams params) {
-    ImmutableMap.Builder<String, Map<String, String>> results = ImmutableMap.builder();
-    results.putAll(super.repoMaintenance(params));
-
-    if (params instanceof EmbeddedRepoMaintenanceParams) {
-      EmbeddedRepoPurgeParams purgeParams =
-          ((EmbeddedRepoMaintenanceParams) params).getEmbeddedRepoPurgeParams();
-      if (purgeParams != null) {
-        results.putAll(embeddedRepoPurge(purgeParams));
-      }
-    }
-
-    return results.build();
-  }
-
-  private Map<String, Map<String, String>> embeddedRepoPurge(EmbeddedRepoPurgeParams params) {
-    try {
-      logger.info("Starting repository maintenance with parameters: {}", params);
-      Map<String, String> purgeResults = purgeKeyLists(params);
-      logger.info("Finished repository maintenance");
-
-      return Collections.singletonMap("purgeKeyLists", purgeResults);
-    } catch (ReferenceNotFoundException e) {
-      throw new IllegalStateException(e);
-    }
-  }
-
-  /**
-   * This method purges older key lists that are referenced in Nessie history, but keeps the most
-   * up-to-date key list. This is necessary to avoid excessive data size growth since the number of
-   * keys in Embedded Nessie is generally so large that individual commits cannot hold the whole key
-   * list.
-   */
-  private Map<String, String> purgeKeyLists(EmbeddedRepoPurgeParams params)
-      throws ReferenceNotFoundException {
-    logger.info("Purging key lists");
-    long startTimeMillis = config.getClock().millis();
-    AtomicInteger totalCommits = new AtomicInteger();
-    AtomicInteger obsoleteKeyListIds = new AtomicInteger();
-    AtomicInteger deletedKeyListIds = new AtomicInteger();
-    AtomicInteger updatedCommits = new AtomicInteger();
-
-    Set<Hash> liveKeyListIds = new HashSet<>();
-
-    // Collect the most recent key list IDs from all branches to protect them from being deleted.
-    // Note: branches may be created by upgrade steps safeguarding against upgrade failures.
-    try (Stream<ReferenceInfo<ByteString>> refs = namedRefs(GetNamedRefsParams.DEFAULT)) {
-      refs.forEach(
-          ref -> {
-            AtomicBoolean keyListFound = new AtomicBoolean();
-            try {
-              try (Stream<CommitLogEntry> log = commitLog(ref.getHash())) {
-                DatabaseAdapterUtil.takeUntilExcludeLast(log, e -> keyListFound.get())
-                    .forEach(
-                        commitLogEntry -> {
-                          if (!commitLogEntry.getKeyListsIds().isEmpty()) {
-                            keyListFound.set(true);
-                            liveKeyListIds.addAll(commitLogEntry.getKeyListsIds());
-                          }
-                        });
-              }
-            } catch (ReferenceNotFoundException e) {
-              throw new IllegalStateException(e);
-            }
-          });
-    }
-
-    // Purge obsolete key lists from the main branch.
-    // Note: Only the main branch is used in Embedded Nessie during regular operation (non-upgrade).
-    ReferenceInfo<ByteString> ref = namedRef("main", GetNamedRefsParams.DEFAULT);
-    AtomicBoolean keyListFound = new AtomicBoolean();
-    try (Stream<CommitLogEntry> log = commitLog(ref.getHash())) {
-      log.forEach(
-          commitLogEntry -> {
-            if (!commitLogEntry.getKeyListsIds().isEmpty()) {
-              // Keep the latest key list, but purge all other key lists
-              if (keyListFound.get()) {
-                // First, remove key list IDs from the commit to maintain logical Nessie data
-                // consistency.
-                // The end result will be the same as if the obsolete key lists were never present.
-                if (!params.dryRun()) {
-                  ImmutableCommitLogEntry updatedCommit =
-                      ImmutableCommitLogEntry.builder()
-                          .from(commitLogEntry)
-                          .keyListsIds(Collections.emptyList())
-                          .build();
-                  // Overwrite commit data at the same key (hash)
-                  db.getCommitLog()
-                      .put(dbKey(updatedCommit.getHash()), toProto(updatedCommit).toByteArray());
-                  updatedCommits.incrementAndGet();
-                }
-
-                // Now, delete obsolete key list entities
-                commitLogEntry
-                    .getKeyListsIds()
-                    .forEach(
-                        keyListId -> {
-                          if (!liveKeyListIds.contains(keyListId)) {
-                            obsoleteKeyListIds.incrementAndGet();
-
-                            if (!params.dryRun()) {
-                              db.getKeyList()
-                                  .delete(dbKey(keyListId), KVStore.DeleteOption.NO_META);
-                              deletedKeyListIds.incrementAndGet();
-                              params.progressReporter().onKeyListEntityDeleted(keyListId);
-                            }
-                          }
-                        });
-              } else {
-                keyListFound.set(true);
-              }
-            }
-
-            totalCommits.incrementAndGet();
-            params.progressReporter().onCommitProcessed(commitLogEntry.getHash());
-          });
-    }
-
-    return ImmutableMap.<String, String>builder()
-        .put("processedCommits", "" + totalCommits.get())
-        .put("updatedCommits", "" + updatedCommits.get())
-        .put("obsoleteKeyListEntities", "" + obsoleteKeyListIds.get())
-        .put("liveKeyListEntities", "" + liveKeyListIds.size())
-        .put("deletedKeyListEntities", "" + deletedKeyListIds.get())
-        .put("duration", Duration.ofMillis(config.getClock().millis() - startTimeMillis).toString())
-        .build();
   }
 }

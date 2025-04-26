@@ -34,6 +34,7 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.query.SqlToPlanHandler;
 import com.dremio.exec.proto.ExecProtos.ServerPreparedStatementState;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.work.foreman.ExecutionPlan;
 import com.dremio.reflection.hints.ReflectionExplanationsAndQueryDistance;
@@ -126,6 +127,7 @@ public abstract class HandlerToPreparePlanBase<T> implements CommandRunner<T> {
                 context.getQueryId(),
                 context.getQueryUserName(),
                 context.getQueryRequiresGroupsInfo(),
+                context.getSession().getQueryLabel(),
                 sql,
                 plan,
                 recording);
@@ -204,6 +206,11 @@ public abstract class HandlerToPreparePlanBase<T> implements CommandRunner<T> {
     }
 
     @Override
+    public void planStepLogging(String phaseName, String text, long millisTaken) {
+      calls.add(observer -> observer.planStepLogging(phaseName, text, millisTaken));
+    }
+
+    @Override
     public void planSerializable(final RelNode plan) {
       calls.add(observer -> observer.planSerializable(plan));
     }
@@ -228,6 +235,11 @@ public abstract class HandlerToPreparePlanBase<T> implements CommandRunner<T> {
     }
 
     @Override
+    public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+      calls.add(observer -> observer.planConsidered(profile, target));
+    }
+
+    @Override
     public void planSubstituted(
         final DremioMaterialization materialization,
         final List<RelWithInfo> substitutions,
@@ -246,8 +258,9 @@ public abstract class HandlerToPreparePlanBase<T> implements CommandRunner<T> {
     }
 
     @Override
-    public void planText(final String text, final long millisTaken) {
-      calls.add(observer -> observer.planText(text, millisTaken));
+    public void planFinalPhysical(
+        final String text, final long millisTaken, List<PlannerPhaseRulesStats> stats) {
+      calls.add(observer -> observer.planFinalPhysical(text, millisTaken, stats));
     }
 
     @Override
@@ -298,11 +311,6 @@ public abstract class HandlerToPreparePlanBase<T> implements CommandRunner<T> {
     @Override
     public void restoreAccelerationProfileFromCachedPlan(AccelerationProfile accelerationProfile) {
       calls.add(observer -> observer.restoreAccelerationProfileFromCachedPlan(accelerationProfile));
-    }
-
-    @Override
-    public void planCacheUsed(int count) {
-      calls.add(observer -> observer.planCacheUsed(count));
     }
 
     @Override

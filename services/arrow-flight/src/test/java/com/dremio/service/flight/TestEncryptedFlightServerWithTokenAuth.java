@@ -21,7 +21,7 @@ import org.junit.BeforeClass;
 /** Test encrypted Flight Server with bearer token authentication. */
 public class TestEncryptedFlightServerWithTokenAuth extends AbstractTestEncryptedFlightServer {
   @BeforeClass
-  public static void setup() throws Exception {
+  public static void setupDefaultTestCluster() throws Exception {
     setupBaseFlightQueryTest(
         true,
         true,

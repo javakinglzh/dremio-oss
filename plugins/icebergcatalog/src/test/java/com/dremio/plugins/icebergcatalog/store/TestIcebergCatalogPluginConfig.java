@@ -15,15 +15,13 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
-import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_ENABLED;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 
 import com.dremio.BaseTestQuery;
-import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.store.dfs.CacheProperties;
-import org.apache.hadoop.conf.Configuration;
+import javax.inject.Provider;
 import org.junit.Test;
 
 public class TestIcebergCatalogPluginConfig extends BaseTestQuery {
@@ -33,28 +31,16 @@ public class TestIcebergCatalogPluginConfig extends BaseTestQuery {
     public TestAbstractIcebergCatalogPluginConfig() {}
 
     @Override
-    public CatalogAccessor createCatalog(Configuration config, SabotContext context) {
+    public IcebergCatalogPlugin newPlugin(
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
   }
 
   private final TestAbstractIcebergCatalogPluginConfig testAbstractIcebergCatalogPluginConfig =
       new TestAbstractIcebergCatalogPluginConfig();
-
-  @Test
-  public void testIcebergCatalogPluginConfigShouldPass() throws Exception {
-    try (AutoCloseable ignored = withSystemOption(RESTCATALOG_PLUGIN_ENABLED, true)) {
-      testAbstractIcebergCatalogPluginConfig.validateOnStart(getSabotContext());
-    }
-  }
-
-  @Test
-  public void testIcebergCatalogPluginConfigShouldThrowException() {
-    assertThatThrownBy(
-            () -> testAbstractIcebergCatalogPluginConfig.validateOnStart(getSabotContext()))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("Iceberg Catalog Source is not supported.");
-  }
 
   @Test
   public void testGetCacheProperties() {

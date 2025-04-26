@@ -26,13 +26,13 @@ import com.dremio.datastore.RemoteKVStoreProvider;
 import com.dremio.datastore.TracingKVStoreProvider;
 import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
-import com.dremio.exec.server.BootStrapContext;
 import com.dremio.services.fabric.api.FabricService;
 import io.opentracing.Tracer;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
 import javax.inject.Provider;
+import org.apache.arrow.memory.BufferAllocator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -51,18 +51,21 @@ public class KVStoreProviderHelper {
 
   public static KVStoreProvider newKVStoreProvider(
       DACConfig dacConfig,
-      BootStrapContext bootstrap,
+      ScanResult classpathScan,
+      BufferAllocator allocator,
       Provider<FabricService> fabricService,
       Provider<NodeEndpoint> endPoint,
       Tracer tracer) {
 
     return new TracingKVStoreProvider(
-        internalKVStoreProvider(dacConfig, bootstrap, fabricService, endPoint), tracer);
+        internalKVStoreProvider(dacConfig, classpathScan, allocator, fabricService, endPoint),
+        tracer);
   }
 
   private static KVStoreProvider internalKVStoreProvider(
       DACConfig dacConfig,
-      BootStrapContext bootstrap,
+      ScanResult classpathScan,
+      BufferAllocator allocator,
       Provider<FabricService> fabricService,
       Provider<NodeEndpoint> endPoint) {
     DremioConfig dremioConfig = dacConfig.getConfig();
@@ -72,8 +75,7 @@ public class KVStoreProviderHelper {
     // instantiate NoopKVStoreProvider on all non-coordinator nodes.
     boolean isCoordinator = dremioConfig.getBoolean(DremioConfig.ENABLE_COORDINATOR_BOOL);
     if (!isCoordinator) {
-      return new NoopKVStoreProvider(
-          bootstrap.getClasspathScan(), fabricService, endPoint, bootstrap.getAllocator(), config);
+      return new NoopKVStoreProvider(classpathScan, fabricService, endPoint, allocator, config);
     }
 
     // Configure the default KVStore
@@ -100,7 +102,7 @@ public class KVStoreProviderHelper {
     switch (datastoreType) {
       case DEFAULT_DB:
         config.put(LocalKVStoreProvider.CONFIG_HOSTNAME, thisNode);
-        // fall through to TEST_CLUSTER_DB
+      // fall through to TEST_CLUSTER_DB
       case TEST_CLUSTER_DB:
         boolean isMasterless = dremioConfig.isMasterlessEnabled();
         boolean isMaster =
@@ -141,11 +143,6 @@ public class KVStoreProviderHelper {
     }
 
     return KVStoreProvider.newInstance(
-        cls,
-        bootstrap.getClasspathScan(),
-        fabricService,
-        endPoint,
-        bootstrap.getAllocator(),
-        config);
+        cls, classpathScan, fabricService, endPoint, allocator, config);
   }
 }

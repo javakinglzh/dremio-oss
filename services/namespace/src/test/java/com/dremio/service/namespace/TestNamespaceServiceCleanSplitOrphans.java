@@ -249,7 +249,6 @@ public class TestNamespaceServiceCleanSplitOrphans {
             .setId(new EntityId().setId(UUID.randomUUID().toString()))
             .setName(name)
             .setType("test")
-            .setCtime(100L)
             .setAccelerationRefreshPeriod(REFRESH_PERIOD_MS)
             .setAccelerationGracePeriod(GRACE_PERIOD_MS)
             .setMetadataPolicy(

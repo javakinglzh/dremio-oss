@@ -17,6 +17,7 @@ package com.dremio.service.reflection.refresh;
 
 import com.dremio.exec.store.CatalogService;
 import com.dremio.service.reflection.ReflectionSettings;
+import com.dremio.service.reflection.descriptor.DescriptorHelper;
 import com.dremio.service.reflection.store.DependenciesStore;
 import com.dremio.service.reflection.store.MaterializationStore;
 
@@ -32,4 +33,6 @@ public interface RefreshHelper {
   CatalogService getCatalogService();
 
   DependenciesStore getDependenciesStore();
+
+  DescriptorHelper getDescriptorHelper();
 }

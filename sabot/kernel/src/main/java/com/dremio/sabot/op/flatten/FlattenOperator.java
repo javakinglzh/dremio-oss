@@ -307,7 +307,12 @@ public class FlattenOperator implements SingleInputOperator {
         incoming.getValueAccessorById(vectorClass, fieldId.getFieldIds()).getValueVector();
 
     final ValueVector vvIn = RepeatedValueVector.class.cast(flattenField).getDataVector();
-    return vvIn.getTransferPair(outputName.getAsNamePart().getName(), context.getAllocator());
+    return vvIn.getTransferPair(
+        new Field(
+            outputName.getAsNamePart().getName(),
+            vvIn.getField().getFieldType(),
+            vvIn.getField().getChildren()),
+        context.getAllocator());
   }
 
   private List<NamedExpression> getExpressionList() {

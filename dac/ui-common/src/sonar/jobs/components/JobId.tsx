@@ -15,7 +15,7 @@
  */
 /* eslint-disable react/prop-types */
 import { FC } from "react";
-import { Job } from "@dremio/dremio-js/interfaces";
+import type { Job } from "@dremio/dremio-js/oss";
 import * as jobPaths from "../../../paths/jobs";
 import { getSonarContext } from "../../../contexts/SonarContext";
 import { CopyButton, Tooltip } from "dremio-ui-lib/components";

@@ -54,30 +54,15 @@ public class SortPrel extends SortRelBase implements Prel {
 
   /** Creates a SortRel with offset and fetch. */
   private SortPrel(
-      RelOptCluster cluster,
-      RelTraitSet traits,
-      RelNode input,
-      RelCollation collation,
-      RexNode offset,
-      RexNode fetch) {
-    super(cluster, traits, input, collation, offset, fetch);
+      RelOptCluster cluster, RelTraitSet traits, RelNode input, RelCollation collation) {
+    super(cluster, traits, input, collation);
   }
 
   public static SortPrel create(
       RelOptCluster cluster, RelTraitSet traits, RelNode input, RelCollation collation) {
-    return create(cluster, traits, input, collation, null, null);
-  }
-
-  public static SortPrel create(
-      RelOptCluster cluster,
-      RelTraitSet traits,
-      RelNode input,
-      RelCollation collation,
-      RexNode offset,
-      RexNode fetch) {
     final RelTraitSet adjustedTraits = adjustTraits(traits, collation);
     // TODO: should distribution be adjusted too to match input?
-    return new SortPrel(cluster, adjustedTraits, input, collation, offset, fetch);
+    return new SortPrel(cluster, adjustedTraits, input, collation);
   }
 
   @Override

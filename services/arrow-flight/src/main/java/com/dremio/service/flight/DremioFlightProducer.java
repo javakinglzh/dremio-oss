@@ -16,6 +16,7 @@
 
 package com.dremio.service.flight;
 
+import static com.dremio.service.flight.AbstractSessionServiceFlightManager.SESSION_ID_KEY;
 import static com.dremio.service.flight.utils.DremioFlightSqlInfoUtils.getNewSqlInfoBuilder;
 import static com.google.protobuf.Any.pack;
 import static org.apache.arrow.flight.sql.impl.FlightSql.ActionClosePreparedStatementRequest;
@@ -40,22 +41,37 @@ import static org.apache.arrow.flight.sql.impl.FlightSql.TicketStatementQuery;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.context.RequestContext;
 import com.dremio.context.TenantContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.work.protector.UserWorker;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.rpc.user.ChangeTrackingUserSession;
+import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.flight.error.mapping.DremioFlightErrorMapper;
 import com.dremio.service.flight.impl.FlightPreparedStatement;
 import com.dremio.service.flight.impl.FlightWorkManager;
 import com.dremio.service.flight.impl.FlightWorkManager.RunQueryResponseHandlerFactory;
+import com.dremio.service.flight.utils.DremioFlightPreparedStatementUtils;
+import com.dremio.service.users.User;
+import com.dremio.service.users.UserNotFoundException;
+import com.dremio.service.users.UserService;
+import com.dremio.service.users.proto.UID;
 import com.dremio.service.usersessions.UserSessionService;
+import com.dremio.service.usersessions.UserSessionService.UserSessionData;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
+import io.grpc.Status;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import javax.inject.Provider;
@@ -63,19 +79,29 @@ import org.apache.arrow.flight.Action;
 import org.apache.arrow.flight.ActionType;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.CallStatus;
+import org.apache.arrow.flight.CloseSessionResult;
 import org.apache.arrow.flight.Criteria;
+import org.apache.arrow.flight.DremioToFlightSessionOptionValueConverter;
+import org.apache.arrow.flight.FlightConstants;
 import org.apache.arrow.flight.FlightDescriptor;
 import org.apache.arrow.flight.FlightEndpoint;
 import org.apache.arrow.flight.FlightInfo;
 import org.apache.arrow.flight.FlightRuntimeException;
 import org.apache.arrow.flight.FlightStream;
+import org.apache.arrow.flight.GetSessionOptionsResult;
 import org.apache.arrow.flight.Location;
 import org.apache.arrow.flight.PutResult;
 import org.apache.arrow.flight.Result;
 import org.apache.arrow.flight.SchemaResult;
+import org.apache.arrow.flight.SessionOptionValueToProtocolVisitor;
+import org.apache.arrow.flight.SetSessionOptionsRequest;
+import org.apache.arrow.flight.SetSessionOptionsResult;
 import org.apache.arrow.flight.Ticket;
+import org.apache.arrow.flight.impl.Flight;
 import org.apache.arrow.flight.sql.FlightSqlProducer;
 import org.apache.arrow.flight.sql.FlightSqlUtils;
+import org.apache.arrow.flight.sql.impl.FlightSql;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.VectorSchemaRoot;
 import org.apache.arrow.vector.types.pojo.Schema;
@@ -94,6 +120,7 @@ public class DremioFlightProducer implements FlightSqlProducer {
   private final DremioFlightSessionsManager sessionsManager;
   private final BufferAllocator allocator;
   private final Provider<FlightRequestContextDecorator> requestContextDecorator;
+  private final Provider<UserService> userServiceProvider;
 
   public DremioFlightProducer(
       Optional<Location> location,
@@ -102,11 +129,13 @@ public class DremioFlightProducer implements FlightSqlProducer {
       Provider<OptionManager> optionManagerProvider,
       BufferAllocator allocator,
       Provider<FlightRequestContextDecorator> requestContextDecorator,
-      RunQueryResponseHandlerFactory runQueryResponseHandlerFactory) {
+      RunQueryResponseHandlerFactory runQueryResponseHandlerFactory,
+      Provider<UserService> userServiceProvider) {
     this.location = location;
     this.sessionsManager = sessionsManager;
     this.allocator = allocator;
     this.requestContextDecorator = requestContextDecorator;
+    this.userServiceProvider = userServiceProvider;
 
     flightWorkManager =
         new FlightWorkManager(
@@ -163,7 +192,11 @@ public class DremioFlightProducer implements FlightSqlProducer {
           UserProtos.PreparedStatementArrow.parseFrom(
               commandPreparedStatementQuery.getPreparedStatementHandle());
 
-      runPreparedStatement(callContext, serverStreamListener, preparedStatement.getServerHandle());
+      runPreparedStatement(
+          callContext,
+          serverStreamListener,
+          preparedStatement.getServerHandle(),
+          preparedStatement.getParametersList());
     } catch (InvalidProtocolBufferException e) {
       final FlightRuntimeException ex =
           CallStatus.INVALID_ARGUMENT
@@ -284,10 +317,206 @@ public class DremioFlightProducer implements FlightSqlProducer {
             return null;
           }
 
-          throw CallStatus.UNIMPLEMENTED
-              .withDescription("doAction is not implemented.")
-              .toRuntimeException();
+          logger.debug("DremioFlightProducer.doAction checking action type");
+          try {
+            if (action.getType().equals(FlightConstants.SET_SESSION_OPTIONS.getType())) {
+              logger.debug("DremioFlightProducer.doAction action type set-session-option");
+              final SetSessionOptionsRequest request =
+                  SetSessionOptionsRequest.deserialize(ByteBuffer.wrap(action.getBody()));
+              doActionSetSessionOption(request, callContext, streamListener);
+              return null;
+            }
+            if (action.getType().equals(FlightConstants.GET_SESSION_OPTIONS.getType())) {
+              logger.debug("DremioFlightProducer.doAction action type get-session-option");
+              doActionGetSessionOptions(callContext, streamListener);
+              return null;
+            } else if (action.getType().equals(FlightConstants.CLOSE_SESSION.getType())) {
+              logger.debug("DremioFlightProducer.doAction action type close-session");
+              doActionCloseSession(callContext, streamListener);
+              return null;
+            }
+          } catch (RuntimeException e) {
+            streamListener.onError(e);
+            throw (e);
+          }
+
+          logger.error("Invalid action type {}", action.getType());
+          final RuntimeException exception =
+              Status.UNIMPLEMENTED
+                  .withDescription(
+                      String.format("doAction action: %s is not implemented.", action.getType()))
+                  .asRuntimeException();
+          streamListener.onError(exception);
+          throw exception;
         });
+  }
+
+  private void doActionSetSessionOption(
+      SetSessionOptionsRequest request,
+      CallContext callContext,
+      StreamListener<Result> streamListener) {
+    final CallHeaders incomingHeaders = retrieveHeadersFromCallContext(callContext);
+    final UserSessionService.UserSessionData oldUserSessionData =
+        sessionsManager.getUserSession(callContext.peerIdentity(), incomingHeaders);
+    final Map<String, SessionOptionValue> sessionOptionsValueMap = new HashMap<>();
+
+    if (oldUserSessionData != null) {
+      sessionOptionsValueMap.putAll(oldUserSessionData.getSession().getSessionOptionsMap());
+    }
+
+    final Map<String, SetSessionOptionsResult.Error> errors =
+        addSessionOptions(request.getSessionOptions(), sessionOptionsValueMap);
+
+    // Do not create UserSession if errors in Session Options
+    if (errors.isEmpty()) {
+      if (oldUserSessionData != null) {
+        doActionUpdateSession(oldUserSessionData, sessionOptionsValueMap);
+      } else {
+        doActionCreateSession(callContext, incomingHeaders, sessionOptionsValueMap);
+      }
+    }
+    streamListener.onNext(new Result(new SetSessionOptionsResult(errors).serialize().array()));
+    streamListener.onCompleted();
+    logger.debug("DremioFlightProducer.doActionSetSessionOption success");
+  }
+
+  private void doActionGetSessionOptions(
+      CallContext callContext, StreamListener<Result> streamListener) {
+    final CallHeaders incomingHeaders = retrieveHeadersFromCallContext(callContext);
+    UserSessionService.UserSessionData existingUserSessionData =
+        sessionsManager.getUserSession(callContext.peerIdentity(), incomingHeaders);
+
+    if (existingUserSessionData == null) {
+      doActionCreateSession(callContext, incomingHeaders, new HashMap<>());
+      // Re-fetch the session data in case default session options were set
+      existingUserSessionData =
+          sessionsManager.getUserSession(callContext.peerIdentity(), incomingHeaders);
+    }
+    final Map<String, org.apache.arrow.flight.SessionOptionValue> sessionOptions =
+        DremioToFlightSessionOptionValueConverter.convert(
+            existingUserSessionData.getSession().getSessionOptionsMap());
+
+    streamListener.onNext(
+        new Result(new GetSessionOptionsResult(sessionOptions).serialize().array()));
+    streamListener.onCompleted();
+    logger.debug("DremioFlightProducer.doActionGetSessionOption success");
+  }
+
+  private void doActionUpdateSession(
+      UserSessionService.UserSessionData oldUserSessionData,
+      Map<String, SessionOptionValue> sessionOptionsValueMap) {
+    final UserSession oldUserSession = oldUserSessionData.getSession();
+    final UserSession.Builder newUserSessionBuilder;
+    newUserSessionBuilder = UserSession.Builder.newBuilderWithCopy(oldUserSession);
+    newUserSessionBuilder.withSessionOptions(sessionOptionsValueMap);
+    UserSession newUserSession = newUserSessionBuilder.build();
+    UserSessionService.UserSessionData updatedUserSessionData =
+        new UserSessionService.UserSessionData(
+            newUserSession, oldUserSessionData.getVersion(), oldUserSessionData.getSessionId());
+    logger.debug("DremioFlightProducer updateSession {}", oldUserSessionData.getSessionId());
+    sessionsManager.updateSession(updatedUserSessionData);
+  }
+
+  private void doActionCreateSession(
+      CallContext callContext,
+      CallHeaders incomingHeaders,
+      Map<String, SessionOptionValue> sessionOptionsValueMap) {
+    try {
+      logger.debug("DremioFlightProducer createUserSession");
+      UserSessionService.UserSessionData sessionData =
+          sessionsManager.createUserSession(
+              callContext.peerIdentity(), incomingHeaders, Optional.of(sessionOptionsValueMap));
+      sessionsManager.decorateResponse(callContext, sessionData);
+    } catch (Exception e) {
+      final String errorDescription = "Unable to create user session";
+      logger.error(errorDescription, e);
+      throw CallStatus.INTERNAL.withCause(e).withDescription(errorDescription).toRuntimeException();
+    }
+  }
+
+  private Map<String, SetSessionOptionsResult.Error> addSessionOptions(
+      Map<String, org.apache.arrow.flight.SessionOptionValue> sessionOptionsToAdd,
+      Map<String, com.dremio.sabot.rpc.user.SessionOptionValue> sessionOptionsValueMap) {
+    Map<String, SetSessionOptionsResult.Error> errors = new HashMap<>();
+
+    for (Map.Entry<String, org.apache.arrow.flight.SessionOptionValue> entry :
+        sessionOptionsToAdd.entrySet()) {
+      final String key = entry.getKey();
+      final Flight.SessionOptionValue value =
+          SessionOptionValueToProtocolVisitor.toProtocol(entry.getValue());
+      final Flight.SessionOptionValue.OptionValueCase valueCase = value.getOptionValueCase();
+      switch (valueCase) {
+        case STRING_VALUE:
+          logger.debug(
+              "ProxyFlightProducer.doActionSetSessionOption setting str option: {} {}",
+              key,
+              value.getStringValue());
+          sessionOptionsValueMap.put(
+              key,
+              com.dremio.sabot.rpc.user.SessionOptionValue.Builder.newBuilder()
+                  .setStringValue(value.getStringValue())
+                  .build());
+          break;
+        case BOOL_VALUE:
+          sessionOptionsValueMap.put(
+              key,
+              com.dremio.sabot.rpc.user.SessionOptionValue.Builder.newBuilder()
+                  .setBoolValue(value.getBoolValue())
+                  .build());
+          break;
+        case INT64_VALUE:
+          sessionOptionsValueMap.put(
+              key,
+              com.dremio.sabot.rpc.user.SessionOptionValue.Builder.newBuilder()
+                  .setInt64Value(value.getInt64Value())
+                  .build());
+          break;
+        case DOUBLE_VALUE:
+          sessionOptionsValueMap.put(
+              key,
+              com.dremio.sabot.rpc.user.SessionOptionValue.Builder.newBuilder()
+                  .setDoubleValue(value.getDoubleValue())
+                  .build());
+          break;
+        case STRING_LIST_VALUE:
+          sessionOptionsValueMap.put(
+              key,
+              com.dremio.sabot.rpc.user.SessionOptionValue.Builder.newBuilder()
+                  .setStringListValue(value.getStringListValueOrBuilder().getValuesList())
+                  .build());
+          break;
+        default:
+          final String errorDescription =
+              String.format(
+                  "OptionValueCase %d is not valid", value.getOptionValueCase().getNumber());
+          logger.error(errorDescription);
+          errors.put(
+              entry.getKey(),
+              new SetSessionOptionsResult.Error(SetSessionOptionsResult.ErrorValue.INVALID_VALUE));
+      }
+    }
+    return errors;
+  }
+
+  private void doActionCloseSession(
+      CallContext callContext, StreamListener<Result> streamListener) {
+    final CallHeaders incomingHeaders = retrieveHeadersFromCallContext(callContext);
+    UserSessionService.UserSessionData sessionData =
+        sessionsManager.getUserSession(callContext.peerIdentity(), incomingHeaders);
+
+    if (sessionData == null) {
+      final String errorDescription =
+          String.format(
+              "User session %s does not exist",
+              CookieUtils.getCookieValue(incomingHeaders, SESSION_ID_KEY));
+      logger.error(errorDescription);
+      throw CallStatus.NOT_FOUND.withDescription(errorDescription).toRuntimeException();
+    }
+    sessionsManager.closeSession(callContext, sessionData);
+    final Result result =
+        new Result(new CloseSessionResult(CloseSessionResult.Status.CLOSED).serialize().array());
+    streamListener.onNext(result);
+    streamListener.onCompleted();
   }
 
   @Override
@@ -346,6 +575,7 @@ public class DremioFlightProducer implements FlightSqlProducer {
           actionClosePreparedStatementRequest.getPreparedStatementHandle());
 
     } catch (InvalidProtocolBufferException e) {
+      logger.error("Invalid PreparedStatementHandle used in closePreparedStatement.");
       final FlightRuntimeException ex =
           CallStatus.INVALID_ARGUMENT
               .withDescription("Invalid PreparedStatementHandle used in closePreparedStatement.")
@@ -439,9 +669,43 @@ public class DremioFlightProducer implements FlightSqlProducer {
       CallContext callContext,
       FlightStream flightStream,
       StreamListener<PutResult> streamListener) {
-    throw CallStatus.UNIMPLEMENTED
-        .withDescription("PreparedStatement with parameter binding not supported.")
-        .toRuntimeException();
+    return () -> {
+      try {
+        final UserProtos.PreparedStatementArrow.Builder handle =
+            UserProtos.PreparedStatementArrow.newBuilder()
+                .mergeFrom(commandPreparedStatementQuery.getPreparedStatementHandle());
+
+        List<UserProtos.PreparedStatementParameterValue> parameterList = new ArrayList<>();
+        while (flightStream.next() && flightStream.hasRoot()) {
+          final VectorSchemaRoot parameters = flightStream.getRoot();
+          parameterList.addAll(DremioFlightPreparedStatementUtils.convertParameters(parameters));
+        }
+        handle.addAllParameters(parameterList);
+
+        final FlightSql.DoPutPreparedStatementResult result =
+            FlightSql.DoPutPreparedStatementResult.newBuilder()
+                .setPreparedStatementHandle(handle.build().toByteString())
+                .build();
+
+        try (final ArrowBuf buffer = allocator.buffer(result.getSerializedSize())) {
+          buffer.writeBytes(result.toByteArray());
+          streamListener.onNext(PutResult.metadata(buffer));
+          streamListener.onCompleted();
+        }
+      } catch (InvalidProtocolBufferException e) {
+        final FlightRuntimeException ex =
+            CallStatus.INVALID_ARGUMENT
+                .withCause(e)
+                .withDescription(
+                    "Invalid PreparedStatementHandle used in acceptPutPreparedStatementQuery.")
+                .toRuntimeException();
+        streamListener.onError(ex);
+        throw ex;
+      } catch (RuntimeException e) {
+        streamListener.onError(e);
+        throw e;
+      }
+    };
   }
 
   @Override
@@ -717,7 +981,12 @@ public class DremioFlightProducer implements FlightSqlProducer {
   /// acceptPut(), listActions(), doAction().
   private <V> V runWithRequestContext(CallContext context, Callable<V> callable) {
     try {
-      return requestContextDecorator.get().apply(RequestContext.current(), context).call(callable);
+      final UserSessionService.UserSessionData sessionData = getUserSessionData(context);
+      RequestContext requestContext = populateUserContextInCurrentRequestContext(sessionData);
+      return requestContextDecorator
+          .get()
+          .apply(requestContext, context, sessionData)
+          .call(callable);
     } catch (Exception ex) {
       // Flight request handlers cannot throw any checked exceptions. So propagate RuntimeExceptions
       // and convert
@@ -732,10 +1001,35 @@ public class DremioFlightProducer implements FlightSqlProducer {
     }
   }
 
+  @VisibleForTesting
+  RequestContext populateUserContextInCurrentRequestContext(UserSessionData sessionData) {
+    RequestContext requestContext = RequestContext.current();
+    if (sessionData.getSession() != null && sessionData.getSession().getCredentials() != null) {
+      String userName = sessionData.getSession().getCredentials().getUserName();
+      try {
+        User user = userServiceProvider.get().getUser(userName);
+        UID uid = user.getUID();
+        requestContext = requestContext.with(UserContext.CTX_KEY, UserContext.of(uid.getId()));
+      } catch (UserNotFoundException e) {
+        throw new RuntimeException(e);
+      }
+    }
+    return requestContext;
+  }
+
   private void runPreparedStatement(
       CallContext callContext,
       ServerStreamListener serverStreamListener,
       UserProtos.PreparedStatementHandle preparedStatementHandle) {
+    runPreparedStatement(
+        callContext, serverStreamListener, preparedStatementHandle, ImmutableList.of());
+  }
+
+  private void runPreparedStatement(
+      CallContext callContext,
+      ServerStreamListener serverStreamListener,
+      UserProtos.PreparedStatementHandle preparedStatementHandle,
+      List<UserProtos.PreparedStatementParameterValue> preparedStatementParameters) {
     final UserSessionService.UserSessionData sessionData = getUserSessionData(callContext);
     final ChangeTrackingUserSession userSession =
         ChangeTrackingUserSession.Builder.newBuilder()
@@ -744,6 +1038,7 @@ public class DremioFlightProducer implements FlightSqlProducer {
 
     flightWorkManager.runPreparedStatement(
         preparedStatementHandle,
+        preparedStatementParameters,
         serverStreamListener,
         allocator,
         userSession,
@@ -783,7 +1078,8 @@ public class DremioFlightProducer implements FlightSqlProducer {
     if (sessionData == null) {
       try {
         sessionData =
-            sessionsManager.createUserSession(callContext.peerIdentity(), incomingHeaders);
+            sessionsManager.createUserSession(
+                callContext.peerIdentity(), incomingHeaders, Optional.empty());
         sessionsManager.decorateResponse(callContext, sessionData);
       } catch (Exception e) {
         final String errorDescription = "Unable to create user session";

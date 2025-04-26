@@ -146,7 +146,14 @@ public class TestIcebergManifests extends BaseTestQuery {
       tableFolder.mkdir();
 
       FileSystemPlugin fileSystemPlugin = BaseTestQuery.getMockedFileSystemPlugin();
-      IcebergHadoopModel icebergHadoopModel = new IcebergHadoopModel(fileSystemPlugin);
+      IcebergHadoopModel icebergHadoopModel =
+          new IcebergHadoopModel(
+              "",
+              fileSystemPlugin.getFsConfCopy(),
+              fileSystemPlugin.createIcebergFileIO(
+                  fileSystemPlugin.getSystemUserFS(), null, null, null, null),
+              null,
+              null);
       when(fileSystemPlugin.getIcebergModel()).thenReturn(icebergHadoopModel);
       SchemaConverter schemaConverter =
           SchemaConverter.getBuilder().setTableName(tableName).build();

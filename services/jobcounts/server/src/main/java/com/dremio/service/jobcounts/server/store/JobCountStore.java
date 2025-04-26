@@ -25,7 +25,11 @@ public interface JobCountStore extends Service {
 
   int getCount(String id, JobCountType type, int jobCountAgeInDays);
 
+  int getCountForDay(String id, JobCountType type, int day);
+
   List<Integer> getCounts(List<String> ids, JobCountType type, int jobCountAgeInDays);
+
+  List<Integer> getCountsDaily(String id, JobCountType type, int jobCountAgeInDays);
 
   default void updateCount(String id, JobCountType type) {
     updateCount(id, type, System.currentTimeMillis());

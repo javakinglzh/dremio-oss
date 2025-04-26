@@ -24,16 +24,24 @@ import static com.dremio.service.namespace.proto.NameSpaceContainer.Type.SOURCE;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static java.util.Collections.singletonList;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityForbiddenException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogException;
+import com.dremio.catalog.exception.CatalogFolderNotEmptyException;
+import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.CatalogFolder;
+import com.dremio.catalog.model.ImmutableCatalogFolder;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.dac.api.CatalogItem;
 import com.dremio.dac.api.Source;
-import com.dremio.dac.explore.DatasetResourceUtils;
-import com.dremio.dac.explore.model.VersionContextReq;
 import com.dremio.dac.explore.model.VersionContextUtils;
 import com.dremio.dac.model.common.NamespacePath;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
+import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.resourcetree.ResourceTreeEntity;
@@ -52,20 +60,20 @@ import com.dremio.dac.service.datasets.DatasetVersionMutator;
 import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.errors.PhysicalDatasetNotFoundException;
 import com.dremio.dac.service.errors.ResourceExistsException;
+import com.dremio.dac.service.errors.ResourceForbiddenException;
 import com.dremio.dac.service.errors.SourceFolderNotFoundException;
 import com.dremio.dac.service.errors.SourceNotFoundException;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUser;
-import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.ImmutableVersionedListOptions;
 import com.dremio.exec.catalog.MetadataRequestOptions;
 import com.dremio.exec.catalog.SourceCatalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.store.CatalogService;
-import com.dremio.exec.store.NamespaceAlreadyExistsException;
 import com.dremio.exec.store.NoDefaultBranchException;
 import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.ReferenceTypeConflictException;
@@ -109,13 +117,17 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.jetbrains.annotations.NotNull;
 
 /** Source service. */
 public class SourceService {
@@ -162,11 +174,11 @@ public class SourceService {
     this.collaborationService = collaborationService;
   }
 
-  private Catalog createCatalog() {
+  protected Catalog createCatalog() {
     return createCatalog(null);
   }
 
-  private Catalog createCatalog(String userName) {
+  Catalog createCatalog(String userName) {
     return catalogService.getCatalog(
         MetadataRequestOptions.of(
             SchemaConfig.newBuilder(
@@ -176,40 +188,44 @@ public class SourceService {
                 .build()));
   }
 
-  public ConnectionConf<?, ?> getConnectionConf(SourceConfig config) {
-    return connectionReader.getConnectionConf(config);
-  }
-
-  public ConnectionReader getConnectionReader() {
-    return connectionReader;
-  }
-
-  public SourceConfig registerSourceWithRuntime(SourceUI source)
+  public SourceConfig registerSourceWithRuntime(
+      SourceUI source, SourceRefreshOption sourceRefreshOption)
       throws ExecutionSetupException, NamespaceException {
     return registerSourceWithRuntimeInternal(
-        source.asSourceConfig(), createCatalog(), source.getNamespaceAttributes());
-  }
-
-  public SourceConfig registerSourceWithRuntime(SourceConfig sourceConfig)
-      throws ExecutionSetupException, NamespaceException {
-    return registerSourceWithRuntimeInternal(sourceConfig, createCatalog());
+        source.asSourceConfig(),
+        createCatalog(),
+        sourceRefreshOption,
+        source.getNamespaceAttributes());
   }
 
   public SourceConfig registerSourceWithRuntime(
-      SourceConfig sourceConfig, String userName, NamespaceAttribute... attributes)
+      SourceConfig sourceConfig, SourceRefreshOption sourceRefreshOption)
+      throws ExecutionSetupException, NamespaceException {
+    return registerSourceWithRuntimeInternal(sourceConfig, createCatalog(), sourceRefreshOption);
+  }
+
+  public SourceConfig registerSourceWithRuntime(
+      SourceConfig sourceConfig,
+      String userName,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
       throws NamespaceException {
-    return registerSourceWithRuntimeInternal(sourceConfig, createCatalog(userName), attributes);
+    return registerSourceWithRuntimeInternal(
+        sourceConfig, createCatalog(userName), sourceRefreshOption, attributes);
   }
 
   private SourceConfig registerSourceWithRuntimeInternal(
-      SourceConfig sourceConfig, SourceCatalog sourceCatalog, NamespaceAttribute... attributes)
+      SourceConfig sourceConfig,
+      SourceCatalog sourceCatalog,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
       throws NamespaceException {
-    validateConnectionConf(getConnectionConf(sourceConfig));
+    validateConnectionConf(connectionReader.getConnectionConf(sourceConfig));
 
     if (sourceConfig.getTag() == null) {
-      sourceCatalog.createSource(sourceConfig, attributes);
+      sourceCatalog.createSource(sourceConfig, sourceRefreshOption, attributes);
     } else {
-      sourceCatalog.updateSource(sourceConfig, attributes);
+      sourceCatalog.updateSource(sourceConfig, sourceRefreshOption, attributes);
     }
 
     final NamespaceKey key = new NamespaceKey(sourceConfig.getName());
@@ -225,8 +241,8 @@ public class SourceService {
     final NamespaceKey key = new NamespaceKey(sourceName.getName());
     try {
       SourceConfig config = namespaceService.getSource(key);
-      validateConnectionConf(getConnectionConf(config));
-      createCatalog().deleteSource(config);
+      validateConnectionConf(connectionReader.getConnectionConf(config));
+      createCatalog().deleteSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
       reflectionServiceHelper.getReflectionSettings().removeSettings(key);
     } catch (NamespaceException e) {
       throw Throwables.propagate(e);
@@ -234,10 +250,13 @@ public class SourceService {
   }
 
   @WithSpan
-  public SourceConfig createSource(SourceConfig sourceConfig, NamespaceAttribute... attributes)
+  public SourceConfig createSource(
+      SourceConfig sourceConfig,
+      SourceRefreshOption sourceRefreshOption,
+      NamespaceAttribute... attributes)
       throws ExecutionSetupException, NamespaceException, ResourceExistsException {
     validateSourceConfig(sourceConfig);
-    validateConnectionConf(getConnectionConf(sourceConfig));
+    validateConnectionConf(connectionReader.getConnectionConf(sourceConfig));
 
     Preconditions.checkArgument(
         sourceConfig.getId() == null || Strings.isNullOrEmpty(sourceConfig.getId().getId()),
@@ -251,10 +270,8 @@ public class SourceService {
           String.format("A source with the name [%s] already exists.", sourceConfig.getName()));
     }
 
-    sourceConfig.setCtime(clock.millis());
-    sourceConfig.setLastModifiedAt(sourceConfig.getCtime());
-
-    return registerSourceWithRuntimeInternal(sourceConfig, createCatalog(), attributes);
+    return registerSourceWithRuntimeInternal(
+        sourceConfig, createCatalog(), sourceRefreshOption, attributes);
   }
 
   @WithSpan
@@ -262,7 +279,7 @@ public class SourceService {
       String id, SourceConfig sourceConfig, NamespaceAttribute... attributes)
       throws NamespaceException, SourceNotFoundException {
     validateSourceConfig(sourceConfig);
-    validateConnectionConf(getConnectionConf(sourceConfig));
+    validateConnectionConf(connectionReader.getConnectionConf(sourceConfig));
 
     SourceConfig oldSourceConfig = getById(id);
 
@@ -278,17 +295,16 @@ public class SourceService {
             || sourceConfig.getCtime().equals(oldSourceConfig.getCtime()),
         "Creation time is immutable.");
 
-    // The caller is not expected to set creation time when updating, ensure it's the same.
-    sourceConfig.setCtime(oldSourceConfig.getCtime());
-    sourceConfig.setLastModifiedAt(clock.millis());
-
-    return registerSourceWithRuntimeInternal(sourceConfig, createCatalog(), attributes);
+    return registerSourceWithRuntimeInternal(
+        sourceConfig,
+        createCatalog(),
+        SourceRefreshOption.BACKGROUND_DATASETS_CREATION,
+        attributes);
   }
 
-  public void deleteSource(SourceConfig sourceConfig) {
+  public void deleteSource(SourceConfig sourceConfig, SourceRefreshOption sourceRefreshOption) {
     validateSourceConfig(sourceConfig);
-
-    createCatalog().deleteSource(sourceConfig);
+    createCatalog().deleteSource(sourceConfig, sourceRefreshOption);
     reflectionServiceHelper
         .getReflectionSettings()
         .removeSettings(new NamespaceKey(sourceConfig.getName()));
@@ -374,14 +390,30 @@ public class SourceService {
     return FileFormat.getForFile(config);
   }
 
-  protected void addFolderToNamespaceTree(
+  protected void addFolderToNamespaceTreeForFileSystemPlugin(
       NamespaceTree ns, SourceFolderPath path, FolderConfig folderConfig)
       throws NamespaceNotFoundException {
-    Folder folder = Folder.newInstance(path, folderConfig, null, null, false, true, 0);
+    String id = folderConfig.getId() == null ? path.toUrlPath() : folderConfig.getId().getId();
+    FolderModel folder =
+        new FolderModel(
+            id,
+            folderConfig.getName(),
+            path.toUrlPath(),
+            folderConfig.getIsPhysicalDataset(),
+            true,
+            false,
+            folderConfig.getExtendedConfig(),
+            folderConfig.getTag(),
+            null,
+            null,
+            null,
+            0,
+            folderConfig.getStorageUri(),
+            folderConfig.getTag());
     ns.addFolder(folder);
   }
 
-  protected void addFolderTableToNamespaceTree(
+  protected void addFolderTableToNamespaceTreeForFileSystemPlugin(
       NamespaceTree ns,
       SourceFolderPath folderPath,
       FolderConfig folderConfig,
@@ -389,8 +421,24 @@ public class SourceService {
       boolean isQueryable,
       int jobCount)
       throws NamespaceNotFoundException {
-    final Folder folder =
-        Folder.newInstance(folderPath, folderConfig, fileFormat, null, isQueryable, true, jobCount);
+    String id =
+        folderConfig.getId() == null ? folderPath.toUrlPath() : folderConfig.getId().getId();
+    FolderModel folder =
+        new FolderModel(
+            id,
+            folderConfig.getName(),
+            folderPath.toUrlPath(),
+            folderConfig.getIsPhysicalDataset(),
+            true,
+            isQueryable,
+            folderConfig.getExtendedConfig(),
+            folderConfig.getTag(),
+            fileFormat,
+            null,
+            null,
+            jobCount,
+            folderConfig.getStorageUri(),
+            folderConfig.getTag());
     ns.addFolder(folder);
   }
 
@@ -404,8 +452,8 @@ public class SourceService {
     ns.addPhysicalDataset(new PhysicalDataset(path, name, datasetConfig, jobsCount, null));
   }
 
-  private void addToNamespaceTree(
-      NamespaceTree ns, List<SchemaEntity> entities, SourceName sourceName, String prefix)
+  private void addToNamespaceTreeForFileSystemPlugin(
+      NamespaceTree ns, List<SchemaEntity> entities, String prefix)
       throws IOException, PhysicalDatasetNotFoundException, NamespaceException {
     for (SchemaEntity entity : entities) {
       switch (entity.getType()) {
@@ -417,7 +465,7 @@ public class SourceService {
             folderConfig.setFullPathList(path.toPathList());
             folderConfig.setName(path.getFolderName().getName());
             folderConfig.setTag("0");
-            addFolderToNamespaceTree(ns, path, folderConfig);
+            addFolderToNamespaceTreeForFileSystemPlugin(ns, path, folderConfig);
           }
           break;
 
@@ -455,8 +503,9 @@ public class SourceService {
 
             // TODO(Amit H): Should we ignore exceptions from getFilesystemPhysicalDataset?
             // Dataset could be marked as deleted by the time we come here.
+            // TODO: DX-101924 - Investigate why PHYSICAL_DATASET_HOME_FOLDER is being used here.
             final PhysicalDatasetConfig physicalDatasetConfig =
-                getFilesystemPhysicalDataset(folderPath);
+                getFilesystemPhysicalDataset(folderPath, DatasetType.PHYSICAL_DATASET_HOME_FOLDER);
             final FileConfig fileConfig = physicalDatasetConfig.getFormatSettings();
             fileConfig.setOwner(entity.getOwner());
 
@@ -469,7 +518,7 @@ public class SourceService {
             folderConfig.setTag(physicalDatasetConfig.getTag());
             fileConfig.setTag(physicalDatasetConfig.getTag());
 
-            addFolderTableToNamespaceTree(
+            addFolderTableToNamespaceTreeForFileSystemPlugin(
                 ns,
                 folderPath,
                 folderConfig,
@@ -547,10 +596,9 @@ public class SourceService {
         namespaceTree.setIsFileSystemSource(true);
         namespaceTree.setIsImpersonationEnabled(
             ((FileSystemPlugin<?>) plugin).getConfig().isImpersonationEnabled());
-        addToNamespaceTree(
+        addToNamespaceTreeForFileSystemPlugin(
             namespaceTree,
             ((FileSystemPlugin<?>) plugin).list(sourceKey.getPathComponents(), userName),
-            sourceName,
             sourceName.getName());
         fillInTags(namespaceTree);
       } else {
@@ -561,19 +609,11 @@ public class SourceService {
       Span.current()
           .setAttribute(LIST_SOURCE_TOTAL_COUNT_SPAN_ATTRIBUTE_NAME, namespaceTree.totalCount());
       return namespaceTree;
-    } catch (IOException | DatasetNotFoundException e) {
+    } catch (IOException e) {
       throw new RuntimeException(e);
+    } catch (DatasetNotFoundException e) {
+      throw new NotFoundException(e);
     }
-  }
-
-  public NamespaceTree listSource(
-      SourceName sourceName,
-      SourceConfig sourceConfig,
-      String userName,
-      @Nullable String pageToken,
-      int maxResults)
-      throws NamespaceException {
-    return listSource(sourceName, sourceConfig, userName, null, null, pageToken, maxResults, false);
   }
 
   /**
@@ -583,7 +623,7 @@ public class SourceService {
    * @param folderPath folder path
    * @return folder properties
    */
-  public Folder getFolder(
+  public FolderModel getFolder(
       SourceName sourceName,
       SourceFolderPath folderPath,
       boolean includeContents,
@@ -602,38 +642,6 @@ public class SourceService {
     final boolean isFileSystemPlugin = (plugin instanceof FileSystemPlugin);
     Span.current().setAttribute(IS_FILE_SYSTEM_PLUGIN_SPAN_ATTRIBUTE_NAME, isFileSystemPlugin);
 
-    FolderConfig folderConfig;
-    if (isFileSystemPlugin) {
-      // this could be a physical dataset folder
-      DatasetConfig datasetConfig;
-      try {
-        datasetConfig = namespaceService.getDataset(folderPath.toNamespaceKey());
-        if (datasetConfig.getType() != DatasetType.VIRTUAL_DATASET) {
-          folderConfig =
-              new FolderConfig()
-                  .setId(datasetConfig.getId())
-                  .setFullPathList(folderPath.toPathList())
-                  .setName(folderPath.getFolderName().getName())
-                  .setIsPhysicalDataset(true)
-                  .setTag(datasetConfig.getTag());
-        } else {
-          throw new SourceFolderNotFoundException(
-              sourceName,
-              folderPath,
-              new IllegalArgumentException(folderPath.toString() + " is a virtual dataset"));
-        }
-      } catch (NamespaceNotFoundException nfe) {
-        // folder on filesystem
-        folderConfig =
-            new FolderConfig()
-                .setFullPathList(folderPath.toPathList())
-                .setName(folderPath.getFolderName().getName());
-      }
-    } else {
-      folderConfig = namespaceService.getFolder(folderPath.toNamespaceKey());
-    }
-
-    // TODO: why do we need to look up the dataset again in isPhysicalDataset?
     NamespaceTree contents =
         includeContents
             ? listFolder(
@@ -646,111 +654,246 @@ public class SourceService {
                 Integer.MAX_VALUE,
                 includeUDFChildren)
             : null;
-    String versionedDatasetId = getVersionedDatasetId(folderPath, refType, refValue);
-    if (versionedDatasetId != null) {
-      folderConfig.setId(new EntityId(versionedDatasetId));
-    }
+
     return newFolder(
         folderPath,
-        folderConfig,
+        getFolderConfig(sourceName, folderPath, refType, refValue),
         contents,
         isPhysicalDataset(sourceName, folderPath),
-        isFileSystemPlugin);
+        isFileSystemPlugin,
+        plugin,
+        refType,
+        refValue);
+  }
+
+  private FolderConfig getFolderConfig(
+      SourceName sourceName, SourceFolderPath folderPath, String refType, String refValue)
+      throws SourceFolderNotFoundException, NamespaceException, PhysicalDatasetNotFoundException {
+    final StoragePlugin plugin = catalogService.getSource(sourceName.getName());
+    if (plugin == null) {
+      throw new SourceFolderNotFoundException(sourceName, folderPath, null);
+    }
+    final boolean isFileSystemPlugin = plugin instanceof FileSystemPlugin;
+    Span.current().setAttribute(IS_FILE_SYSTEM_PLUGIN_SPAN_ATTRIBUTE_NAME, isFileSystemPlugin);
+    FolderConfig folderConfig;
+    if (!isFileSystemPlugin) {
+      folderConfig = namespaceService.getFolder(folderPath.toNamespaceKey());
+    } else {
+      folderConfig = getFolderConfigForFileSystemPlugin(sourceName, folderPath);
+    }
+    checkPluginState(sourceName.getName(), plugin);
+    if (!plugin.isWrapperFor(VersionedPlugin.class)) {
+      return folderConfig;
+    }
+    return getFolderConfigForVersionedPlugin(sourceName, folderPath, refType, refValue, plugin);
+  }
+
+  private FolderConfig getFolderConfigForVersionedPlugin(
+      SourceName sourceName,
+      SourceFolderPath folderPath,
+      String refType,
+      String refValue,
+      StoragePlugin plugin) {
+    FolderConfig folderConfig;
+    final VersionContext version = getVersionContext(refType, refValue);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(version))
+            .build();
+    folderConfig =
+        plugin
+            .unwrap(VersionedPlugin.class)
+            .getFolder(folderKey)
+            .orElseThrow(() -> new SourceFolderNotFoundException(sourceName, folderPath, null));
+    return folderConfig;
+  }
+
+  private @NotNull FolderConfig getFolderConfigForFileSystemPlugin(
+      SourceName sourceName, SourceFolderPath folderPath) {
+    FolderConfig folderConfig;
+    // this could be a physical dataset folder
+    DatasetConfig datasetConfig;
+    try {
+      datasetConfig = namespaceService.getDataset(folderPath.toNamespaceKey());
+      if (datasetConfig.getType() != DatasetType.VIRTUAL_DATASET) {
+        folderConfig =
+            new FolderConfig()
+                .setId(datasetConfig.getId())
+                .setFullPathList(folderPath.toPathList())
+                .setName(folderPath.getFolderName().getName())
+                .setIsPhysicalDataset(true)
+                .setTag(datasetConfig.getTag());
+      } else {
+        throw new SourceFolderNotFoundException(
+            sourceName,
+            folderPath,
+            new IllegalArgumentException(folderPath + " is a virtual dataset"));
+      }
+    } catch (NamespaceNotFoundException nfe) {
+      // folder on filesystem
+      folderConfig =
+          new FolderConfig()
+              .setFullPathList(folderPath.toPathList())
+              .setName(folderPath.getFolderName().getName());
+    }
+    return folderConfig;
   }
 
   public void deleteFolder(SourceFolderPath folderPath, String refType, String refValue) {
-    final StoragePlugin plugin =
-        checkNotNull(
-            catalogService.getSource(folderPath.getSourceName().getName()),
-            "storage plugin %s not found",
-            folderPath.getSourceName());
-    final boolean isVersionedPlugin = plugin.isWrapperFor(VersionedPlugin.class);
-    Span.current().setAttribute(IS_VERSIONED_PLUGIN_SPAN_ATTRIBUTE_NAME, isVersionedPlugin);
-    if (isVersionedPlugin) {
-      final VersionContext version = VersionContextUtils.parse(refType, refValue);
-      deleteFolderForVersionedPlugin(folderPath, plugin.unwrap(VersionedPlugin.class), version);
-    } else {
-      throw new UnsupportedOperationException("Deleting a folder in a source is not supported.");
+    final VersionContext versionContext = VersionContextUtils.parse(refType, refValue);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    try {
+      createCatalog().deleteFolder(folderKey, null);
+    } catch (CatalogEntityNotFoundException e) {
+      throw UserException.validationError()
+          .message("Folder %s does not exist.", folderPath)
+          .buildSilently();
+    } catch (CatalogFolderNotEmptyException e) {
+      throw UserException.validationError()
+          .message("Folder %s contains items within the folder and cannot be deleted.", folderPath)
+          .buildSilently();
+    } catch (CatalogException e) {
+      throw e.toRestApiException();
     }
   }
 
-  public void deleteFolderForVersionedPlugin(
-      SourceFolderPath folderPath, VersionedPlugin plugin, VersionContext version) {
-    plugin.deleteFolder(folderPath.toNamespaceKey(), version);
-  }
-
-  public Folder createFolder(
+  public Optional<FolderModel> createFolder(
       SourceName sourceName,
       SourceFolderPath folderPath,
       String userName,
       String refType,
-      String refValue) {
-    final StoragePlugin plugin =
-        checkNotNull(
-            catalogService.getSource(sourceName.getName()),
-            "storage plugin %s not found",
-            sourceName);
-    final boolean isVersionedPlugin = plugin.isWrapperFor(VersionedPlugin.class);
-    Span.current().setAttribute(IS_VERSIONED_PLUGIN_SPAN_ATTRIBUTE_NAME, isVersionedPlugin);
-
-    if (!isVersionedPlugin) {
-      throw new UnsupportedOperationException("Creating folder is not supported");
-    }
-
-    final VersionContext version = getVersionContext(refType, refValue);
-    FolderConfig folderConfig = getFolderConfig(folderPath);
-
+      String refValue,
+      String storageUri) {
+    final VersionContext versionContext = getVersionContext(refType, refValue);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    CatalogFolder inputCatalogFolder =
+        new ImmutableCatalogFolder.Builder()
+            .setFullPath(folderKey.getKeyComponents())
+            .setVersionContext(versionContext)
+            .setStorageUri(storageUri)
+            .build();
     try {
-      plugin.unwrap(VersionedPlugin.class).createNamespace(folderPath.toNamespaceKey(), version);
-      String id = setFolderIdForVersionedSources(folderPath, refType, refValue);
-      return Folder.newInstance(sourceName, folderConfig, id);
-    } catch (NamespaceAlreadyExistsException e) {
-      throw UserException.validationError(e)
-          .message(
-              "Unable to create folder %s on source %s. An object already exists with that name.",
-              folderPath.getPathWithoutRoot().toPathString(), sourceName.getName())
-          .buildSilently();
-    } catch (ReferenceNotFoundException e) {
-      throw UserException.validationError(e)
-          .message("Requested %s not found on source %s.", version, sourceName.getName())
-          .buildSilently();
-    } catch (NoDefaultBranchException e) {
-      throw UserException.validationError(e)
-          .message(
-              "Unable to resolve source version. Version was not specified and Source %s does not"
-                  + " have a default branch set.",
-              sourceName.getName())
-          .buildSilently();
-    } catch (ReferenceTypeConflictException e) {
-      throw UserException.validationError(e)
-          .message(
-              "Requested %s in source %s is not the requested type.", version, sourceName.getName())
-          .buildSilently();
+      Optional<CatalogFolder> returnedCatalogFolder =
+          createCatalog().createFolder(inputCatalogFolder);
+      if (returnedCatalogFolder.isEmpty()) {
+        throw new RuntimeException(String.format("Failed to create folder %s.", folderPath));
+      }
+      return Optional.of(
+          new FolderModel(
+              (returnedCatalogFolder.get().id() == null)
+                  ? UUID.randomUUID().toString()
+                  : returnedCatalogFolder.get().id(),
+              folderPath.getFolderName().getName(),
+              new FolderPath(returnedCatalogFolder.get().fullPath()).toUrlPath(),
+              false,
+              false,
+              false,
+              null,
+              null,
+              null,
+              new NamespaceTree(),
+              List.of(),
+              0,
+              returnedCatalogFolder.get().storageUri(),
+              returnedCatalogFolder.get().tag()));
+    } catch (CatalogEntityAlreadyExistsException e) {
+      throw new ResourceExistsException(String.format("Folder %s already exists.", folderPath));
+    } catch (CatalogEntityForbiddenException e) {
+      throw new ResourceForbiddenException(e.getMessage());
+    } catch (CatalogException e) {
+      throw e.toRestApiException();
     }
   }
 
-  /**
-   * Fetches the folderId for the Versioned Sources
-   *
-   * @param folderPath
-   * @param refType
-   * @param refValue
-   */
-  String setFolderIdForVersionedSources(
-      SourceFolderPath folderPath, String refType, String refValue) {
-    return getVersionedDatasetId(folderPath, refType, refValue);
+  public Optional<FolderModel> updateFolder(
+      SourceName sourceName,
+      SourceFolderPath folderPath,
+      String refType,
+      String refValue,
+      String storageUri) {
+    final VersionContext versionContext = getVersionContext(refType, refValue);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    CatalogFolder inputCatalogFolder =
+        new ImmutableCatalogFolder.Builder()
+            .setFullPath(folderKey.getKeyComponents())
+            .setVersionContext(versionContext)
+            .setStorageUri(storageUri)
+            .build();
+    try {
+      Optional<CatalogFolder> returnedCatalogFolder =
+          createCatalog().updateFolder(inputCatalogFolder);
+      if (returnedCatalogFolder.isEmpty()) {
+        throw new RuntimeException(String.format("Failed to update folder %s.", folderPath));
+      }
+      return Optional.of(
+          new FolderModel(
+              (returnedCatalogFolder.get().id() == null)
+                  ? UUID.randomUUID().toString()
+                  : returnedCatalogFolder.get().id(),
+              folderPath.getFolderName().getName(),
+              new FolderPath(returnedCatalogFolder.get().fullPath()).toUrlPath(),
+              false,
+              false,
+              false,
+              null,
+              null,
+              null,
+              new NamespaceTree(),
+              List.of(),
+              0,
+              returnedCatalogFolder.get().storageUri(),
+              returnedCatalogFolder.get().tag()));
+    } catch (CatalogEntityNotFoundException e) {
+      throw UserException.validationError()
+          .message("Folder %s does not exist.", folderPath)
+          .buildSilently();
+    } catch (CatalogEntityForbiddenException e) {
+      throw new ResourceForbiddenException(e.getMessage());
+    } catch (CatalogException e) {
+      throw e.toRestApiException();
+    }
   }
 
-  protected Folder newFolder(
+  protected FolderModel newFolder(
       SourceFolderPath folderPath,
       FolderConfig folderConfig,
       NamespaceTree contents,
       boolean isQueryable,
-      boolean isFileSystemPlugin)
+      boolean isFileSystemPlugin,
+      StoragePlugin plugin,
+      String refType,
+      String refValue)
       throws NamespaceNotFoundException {
-    // TODO: why do we need to look up the dataset again in isPhysicalDataset?
-    return Folder.newInstance(
-        folderPath, folderConfig, null, contents, isQueryable, isFileSystemPlugin, 0);
+    String id =
+        folderConfig.getId() == null ? folderPath.toUrlPath() : folderConfig.getId().getId();
+    return new FolderModel(
+        id,
+        folderConfig.getName(),
+        folderPath.toUrlPath(),
+        folderConfig.getIsPhysicalDataset(),
+        isFileSystemPlugin,
+        isQueryable,
+        folderConfig.getExtendedConfig(),
+        folderConfig.getTag(),
+        null,
+        contents,
+        null,
+        0,
+        folderConfig.getStorageUri(),
+        folderConfig.getTag());
   }
 
   protected NamespaceTree newNamespaceTree(
@@ -763,7 +906,7 @@ public class SourceService {
         collaborationService,
         isFileSystemSource,
         isImpersonationEnabled,
-        null);
+        optionManager);
   }
 
   public NamespaceTree listFolder(
@@ -798,10 +941,9 @@ public class SourceService {
         ns.setIsFileSystemSource(true);
         ns.setIsImpersonationEnabled(
             ((FileSystemPlugin<?>) plugin).getConfig().isImpersonationEnabled());
-        addToNamespaceTree(
+        addToNamespaceTreeForFileSystemPlugin(
             ns,
             plugin.unwrap(FileSystemPlugin.class).list(folderPath.toPathList(), userName),
-            sourceName,
             prefix);
 
         fillInTags(ns);
@@ -813,20 +955,11 @@ public class SourceService {
             false,
             false);
       }
-    } catch (IOException | DatasetNotFoundException e) {
+    } catch (IOException e) {
       throw new RuntimeException(e);
+    } catch (DatasetNotFoundException e) {
+      throw new NotFoundException(e);
     }
-  }
-
-  public NamespaceTree listFolder(
-      SourceName sourceName,
-      SourceFolderPath folderPath,
-      String userName,
-      @Nullable String startChildName,
-      int maxResults)
-      throws NamespaceException, IOException {
-    return listFolder(
-        sourceName, folderPath, userName, null, null, startChildName, maxResults, false);
   }
 
   @WithSpan
@@ -874,12 +1007,6 @@ public class SourceService {
     return VersionContextUtils.parse(refType, refValue);
   }
 
-  protected FolderConfig getFolderConfig(SourceFolderPath folderPath) {
-    return new FolderConfig()
-        .setFullPathList(folderPath.toPathList())
-        .setName(folderPath.getFolderName().getName());
-  }
-
   protected ExternalListResponse versionedPluginListEntriesHelper(
       VersionedPlugin plugin,
       NamespaceKey namespaceKey,
@@ -892,12 +1019,18 @@ public class SourceService {
     try {
       if (maxResults == NO_PAGINATION_MAX_RESULTS) {
         return ExternalListResponse.ofStream(
-            plugin.listEntries(namespaceKey.getPathWithoutRoot(), version));
+            plugin.listEntries(
+                namespaceKey.getPathWithoutRoot(),
+                plugin.resolveVersionContext(version),
+                VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY));
       } else {
         return ExternalListResponse.ofVersionedListPage(
             plugin.listEntriesPage(
                 namespaceKey.getPathWithoutRoot(),
-                version,
+                plugin.resolveVersionContext(version),
+                VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY,
                 new ImmutableVersionedListOptions.Builder()
                     .setPageToken(pageToken)
                     .setMaxResultsPerPage(maxResults)
@@ -941,7 +1074,7 @@ public class SourceService {
   }
 
   @Deprecated
-  public FileFormat getDefaultFileFormat(SourceName sourceName, SourceFilePath sourceFilePath) {
+  public FileFormat getDefaultFileFormat(SourceFilePath sourceFilePath) {
     final FileConfig config = new FileConfig();
     config.setCtime(clock.millis());
     config.setFullPathList(sourceFilePath.toPathList());
@@ -959,7 +1092,6 @@ public class SourceService {
    * @param sourceFolderPath path to directory
    * @param user user name
    * @return {@code FileFormat} format settings
-   * @throws IOException on filesystem related errors
    * @throws NamespaceException on invalid namespace operation
    * @throws PhysicalDatasetNotFoundException if file/folder is marked as physical dataset but is
    *     missing from namespace
@@ -967,12 +1099,13 @@ public class SourceService {
   @Deprecated
   public FileFormat getDefaultFileFormat(
       SourceName sourceName, SourceFolderPath sourceFolderPath, String user)
-      throws IOException, NamespaceException, PhysicalDatasetNotFoundException {
+      throws NamespaceException, PhysicalDatasetNotFoundException {
     final FileConfig config = new FileConfig();
     config.setCtime(clock.millis());
     config.setFullPathList(sourceFolderPath.toPathList());
     config.setName(sourceFolderPath.getFolderName().getName());
-    NamespaceTree ns = listFolder(sourceName, sourceFolderPath, user, null, Integer.MAX_VALUE);
+    NamespaceTree ns =
+        listFolder(sourceName, sourceFolderPath, user, null, null, null, Integer.MAX_VALUE, false);
     if (!ns.getFiles().isEmpty()) {
       config.setType(
           FileFormat.getFileFormatType(
@@ -1007,22 +1140,12 @@ public class SourceService {
   }
 
   public PhysicalDatasetConfig getFilesystemPhysicalDataset(NamespacePath path, DatasetType type)
-      throws NamespaceException {
+      throws PhysicalDatasetNotFoundException {
     try {
       return toPhysicalDatasetConfig(namespaceService.getDataset(path.toNamespaceKey()));
     } catch (NamespaceNotFoundException nse) {
       throw new PhysicalDatasetNotFoundException(path, type, nse);
     }
-  }
-
-  public PhysicalDatasetConfig getFilesystemPhysicalDataset(SourceFolderPath path)
-      throws NamespaceException {
-    return getFilesystemPhysicalDataset(path, DatasetType.PHYSICAL_DATASET_HOME_FOLDER);
-  }
-
-  public PhysicalDatasetConfig getFilesystemPhysicalDataset(SourceFilePath path)
-      throws NamespaceException {
-    return getFilesystemPhysicalDataset(path, DatasetType.PHYSICAL_DATASET_HOME_FILE);
   }
 
   // For all tables including filesystem tables.
@@ -1060,7 +1183,7 @@ public class SourceService {
     return new PhysicalDataset(resourcePath, datasetName, datasetConfig, jobsCount, null);
   }
 
-  public boolean isPhysicalDataset(SourceName sourceName, SourceFolderPath folderPath) {
+  private boolean isPhysicalDataset(SourceName sourceName, SourceFolderPath folderPath) {
     try {
       DatasetConfig ds =
           namespaceService.getDataset(new PhysicalDatasetPath(folderPath).toNamespaceKey());
@@ -1100,20 +1223,6 @@ public class SourceService {
     }
   }
 
-  public SourceState getSourceState(String sourceName) {
-    return catalogService.getSourceState(sourceName);
-  }
-
-  @VisibleForTesting
-  public StoragePlugin getStoragePlugin(String sourceName)
-      throws SourceNotFoundException, ExecutionSetupException {
-    StoragePlugin plugin = catalogService.getSource(sourceName);
-    if (plugin == null) {
-      throw new SourceNotFoundException(sourceName);
-    }
-    return plugin;
-  }
-
   @WithSpan
   public List<SourceConfig> getSources() {
     final List<SourceConfig> sources = new ArrayList<>();
@@ -1137,10 +1246,6 @@ public class SourceService {
     }
   }
 
-  public Source fromSourceConfig(SourceConfig sourceConfig) {
-    return fromSourceConfig(sourceConfig, null, null);
-  }
-
   public Source fromSourceConfig(
       SourceConfig sourceConfig, List<CatalogItem> children, @Nullable String nextPageToken) {
     final AccelerationSettings settings =
@@ -1150,18 +1255,10 @@ public class SourceService {
     return new Source(
         sourceConfig,
         settings,
-        getConnectionReader(),
+        connectionReader,
         children,
         nextPageToken,
-        getStateForSource(sourceConfig));
-  }
-
-  public SourceState getStateForSource(SourceConfig sourceConfig) {
-    return getSourceState(sourceConfig.getName());
-  }
-
-  public boolean isSourceConfigMetadataImpacting(SourceConfig sourceConfig) {
-    return catalogService.isSourceConfigMetadataImpacting(sourceConfig);
+        catalogService.getSourceState(sourceConfig.getName()));
   }
 
   /**
@@ -1180,28 +1277,7 @@ public class SourceService {
     }
   }
 
-  private String getVersionedDatasetId(
-      SourceFolderPath folderPath, String refType, String refValue) {
-    final NamespaceKey folderKey = folderPath.toNamespaceKey();
-    return getVersionedDatasetId(folderKey, refType, refValue);
-  }
-
-  private String getVersionedDatasetId(NamespaceKey key, String refType, String refValue) {
-    Catalog catalog = CatalogUtil.getSystemCatalogForDatasetResource(catalogService);
-    if (catalog == null
-        || refType == null
-        || refValue == null
-        || !CatalogUtil.requestedPluginSupportsVersionedTables(key, catalog)) {
-      return null;
-    }
-    final Map<String, VersionContextReq> versionContextMapping =
-        DatasetResourceUtils.createSourceVersionMapping(key.getRoot(), refType, refValue);
-    return (catalog.resolveCatalog(
-            DatasetResourceUtils.createSourceVersionMapping(versionContextMapping)))
-        .getDatasetId(key);
-  }
-
-  public void checkPluginState(String name, StoragePlugin plugin) {
+  protected void checkPluginState(String name, StoragePlugin plugin) {
     if (plugin.getState().getStatus() == SourceState.SourceStatus.bad) {
       String message =
           String.format(

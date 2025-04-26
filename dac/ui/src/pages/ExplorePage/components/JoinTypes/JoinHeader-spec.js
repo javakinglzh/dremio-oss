@@ -47,10 +47,6 @@ describe("JoinHeader", () => {
     expect(wrapper).to.have.length(1);
   });
 
-  it("should render two tabs", () => {
-    expect(wrapper.find(".transform-tab")).to.have.length(2);
-  });
-
   it("#setActiveTab", () => {
     const instance = wrapper.instance();
 

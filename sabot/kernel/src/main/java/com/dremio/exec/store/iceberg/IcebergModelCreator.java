@@ -18,7 +18,7 @@ package com.dremio.exec.store.iceberg;
 import static com.dremio.exec.ExecConstants.ICEBERG_CATALOG_TYPE_KEY;
 import static com.dremio.exec.ExecConstants.ICEBERG_NAMESPACE_KEY;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.iceberg.hadoop.IcebergHadoopModel;
 import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
@@ -37,7 +37,7 @@ public final class IcebergModelCreator {
   // TODO  REFACTOR : Remove last param in this method.
   public static IcebergModel createIcebergModel(
       Configuration configuration,
-      SabotContext sabotContext,
+      PluginSabotContext sabotContext,
       FileIO fileIO,
       OperatorContext operatorContext,
       SupportsIcebergMutablePlugin plugin) {
@@ -54,23 +54,21 @@ public final class IcebergModelCreator {
             sabotContext.getNessieApiProvider(),
             fileIO,
             operatorContext,
-            new DatasetCatalogGrpcClient(sabotContext.getDatasetCatalogBlockingStub().get()),
-            plugin);
+            new DatasetCatalogGrpcClient(sabotContext.getDatasetCatalogBlockingStub().get()));
       case HADOOP:
         return new IcebergHadoopModel(
             namespace,
             configuration,
             fileIO,
             operatorContext,
-            new DatasetCatalogGrpcClient(sabotContext.getDatasetCatalogBlockingStub().get()),
-            plugin);
+            new DatasetCatalogGrpcClient(sabotContext.getDatasetCatalogBlockingStub().get()));
       default:
         throw new UnsupportedOperationException();
     }
   }
 
   public static IcebergCatalogType getIcebergCatalogType(
-      Configuration configuration, SabotContext context) {
+      Configuration configuration, PluginSabotContext context) {
     String icebergCatalogType =
         configuration.get(ICEBERG_CATALOG_TYPE_KEY, IcebergCatalogType.HADOOP.name()).toUpperCase();
     IcebergCatalogType catalogType;

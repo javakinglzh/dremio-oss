@@ -17,7 +17,10 @@ package com.dremio.service.flight;
 
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators;
+import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.service.usersessions.UserSessionService;
+import java.util.Map;
+import java.util.Optional;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.FlightProducer;
 
@@ -46,10 +49,14 @@ public interface DremioFlightSessionsManager extends AutoCloseable {
    * already validated.
    *
    * @param peerIdentity identity after authorization
-   * @param incomingHeaders The CallHeaders to parse client properties from.
+   * @param incomingHeaders The CallHeaders to parse client properties from
+   * @param sessionOptionValueMap optional map of sessions options
+   * @return Attributes associated with a UserSession
    */
   UserSessionService.UserSessionData createUserSession(
-      String peerIdentity, CallHeaders incomingHeaders);
+      String peerIdentity,
+      CallHeaders incomingHeaders,
+      Optional<Map<String, SessionOptionValue>> sessionOptionValueMap);
 
   /**
    * Decorates the response to go back to the client.
@@ -67,4 +74,13 @@ public interface DremioFlightSessionsManager extends AutoCloseable {
    *     and the changed session.
    */
   void updateSession(UserSessionService.UserSessionData updatedSession);
+
+  /**
+   * Decorates the response to go back to the client indicating the Session is expired.
+   *
+   * @param callContext request call context
+   * @param sessionData data for the session
+   */
+  void closeSession(
+      FlightProducer.CallContext callContext, UserSessionService.UserSessionData sessionData);
 }

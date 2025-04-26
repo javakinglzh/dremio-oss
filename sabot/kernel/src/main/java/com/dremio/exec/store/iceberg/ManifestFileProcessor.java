@@ -39,6 +39,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.ContentFile;
@@ -61,9 +62,9 @@ import org.apache.iceberg.io.FilterIterator;
 public class ManifestFileProcessor implements AutoCloseable {
   private final OpProps opProps;
   private final SupportsIcebergRootPointer icebergRootPointerPlugin;
-  private final List<String> dataset;
   private final OperatorContext context;
   private final String datasourcePluginUID;
+  private final List<String> datasetFromFunctionConfig;
   private final OperatorStats operatorStats;
   private final ManifestEntryProcessor manifestEntryProcessor;
   private final Configuration conf;
@@ -85,7 +86,7 @@ public class ManifestFileProcessor implements AutoCloseable {
     Preconditions.checkState(context != null, "Unexpected state");
     this.context = context;
     this.operatorStats = context.getStats();
-    this.dataset = getDataset(functionConfig);
+    this.datasetFromFunctionConfig = getDataset(functionConfig);
     this.datasourcePluginUID = getDatasourcePluginId(functionConfig.getFunctionContext());
     this.manifestEntryProcessor =
         new ManifestEntryProcessorFactory(fec, props, context)
@@ -112,11 +113,18 @@ public class ManifestFileProcessor implements AutoCloseable {
     manifestEntryProcessor.setup(incoming, outgoing);
   }
 
-  public void setupManifestFile(ManifestFile manifestFile, int row) {
-    FileSystem fs = createFs(manifestFile.path(), context, opProps, icebergRootPointerPlugin);
+  public void setupManifestFile(
+      ManifestFile manifestFile, int row, Optional<List<String>> dataset) {
+    FileSystem fs =
+        createFs(
+            manifestFile.path(),
+            context,
+            opProps,
+            icebergRootPointerPlugin,
+            dataset.orElse(datasetFromFunctionConfig));
     Preconditions.checkState(fs != null, "Unexpected state");
 
-    manifestReader = getManifestReader(manifestFile, fs);
+    manifestReader = getManifestReader(manifestFile, fs, dataset.orElse(datasetFromFunctionConfig));
     if (manifestScanFilters.doesIcebergAnyColExpressionExists()) {
       manifestReader.filterRows(manifestScanFilters.getIcebergAnyColExpressionDeserialized());
     }
@@ -139,16 +147,27 @@ public class ManifestFileProcessor implements AutoCloseable {
       return; // Read all files as they belong to an old partition.
     }
 
-    // Skip the data files if they fall within the given range
-    if (manifestScanFilters.doesSkipDataFileSizeRangeExist()) {
+    // data file filters
+    if (manifestScanFilters.doesSkipDataFileSizeRangeExist()
+        || manifestScanFilters.doesSkipDataFileBySequenceFilterExist()) {
       iterator =
           new FilterIterator<ManifestEntryWrapper<?>>(
               (CloseableIterator<ManifestEntryWrapper<?>>) iterator) {
             @Override
             protected boolean shouldKeep(ManifestEntryWrapper<?> dataFile) {
-              return manifestScanFilters
-                  .getSkipDataFileSizeRange()
-                  .isNotInRange(dataFile.file().fileSizeInBytes());
+              // Skip the data files if they fall within the given range
+              if (manifestScanFilters.doesSkipDataFileSizeRangeExist()
+                  && !manifestScanFilters
+                      .getSkipDataFileSizeRange()
+                      .isNotInRange(dataFile.file().fileSizeInBytes())) {
+                return false;
+              }
+
+              // sequence number filters
+              if (manifestScanFilters.doesSkipDataFileBySequenceFilterExist()) {
+                return manifestScanFilters.getSkipDataFileBySequenceFilter().shouldKeep(dataFile);
+              }
+              return true;
             }
           };
     }
@@ -186,16 +205,17 @@ public class ManifestFileProcessor implements AutoCloseable {
 
   @VisibleForTesting
   ManifestReader<? extends ContentFile<?>> getManifestReader(
-      ManifestFile manifestFile, FileSystem fs) {
+      ManifestFile manifestFile, FileSystem fs, List<String> dataset) {
     if (manifestFile.content() == ManifestContent.DATA) {
-      return ManifestFiles.read(manifestFile, getFileIO(manifestFile, fs), partitionSpecMap);
+      return ManifestFiles.read(
+          manifestFile, getFileIO(manifestFile, fs, dataset), partitionSpecMap);
     } else {
       return ManifestFiles.readDeleteManifest(
-          manifestFile, getFileIO(manifestFile, fs), partitionSpecMap);
+          manifestFile, getFileIO(manifestFile, fs, dataset), partitionSpecMap);
     }
   }
 
-  private FileIO getFileIO(ManifestFile manifestFile, FileSystem fs) {
+  private FileIO getFileIO(ManifestFile manifestFile, FileSystem fs, List<String> dataset) {
     return icebergRootPointerPlugin.createIcebergFileIO(
         fs, context, dataset, datasourcePluginUID, manifestFile.length());
   }
@@ -247,9 +267,16 @@ public class ManifestFileProcessor implements AutoCloseable {
       String path,
       OperatorContext context,
       OpProps props,
-      SupportsIcebergRootPointer icebergRootPointerPlugin) {
+      SupportsIcebergRootPointer icebergRootPointerPlugin,
+      List<String> dataset) {
     try {
-      return icebergRootPointerPlugin.createFSWithAsyncOptions(path, props.getUserName(), context);
+      return icebergRootPointerPlugin.createFS(
+          SupportsFsCreation.builder()
+              .withAsyncOptions(true)
+              .filePath(path)
+              .userName(props.getUserName())
+              .operatorContext(context)
+              .dataset(dataset));
     } catch (IOException e) {
       throw UserException.ioExceptionError(e).buildSilently();
     }

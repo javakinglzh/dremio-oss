@@ -34,25 +34,25 @@ public class V1JobHistorySchemaDefinition implements SchemaDefinition {
   protected final long schemaVersion;
 
   public static final ColumnDefinition EXECUTED_AT_COL =
-      new ColumnDefinition("executed_at", 1, Types.TimestampType.withZone(), false, false);
+      new ColumnDefinition("executed_at", 1, Types.TimestampType.withZone(), true, false);
   public static final ColumnDefinition JOB_ID_COL =
-      new ColumnDefinition("job_id", 2, new Types.StringType(), false, false);
+      new ColumnDefinition("job_id", 2, new Types.StringType(), true, false);
   public static final ColumnDefinition TABLE_NAME_COL =
-      new ColumnDefinition("table_name", 3, new Types.StringType(), false, false);
+      new ColumnDefinition("table_name", 3, new Types.StringType(), true, false);
   public static final ColumnDefinition RECORDS_LOADED_COUNT_COL =
-      new ColumnDefinition("records_loaded_count", 4, new Types.LongType(), false, false);
+      new ColumnDefinition("records_loaded_count", 4, new Types.LongType(), true, false);
   public static final ColumnDefinition RECORDS_REJECTED_COUNT_COL =
-      new ColumnDefinition("records_rejected_count", 5, new Types.LongType(), false, false);
+      new ColumnDefinition("records_rejected_count", 5, new Types.LongType(), true, false);
   public static final ColumnDefinition COPY_OPTIONS_COL =
-      new ColumnDefinition("copy_options", 6, new Types.StringType(), false, false);
+      new ColumnDefinition("copy_options", 6, new Types.StringType(), true, false);
   public static final ColumnDefinition USER_NAME_COL =
-      new ColumnDefinition("user_name", 7, new Types.StringType(), false, false);
+      new ColumnDefinition("user_name", 7, new Types.StringType(), true, false);
   public static final ColumnDefinition BASE_SNAPSHOT_ID_COL =
-      new ColumnDefinition("base_snapshot_id", 8, new Types.LongType(), false, false);
+      new ColumnDefinition("base_snapshot_id", 8, new Types.LongType(), true, false);
   public static final ColumnDefinition STORAGE_LOCATION_COL =
-      new ColumnDefinition("storage_location", 9, new Types.StringType(), false, false);
+      new ColumnDefinition("storage_location", 9, new Types.StringType(), true, false);
   public static final ColumnDefinition FILE_FORMAT_COL =
-      new ColumnDefinition("file_format", 10, new Types.StringType(), false, false);
+      new ColumnDefinition("file_format", 10, new Types.StringType(), true, false);
 
   protected List<ColumnDefinition> columns =
       ImmutableList.of(

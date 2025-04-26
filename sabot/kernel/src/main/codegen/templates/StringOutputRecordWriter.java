@@ -43,6 +43,7 @@ import java.io.IOException;
 import java.lang.UnsupportedOperationException;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 
 /**
  * Abstract implementation of RecordWriter interface which exposes interface:
@@ -59,6 +60,7 @@ public abstract class StringOutputRecordWriter extends AbstractRowBasedRecordWri
   private final int maxCellSize;
 
   protected StringOutputRecordWriter(OperatorContext context) {
+    super(context);
     maxCellSize = Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
   }
 
@@ -125,8 +127,14 @@ public abstract class StringOutputRecordWriter extends AbstractRowBasedRecordWri
         minor.class == "BigInt" ||
         minor.class == "UInt8" ||
         minor.class == "Float8">
+    if (isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFixedLengthTypeSize(reader.getMinorType());
+    }
     addField(fieldId, String.valueOf(holder.value));
   <#elseif minor.class == "Bit">
+    if (isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFixedLengthTypeSize(reader.getMinorType());
+    }
     addField(fieldId, holder.value == 0 ? "false" : "true");
   <#elseif
         minor.class == "DateMilli" ||
@@ -135,7 +143,14 @@ public abstract class StringOutputRecordWriter extends AbstractRowBasedRecordWri
         minor.class == "TimeStampMilli" ||
         minor.class == "IntervalYear" ||
         minor.class == "IntervalDay" ||
-        minor.class == "Interval" ||
+        minor.class == "Interval">
+
+    // TODO: error check
+    if (isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFixedLengthTypeSize(reader.getMinorType());
+    }
+    addField(fieldId, reader.readObject().toString());
+  <#elseif
         minor.class == "Decimal" ||
         minor.class == "Decimal18" ||
         minor.class == "Decimal28Dense" ||
@@ -143,11 +158,16 @@ public abstract class StringOutputRecordWriter extends AbstractRowBasedRecordWri
         minor.class == "Decimal28Sparse" ||
         minor.class == "Decimal38Sparse">
 
-    // TODO: error check
+    if (isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = com.dremio.exec.util.RowSizeUtil.getFieldSizeForDecimalType(reader.readBigDecimal());
+    }
     addField(fieldId, reader.readObject().toString());
 
   <#elseif minor.class == "VarChar" || minor.class == "Var16Char" || minor.class == "VarBinary">
     FieldSizeLimitExceptionHelper.checkSizeLimit(holder.end - holder.start, maxCellSize, fieldId, logger);
+    if (isRowSizeLimitCheckEnabled()) {
+      currentFieldSize = holder.end - holder.start;
+    }
     addField(fieldId, reader.readObject().toString());
   <#else>
     throw new UnsupportedOperationException(String.format("Unsupported field type: %s",

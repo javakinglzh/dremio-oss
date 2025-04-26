@@ -120,6 +120,11 @@ public class AccelerationAwareSubstitutionProvider implements SubstitutionProvid
     return delegate.getMatchedReflections();
   }
 
+  @Override
+  public Optional<RelNode> generateHashReplacement(RelNode query) {
+    return delegate.generateHashReplacement(query);
+  }
+
   public static AccelerationAwareSubstitutionProvider of(final SubstitutionProvider delegate) {
     return new AccelerationAwareSubstitutionProvider(delegate);
   }

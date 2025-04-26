@@ -36,7 +36,7 @@ import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.VersionedDatasetHandle;
 import com.dremio.exec.store.iceberg.IcebergViewMetadata;
-import com.dremio.exec.store.iceberg.ViewHandle;
+import com.dremio.exec.store.iceberg.VersionedViewHandle;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
@@ -152,7 +152,7 @@ public class TestVersionedDatasetAdapter {
     when(icebergViewMetadata.getFormatVersion())
         .thenReturn(IcebergViewMetadata.SupportedIcebergViewSpecVersion.V1);
 
-    ViewHandle viewHandle = mock(ViewHandle.class);
+    VersionedViewHandle viewHandle = mock(VersionedViewHandle.class);
     when(viewHandle.getType()).thenReturn(VersionedPlugin.EntityType.ICEBERG_VIEW);
     when(viewHandle.getContentId()).thenReturn(UUID.randomUUID().toString());
     when(viewHandle.getDatasetPath()).thenReturn(new EntityPath(tableKey));

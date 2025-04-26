@@ -31,16 +31,69 @@
   <build>
     <plugins>
       <plugin>
+        <groupId>com.github.eirslett</groupId>
+        <artifactId>frontend-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>install node and npm</id>
+            <goals>
+              <goal>install-node-and-pnpm</goal>
+            </goals>
+            <phase>initialize</phase>
+          </execution>
+          <execution>
+            <id>install dependencies</id>
+            <goals>
+              <goal>pnpm</goal>
+            </goals>
+            <phase>generate-resources</phase>
+            <configuration>
+              <arguments>install --frozen-lockfile --prefer-offline --ignore-scripts</arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <id>prepare</id>
+            <goals>
+              <goal>pnpm</goal>
+            </goals>
+            <phase>compile</phase>
+            <configuration>
+              <arguments>run prepare</arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
         <groupId>com.mycila</groupId>
         <artifactId>license-maven-plugin</artifactId>
         <configuration>
           <licenseSets>
             <licenseSet>
               <includes>
-                <include>**/*.scss</include>
+                <include>components/**/*</include>
+                <include>scss/**/*.scss</include>
               </includes>
             </licenseSet>
           </licenseSets>
+          <mapping>
+            <Makefile>SCRIPT_STYLE</Makefile>
+          </mapping>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-clean-plugin</artifactId>
+        <configuration>
+          <filesets>
+            <fileset>
+              <directory>${project.basedir}</directory>
+              <followSymlinks>false</followSymlinks>
+              <includes>
+                <include>dist/</include>
+                <include>node_modules/</include>
+              </includes>
+            </fileset>
+          </filesets>
         </configuration>
       </plugin>
     </plugins>

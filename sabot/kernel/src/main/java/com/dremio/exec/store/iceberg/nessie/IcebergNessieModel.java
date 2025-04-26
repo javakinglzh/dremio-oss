@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.store.iceberg.nessie;
 
-import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergBaseModel;
 import com.dremio.exec.store.iceberg.model.IcebergCommand;
 import com.dremio.exec.store.iceberg.model.IcebergCommitOrigin;
@@ -34,7 +33,6 @@ public class IcebergNessieModel extends IcebergBaseModel {
 
   private final OptionManager optionManager;
   private final Provider<NessieApiV2> nessieApi;
-  private final SupportsIcebergMutablePlugin plugin;
 
   public IcebergNessieModel(
       OptionManager optionManager,
@@ -43,12 +41,10 @@ public class IcebergNessieModel extends IcebergBaseModel {
       Provider<NessieApiV2> nessieApi,
       FileIO fileIO,
       OperatorContext operatorContext,
-      DatasetCatalogGrpcClient datasetCatalogGrpcClient,
-      SupportsIcebergMutablePlugin plugin) {
-    super(namespace, configuration, fileIO, operatorContext, datasetCatalogGrpcClient, plugin);
+      DatasetCatalogGrpcClient datasetCatalogGrpcClient) {
+    super(namespace, configuration, fileIO, operatorContext, datasetCatalogGrpcClient);
     this.optionManager = optionManager;
     this.nessieApi = nessieApi;
-    this.plugin = plugin;
   }
 
   @Override

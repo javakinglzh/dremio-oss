@@ -146,4 +146,9 @@ public class CopyErrorsPlanBuilder extends CopyIntoTablePlanBuilderBase {
         copyErrorsMetadata.getRowType(),
         DEFAULT_EASY_SCAN_ROW_COUNT_ESTIMATE);
   }
+
+  @Override
+  protected void ensureNoUnsupportedFormatProperties() {
+    // no-op, original query was already checked
+  }
 }

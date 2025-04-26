@@ -132,6 +132,36 @@ public class Dataset implements AddressableResource {
         null);
   }
 
+  public static Dataset newInstance(
+      List<String> entityPath, String id, int jobCount, List<String> tags) {
+
+    final DatasetPath datasetPath = new DatasetPath(entityPath);
+    DatasetName datasetName = new DatasetName(datasetPath.getLeaf().getName());
+
+    // For Source views in external catalog we generate a  random datasetVersion.
+    final DatasetVersion datasetVersion = DatasetVersion.newVersion();
+    final VirtualDatasetUI vds = new VirtualDatasetUI();
+    vds.setFullPathList(datasetPath.toPathList());
+    vds.setName(datasetName.getName());
+    vds.setId((id == null) ? UUID.randomUUID().toString() : id);
+    vds.setVersion(datasetVersion);
+
+    final DatasetResourcePath datasetResourcePath = new DatasetResourcePath(datasetPath);
+    final DatasetVersionResourcePath datasetVersionResourcePath =
+        new DatasetVersionResourcePath(datasetPath, datasetVersion);
+
+    return new Dataset(
+        vds.getId(),
+        datasetResourcePath,
+        datasetVersionResourcePath,
+        datasetName,
+        null, // Unused and not displayed  so no need to pass
+        vds,
+        null, // Unused and not applicable to source views
+        jobCount,
+        tags);
+  }
+
   public int getJobCount() {
     return jobCount;
   }

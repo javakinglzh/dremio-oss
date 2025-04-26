@@ -18,8 +18,8 @@ package com.dremio.exec.store.dfs;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.types.SupportsTypeCoercionsAndUpPromotions;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.SchemaConverter;
@@ -28,6 +28,7 @@ import com.dremio.exec.util.BatchSchemaDiff;
 import com.dremio.exec.util.BatchSchemaDiffer;
 import com.dremio.io.file.Path;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.UserDefinedSchemaSettings;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -54,7 +55,7 @@ public class ColumnOperations extends MetadataOperations {
 
   public ColumnOperations(
       NamespaceKey table,
-      SabotContext context,
+      PluginSabotContext context,
       DatasetConfig datasetConfig,
       SchemaConfig schemaConfig,
       IcebergModel model,
@@ -105,7 +106,9 @@ public class ColumnOperations extends MetadataOperations {
             getUserDefinedSettings()
                 .setDroppedColumns(newDroppedCols.toByteString())
                 .setModifiedColumns(newModifiedCols.toByteString()));
-    save(table, datasetConfig, schemaConfig.getUserName(), context);
+    DatasetNamespaceService userNamespaceService =
+        context.getNamespaceService(schemaConfig.getUserName());
+    updateDatasetInNamespaceService(table, datasetConfig, userNamespaceService);
   }
 
   protected void computeDroppedAndUpdatedColumns(BatchSchema newSchema) {

@@ -27,7 +27,6 @@ import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.VersionedDatasetHandle;
-import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.dremio.service.namespace.proto.EntityId;
@@ -55,7 +54,6 @@ public class MaterializedDatasetTableProvider implements Provider<MaterializedDa
   private final StoragePluginId pluginId;
   private final SchemaConfig schemaConfig;
   private final DatasetRetrievalOptions options;
-  private final OptionManager optionManager;
 
   public MaterializedDatasetTableProvider(
       DatasetConfig currentConfig,
@@ -63,15 +61,13 @@ public class MaterializedDatasetTableProvider implements Provider<MaterializedDa
       StoragePlugin plugin,
       StoragePluginId pluginId,
       SchemaConfig schemaConfig,
-      DatasetRetrievalOptions options,
-      OptionManager optionManager) {
+      DatasetRetrievalOptions options) {
     this.currentConfig = currentConfig;
     this.handle = handle;
     this.plugin = plugin;
     this.pluginId = pluginId;
     this.schemaConfig = schemaConfig;
     this.options = options;
-    this.optionManager = optionManager;
   }
 
   @Override

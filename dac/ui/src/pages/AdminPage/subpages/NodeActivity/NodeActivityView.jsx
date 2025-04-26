@@ -117,11 +117,16 @@ class NodeActivityView extends PureComponent {
     }
     return node.get("status");
   }
-  getStatusTooltip(status) {
+  getStatusTooltip(status, node) {
     switch (status) {
       case "green":
         return intl.formatMessage({ id: "Admin.Engines.Status.Enabled" });
       case "red":
+        if (node.get("status") === "red") {
+          return intl.formatMessage({
+            id: "Admin.Engines.Status.Unresponsive",
+          });
+        }
         return intl.formatMessage({ id: "Admin.Engines.Status.Incompatible" });
       default:
         return "";
@@ -175,7 +180,7 @@ class NodeActivityView extends PureComponent {
       data: {
         [nodeStatus]: {
           node: () => (
-            <Tooltip title={this.getStatusTooltip(status)}>
+            <Tooltip title={this.getStatusTooltip(status, node)}>
               <span>{this.getEngineStatus(node)}</span>
             </Tooltip>
           ),

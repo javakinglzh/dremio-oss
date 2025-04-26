@@ -16,7 +16,7 @@
 package com.dremio.exec.planner.physical;
 
 import com.dremio.exec.ops.OptimizerRulesContext;
-import com.dremio.exec.planner.OptimizePlanGenerator;
+import com.dremio.exec.planner.OptimizePlanGeneratorBase;
 import com.dremio.exec.planner.logical.TableOptimizeRel;
 import com.dremio.exec.store.TableMetadata;
 import org.apache.calcite.plan.RelOptRuleOperand;
@@ -35,8 +35,8 @@ public abstract class TableOptimizePruleBase extends Prule {
 
   public Prel getPhysicalPlan(
       TableOptimizeRel optimizeRel, RelNode input, TableMetadata tableMetadata) {
-    OptimizePlanGenerator planGenerator =
-        new OptimizePlanGenerator(
+    OptimizePlanGeneratorBase planGenerator =
+        context.getOptimizePlanGenerator(
             optimizeRel.getTable(),
             optimizeRel.getCluster(),
             optimizeRel.getTraitSet().plus(Prel.PHYSICAL),

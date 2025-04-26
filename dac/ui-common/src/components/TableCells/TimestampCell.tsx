@@ -18,6 +18,7 @@ import {
   formatDateTimestampShort,
   formatDateTimestampShortNoTZ,
 } from "../../utilities/formatDate";
+import { supportedFormats } from "../DateTime";
 
 type TimestampCellProps = {
   timestamp: Date;
@@ -31,7 +32,13 @@ const CellRenderer = (props: TimestampCellProps & { children: string }) => {
       className="dremio-typography-tabular-numeric"
       style={{ textAlign: "right" }}
     >
-      <time dateTime={props.timestamp.toISOString()}>
+      <time
+        dateTime={props.timestamp.toISOString()}
+        title={Intl.DateTimeFormat(
+          "default",
+          supportedFormats["pretty"],
+        ).format(props.timestamp)}
+      >
         {props.applyFormat ? props.applyFormat(props.children) : props.children}
       </time>
     </div>

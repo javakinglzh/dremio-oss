@@ -14,23 +14,59 @@
  * limitations under the License.
  */
 
-import { memo, type FC } from "react";
-import type { CatalogReference } from "@dremio/dremio-js/interfaces";
-import { ExpandedContextProvider, useTree } from "../Tree";
+import { memo, useState, type FC } from "react";
+import { useSelector } from "react-redux";
+import { useCatalogRoot } from "@inject/exports/providers/useCatalogRoot";
+import { getHomeSource, getSources } from "#oss/selectors/home";
+import {
+  ExpandedContextProvider,
+  FocusContext,
+  useTree,
+  useTreeKeyboardListener,
+} from "../Tree";
 import { CatalogTreeChildren } from "./CatalogTreeChildren";
+import { PathPrefixContext } from "./prefixContext";
 
-export const CatalogTree: FC<{
-  catalogReferences: CatalogReference[];
-}> = memo(function CatalogTree(props) {
+export const CatalogTree: FC<
+  Partial<{ sort: "asc" | "desc"; starsOnly: boolean }>
+> = memo(function CatalogTree(props) {
+  const catalogReferences = useCatalogRoot(props);
+  const [focusedEl, setFocusedEl] = useState<HTMLElement>();
+
+  const { treeRef, onFocus, onBlur } = useTreeKeyboardListener({
+    handleFocus: (el: HTMLElement) => setFocusedEl(el),
+  });
   const treeProps = useTree({
-    childrenIds: props.catalogReferences.map((ref) => ref.id),
+    childrenIds: catalogReferences.map((ref) => ref.id),
   });
 
+  const expandedSource: string | undefined = useSelector((state) =>
+    getHomeSource(getSources(state)),
+  )?.get("id");
+
   return (
-    <ExpandedContextProvider>
-      <div className="tree px-105 pt-05 overflow-y-auto" {...treeProps}>
-        <CatalogTreeChildren catalogReferences={props.catalogReferences} />
-      </div>
+    // @ts-expect-error `split()` expects a separator but accepts undefined
+    <ExpandedContextProvider initialExpansionState={expandedSource?.split()}>
+      <PathPrefixContext.Provider value={null}>
+        <FocusContext.Provider value={focusedEl}>
+          <div
+            ref={(r) => (treeRef.current = r ? r : undefined)}
+            className="tree px-105 pt-05 overflow-y-auto"
+            onFocus={onFocus}
+            onBlur={onBlur}
+            tabIndex={0}
+            {...treeProps}
+          >
+            {props.starsOnly && !catalogReferences.length ? (
+              <p className="flex flex-row items-center justify-center h-10 dremio-typography-large">
+                No entities starred
+              </p>
+            ) : (
+              <CatalogTreeChildren catalogReferences={catalogReferences} />
+            )}
+          </div>
+        </FocusContext.Provider>
+      </PathPrefixContext.Provider>
     </ExpandedContextProvider>
   );
 });

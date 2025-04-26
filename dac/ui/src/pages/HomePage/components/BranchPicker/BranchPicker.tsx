@@ -72,6 +72,7 @@ type BranchPickerProps = {
   getAnchorEl?: () => HTMLElement | undefined;
   position?: any;
   onApply?: (stateKey: string, state: SetReferenceAction["payload"]) => void;
+  tabIndex?: number;
 };
 
 function BranchPicker({
@@ -82,6 +83,7 @@ function BranchPicker({
   getAnchorEl,
   position = defaultPosition,
   onApply = () => {},
+  tabIndex,
 }: BranchPickerProps & ConnectedProps & { router?: any }) {
   const { ref } = useBranchPickerContext();
   const { state, apiV2, stateKey, source } = useNessieContext();
@@ -209,7 +211,7 @@ function BranchPicker({
             toggleProps.onClick(e);
           }
         }}
-        tabIndex={0}
+        tabIndex={tabIndex != null ? tabIndex : 0}
       >
         <BranchPickerTag
           reference={state.reference}
@@ -232,6 +234,7 @@ function BranchPicker({
               onClick={(e) => {
                 e.stopPropagation();
               }}
+              aria-label={`Branch picker popup menu for ${source.name}, reference ${reference?.name}`}
             >
               <DialogContent
                 actions={
@@ -289,16 +292,20 @@ function BranchPicker({
                             label={
                               <div className="branchesView-datePicker">
                                 <FormattedMessage id="BranchPicker.ChooseTime" />
-                                <DatePicker
-                                  ref={pickerRef}
-                                  disabled={formVal !== "date"}
-                                  showTimeSelect
-                                  selected={date}
-                                  onChange={onChooseDate}
-                                  popperPlacement="bottom-start"
-                                  customInput={<SearchField showIcon={false} />}
-                                  dateFormat="M/d/yyyy hh:mm aa"
-                                />
+                                <div aria-hidden={true}>
+                                  <DatePicker
+                                    ref={pickerRef}
+                                    disabled={formVal !== "date"}
+                                    showTimeSelect
+                                    selected={date}
+                                    onChange={onChooseDate}
+                                    popperPlacement="bottom-start"
+                                    customInput={
+                                      <SearchField showIcon={false} />
+                                    }
+                                    dateFormat="M/d/yyyy hh:mm aa"
+                                  />
+                                </div>
                               </div>
                             }
                           />
@@ -311,15 +318,17 @@ function BranchPicker({
                                 <span className="branchesView-commitLabel">
                                   <FormattedMessage id="Common.Commit" />
                                 </span>
-                                <CommitBrowser
-                                  onDataChange={commitListLoaded}
-                                  disabled={formVal !== "commit"}
-                                  key={reference.name}
-                                  branch={reference}
-                                  onClick={setHash}
-                                  selectedHash={hash}
-                                  api={apiV2}
-                                />
+                                <div aria-hidden={true}>
+                                  <CommitBrowser
+                                    onDataChange={commitListLoaded}
+                                    disabled={formVal !== "commit"}
+                                    key={reference.name}
+                                    branch={reference}
+                                    onClick={setHash}
+                                    selectedHash={hash}
+                                    api={apiV2}
+                                  />
+                                </div>
                               </>
                             }
                           />

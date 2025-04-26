@@ -38,6 +38,10 @@
       <groupId>com.dremio</groupId>
       <artifactId>dremio-protocol</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.dremio.common</groupId>
+      <artifactId>dremio-common-core</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>io.protostuff</groupId>
@@ -178,16 +182,16 @@
       <artifactId>grpc-stub</artifactId>
     </dependency>
     <dependency>
-      <groupId>software.amazon.awssdk</groupId>
-      <artifactId>auth</artifactId>
-    </dependency>
-    <dependency>
       <groupId>org.apache.arrow</groupId>
       <artifactId>arrow-format</artifactId>
     </dependency>
     <dependency>
       <groupId>net.logstash.logback</groupId>
       <artifactId>logstash-logback-encoder</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.google.protobuf</groupId>
+      <artifactId>protobuf-java</artifactId>
     </dependency>
     <dependency>
       <groupId>com.google.protobuf</groupId>
@@ -251,10 +255,6 @@
               <validHeaders>
                 <validHeader>src/main/licenses/io.protostuff.JsonIOUtils.license.txt</validHeader>
               </validHeaders>
-              <excludes combine.children="append">
-                <!-- it needs Java style, was handedited -->
-                <exclude>src/test/resources/maprtest/conf/login.conf</exclude>
-              </excludes>
             </licenseSet>
           </licenseSets>
         </configuration>

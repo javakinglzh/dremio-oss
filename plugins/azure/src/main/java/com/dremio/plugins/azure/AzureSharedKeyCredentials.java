@@ -15,10 +15,9 @@
  */
 package com.dremio.plugins.azure;
 
-import static com.dremio.plugins.azure.AzureStorageFileSystem.ACCOUNT;
-
 import com.azure.storage.common.StorageSharedKeyCredential;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.services.credentials.CredentialsException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -76,7 +75,7 @@ public class AzureSharedKeyCredentials implements AzureStorageCredentials, Confi
   }
 
   @Override
-  public String getAuthzHeaderValue(final Request req) {
+  public String getAuthorizationHeader(final Request req) {
     StorageSharedKeyCredential storageSharedKeyCredential =
         new StorageSharedKeyCredential(accountName, accountKeySupplier.get());
     try {
@@ -105,7 +104,7 @@ public class AzureSharedKeyCredentials implements AzureStorageCredentials, Confi
     synchronized (this) {
       this.conf = conf;
       this.accountKeySupplier = memorizeAccountKeySupplier(() -> getSharedAccessKey(conf));
-      this.accountName = Objects.requireNonNull(conf.get(ACCOUNT));
+      this.accountName = Objects.requireNonNull(conf.get(AzureStorageConfProperties.ACCOUNT));
     }
   }
 

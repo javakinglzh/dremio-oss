@@ -68,7 +68,7 @@ class StraightPipe extends Pipe {
             }
           }
 
-          // this pipe is blocked on downstream.
+        // this pipe is blocked on downstream.
         case CAN_PRODUCE:
         case BLOCKED:
           return Result.NOT_READY_DOWNSTREAM;

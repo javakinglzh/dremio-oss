@@ -15,7 +15,10 @@
  */
 package com.dremio.exec.store.easy.json;
 
+import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecConstants;
@@ -32,6 +35,7 @@ import com.dremio.exec.physical.config.copyinto.IngestionProperties;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.AbstractRecordReader;
+import com.dremio.exec.store.SampleMutator;
 import com.dremio.exec.store.dfs.FileLoadInfo.Util;
 import com.dremio.exec.store.dfs.copyinto.CopyIntoExceptionUtils;
 import com.dremio.exec.store.dfs.easy.ExtendedEasyReaderProperties;
@@ -57,9 +61,11 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
 import io.protostuff.ByteString;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.ValueVector;
@@ -117,6 +123,7 @@ public class JSONRecordReader extends AbstractRecordReader {
   private boolean onErrorHandlingRequired = false;
   private long processingStartTime;
   private final long fileSize;
+  private boolean rowSizeLimitEnabledForReader;
 
   /**
    * Create a JSON Record Reader that uses a file based input stream.
@@ -204,6 +211,7 @@ public class JSONRecordReader extends AbstractRecordReader {
 
     // We don't care about the URI schema but the actual path only in the errors
     this.filePathForError = fsPath == null ? "" : fsPath.toURI().getPath();
+    this.rowSizeLimitEnabledForReader = rowSizeLimitEnabled;
   }
 
   public JSONRecordReader(
@@ -282,17 +290,12 @@ public class JSONRecordReader extends AbstractRecordReader {
             FileSystemUtils.openPossiblyCompressedStream(codecFactory, fileSystem, fsPath);
       }
       if (isSkipQuery()) {
-        this.jsonReader = new CountingJsonReader();
+        this.jsonReader = new CountingJsonReader(context);
         setupParser(jsonReader);
       } else {
         final int sizeLimit =
             Math.toIntExact(
                 this.context.getOptions().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
-        final int rowSizeLimit =
-            Math.toIntExact(
-                this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
-        final boolean rowSizeLimitEnabled =
-            this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
         final int maxLeafLimit =
             Math.toIntExact(
                 this.context.getOptions().getOption(CatalogOptions.METADATA_LEAF_COLUMN_MAX));
@@ -303,7 +306,21 @@ public class JSONRecordReader extends AbstractRecordReader {
                 : (output.getContainer() != null && output.getContainer().hasSchema()
                     ? output.getContainer().getSchema()
                     : null);
+        Map<String, Field> fieldDecimalMap =
+            output instanceof SampleMutator
+                ? ((SampleMutator) output).getFieldDecimalMap()
+                : Maps.newHashMap();
 
+        if (rowSizeLimitEnabled) {
+          if (fixedDataLenPerRow <= rowSizeLimit && variableVectorCount == 0) {
+            rowSizeLimitEnabledForReader = false;
+          }
+          if (fixedDataLenPerRow > rowSizeLimit) {
+            throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+                rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+          }
+          rowSizeLimit -= fixedDataLenPerRow;
+        }
         if (copyIntoQueryProperties != null
             && copyIntoQueryProperties.getOnErrorOption() == OnErrorOption.SKIP_FILE) {
           this.jsonReader =
@@ -311,8 +328,6 @@ public class JSONRecordReader extends AbstractRecordReader {
                   context.getManagedBuffer(),
                   ImmutableList.copyOf(getColumns()),
                   sizeLimit,
-                  rowSizeLimitEnabled,
-                  rowSizeLimit,
                   maxLeafLimit,
                   enableAllTextMode,
                   true,
@@ -331,14 +346,15 @@ public class JSONRecordReader extends AbstractRecordReader {
                   fileSize,
                   isValidationMode,
                   validationErrorRowWriter,
-                  processingStartTime);
+                  processingStartTime,
+                  fieldDecimalMap,
+                  rowSizeLimitEnabledForReader,
+                  fixedDataLenPerRow);
           this.preValidatorJsonReader =
               new JsonReader(
                   context.getManagedBuffer(),
                   ImmutableList.copyOf(getColumns()),
                   sizeLimit,
-                  rowSizeLimitEnabled,
-                  rowSizeLimit,
                   maxLeafLimit,
                   enableAllTextMode,
                   true,
@@ -357,7 +373,10 @@ public class JSONRecordReader extends AbstractRecordReader {
                   fileSize,
                   true,
                   validationErrorRowWriter,
-                  processingStartTime);
+                  processingStartTime,
+                  fieldDecimalMap,
+                  rowSizeLimitEnabledForReader,
+                  fixedDataLenPerRow);
           setupParser(preValidatorJsonReader);
           recordBatchReadingStatus = RecordBatchReadingStatus.PRE_VALIDATION;
         } else {
@@ -366,8 +385,6 @@ public class JSONRecordReader extends AbstractRecordReader {
                   context.getManagedBuffer(),
                   ImmutableList.copyOf(getColumns()),
                   sizeLimit,
-                  rowSizeLimitEnabled,
-                  rowSizeLimit,
                   maxLeafLimit,
                   enableAllTextMode,
                   true,
@@ -386,10 +403,14 @@ public class JSONRecordReader extends AbstractRecordReader {
                   fileSize,
                   isValidationMode,
                   validationErrorRowWriter,
-                  processingStartTime);
+                  processingStartTime,
+                  fieldDecimalMap,
+                  rowSizeLimitEnabledForReader,
+                  fixedDataLenPerRow);
           setupParser(jsonReader);
         }
       }
+
     } catch (final Exception e) {
       if (onErrorHandlingRequired) {
         setupError = CopyIntoExceptionUtils.redactException(e).getMessage();
@@ -624,9 +645,7 @@ public class JSONRecordReader extends AbstractRecordReader {
 
   @Override
   public void close() throws Exception {
-    if (stream != null) {
-      stream.close();
-    }
+    AutoCloseables.close(stream);
   }
 
   @Override

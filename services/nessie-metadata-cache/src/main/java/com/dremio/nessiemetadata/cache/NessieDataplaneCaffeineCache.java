@@ -17,8 +17,7 @@ package com.dremio.nessiemetadata.cache;
 
 import com.dremio.nessiemetadata.cacheLoader.DataplaneCacheLoader;
 import com.github.benmanes.caffeine.cache.LoadingCache;
-import org.checkerframework.checker.nullness.qual.NonNull;
-import org.checkerframework.checker.nullness.qual.Nullable;
+import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,16 +36,16 @@ public class NessieDataplaneCaffeineCache<K extends String, V>
   }
 
   @Override
-  public @Nullable V get(@NonNull K var1) {
+  public @Nullable V get(K key) {
     if (bypassCache) {
       try {
-        return loader.load(var1);
+        return loader.load(key);
       } catch (Exception e) {
         logger.error("Failed to load dataplane cache", e);
         throw new LoadCacheException("Failed to load dataplane cache");
       }
     }
-    return loadingCache.get(var1);
+    return loadingCache.get(key);
   }
 
   @Override

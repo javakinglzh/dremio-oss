@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { ProjectProperties } from "../../interfaces/Project.js";
+
+import type { ProjectProperties } from "./Project.ts";
 
 export const projectEntityToProperties = (
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

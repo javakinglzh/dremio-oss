@@ -54,11 +54,20 @@ public class ITValidateShadedJar {
       Timeout.builder().withTimeout(2, TimeUnit.MINUTES).build();
 
   private static final List<String> ALLOWED_PREFIXES =
-      Collections.unmodifiableList(Arrays.asList("com/dremio/jdbc/", "META-INF/"));
+      Collections.unmodifiableList(
+          Arrays.asList(
+              "com/dremio/jdbc/",
+              "META-INF/services/",
+              "META-INF/native/com_dremio_jdbc_shaded_netty_",
+              "META-INF/native/libcom_dremio_jdbc_shaded_netty_"));
 
   private static final List<String> ALLOWED_FILES =
       Collections.unmodifiableList(
           Arrays.asList(
+              "META-INF/LICENSE",
+              "META-INF/LICENSES_FOR_DEPENDENCIES.md",
+              "META-INF/MANIFEST.MF",
+              "META-INF/NOTICE",
               "CDJDLog4j-charsets.properties",
               "git.properties",
               "arrow-git.properties",
@@ -70,6 +79,7 @@ public class ITValidateShadedJar {
   @Test
   public void validateShadedJar() throws IOException {
     // Validate the content of the jar to enforce all 3rd party dependencies have been shaded
+
     try (JarFile jar = new JarFile(getJdbcFile())) {
       toIterator(jar.entries())
           .forEachRemaining(

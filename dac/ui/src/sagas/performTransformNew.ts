@@ -226,7 +226,7 @@ export function* handlePostNewQueryJobSuccess({
 
   // fetch job details on job submissions for engine name and query type
   // @ts-expect-error return type of fetchJobDetails is not an action
-  yield put(fetchJobDetails({ jobId }));
+  yield yield put(fetchJobDetails({ jobId }));
 
   return [dataset, datasetPath, versionToUse, jobId, paginationUrl, sessionId];
 }

@@ -19,10 +19,11 @@ import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_OAUTH_CLIEN
 import static com.dremio.exec.store.DataplanePluginOptions.NESSIE_PLUGIN_ENABLED;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SourceOnlyAccessPlugin;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.SecretRef;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.nessiemetadata.cache.NessieDataplaneCacheProvider;
 import com.dremio.nessiemetadata.storeprovider.NessieDataplaneCacheStoreProvider;
 import com.dremio.plugins.NessieClient;
@@ -39,7 +40,7 @@ import org.projectnessie.client.auth.NessieAuthentication;
 import org.projectnessie.client.auth.oauth2.OAuth2AuthenticationProvider;
 import org.projectnessie.client.auth.oauth2.OAuth2AuthenticatorConfig;
 
-public class NessiePlugin extends DataplanePlugin {
+public class NessiePlugin extends DataplanePlugin implements SourceOnlyAccessPlugin {
   private static final org.slf4j.Logger LOGGER =
       org.slf4j.LoggerFactory.getLogger(NessiePlugin.class);
   private static final String SERVER_NAME = "Nessie";
@@ -50,16 +51,21 @@ public class NessiePlugin extends DataplanePlugin {
 
   public NessiePlugin(
       NessiePluginConfig pluginConfig,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       String name,
       Provider<StoragePluginId> idProvider,
       NessieDataplaneCacheProvider cacheProvider,
       @Nullable NessieDataplaneCacheStoreProvider nessieDataplaneCacheStoreProvider) {
     super(
-        pluginConfig, context, name, idProvider, cacheProvider, nessieDataplaneCacheStoreProvider);
+        pluginConfig,
+        pluginSabotContext,
+        name,
+        idProvider,
+        cacheProvider,
+        nessieDataplaneCacheStoreProvider);
     this.name = name;
     this.pluginConfig = pluginConfig;
-    this.nessieClient = getNessieClient(name, context, pluginConfig);
+    this.nessieClient = getNessieClient(name, pluginSabotContext, pluginConfig);
   }
 
   @Override
@@ -111,20 +117,26 @@ public class NessiePlugin extends DataplanePlugin {
   }
 
   @Override
-  public SourceState getState(NessieClient nessieClient, String name, SabotContext context) {
+  public SourceState getState(
+      NessieClient nessieClient, String name, PluginSabotContext pluginSabotContext) {
     return NessiePluginUtils.getState(
         nessieClient, name, pluginConfig.getNessieEndpoint(), SERVER_NAME);
   }
 
   @Override
-  public void validatePluginEnabled(SabotContext context) {
-    if (!context.getOptionManager().getOption(NESSIE_PLUGIN_ENABLED)) {
+  public void validatePluginEnabled(PluginSabotContext pluginSabotContext) {
+    if (pluginSabotContext.isExecutor()) {
+      return; // Executor only reads default options at startup time since it does not have access
+      // to the KV store so there is no point validating the default options. We only
+      // evaluate the options at coordinator.
+    }
+    if (!pluginSabotContext.getOptionManager().getOption(NESSIE_PLUGIN_ENABLED)) {
       throw UserException.unsupportedError()
           .message("Nessie Source is not supported.")
           .buildSilently();
     }
     if (pluginConfig.nessieAuthType == NessieAuthType.OAUTH2
-        && !context.getOptionManager().getOption(DATAPLANE_OAUTH_CLIENT_AUTH_ENABLED)) {
+        && !pluginSabotContext.getOptionManager().getOption(DATAPLANE_OAUTH_CLIENT_AUTH_ENABLED)) {
       throw UserException.unsupportedError()
           .message("Nessie source with OAuth2 authentication is not supported.")
           .buildSilently();
@@ -133,7 +145,7 @@ public class NessiePlugin extends DataplanePlugin {
 
   @Override
   public void validateConnectionToNessieRepository(
-      NessieClient nessieClient, String name, SabotContext context) {
+      NessieClient nessieClient, String name, PluginSabotContext context) {
     NessiePluginUtils.validateConnectionToNessieRepository(nessieClient);
   }
 
@@ -145,7 +157,7 @@ public class NessiePlugin extends DataplanePlugin {
 
   @VisibleForTesting
   NessieClient getNessieClient(
-      String name, SabotContext sabotContext, NessiePluginConfig pluginConfig) {
+      String name, PluginSabotContext sabotContext, NessiePluginConfig pluginConfig) {
     NessieApiV2 nessieApiV2;
     switch (pluginConfig.getNessieAuthType()) {
       case BEARER:
@@ -213,6 +225,14 @@ public class NessiePlugin extends DataplanePlugin {
           .message(
               "Unable to create or access source [%s], " + "OAuth2 credentials are not valid", name)
           .build(LOGGER);
+    }
+  }
+
+  @Override
+  protected void validateStorageUri(String storageUriString) {
+    // No validation required for Nessie sources, hence no action required here
+    if (storageUriString != null) {
+      throw new UnsupportedOperationException("Storage URI is not supported for folders");
     }
   }
 

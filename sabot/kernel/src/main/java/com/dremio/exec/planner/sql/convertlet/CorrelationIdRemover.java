@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql.convertlet;
 
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
+import com.dremio.exec.planner.sql.handlers.RexSubQueryUtils;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.CorrelationId;
 import org.apache.calcite.rel.logical.LogicalFilter;
@@ -52,24 +53,7 @@ public final class CorrelationIdRemover {
         return subQuery;
       }
 
-      RexSubQuery rewrittenSubQuery;
-      switch (subQuery.op.getKind()) {
-        case IN:
-          rewrittenSubQuery = RexSubQuery.in(subQuery.rel, subQuery.operands, null);
-          break;
-
-        case EXISTS:
-          rewrittenSubQuery = RexSubQuery.exists(subQuery.rel, null);
-          break;
-
-        case ARRAY_QUERY_CONSTRUCTOR:
-          rewrittenSubQuery = RexSubQuery.array(subQuery.rel, null);
-          break;
-
-        default:
-          throw new UnsupportedOperationException("Unsupported subquery kind: " + subQuery.op);
-      }
-
+      RexSubQuery rewrittenSubQuery = RexSubQueryUtils.clone(subQuery, null);
       correlationIdRemoved = subQuery.correlationId;
       return rewrittenSubQuery;
     }

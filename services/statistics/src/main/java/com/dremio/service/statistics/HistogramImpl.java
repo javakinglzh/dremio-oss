@@ -269,10 +269,10 @@ public class HistogramImpl implements StatisticsService.Histogram {
           return l.getValueAs(Short.class);
         case TINYINT:
           return l.getValueAs(Short.class);
-          //      case VARBINARY:
+        //      case VARBINARY:
         case TIME:
           return toTimeValue(l);
-          //      case INTERVAL_DAY:
+        //      case INTERVAL_DAY:
         case BIGINT:
           return ((BigDecimal) l.getValueAs(BigDecimal.class))
               .setScale(0, RoundingMode.HALF_UP)

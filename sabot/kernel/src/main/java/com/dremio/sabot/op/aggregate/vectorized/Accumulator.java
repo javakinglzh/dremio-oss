@@ -58,6 +58,23 @@ public interface Accumulator extends AutoCloseable {
    */
   void output(int startBatchIndex, int[] recordsInBatches);
 
+  /*
+   * Output the data from multiple batches starting from startBatchIndex. for each batch, the record
+   * count is provided in recordsInBatches array. For the startBatchIndex, the records from startRow
+   * are copied to the output
+   *
+   * @param startBatchIndex
+   * @param startRow
+   * @param recordsInBatch
+   * @Param totalRecords
+   * @returns int
+   */
+  default void output(
+      int startBatchIndex, int startRow, int recordsToOutput, int numRecordsInBatch) {
+    throw new UnsupportedOperationException(
+        "output(int startBatchIndex, int startRow, int recordsInBatches) is not yet supported");
+  }
+
   /**
    * return the size of accumulator by looking at vector in the accumulator and the size of
    * ArrowBufs inside the vectors.

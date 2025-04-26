@@ -40,7 +40,6 @@ import com.dremio.exec.planner.sql.handlers.direct.AccelToggleHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AddColumnsHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AlterClearPlanCacheHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AlterTableChangeColumnSetOptionHandler;
-import com.dremio.exec.planner.sql.handlers.direct.AlterTableClusterKeyHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AlterTablePartitionSpecHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AlterTablePropertiesHandler;
 import com.dremio.exec.planner.sql.handlers.direct.AlterTableSetOptionHandler;
@@ -49,7 +48,7 @@ import com.dremio.exec.planner.sql.handlers.direct.AnalyzeTableStatisticsHandler
 import com.dremio.exec.planner.sql.handlers.direct.ChangeColumnHandler;
 import com.dremio.exec.planner.sql.handlers.direct.CreateEmptyTableHandler;
 import com.dremio.exec.planner.sql.handlers.direct.CreateFunctionHandler;
-import com.dremio.exec.planner.sql.handlers.direct.CreateViewHandler;
+import com.dremio.exec.planner.sql.handlers.direct.CreateOrUpdateViewHandler;
 import com.dremio.exec.planner.sql.handlers.direct.DescribeFunctionHandler;
 import com.dremio.exec.planner.sql.handlers.direct.DescribeTableHandler;
 import com.dremio.exec.planner.sql.handlers.direct.DropColumnHandler;
@@ -87,7 +86,6 @@ import com.dremio.exec.planner.sql.parser.SqlAlterClearPlanCache;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableAddColumns;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableChangeColumn;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableChangeColumnSetOption;
-import com.dremio.exec.planner.sql.parser.SqlAlterTableClusterKey;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableDropColumn;
 import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableProperties;
@@ -307,8 +305,8 @@ public class CommandCreator {
           case PREPARED_STATEMENT:
             try {
               final ServerPreparedStatementState preparedStatement =
-                  ServerPreparedStatementState.PARSER.parseFrom(
-                      query.getPreparedStatementHandle().getServerInfo());
+                  ServerPreparedStatementState.parser()
+                      .parseFrom(query.getPreparedStatementHandle().getServerInfo());
               if (preparedStatement.hasPrepareId()) {
                 prepareId.value = preparedStatement.getPrepareId();
               }
@@ -333,6 +331,7 @@ public class CommandCreator {
                               .equals(context.getSession().getCredentials().getUserName());
                   if (queryMatches && usernameMatches) {
                     context.setQueryRequiresGroupsInfo(plan.getQueryRequiresGroupsInfo());
+                    context.getSession().setQueryLabel(plan.getQueryLabel());
                     return new PrepareToExecution(plan, observer);
                   }
                 }
@@ -588,7 +587,7 @@ public class CommandCreator {
         return direct.create(DescribeTableHandler.create(catalog, context, context.getSession()));
 
       case CREATE_VIEW:
-        return direct.create(CreateViewHandler.create(config));
+        return direct.create(CreateOrUpdateViewHandler.create(config));
 
       case DROP_TABLE:
         return direct.create(new DropTableHandler(catalog, context.getSession()));
@@ -627,8 +626,6 @@ public class CommandCreator {
           return direct.create(new AlterTablePropertiesHandler(catalog, config));
         } else if (sqlNode instanceof SqlAlterTableSortOrder) {
           return direct.create(new AlterTableSortOrderHandler(catalog, config));
-        } else if (sqlNode instanceof SqlAlterTableClusterKey) {
-          return direct.create(new AlterTableClusterKeyHandler(catalog, config));
         }
         throw new IllegalArgumentException("Must have a correct SQL Node for ALTER_TABLE case");
 
@@ -719,7 +716,6 @@ public class CommandCreator {
           return direct.create(
               new RefreshTableHandler(
                   catalog,
-                  context.getNamespaceService(),
                   context.getOptions().getOption(PlannerSettings.ERROR_ON_CONCURRENT_REFRESH)));
         } else if (sqlNode instanceof SqlRefreshSourceStatus) {
           return direct.create(new RefreshSourceStatusHandler(catalog));
@@ -762,7 +758,7 @@ public class CommandCreator {
           return direct.create(new ShowTablePropertiesHandler(catalog, context));
         }
 
-        // fallthrough
+      // fallthrough
       default:
         return getDefaultCommandRunner(config, async);
     }

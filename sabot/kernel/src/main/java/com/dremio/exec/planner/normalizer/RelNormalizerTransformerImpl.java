@@ -20,11 +20,13 @@ import com.dremio.exec.ops.ViewExpansionContext;
 import com.dremio.exec.planner.DremioVolcanoPlanner;
 import com.dremio.exec.planner.HepPlannerRunner;
 import com.dremio.exec.planner.PlannerPhase;
-import com.dremio.exec.planner.acceleration.ExpansionNode;
+import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionProvider;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
+import com.dremio.exec.planner.decorrelation.DecorrelationAssertions;
 import com.dremio.exec.planner.events.FunctionDetectedEvent;
 import com.dremio.exec.planner.events.PlannerEventBus;
+import com.dremio.exec.planner.logical.DremioRelFactories;
 import com.dremio.exec.planner.logical.PreProcessRel;
 import com.dremio.exec.planner.logical.UncollectToFlattenConverter;
 import com.dremio.exec.planner.logical.ValuesRewriteShuttle;
@@ -37,16 +39,27 @@ import com.dremio.exec.planner.sql.handlers.RelTransformer;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Values;
+import org.apache.calcite.rel.logical.LogicalValues;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.tools.RelBuilder;
+import org.apache.calcite.util.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
+
   private static final Logger LOGGER = LoggerFactory.getLogger(RelNormalizerTransformerImpl.class);
   private final HepPlannerRunner hepPlannerRunner;
   private final NormalizerRuleSets normalizerRuleSets;
@@ -81,10 +94,11 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
       final RelNode normalizedRel = transformPreSerialization(relNode, attemptObserver);
 
       attemptObserver.planSerializable(normalizedRel);
-      updateOriginalRoot(normalizedRel);
+      if (!plannerSettings.options.getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
+        updateOriginalRoot(normalizedRel);
+      }
 
-      final RelNode expansionNodesRemoved = ExpansionNode.removeFromTree(normalizedRel);
-      final RelNode normalizedRel2 = transformPostSerialization(expansionNodesRemoved);
+      final RelNode normalizedRel2 = transformPostSerialization(normalizedRel);
 
       PlanLogUtil.log("INITIAL", normalizedRel2, LOGGER, null);
       attemptObserver.setNumJoinsInUserQuery(MoreRelOptUtil.countJoins(normalizedRel2));
@@ -105,10 +119,11 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
       final RelNode transformed = relTransformer.transform(normalizedRel);
 
       attemptObserver.planSerializable(transformed);
-      updateOriginalRoot(transformed);
+      if (!plannerSettings.options.getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
+        updateOriginalRoot(transformed);
+      }
 
-      final RelNode expansionNodesRemoved = ExpansionNode.removeFromTree(transformed);
-      final RelNode normalizedRel2 = transformPostSerialization(expansionNodesRemoved);
+      final RelNode normalizedRel2 = transformPostSerialization(transformed);
 
       PlanLogUtil.log("INITIAL", normalizedRel2, LOGGER, null);
       attemptObserver.setNumJoinsInUserQuery(MoreRelOptUtil.countJoins(normalizedRel2));
@@ -121,6 +136,42 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
 
   @Override
   public RelNode transformPreSerialization(RelNode relNode, AttemptObserver attemptObserver) {
+    RelNode expanded = expand(relNode);
+    Optional<RelNode> hashMatched = matchHash(expanded, attemptObserver);
+    RelNode drrsMatched = matchDRRs(hashMatched.orElse(expanded), attemptObserver);
+    RelNode uncollectsReplaced =
+        UncollectToFlattenConverter.convert(
+            plannerSettings.options.getOption(PlannerSettings.VALUES_CAST_ENABLED)
+                ? ValuesRewriteShuttle.rewrite(drrsMatched)
+                : drrsMatched);
+    RelNode aggregateRewritten =
+        hepPlannerRunner.transform(uncollectsReplaced, normalizerRuleSets.createAggregateRewrite());
+    // We need to do all this detection analysis before the reduce rules fire, since the function
+    // might get converted to a literal.
+    RelNode expandedButNotReduced = aggregateRewritten;
+    dispatchFunctions(expandedButNotReduced, plannerEventBus);
+    RelNode valuesNormalized = normalizeValues(expandedButNotReduced);
+    RelNode reduced = reduce(valuesNormalized);
+
+    return reduced;
+  }
+
+  @Override
+  public RelNode transformPostSerialization(RelNode relNode) throws SqlUnsupportedException {
+    RelNode expandedOperators =
+        hepPlannerRunner.transform(relNode, normalizerRuleSets.createOperatorExpansion());
+    RelNode preprocessedRel;
+    if (plannerSettings.options.getOption(PlannerSettings.VALUES_CAST_ENABLED)) {
+      RelNode values = ValuesRewriteShuttle.rewrite(expandedOperators);
+      preprocessedRel = preprocess(values);
+    } else {
+      preprocessedRel = preprocess(expandedOperators);
+    }
+    return preprocessedRel;
+  }
+
+  private RelNode expand(RelNode relNode) {
+    DecorrelationAssertions.assertPostSqlToRelPreExpansion(relNode);
     // This has to be the very first step, since it will expand RexSubqueries to Correlates and all
     // the other
     // transformations can't operate on the RelNode inside of RexSubquery.
@@ -130,48 +181,115 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
       expanded = RexCorrelVariableSchemaFixer.fixSchema(expanded);
     }
 
+    DecorrelationAssertions.assertPostExpansionPreDecorrelation(expanded);
+
+    return expanded;
+  }
+
+  private Optional<RelNode> matchHash(RelNode relNode, AttemptObserver attemptObserver) {
+    final Stopwatch hashStopwatch = Stopwatch.createStarted();
+    Optional<RelNode> hashMatched = substitutionProvider.generateHashReplacement(relNode);
+    attemptObserver.planRelTransform(
+        PlannerPhase.DEFAULT_HASH_MATCHING,
+        null,
+        relNode,
+        hashMatched.orElse(relNode),
+        hashStopwatch.elapsed(TimeUnit.MILLISECONDS),
+        ImmutableList.of());
+    return hashMatched;
+  }
+
+  private RelNode matchDRRs(RelNode relNode, AttemptObserver attemptObserver) {
     final Stopwatch drrStopwatch = Stopwatch.createStarted();
     RelNode drrsMatched =
-        DRRMatcher.match(expanded, substitutionProvider, viewExpansionContext, attemptObserver);
+        DRRMatcher.match(relNode, substitutionProvider, viewExpansionContext, attemptObserver);
     attemptObserver.planRelTransform(
-        PlannerPhase.DEFAULT_RAW_REFLECTION,
+        PlannerPhase.DEFAULT_RAW_MATCHING,
         null,
-        expanded,
+        relNode,
         drrsMatched,
         drrStopwatch.elapsed(TimeUnit.MILLISECONDS),
         ImmutableList.of());
 
-    RelNode valuesRewritten = ValuesRewriteShuttle.rewrite(drrsMatched);
-    // We don't have an execution for uncollect, so flatten needs to be part of the normalized
-    // query.
-    RelNode uncollectsReplaced = UncollectToFlattenConverter.convert(valuesRewritten);
-    RelNode aggregateRewritten =
-        hepPlannerRunner.transform(uncollectsReplaced, normalizerRuleSets.createAggregateRewrite());
-    // We need to do all this detection analysis before the reduce rules fire, since the function
-    // might get converted to a literal.
-    RelNode expandedButNotReduced = aggregateRewritten;
-    dispatchFunctions(expandedButNotReduced, plannerEventBus);
-    RelNode reduced = reduce(aggregateRewritten);
-
-    return reduced;
-  }
-
-  @Override
-  public RelNode transformPostSerialization(RelNode relNode) throws SqlUnsupportedException {
-    final RelNode expansionNodesRemoved = ExpansionNode.removeFromTree(relNode);
-    RelNode expandedOperators =
-        hepPlannerRunner.transform(
-            expansionNodesRemoved, normalizerRuleSets.createOperatorExpansion());
-    RelNode values = ValuesRewriteShuttle.rewrite(expandedOperators);
-    RelNode preprocessedRel = preprocess(values);
-
-    return preprocessedRel;
+    return drrsMatched;
   }
 
   private RelNode reduce(RelNode relNode) {
     RelNode reduced =
         hepPlannerRunner.transform(relNode, normalizerRuleSets.createReduceExpression());
     return reduced;
+  }
+
+  private RelNode normalizeValues(RelNode relNode) {
+    // This logic can't be a rule, since the planner uses digest for equality and this rewrite ends
+    // up with the same digest.
+    RelBuilder relBuilder =
+        DremioRelFactories.CALCITE_LOGICAL_BUILDER.create(relNode.getCluster(), null);
+    try {
+      return relNode.accept(
+          new StatelessRelShuttleImpl() {
+            @Override
+            public RelNode visit(LogicalValues values) {
+              if (!needsNormalization(values)) {
+                return values;
+              }
+
+              RelDataType rowType = values.getRowType();
+              List<ImmutableList<RexLiteral>> newTuples = new ArrayList<>();
+              for (List<RexLiteral> tuple : values.getTuples()) {
+                assert tuple.size() == rowType.getFieldCount();
+                List<RexLiteral> newTuple = new ArrayList<>();
+                for (Pair<RexLiteral, RelDataTypeField> pair :
+                    Pair.zip(tuple, rowType.getFieldList())) {
+                  RexLiteral literal = pair.left;
+                  RelDataType fieldType = pair.right.getType();
+
+                  RexLiteral newLiteral;
+                  if (literal.getType() != fieldType) {
+                    RexNode castedLiteral =
+                        relBuilder.getRexBuilder().makeCast(fieldType, literal, true);
+                    if (castedLiteral instanceof RexLiteral) {
+                      newLiteral = (RexLiteral) castedLiteral;
+                    } else {
+                      newLiteral = literal;
+                    }
+                  } else {
+                    newLiteral = literal;
+                  }
+
+                  newTuple.add(newLiteral);
+                }
+
+                newTuples.add(ImmutableList.copyOf(newTuple));
+              }
+
+              RelNode newValues =
+                  relBuilder.values(ImmutableList.copyOf(newTuples), values.getRowType()).build();
+              return newValues;
+            }
+          });
+    } catch (Exception ex) {
+      // We don't want this logic to fail the whole query if it fails.
+      LOGGER.error("Failed to normalize a values rel for unknown reason.", ex);
+      return relNode;
+    }
+  }
+
+  private static boolean needsNormalization(Values values) {
+    RelDataType rowType = values.getRowType();
+    for (List<RexLiteral> tuple : values.getTuples()) {
+      assert tuple.size() == rowType.getFieldCount();
+      for (Pair<RexLiteral, RelDataTypeField> pair : Pair.zip(tuple, rowType.getFieldList())) {
+        RexLiteral literal = pair.left;
+        RelDataType fieldType = pair.right.getType();
+
+        if (literal.getType() != fieldType) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   private RelNode preprocess(RelNode relNode) throws SqlUnsupportedException {
@@ -184,7 +302,7 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
     }
   }
 
-  private static void updateOriginalRoot(RelNode relNode) {
+  public static void updateOriginalRoot(RelNode relNode) {
     final DremioVolcanoPlanner volcanoPlanner =
         (DremioVolcanoPlanner) relNode.getCluster().getPlanner();
     volcanoPlanner.setOriginalRoot(relNode);

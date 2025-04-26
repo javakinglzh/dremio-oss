@@ -18,31 +18,22 @@ package com.dremio.exec.catalog;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.catalog.model.dataset.TableVersionType;
 import com.fasterxml.jackson.core.JsonProcessingException;
-import java.util.Arrays;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
-import org.apache.commons.lang3.StringUtils;
-import org.junit.After;
-import org.junit.Before;
+import java.util.Map;
 import org.junit.Test;
 
 public class TestVersionedDatasetId {
   final String tableName = "table";
 
   final String branchName = "branchName";
-  List<String> tableKey = Arrays.asList(tableName);
-  VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+  final List<String> tableKey = List.of(tableName);
   final String contentId = "contentId";
-
-  @Before
-  public void setUp() throws Exception {}
-
-  @After
-  public void tearDown() throws Exception {}
 
   @Test
   public void testAsString() throws JsonProcessingException {
@@ -58,15 +49,10 @@ public class TestVersionedDatasetId {
 
     // Act
     String convertedDatasetId = versionedDatasetId.asString();
-    String convertedDatasetIdNoBrace = StringUtils.substringBetween(convertedDatasetId, "{", "}");
-    List<String> datasetIdParts = Arrays.asList(convertedDatasetIdNoBrace.split(",", 3));
-
+    Map<String, Object> jsonData =
+        new ObjectMapper().readValue(convertedDatasetId, new TypeReference<>() {});
     // Assert
-
-    assertThat(datasetIdParts.size() == 3).isTrue();
-    assertThat(StringUtils.startsWith(datasetIdParts.get(0), "\"tableKey\"")).isTrue();
-    assertThat(StringUtils.startsWith(datasetIdParts.get(1), "\"contentId\"")).isTrue();
-    assertThat(StringUtils.startsWith(datasetIdParts.get(2), "\"versionContext\"")).isTrue();
+    assertThat(jsonData).hasSize(3).containsKeys("tableKey", "contentId", "versionContext");
   }
 
   @Test
@@ -101,9 +87,7 @@ public class TestVersionedDatasetId {
             .build();
     // Act
     String convertedDatasetId = versionedDatasetId.asString();
-    String invalidDatasetId =
-        org.apache.commons.lang.StringUtils.replace(
-            convertedDatasetId, "contentId", "invalidContentIdToken");
+    String invalidDatasetId = convertedDatasetId.replace("contentId", "invalidContentIdToken");
     // Assert
     assertThatThrownBy(() -> VersionedDatasetId.fromString(invalidDatasetId))
         .hasMessageContaining("Unrecognized field ");

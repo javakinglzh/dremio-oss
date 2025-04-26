@@ -16,7 +16,7 @@
 package com.dremio.service.coordinator;
 
 import com.dremio.common.AutoCloseables;
-import com.dremio.common.utils.AssumeRoleCredentialsProvider;
+import com.dremio.common.aws.AssumeRoleCredentialsProvider;
 import javax.inject.Provider;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;

@@ -15,6 +15,7 @@
  */
 package com.dremio.dac.service.datasets;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -41,15 +42,23 @@ import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.VersionedPlugin;
+import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
+import com.dremio.exec.store.StoragePlugin;
+import com.dremio.exec.store.iceberg.SupportsIcebergRestApi;
 import com.dremio.options.OptionManager;
 import com.dremio.plugins.dataplane.store.DataplanePlugin;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.dataset.DatasetVersion;
+import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.ViewFieldType;
+import com.dremio.service.namespace.dataset.proto.VirtualDataset;
+import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
@@ -57,6 +66,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,6 +82,8 @@ public class TestDatasetVersionMutator {
   @Mock
   private LegacyKVStore<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>
       datasetVersions;
+
+  @Mock private StoragePlugin sourcePlugin;
 
   private static final String versionedSourceName = "nessie";
 
@@ -133,6 +145,7 @@ public class TestDatasetVersionMutator {
             .setState(new VirtualDatasetState())
             .setVersion(new DatasetVersion("1"))
             .setCreatedAt(123L);
+
     datasetVersionMutator.putVersion(uiProto);
     DatasetVersionMutator.VersionDatasetKey key =
         new DatasetVersionMutator.VersionDatasetKey(
@@ -163,7 +176,7 @@ public class TestDatasetVersionMutator {
   }
 
   @Test
-  public void testGettingCorrectSavedVersion() {
+  public void testGettingCorrectSavedVersion() throws NamespaceNotFoundException {
     List<String> path = ImmutableList.of("path");
     VirtualDatasetUI first =
         new VirtualDatasetUI()
@@ -202,6 +215,10 @@ public class TestDatasetVersionMutator {
             .setDatasetVersion(second.getVersion().getVersion());
     third.setPreviousVersion(secondRef);
 
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.getSource(Mockito.<String>any())).thenReturn(sourcePlugin);
+    when(sourcePlugin.isWrapperFor(SupportsIcebergRestApi.class)).thenReturn(false);
+
     datasetVersionMutator.putVersion(first);
     datasetVersionMutator.putVersion(second);
     datasetVersionMutator.putVersion(third);
@@ -238,6 +255,10 @@ public class TestDatasetVersionMutator {
             .setState(new VirtualDatasetState())
             .setVersion(new DatasetVersion("1"));
 
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.getSource(Mockito.<String>any())).thenReturn(sourcePlugin);
+    when(sourcePlugin.isWrapperFor(SupportsIcebergRestApi.class)).thenReturn(false);
+
     datasetVersionMutator.putVersion(first);
 
     when(datasetVersions.get(
@@ -247,6 +268,44 @@ public class TestDatasetVersionMutator {
     assertNull(
         datasetVersionMutator.getLatestVersionByOrigin(
             new DatasetPath(path), first.getVersion(), DatasetVersionOrigin.SAVE));
+  }
+
+  @Test
+  public void testGetVersionFromCatalogForIcebergRestApiSources() throws Exception {
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+
+    DatasetPath path = new DatasetPath(ImmutableList.of("iceberg", "db", "table"));
+    DatasetVersion version = new DatasetVersion("1");
+    NamespaceKey namespaceKey = new NamespaceKey(path.toPathList());
+
+    when(catalog.getSource("iceberg")).thenReturn(sourcePlugin);
+    when(sourcePlugin.isWrapperFor(SupportsIcebergRestApi.class)).thenReturn(true);
+
+    ViewTable viewTable = mock(ViewTable.class);
+    String sql = "SELECT * FROM sourceTable";
+    List<String> sqlContextList = ImmutableList.of("context1", "context2");
+    DatasetConfig expectedConfig =
+        new DatasetConfig()
+            .setType(DatasetType.VIRTUAL_DATASET)
+            .setId(new EntityId().setId("test-id"))
+            .setFullPathList(namespaceKey.getPathComponents())
+            .setVirtualDataset(
+                new VirtualDataset()
+                    .setSql(sql)
+                    .setVersion(version)
+                    .setContextList(sqlContextList));
+
+    when(viewTable.getDatasetConfig()).thenReturn(expectedConfig);
+    when(catalog.getDataset(namespaceKey)).thenReturn(expectedConfig);
+    when(catalog.getTable(namespaceKey)).thenReturn(viewTable);
+
+    VirtualDatasetUI result = datasetVersionMutator.getVersion(path, version);
+
+    assertThat(result).isNotNull();
+    assertThat(result.getSql()).isEqualTo(sql);
+    assertThat(result.getVersion()).isEqualTo(version);
+    verify(datasetVersions, times(1)).get(Mockito.<DatasetVersionMutator.VersionDatasetKey>any());
+    verify(catalog).getTable(namespaceKey);
   }
 
   private void setupForVersionedSource() throws NamespaceException {

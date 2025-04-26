@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { HTMLInputTypeAttribute } from "react";
+import { type HTMLInputTypeAttribute, type ReactNode } from "react";
 
 export type FormComponent = {
   key: string;
@@ -22,9 +22,8 @@ export type FormComponent = {
   label?: string;
   typeProps?: FormTypeProps;
   components?: FormComponent[];
-  helpText?:
-    | string
-    | { dependencies: string[]; getText: (...formValues: any) => string };
+  dependencies?: string[];
+  helpText?: string | { getText: (...formValues: any) => string };
   tooltipHint?: string;
   placeholder?: string;
   className?: string;
@@ -45,6 +44,7 @@ export type ElementTypes =
   | "textarea"
   | "checkbox"
   | "checkbox-subsection"
+  | "collapsible-section"
   | "custom";
 
 export type FormTypeProps = { defaultValue?: any; disabled?: boolean } & (
@@ -69,5 +69,10 @@ export type TextAreaTypeProps = {
 };
 
 export type SelectTypeProps = {
-  options: { value: string; label: string }[];
+  options?: { value: string; label: string | JSX.Element }[];
+  getOptions?: (...formValues: any) => { value: string; label: string }[];
+  labelFormatter?: (
+    option: string | null,
+    dependencies?: Record<string, string>,
+  ) => ReactNode;
 };

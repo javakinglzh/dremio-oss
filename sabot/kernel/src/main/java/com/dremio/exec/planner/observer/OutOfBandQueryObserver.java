@@ -59,6 +59,21 @@ public class OutOfBandQueryObserver extends AbstractQueryObserver {
   }
 
   @Override
+  public void putExecutorProfile(String nodeEndpoint) {
+    observer.putExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {
+    observer.removeExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public void queryClosed() {
+    observer.queryClosed();
+  }
+
+  @Override
   public void planParallelized(PlanningSet planningSet) {
     serializedExec.execute(
         new Runnable() {

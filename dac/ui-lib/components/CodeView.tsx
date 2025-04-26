@@ -17,7 +17,7 @@
 import * as React from "react";
 
 type CodeViewProps = {
-  title: React.ReactNode;
+  title?: React.ReactNode;
   children: React.ReactNode;
   contentClass?: string;
 };
@@ -25,7 +25,9 @@ type CodeViewProps = {
 export const CodeView = (props: CodeViewProps) => {
   return (
     <div className="code-view">
-      <header className="code-view__header">{props.title}</header>
+      {props.title && (
+        <header className="code-view__header">{props.title}</header>
+      )}
       <div className={`code-view__content ${props.contentClass}`}>
         {props.children}
       </div>

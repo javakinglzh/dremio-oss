@@ -20,34 +20,36 @@ import static com.dremio.dac.util.DatasetsUtil.isTemporaryPath;
 import static com.dremio.dac.util.DatasetsUtil.printVersionViewInfo;
 import static com.dremio.dac.util.DatasetsUtil.toVirtualDatasetUI;
 import static com.dremio.dac.util.DatasetsUtil.toVirtualDatasetVersion;
-import static com.dremio.exec.ExecConstants.VERSIONED_VIEW_ENABLED;
-import static com.dremio.service.namespace.DatasetIndexKeys.DATASET_ALLPARENTS;
 import static com.dremio.service.namespace.dataset.DatasetVersion.MAX_VERSION;
 import static com.dremio.service.namespace.dataset.DatasetVersion.MIN_VERSION;
 import static java.lang.String.format;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
-import com.dremio.common.perf.Timer;
-import com.dremio.common.perf.Timer.TimedBlock;
 import com.dremio.dac.daemon.DACDaemonModule;
 import com.dremio.dac.explore.QueryParser;
 import com.dremio.dac.explore.model.DatasetPath;
+import com.dremio.dac.explore.model.FromBase;
 import com.dremio.dac.explore.model.VersionContextUtils;
 import com.dremio.dac.model.common.RootEntity.RootType;
 import com.dremio.dac.proto.model.dataset.DatasetVersionOrigin;
+import com.dremio.dac.proto.model.dataset.FromSQL;
 import com.dremio.dac.proto.model.dataset.NameDatasetRef;
+import com.dremio.dac.proto.model.dataset.Transform;
+import com.dremio.dac.proto.model.dataset.TransformCreateFromParent;
+import com.dremio.dac.proto.model.dataset.TransformType;
+import com.dremio.dac.proto.model.dataset.VirtualDatasetState;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetVersion;
 import com.dremio.dac.service.datasets.DatasetDownloadManager.DownloadDataResponse;
 import com.dremio.dac.service.errors.ClientErrorException;
 import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.errors.DatasetVersionNotFoundException;
-import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.api.Document;
-import com.dremio.datastore.api.FindByCondition;
-import com.dremio.datastore.api.ImmutableFindByCondition;
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStore.LegacyFindByRange;
@@ -72,6 +74,7 @@ import com.dremio.exec.store.Views;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.InternalFileConf;
 import com.dremio.exec.store.easy.arrow.ArrowFileMetadata;
+import com.dremio.exec.store.iceberg.SupportsIcebergRestApi;
 import com.dremio.exec.util.OptionUtil;
 import com.dremio.exec.util.ViewFieldsHelper;
 import com.dremio.options.OptionManager;
@@ -84,8 +87,10 @@ import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
+import com.dremio.service.namespace.NamespaceOptions;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Function;
@@ -98,10 +103,12 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
@@ -167,6 +174,7 @@ public class DatasetVersionMutator {
   private void putVersion(
       VirtualDatasetUI ds, @Nullable VirtualDatasetUI baseVirtualDataset, boolean doValidation)
       throws DatasetNotFoundException {
+
     DatasetPath path = new DatasetPath(ds.getFullPathList());
     if (doValidation) {
       validate(path, ds);
@@ -177,6 +185,7 @@ public class DatasetVersionMutator {
       ds.setCreatedAt(baseVirtualDataset.getCreatedAt());
     }
     final VersionDatasetKey datasetKey = new VersionDatasetKey(path, ds.getVersion());
+
     datasetVersions.put(datasetKey, toVirtualDatasetVersion(ds));
   }
 
@@ -247,9 +256,33 @@ public class DatasetVersionMutator {
     putVersion(ds);
   }
 
+  private ViewOptions getViewOptions(DatasetConfig datasetConfig, boolean viewExists) {
+    BatchSchema schema = CalciteArrowHelper.fromDataset(datasetConfig);
+    return new ViewOptions.ViewOptionsBuilder()
+        .batchSchema(schema)
+        .actionType(
+            viewExists ? ViewOptions.ActionType.UPDATE_VIEW : ViewOptions.ActionType.CREATE_VIEW)
+        .icebergViewVersion(optionManager)
+        .build();
+  }
+
+  private View getView(DatasetConfig datasetConfig) {
+    return Views.fieldTypesToView(
+        Iterables.getLast(datasetConfig.getFullPathList()),
+        datasetConfig.getVirtualDataset().getSql(),
+        ViewFieldsHelper.getViewFields(datasetConfig),
+        datasetConfig.getVirtualDataset().getContextList(),
+        null);
+  }
+
   public void putWithVersionedSource(
       VirtualDatasetUI ds, DatasetPath path, String branchName, String savedTag)
-      throws DatasetNotFoundException, IOException, NamespaceException {
+      throws DatasetNotFoundException,
+          IOException,
+          NamespaceException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     DatasetConfig datasetConfig = toVirtualDatasetVersion(ds).getDataset();
     Preconditions.checkNotNull(path);
     VersionContext versionContext =
@@ -263,13 +296,7 @@ public class DatasetVersionMutator {
 
     validatePutWithVersionedSource(path, catalog, query, contextMap);
     BatchSchema schema = CalciteArrowHelper.fromDataset(datasetConfig);
-    View view =
-        Views.fieldTypesToView(
-            Iterables.getLast(datasetConfig.getFullPathList()),
-            datasetConfig.getVirtualDataset().getSql(),
-            ViewFieldsHelper.getViewFields(datasetConfig),
-            datasetConfig.getVirtualDataset().getContextList(),
-            null);
+    View view = getView(datasetConfig);
     DremioTable exist = catalog.getTable(new NamespaceKey(path.toPathList()));
     if (exist != null && !(exist instanceof ViewTable)) {
       throw UserException.validationError()
@@ -320,12 +347,39 @@ public class DatasetVersionMutator {
     putVersion(ds);
   }
 
-  public Catalog getCatalog() {
-    return catalogService.getSystemUserCatalog();
+  public void putWithSupportsMutatingViews(
+      VirtualDatasetUI ds, DatasetPath path, @Nullable String savedTag)
+      throws CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException,
+          IOException {
+    DatasetConfig datasetConfig = toVirtualDatasetVersion(ds).getDataset();
+    View view = getView(datasetConfig);
+    NamespaceKey key = new NamespaceKey(path.toPathList());
+    Catalog catalog = getCatalog().resolveCatalog(key);
+    DremioTable existingDataset = catalog.getTable(new NamespaceKey(path.toPathList()));
+    final boolean viewExists = existingDataset != null;
+    if (viewExists && !(existingDataset instanceof ViewTable)) {
+      throw new CatalogEntityNotFoundException(
+          String.format("Cannot find view with name %s", view.getName()));
+    } else if (viewExists
+        && (savedTag == null || !savedTag.equals(existingDataset.getDatasetConfig().getTag()))) {
+      throw new CatalogEntityAlreadyExistsException(
+          String.format(
+              "The specified location already contains a view named \"%s\". Please provide a unique view name or open the existing view, edit and then save.",
+              view.getName()));
+    }
+    ViewOptions viewOptions = getViewOptions(datasetConfig, viewExists);
+    if (viewExists) {
+      catalog.updateView(new NamespaceKey(path.toPathList()), view, viewOptions);
+    } else {
+      catalog.createView(new NamespaceKey(path.toPathList()), view, viewOptions);
+    }
+    putVersion(ds);
   }
 
-  public boolean checkIfVersionedViewEnabled() {
-    return optionManager.getOption(VERSIONED_VIEW_ENABLED);
+  public Catalog getCatalog() {
+    return catalogService.getSystemUserCatalog();
   }
 
   private void validatePaths(DatasetPath toPath, DatasetPath fromPath) {
@@ -465,6 +519,16 @@ public class DatasetVersionMutator {
 
   public DatasetVersion getLatestVersionByOrigin(
       DatasetPath path, DatasetVersion version, DatasetVersionOrigin datasetVersionOrigin) {
+
+    if (isFromIcebergRestApi(path)) {
+      final VirtualDatasetVersion virtualDatasetVersion = getVirtualDatasetVersion(path, version);
+      DatasetVersion datasetVersion = null;
+      if (virtualDatasetVersion != null) {
+        datasetVersion = virtualDatasetVersion.getDataset().getVirtualDataset().getVersion();
+      }
+      return datasetVersion;
+    }
+
     VersionDatasetKey datasetKey = new VersionDatasetKey(path, version);
     do {
       VirtualDatasetVersion virtualDatasetVersion = datasetVersions.get(datasetKey);
@@ -513,6 +577,10 @@ public class DatasetVersionMutator {
     VirtualDatasetVersion vdsVersion =
         datasetVersions.get(new VersionDatasetKey(datasetPath, version));
     if (vdsVersion == null) {
+      if (isFromIcebergRestApi(path)) {
+        return createVirtualDatasetVersionUsingCatalog(path);
+      }
+
       tryFixVersionHistory(path, version);
       vdsVersion = datasetVersions.get(new VersionDatasetKey(datasetPath, version));
     }
@@ -521,6 +589,11 @@ public class DatasetVersionMutator {
 
   public Iterable<VirtualDatasetUI> getAllVersions(DatasetPath path)
       throws DatasetVersionNotFoundException {
+    if (isFromIcebergRestApi(path)) {
+      return Collections.singleton(
+          toVirtualDatasetUI(createVirtualDatasetVersionUsingCatalog(path)));
+    }
+
     DatasetPath datasetPath = getDatasetPathInOriginalCase(path);
     return Iterables.transform(
         datasetVersions.find(
@@ -600,17 +673,9 @@ public class DatasetVersionMutator {
    *
    * @param path path of saved dataset
    * @return count of all descendants.
-   * @throws NamespaceException
    */
   public int getDescendantsCount(NamespaceKey path) {
-    try (TimedBlock b = Timer.time("getDescendantCounts")) {
-      return getCatalog()
-          .getCounts(SearchQueryUtils.newTermQuery(DATASET_ALLPARENTS, path.toString()))
-          .get(0);
-    } catch (NamespaceException e) {
-      logger.error("Failed to get descendant counts for path " + path);
-      return 0;
-    }
+    return getCatalog().getDownstreamsCount(path);
   }
 
   /**
@@ -621,20 +686,9 @@ public class DatasetVersionMutator {
    * @throws NamespaceException
    */
   public Iterable<DatasetPath> getDescendants(DatasetPath path) throws NamespaceException {
-    FindByCondition condition =
-        new ImmutableFindByCondition.Builder()
-            .setCondition(
-                SearchQueryUtils.newTermQuery(DATASET_ALLPARENTS, path.toNamespaceKey().toString()))
-            .setLimit(1000)
-            .build();
-    return Iterables.transform(
-        getCatalog().find(condition),
-        new Function<>() {
-          @Override
-          public DatasetPath apply(Document<NamespaceKey, NameSpaceContainer> input) {
-            return new DatasetPath(input.getKey().getPathComponents());
-          }
-        });
+    return getCatalog().getAllDownstreams(new NamespaceKey(path.toPathList())).stream()
+        .map(datasetConfig -> new DatasetPath(datasetConfig.getFullPathList()))
+        .collect(Collectors.toUnmodifiableList());
   }
 
   public int getJobsCount(NamespaceKey path, OptionManager optionManager) {
@@ -745,6 +799,12 @@ public class DatasetVersionMutator {
       KVStore<VersionDatasetKey, VirtualDatasetVersion> datasetVersionsStore,
       int daysThreshold,
       boolean unsafe) {
+    if (!optionManagerProvider
+        .get()
+        .getOption(NamespaceOptions.DATASET_VERSION_ORPHAN_DELETION_ENABLED)) {
+      logger.warn("deleteOrphans is disabled.");
+      return 0;
+    }
 
     final OptionManager optionManager = optionManagerProvider.get();
     final long maxJobAgeInDays =
@@ -823,6 +883,35 @@ public class DatasetVersionMutator {
     }
   }
 
+  /**
+   * Context: This method creates a VirtualDatasetVersion from querying the catalog and NOT from the
+   * DatasetVersion KVStore. This is because datasets in Iceberg REST Catalogs will not utilize the
+   * DatasetVersion KVStore.
+   */
+  private VirtualDatasetVersion createVirtualDatasetVersionUsingCatalog(DatasetPath path) {
+    final DremioTable table = getCatalog().getTable(new NamespaceKey(path.toPathList()));
+    if (table instanceof ViewTable) {
+      final DatasetConfig tableDatasetConfig = table.getDatasetConfig();
+      final VirtualDataset tableVirtualDataset = tableDatasetConfig.getVirtualDataset();
+
+      VirtualDatasetVersion vdsVersion = new VirtualDatasetVersion();
+      final FromBase from = new FromSQL(tableVirtualDataset.getSql());
+      vdsVersion.setLastTransform(
+          new Transform(TransformType.createFromParent)
+              .setTransformCreateFromParent(new TransformCreateFromParent(from.wrap())));
+      vdsVersion.setState(
+          new VirtualDatasetState()
+              .setContextList(tableVirtualDataset.getContextList())
+              .setFrom(from.wrap()));
+      vdsVersion.setNamed(true);
+      vdsVersion.setDerivation(null);
+      vdsVersion.setReferencesList(null);
+      vdsVersion.setDataset(tableDatasetConfig);
+      return vdsVersion;
+    }
+    return null;
+  }
+
   private void tryFixVersionHistory(DatasetPath path, DatasetVersion version) {
     if (isTemporaryPath(path.toPathList())) {
       return;
@@ -830,6 +919,7 @@ public class DatasetVersionMutator {
 
     logger.info("Try to fix history for dataset {}", path.toUnescapedString());
     DatasetPath originalPath = getDatasetPathInOriginalCase(path);
+
     VersionDatasetKey foundKey = new VersionDatasetKey(path, version);
     VirtualDatasetVersion foundValue = datasetVersions.get(foundKey);
 
@@ -845,6 +935,13 @@ public class DatasetVersionMutator {
         logger.info("Rewrite history {} to {}", foundKey, newKey);
       }
     }
+  }
+
+  private boolean isFromIcebergRestApi(DatasetPath datasetPath) {
+    NamespaceKey namespaceKey = new NamespaceKey(datasetPath.toPathList());
+
+    final Catalog catalog = getCatalog();
+    return CatalogUtil.supportsInterface(namespaceKey, catalog, SupportsIcebergRestApi.class);
   }
 
   /** Storage creator for dataset versions. */

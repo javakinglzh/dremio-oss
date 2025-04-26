@@ -49,13 +49,15 @@ public class PartitionStatsScanPrel extends TableFunctionPrel {
       Long survivingRecords,
       String user,
       boolean isCarryForwardEnabled,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> qualifiedTableName) {
     this(
         storagePluginId,
         cluster,
         traitSet,
         child,
-        getTableFunctionConfig(schema, storagePluginId, isCarryForwardEnabled, schemeVariate),
+        getTableFunctionConfig(
+            schema, storagePluginId, isCarryForwardEnabled, schemeVariate, qualifiedTableName),
         CalciteArrowHelper.wrap(schema).toCalciteRecordType(cluster.getTypeFactory(), true),
         survivingRecords,
         user);
@@ -90,7 +92,8 @@ public class PartitionStatsScanPrel extends TableFunctionPrel {
       BatchSchema schema,
       StoragePluginId storagePluginId,
       boolean isCarryForwardEnabled,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> dataset) {
     TableFunctionContext tableFunctionContext =
         new CarryForwardAwareTableFunctionContext(
             schema,
@@ -100,7 +103,8 @@ public class PartitionStatsScanPrel extends TableFunctionPrel {
                 SchemaPath.getSimplePath(METADATA_FILE_PATH), SchemaPath.getSimplePath(FILE_PATH)),
             FILE_TYPE,
             IcebergFileType.METADATA_JSON.name(),
-            schemeVariate);
+            schemeVariate,
+            dataset);
     return new TableFunctionConfig(
         TableFunctionConfig.FunctionType.ICEBERG_PARTITION_STATS_SCAN, true, tableFunctionContext);
   }

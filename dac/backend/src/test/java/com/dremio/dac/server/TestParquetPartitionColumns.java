@@ -116,7 +116,6 @@ public class TestParquetPartitionColumns extends BaseTestServer {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
                 new PhysicalDataset()

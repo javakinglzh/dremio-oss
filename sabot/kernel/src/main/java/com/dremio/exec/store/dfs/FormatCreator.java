@@ -19,7 +19,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.common.util.ConstructorChecker;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.deltalake.DeltaLakeFormatConfig;
 import com.dremio.exec.store.easy.arrow.ArrowFormatPluginConfig;
 import com.dremio.exec.store.easy.excel.ExcelFormatPluginConfig;
@@ -27,6 +27,7 @@ import com.dremio.exec.store.easy.json.JSONFormatPlugin;
 import com.dremio.exec.store.easy.text.TextFormatPlugin;
 import com.dremio.exec.store.easy.text.TextFormatPlugin.TextFormatConfig;
 import com.dremio.exec.store.iceberg.IcebergFormatConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.ParquetFormatConfig;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -45,9 +46,12 @@ public class FormatCreator {
 
   private static final ConstructorChecker FORMAT_BASED =
       new ConstructorChecker(
-          String.class, SabotContext.class, FormatPluginConfig.class, FileSystemPlugin.class);
+          String.class,
+          PluginSabotContext.class,
+          FormatPluginConfig.class,
+          SupportsFsCreation.class);
   private static final ConstructorChecker DEFAULT_BASED =
-      new ConstructorChecker(String.class, SabotContext.class, FileSystemPlugin.class);
+      new ConstructorChecker(String.class, PluginSabotContext.class, SupportsFsCreation.class);
 
   /**
    * Returns a Map from the FormatPlugin Config class to the constructor of the format plugin that
@@ -78,24 +82,20 @@ public class FormatCreator {
     return constructors;
   }
 
-  private final SabotContext context;
-  private final FileSystemConf<?, ?> storageConfig;
-  private final FileSystemPlugin<?> fsPlugin;
+  private final PluginSabotContext context;
+  private final SupportsFsCreation fsCreator;
 
   /** format plugins initialized from the Sabot config, indexed by name */
   private final Map<String, FormatPlugin> pluginsByName;
 
   /** format plugins initialized from the Sabot config, indexed by {@link FormatPluginConfig} */
-  private Map<FormatPluginConfig, FormatPlugin> pluginsByConfig;
+  private final Map<FormatPluginConfig, FormatPlugin> pluginsByConfig;
 
   /** FormatMatchers for all configured plugins */
-  private List<FormatMatcher> formatMatchers;
+  private final List<FormatMatcher> formatMatchers;
 
   /** FormatMatchers for "layer formats" which can potentially contain files of many formats. */
-  private List<FormatMatcher> layeredFormatMatchers;
-
-  /** The format plugin classes retrieved from classpath scanning */
-  private final Collection<Class<? extends FormatPlugin>> pluginClasses;
+  private final List<FormatMatcher> layeredFormatMatchers;
 
   /**
    * a Map from the FormatPlugin Config class to the constructor of the format plugin that accepts
@@ -103,7 +103,7 @@ public class FormatCreator {
    */
   private final Map<Class<?>, Constructor<?>> configConstructors;
 
-  public static Map<String, FormatPluginConfig> getDefaultFormats() {
+  private static Map<String, FormatPluginConfig> getDefaultFormats() {
     Map<String, FormatPluginConfig> defaultFormats = new TreeMap<>();
     defaultFormats.put("csv", createTextFormatPlugin(false, ",", Lists.newArrayList("csv")));
     defaultFormats.put("csvh", createTextFormatPlugin(true, ",", Lists.newArrayList("csvh")));
@@ -132,7 +132,7 @@ public class FormatCreator {
    *
    * @return - a new TextFormatConfig
    */
-  public static TextFormatPlugin.TextFormatConfig createTextFormatPlugin(
+  private static TextFormatPlugin.TextFormatConfig createTextFormatPlugin(
       boolean extractHeader, String fieldDelimiter, List<String> extensions) {
     TextFormatPlugin.TextFormatConfig newText = new TextFormatPlugin.TextFormatConfig();
     newText.extractHeader = extractHeader;
@@ -143,14 +143,12 @@ public class FormatCreator {
   }
 
   FormatCreator(
-      SabotContext context,
-      FileSystemConf<?, ?> storageConfig,
-      ScanResult classpathScan,
-      FileSystemPlugin fsPlugin) {
+      PluginSabotContext context, ScanResult classpathScan, SupportsFsCreation fsCreator) {
     this.context = context;
-    this.storageConfig = storageConfig;
-    this.fsPlugin = fsPlugin;
-    this.pluginClasses = classpathScan.getImplementations(FormatPlugin.class);
+    this.fsCreator = fsCreator;
+    /** The format plugin classes retrieved from classpath scanning */
+    Collection<Class<? extends FormatPlugin>> pluginClasses =
+        classpathScan.getImplementations(FormatPlugin.class);
     this.configConstructors = initConfigConstructors(pluginClasses);
     Map<String, FormatPlugin> pluginsByName = Maps.newHashMap();
     Map<FormatPluginConfig, FormatPlugin> pluginsByConfig = Maps.newHashMap();
@@ -170,7 +168,7 @@ public class FormatCreator {
         }
         try {
           FormatPlugin formatPlugin =
-              (FormatPlugin) c.newInstance(e.getKey(), context, e.getValue(), fsPlugin);
+              (FormatPlugin) c.newInstance(e.getKey(), context, e.getValue(), fsCreator);
           pluginsByName.put(e.getKey(), formatPlugin);
           pluginsByConfig.put(formatPlugin.getConfig(), formatPlugin);
 
@@ -200,7 +198,7 @@ public class FormatCreator {
           if (!DEFAULT_BASED.check(c)) {
             continue;
           }
-          FormatPlugin plugin = (FormatPlugin) c.newInstance(null, context, fsPlugin);
+          FormatPlugin plugin = (FormatPlugin) c.newInstance(null, context, fsCreator);
           if (pluginsByName.containsKey(plugin.getName())) {
             continue;
           }
@@ -226,10 +224,6 @@ public class FormatCreator {
     this.pluginsByConfig = Collections.unmodifiableMap(pluginsByConfig);
     this.formatMatchers = Collections.unmodifiableList(formatMatchers);
     this.layeredFormatMatchers = Collections.unmodifiableList(layeredFormatMatchers);
-  }
-
-  public FileSystemPlugin getPlugin() {
-    return fsPlugin;
   }
 
   /**
@@ -289,7 +283,7 @@ public class FormatCreator {
           .build(logger);
     }
     try {
-      return (FormatPlugin) c.newInstance(null, context, fpconfig, fsPlugin);
+      return (FormatPlugin) c.newInstance(null, context, fpconfig, fsCreator);
     } catch (InstantiationException
         | IllegalAccessException
         | IllegalArgumentException

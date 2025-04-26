@@ -20,6 +20,7 @@ import com.google.common.collect.ImmutableList;
 import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.apache.arrow.memory.BufferAllocator;
 
 /**
@@ -41,6 +42,8 @@ public class PhaseTicket extends TicketWithChildren {
   private final int majorFragmentId;
   private final int phaseWeight;
   private final Set<FragmentTicket> fragmentTickets = ConcurrentHashMap.newKeySet();
+  private AtomicLong peakNonSpillableMemoryAcrossFragments = new AtomicLong(0);
+  private AtomicLong peakSpillableMemoryAcrossFragments = new AtomicLong(0);
 
   public PhaseTicket(
       QueryTicket queryTicket, int majorFragmentId, BufferAllocator allocator, int phaseWeight) {
@@ -56,6 +59,14 @@ public class PhaseTicket extends TicketWithChildren {
 
   public QueryTicket getQueryTicket() {
     return queryTicket;
+  }
+
+  public void addPeakNonSpillableMemoryAcrossFragments(long memory) {
+    peakNonSpillableMemoryAcrossFragments.addAndGet(memory);
+  }
+
+  public void addPeakSpillableMemoryAcrossFragments(long memory) {
+    peakSpillableMemoryAcrossFragments.addAndGet(memory);
   }
 
   public void reserve(FragmentTicket fragmentTicket) {
@@ -78,6 +89,8 @@ public class PhaseTicket extends TicketWithChildren {
         .setMajorFragmentId(majorFragmentId)
         .setMaxMemoryUsed(getAllocator().getPeakMemoryAllocation())
         .setPhaseWeight(phaseWeight)
+        .setMaxMemoryNonSpillableOperators(peakNonSpillableMemoryAcrossFragments.get())
+        .setMaxMemorySpillableOperators(peakSpillableMemoryAcrossFragments.get())
         .build();
   }
 

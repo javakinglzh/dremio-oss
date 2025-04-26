@@ -17,7 +17,6 @@ package com.dremio.sabot.op.aggregate.hash;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.SuppressForbidden;
-import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.FieldReference;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.exec.compile.sig.RuntimeOverridden;
@@ -254,23 +253,15 @@ public abstract class HashAggTemplate implements HashAggregator {
     this.outContainer = outContainer;
     this.materializedValueFields = new Field[valueFieldIds.size()];
 
-    if (valueFieldIds.size() > 0) {
+    if (!valueFieldIds.isEmpty()) {
       int i = 0;
       FieldReference ref = new FieldReference("dummy", valueFieldIds.get(0).getIntermediateType());
       for (TypedFieldId id : valueFieldIds) {
-        if (id.getIntermediateType() == CompleteType.OBJECT) {
-          materializedValueFields[i++] =
-              new Field(
-                  ref.getAsNamePart().getName(),
-                  new FieldType(true, id.getIntermediateType().getType(), null),
-                  null);
-        } else {
-          materializedValueFields[i++] =
-              new Field(
-                  ref.getAsNamePart().getName(),
-                  new FieldType(true, id.getIntermediateType().getType(), null),
-                  null);
-        }
+        materializedValueFields[i++] =
+            new Field(
+                ref.getAsNamePart().getName(),
+                new FieldType(true, id.getIntermediateType().getType(), null),
+                null);
       }
     }
 

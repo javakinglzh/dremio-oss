@@ -19,9 +19,12 @@ import static com.dremio.exec.compile.sig.GeneratorMapping.GM;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.logical.data.JoinCondition;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.sig.GeneratorMapping;
 import com.dremio.exec.compile.sig.MappingSet;
 import com.dremio.exec.expr.ClassGenerator;
@@ -38,6 +41,7 @@ import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.common.hashtable.Comparator;
 import com.dremio.sabot.op.join.JoinUtils;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.DualInputOperator;
 import com.google.common.base.Preconditions;
 import com.sun.codemodel.JConditional;
@@ -46,6 +50,8 @@ import com.sun.codemodel.JExpression;
 import com.sun.codemodel.JVar;
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.rel.core.JoinRelType;
 
@@ -62,6 +68,8 @@ public class MergeJoinOperator implements DualInputOperator {
     IN_INNER_LOOP
   }
 
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(MergeJoinOperator.class);
   private State state = State.NEEDS_SETUP;
 
   // Join type, INNER, LEFT, RIGHT or OUTER
@@ -83,6 +91,13 @@ public class MergeJoinOperator implements DualInputOperator {
 
   private boolean noMoreLeft = false;
   private boolean noMoreRight = false;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
 
   public MergeJoinOperator(OperatorContext context, MergeJoinPOP popConfig) {
     this.context = context;
@@ -91,6 +106,11 @@ public class MergeJoinOperator implements DualInputOperator {
     this.stats = context.getStats();
 
     this.outgoing = context.createOutputVectorContainer();
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
@@ -145,7 +165,25 @@ public class MergeJoinOperator implements DualInputOperator {
 
     int ret = comparator.getOutputSize();
     comparator.resetOutputCounter();
-    return outgoing.setAllCount(ret);
+    outgoing.setAllCount(ret);
+    checkForRowSizeOverLimit(ret);
+    return ret;
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   private void done() throws Exception {
@@ -167,6 +205,10 @@ public class MergeJoinOperator implements DualInputOperator {
     autoCloseables.add(leftIterator);
     autoCloseables.add(rightIterator);
     AutoCloseables.close(autoCloseables);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   @Override
@@ -191,7 +233,33 @@ public class MergeJoinOperator implements DualInputOperator {
 
     generateComparator();
 
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (!VectorContainerHelper.isVarLenColumnPresent(outgoing)) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+      }
+    }
+
     return outgoing;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
   }
 
   @Override

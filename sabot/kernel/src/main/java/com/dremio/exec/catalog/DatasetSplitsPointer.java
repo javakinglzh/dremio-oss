@@ -21,12 +21,12 @@ import com.dremio.datastore.api.FindByRange;
 import com.dremio.datastore.api.ImmutableFindByCondition;
 import com.dremio.datastore.api.LegacyIndexedStore.LegacyFindByCondition;
 import com.dremio.exec.store.SplitsPointer;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.PartitionChunkId;
 import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.service.namespace.split.SplitNamespaceService;
 import com.google.common.base.Preconditions;
 import java.util.Objects;
 
@@ -39,12 +39,16 @@ public final class DatasetSplitsPointer extends LazySplitsPointer {
   private final EntityId datasetId;
 
   private DatasetSplitsPointer(
-      NamespaceService namespaceService, EntityId datasetId, long splitVersion, int splitsCount) {
+      SplitNamespaceService namespaceService,
+      EntityId datasetId,
+      long splitVersion,
+      int splitsCount) {
     super(namespaceService, splitVersion, splitsCount);
     this.datasetId = datasetId;
   }
 
-  public static SplitsPointer of(NamespaceService namespaceService, DatasetConfig datasetConfig) {
+  public static SplitsPointer of(
+      SplitNamespaceService namespaceService, DatasetConfig datasetConfig) {
     final EntityId datasetId = Preconditions.checkNotNull(datasetConfig.getId());
     final ReadDefinition readDefinition =
         Preconditions.checkNotNull(

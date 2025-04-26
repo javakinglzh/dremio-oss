@@ -153,7 +153,7 @@ public class DremioJoinSubQueryRemoveRule extends RelRule<DremioJoinSubQueryRemo
                     os.operand(Join.class)
                         .predicate(
                             join ->
-                                RexSubQueryUtils.containsSubQuery(join)
+                                RexSubQueryUtils.containsSubQuery(join.getCondition())
                                     && !join.getJoinType().generatesNullsOnLeft())
                         .anyInputs())
             .as(Config.class);
@@ -207,7 +207,15 @@ public class DremioJoinSubQueryRemoveRule extends RelRule<DremioJoinSubQueryRemo
 
     @Override
     public RexNode visitSubQuery(RexSubQuery subQuery) {
-      return subQuery.clone(subQuery.rel.accept(relShuttle));
+      RelNode rewrittenRelNode = subQuery.rel.accept(relShuttle);
+      RexSubQuery rewrittenSubQuery = subQuery.clone(rewrittenRelNode);
+      if (RexSubQueryUtils.collectCorrelatedVariables(rewrittenRelNode, subQuery.correlationId)
+          .isEmpty()) {
+        // If there is no correlate variable in the RelNode, then we should drop the correlationId
+        rewrittenSubQuery = RexSubQueryUtils.clone(rewrittenSubQuery, null);
+      }
+
+      return rewrittenSubQuery;
     }
   }
 

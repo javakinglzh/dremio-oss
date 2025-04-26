@@ -47,7 +47,8 @@ public class LogicalWindowSerde implements RelNodeSerde<LogicalWindow, PLogicalW
         input.getTraitSet(),
         input,
         node.getConstantsList().stream()
-            .map(c -> (RexLiteral) s.toRex(c))
+            .map(s::toRex)
+            .map(RexLiteral.class::cast)
             .collect(Collectors.toList()),
         s.toRelDataType(node.getType()),
         node.getGroupsList().stream().map(g -> fromProto(g, s)).collect(Collectors.toList()));

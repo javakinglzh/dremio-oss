@@ -41,7 +41,7 @@ public class IcebergHiveModel extends IcebergBaseModel {
       String queryUserName,
       OperatorContext operatorContext,
       SupportsIcebergMutablePlugin plugin) {
-    super(namespace, plugin.getFsConfCopy(), fileIO, operatorContext, null, plugin);
+    super(namespace, plugin.getFsConfCopy(), fileIO, operatorContext, null);
     this.queryUserName = queryUserName;
     this.plugin = plugin;
     this.tableName = tableName;
@@ -51,7 +51,7 @@ public class IcebergHiveModel extends IcebergBaseModel {
   protected IcebergCommand getIcebergCommand(
       IcebergTableIdentifier tableIdentifier, @Nullable IcebergCommitOrigin commitOrigin) {
     TableOperations tableOperations =
-        plugin.createIcebergTableOperations(fileIO, queryUserName, tableIdentifier);
+        plugin.createIcebergTableOperations(fileIO, tableIdentifier, queryUserName, null);
     return new IcebergHiveCommand(
         configuration,
         ((IcebergHiveTableIdentifier) tableIdentifier).getTableFolder(),
@@ -65,7 +65,7 @@ public class IcebergHiveModel extends IcebergBaseModel {
       String tableLocation,
       @Nullable IcebergCommitOrigin commitOrigin) {
     TableOperations tableOperations =
-        plugin.createIcebergTableOperations(fileIO, queryUserName, tableIdentifier);
+        plugin.createIcebergTableOperations(fileIO, tableIdentifier, queryUserName, null);
     return new IcebergHiveCommand(configuration, tableLocation, tableOperations, currentQueryId());
   }
 

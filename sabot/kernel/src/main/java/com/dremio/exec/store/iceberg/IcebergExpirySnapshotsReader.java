@@ -19,8 +19,13 @@ import static com.dremio.exec.store.IcebergExpiryMetric.ICEBERG_COMMIT_TIME;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_EXPIRED_SNAPSHOTS;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_TABLE_EXPIRY;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_TOTAL_SNAPSHOTS;
+import static com.dremio.exec.store.SystemSchemas.DATASET_FIELD;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createSnapshotInfoLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.logging.StructuredLogger;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.store.IcebergExpiryMetric;
 import com.dremio.exec.store.RecordReader;
@@ -28,12 +33,16 @@ import com.dremio.exec.store.SystemSchemas;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.scan.OutputMutator;
+import com.google.common.collect.Streams;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.ValueVector;
@@ -49,12 +58,14 @@ import org.slf4j.LoggerFactory;
  */
 public abstract class IcebergExpirySnapshotsReader implements RecordReader {
   private static final Logger LOGGER = LoggerFactory.getLogger(IcebergExpirySnapshotsReader.class);
+  private static final StructuredLogger vacuumLogger = getVacuumLogger();
   private static final byte[] METADATA =
       IcebergFileType.METADATA_JSON.name().getBytes(StandardCharsets.UTF_8);
 
   private Iterator<SnapshotEntry> snapshotsIterator = Collections.emptyIterator();
   protected Iterator<String> metadataPathsToRetain = Collections.emptyIterator();
 
+  private Optional<VarCharVector> datasetOutVector;
   private VarCharVector metadataFilePathOutVector;
   private VarCharVector manifestListOutVector;
   private BigIntVector snapshotIdOutVector;
@@ -67,6 +78,7 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
   protected final SnapshotsScanOptions snapshotsScanOptions;
   protected volatile FileSystem fs;
   protected volatile FileIO io;
+  private final String queryId;
 
   protected OutputMutator output;
 
@@ -82,12 +94,18 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
     this.icebergMutablePlugin = icebergMutablePlugin;
     this.props = props;
     this.snapshotsScanOptions = snapshotsScanOptions;
+    this.queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
   }
 
   @Override
   public void setup(OutputMutator output) throws ExecutionSetupException {
     this.output = output;
 
+    datasetOutVector =
+        Streams.stream(output.getVectors())
+            .filter(v -> v.getField().getName().equals(DATASET_FIELD))
+            .map(v -> (VarCharVector) v)
+            .findFirst();
     metadataFilePathOutVector = (VarCharVector) output.getVector(SystemSchemas.METADATA_FILE_PATH);
     manifestListOutVector = (VarCharVector) output.getVector(SystemSchemas.MANIFEST_LIST_PATH);
     snapshotIdOutVector = (BigIntVector) output.getVector(SystemSchemas.SNAPSHOT_ID);
@@ -128,6 +146,20 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
       snapshotIdOutVector.setSafe(outIndex, snapshot.getSnapshotId());
       manifestListOutVector.setSafe(
           outIndex, snapshot.getManifestListPath().getBytes(StandardCharsets.UTF_8));
+      if (datasetOutVector.isPresent()) {
+        datasetOutVector
+            .get()
+            .setSafe(
+                outIndex,
+                Stream.of(
+                        icebergMutablePlugin.getId().getName(),
+                        currentExpiryAction.dbName,
+                        currentExpiryAction.tableName)
+                    .filter(name -> name != null && !name.isEmpty())
+                    .reduce((a, b) -> String.join(".", a, b))
+                    .get()
+                    .getBytes(StandardCharsets.UTF_8));
+      }
       outIndex++;
     }
 
@@ -199,6 +231,15 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
               .collect(Collectors.joining(",")));
     }
     snapshotsIterator = snapshots.iterator();
+    vacuumLogger.info(
+        createSnapshotInfoLog(
+            queryId,
+            currentExpiryAction.getTableName(),
+            snapshotsScanOptions,
+            snapshots.stream()
+                .map(snapshotEntry -> String.valueOf(snapshotEntry.getSnapshotId()))
+                .collect(Collectors.toList())),
+        "");
   }
 
   protected abstract void setupNextExpiryAction();
@@ -216,17 +257,30 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
     context.getStats().addLongStat(metric, val);
   }
 
-  protected synchronized void setupFsIfNecessary(String path) {
+  protected void setupFsIfNecessary(String path, List<String> dataset) {
     if (this.fs != null) {
       return; // Already initialized
     }
 
+    setupFs(path, dataset);
+  }
+
+  protected synchronized void setupFs(String path, List<String> dataset) {
     try {
-      this.fs = icebergMutablePlugin.createFS(path, props.getUserName(), context);
-      this.io = icebergMutablePlugin.createIcebergFileIO(this.fs, context, null, null, null);
+      this.fs = getFsFromPlugin(path, dataset);
+      this.io = icebergMutablePlugin.createIcebergFileIO(this.fs, context, dataset, null, null);
     } catch (Exception e) {
       LOGGER.error("Failed to initialize the file system with error message {}.", e.getMessage());
       throw new RuntimeException(e);
     }
+  }
+
+  protected FileSystem getFsFromPlugin(String filePath, List<String> dataset) throws IOException {
+    return icebergMutablePlugin.createFS(
+        SupportsFsCreation.builder()
+            .filePath(filePath)
+            .userName(props.getUserName())
+            .operatorContext(context)
+            .dataset(dataset));
   }
 }

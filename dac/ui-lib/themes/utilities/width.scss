@@ -29,6 +29,15 @@
 .w-full {
   inline-size: 100%;
 }
+
+.w-max {
+  width: max-content;
+}
+
+.w-fit {
+  width: fit-content;
+}
+
 .max-w-max {
   max-inline-size: max-content;
 }

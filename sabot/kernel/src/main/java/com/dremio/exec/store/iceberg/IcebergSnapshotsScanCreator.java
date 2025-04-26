@@ -51,7 +51,9 @@ public class IcebergSnapshotsScanCreator
                         plugin,
                         config.getProps(),
                         config.getSnapshotsScanOptions(),
-                        config.getSchemeVariate()))
+                        config.getSchemeVariate(),
+                        config.getUserId(),
+                        config.getTableName()))
             .collect(Collectors.toList());
     return new ScanOperator(
         fragmentExecContext, config, context, RecordReaderIterator.from(readers.listIterator()));
@@ -60,7 +62,7 @@ public class IcebergSnapshotsScanCreator
   private IcebergProtobuf.IcebergDatasetSplitXAttr toXAttrs(SplitAndPartitionInfo split) {
     try {
       return LegacyProtobufSerializer.parseFrom(
-          IcebergProtobuf.IcebergDatasetSplitXAttr.PARSER,
+          IcebergProtobuf.IcebergDatasetSplitXAttr.parser(),
           split.getDatasetSplitInfo().getExtendedProperty());
     } catch (InvalidProtocolBufferException e) {
       throw new RuntimeException("Could not deserialize split info", e);

@@ -18,14 +18,13 @@ package com.dremio.exec.planner.common;
 import com.dremio.exec.planner.cost.DremioCost;
 import com.dremio.exec.planner.cost.DremioCost.Factory;
 import com.dremio.exec.planner.physical.PrelUtil;
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.FluentIterable;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptCost;
 import org.apache.calcite.plan.RelOptPlanner;
@@ -35,10 +34,11 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.SingleRel;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.rel.type.RelDataTypeFactory.Builder;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexSlot;
 
 /** Flatten rel base (can be any convention) */
 public abstract class FlattenRelBase extends SingleRel {
@@ -100,7 +100,7 @@ public abstract class FlattenRelBase extends SingleRel {
       }
     }
 
-    final RelDataTypeFactory.Builder builder = getCluster().getTypeFactory().builder();
+    final Builder builder = getCluster().getTypeFactory().builder();
     for (RelDataTypeField field : outputFields) {
       builder.add(field);
     }
@@ -117,15 +117,7 @@ public abstract class FlattenRelBase extends SingleRel {
   }
 
   public Set<Integer> getFlattenedIndices() {
-    return FluentIterable.from(getToFlatten())
-        .transform(
-            new Function<RexInputRef, Integer>() {
-              @Override
-              public Integer apply(RexInputRef input) {
-                return input.getIndex();
-              }
-            })
-        .toSet();
+    return getToFlatten().stream().map(RexSlot::getIndex).collect(Collectors.toSet());
   }
 
   public Map<Integer, String> getFlattenIndicesToAlias() {
@@ -134,7 +126,7 @@ public abstract class FlattenRelBase extends SingleRel {
       RexInputRef rexInputRef = toFlatten.get(i);
       Integer index = rexInputRef.getIndex();
       String alias = null;
-      if (aliases != null) {
+      if (aliases != null && !aliases.isEmpty()) {
         alias = aliases.get(i);
       }
 

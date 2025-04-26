@@ -15,37 +15,51 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_CATALOG_EXPIRE_SECONDS;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_TABLE_CACHE_SIZE_ITEMS;
+import static com.dremio.plugins.icebergcatalog.store.AbstractRestCatalogAccessor.DEFAULT_BASE_LOCATION;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.connector.ConnectorException;
+import com.dremio.connector.metadata.DatasetHandle;
+import com.dremio.connector.metadata.DatasetHandleListing;
+import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.connector.metadata.ViewDatasetHandle;
+import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.dremioudf.core.udf.InMemoryCatalog;
 import com.dremio.options.OptionManager;
-import com.google.common.base.Supplier;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.RESTCatalog;
+import org.apache.iceberg.view.BaseView;
+import org.apache.iceberg.view.ViewMetadata;
+import org.apache.iceberg.view.ViewOperations;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -56,23 +70,34 @@ import org.mockito.junit.MockitoJUnitRunner;
 @RunWith(MockitoJUnitRunner.class)
 public class TestRestCatalogAccessor {
 
-  @Mock private Supplier<Catalog> mockCatalogSupplier;
+  @Mock private RESTCatalog mockRestCatalog;
+  @Mock private BaseView mockBaseView;
+  @Mock private ViewOperations viewOperations;
+  @Mock private ViewMetadata mockViewMetadata;
+  @Mock private OptionManager mockOptionManager;
+  @Mock private Supplier<Catalog> invalidSupplierCatalog;
+  @Mock private Supplier<Catalog> validSupplierCatalog;
 
   private CatalogAccessor restCatalogAccessor;
+  private CatalogAccessor restCatalogAccessorWithViewSupport;
   private static final long CATALOG_EXPIRY_SECONDS = 2L;
 
   @Before
   public void setup() {
-    Configuration mockConfiguration = mock(Configuration.class);
-    OptionManager mockOptionManager = mock(OptionManager.class);
+    when(validSupplierCatalog.get()).thenReturn(mockRestCatalog);
     when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_SIZE_ITEMS)).thenReturn(10L);
     when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS))
         .thenReturn(10L);
     when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_CATALOG_EXPIRE_SECONDS))
         .thenReturn(CATALOG_EXPIRY_SECONDS);
+
+    when(mockBaseView.operations()).thenReturn(viewOperations);
+    when(viewOperations.current()).thenReturn(mockViewMetadata);
+
     restCatalogAccessor =
-        new RestCatalogAccessor(
-            mockCatalogSupplier, mockConfiguration, mockOptionManager, null, false);
+        new IcebergRestCatalogAccessor(validSupplierCatalog, mockOptionManager, null, false);
+    restCatalogAccessorWithViewSupport =
+        new IcebergRestCatalogAccessor(validSupplierCatalog, mockOptionManager, null, false);
   }
 
   @After
@@ -81,72 +106,41 @@ public class TestRestCatalogAccessor {
   }
 
   @Test
-  public void testDatasetExistsThrowsExceptionForWrongCatalog() {
-    InMemoryCatalog mockInMemoryCatalog = mock(InMemoryCatalog.class);
-    when(mockCatalogSupplier.get()).thenReturn(mockInMemoryCatalog);
-    assertThatThrownBy(() -> restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c")))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessageContaining("RESTCatalog instance expected");
-  }
-
-  @Test
   public void testDatasetExists() {
-    RESTCatalog mockRESTCatalog = mock(RESTCatalog.class);
-    when(mockRESTCatalog.tableExists(TableIdentifier.of("b", "c"))).thenReturn(true);
-    when(mockCatalogSupplier.get()).thenReturn(mockRESTCatalog);
+    when(mockRestCatalog.tableExists(TableIdentifier.of("b", "c"))).thenReturn(true);
     assertTrue(restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c")));
   }
 
   @Test
   public void testDatasetDoesNotExists() {
-    RESTCatalog mockRESTCatalog = mock(RESTCatalog.class);
-    when(mockRESTCatalog.tableExists(any())).thenReturn(false);
-    when(mockCatalogSupplier.get()).thenReturn(mockRESTCatalog);
+    when(mockRestCatalog.tableExists(any())).thenReturn(false);
     assertFalse(restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c")));
   }
 
   @Test
   public void testDatasetExistsThrowsNullPointerExceptionForNullList() {
-    RESTCatalog mockRESTCatalog = mock(RESTCatalog.class);
-    when(mockCatalogSupplier.get()).thenReturn(mockRESTCatalog);
     assertThatThrownBy(() -> restCatalogAccessor.datasetExists(null))
         .isInstanceOf(NullPointerException.class);
   }
 
   @Test
-  public void testDatasetExistsThrowsIllegalStateExceptionForEmptyList() {
-    RESTCatalog mockRESTCatalog = mock(RESTCatalog.class);
-    when(mockCatalogSupplier.get()).thenReturn(mockRESTCatalog);
-    assertThatThrownBy(() -> restCatalogAccessor.datasetExists(List.of()))
-        .isInstanceOf(IllegalStateException.class);
-  }
-
-  @Test
   public void testClose() throws Exception {
-    restCatalogAccessor.close();
-    RESTCatalog mockCatalog = mock(RESTCatalog.class);
-    when(mockCatalogSupplier.get()).thenReturn(mockCatalog);
-    doThrow(new IOException()).when((Closeable) mockCatalog).close();
     restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c"));
     restCatalogAccessor.close();
-    verify(((Closeable) mockCatalog), times(1)).close();
+    verify(((Closeable) mockRestCatalog), times(1)).close();
   }
 
   @Test
   public void testCatalogSupplierCalledAfterExpiry() throws Exception {
-    RESTCatalog mockRESTCatalog = mock(RESTCatalog.class);
-    when(mockRESTCatalog.tableExists(any())).thenReturn(true);
-    when(mockCatalogSupplier.get()).thenReturn(mockRESTCatalog);
+    when(mockRestCatalog.tableExists(any())).thenReturn(true);
 
     assertTrue(restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c")));
-    verify(mockCatalogSupplier, times(1)).get();
 
     Thread.sleep(TimeUnit.SECONDS.toMillis(CATALOG_EXPIRY_SECONDS + 1));
     assertTrue(restCatalogAccessor.datasetExists(Arrays.asList("a", "b", "c")));
-    verify(mockCatalogSupplier, times(2)).get();
   }
 
-  private static void testNSAllowList(
+  private void testNSAllowList(
       Set<Namespace> allowedNamespaces,
       boolean isRecursiveAllowedNamespaces,
       List<Integer> expectedTableNameNums) {
@@ -231,7 +225,8 @@ public class TestRestCatalogAccessor {
             });
 
     List<TableIdentifier> tables =
-        RestCatalogAccessor.streamTables(catalog, allowedNamespaces, isRecursiveAllowedNamespaces)
+        ((IcebergRestCatalogAccessor) restCatalogAccessor)
+            .streamTables(catalog, allowedNamespaces, isRecursiveAllowedNamespaces)
             .collect(Collectors.toList());
     assertEquals(expectedTableNameNums.size(), tables.size());
     List<Integer> tableNumList = tableIdentifiersToTableNameNumbers(tables);
@@ -274,5 +269,142 @@ public class TestRestCatalogAccessor {
     return tableIdentifiers.stream()
         .map(ti -> Character.getNumericValue(ti.name().charAt(3)))
         .collect(Collectors.toList());
+  }
+
+  @Test
+  public void testGetViewMetadata() {
+    when(mockRestCatalog.loadView(any())).thenReturn(mockBaseView);
+    List<String> dataset = List.of("source", "db", "view");
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    ViewMetadata viewMetadata = restCatalogAccessorWithViewSupport.getViewMetadata(dataset);
+    assertEquals(mockViewMetadata, viewMetadata);
+  }
+
+  @Test
+  public void testInvalidCatalog() {
+    InMemoryCatalog mockInMemoryCatalog = mock(InMemoryCatalog.class);
+    when(invalidSupplierCatalog.get()).thenReturn(mockInMemoryCatalog);
+    CatalogAccessor restCatalogAccessorWithInvalidCatalog =
+        new IcebergRestCatalogAccessor(invalidSupplierCatalog, mockOptionManager, null, false);
+    assertThatThrownBy(
+            () -> restCatalogAccessorWithInvalidCatalog.datasetExists(Arrays.asList("a", "b", "c")))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("RESTCatalog instance expected");
+  }
+
+  @Test
+  public void testDatasetExistsWithView() {
+    when(mockRestCatalog.viewExists(TableIdentifier.of("b", "c"))).thenReturn(true);
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    assertTrue(restCatalogAccessorWithViewSupport.datasetExists(Arrays.asList("a", "b", "c")));
+  }
+
+  @Test
+  public void testDatasetDoesNotExistsWithView() {
+    when(mockRestCatalog.viewExists(any())).thenReturn(false);
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    assertFalse(restCatalogAccessorWithViewSupport.datasetExists(Arrays.asList("a", "b", "c")));
+  }
+
+  @Test
+  public void testListDatasetHandles() throws ConnectorException {
+    TableIdentifier mockTableIdentifier = mock(TableIdentifier.class);
+    TableIdentifier mockViewIdentifier = mock(TableIdentifier.class);
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+
+    when(mockRestCatalog.listTables(any())).thenReturn(List.of(mockTableIdentifier));
+    when(mockRestCatalog.listViews(any())).thenReturn(List.of(mockViewIdentifier));
+    when(mockTableIdentifier.namespace()).thenReturn(Namespace.of("root"));
+    when(mockViewIdentifier.namespace()).thenReturn(Namespace.of("root"));
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    DatasetHandleListing datasetHandleListing =
+        restCatalogAccessorWithViewSupport.listDatasetHandles("root", mockPlugin);
+    List<DatasetHandle> datasetHandles = ImmutableList.copyOf(datasetHandleListing.iterator());
+
+    assertNotNull(datasetHandles);
+    assertEquals(2, datasetHandles.size());
+  }
+
+  @Test
+  public void testListDatasetHandlesViewsDisabled() throws ConnectorException {
+    TableIdentifier mockTableIdentifier = mock(TableIdentifier.class);
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+
+    when(mockRestCatalog.listTables(any())).thenReturn(List.of(mockTableIdentifier));
+    when(mockTableIdentifier.namespace()).thenReturn(Namespace.of("root"));
+
+    DatasetHandleListing datasetHandleListing =
+        restCatalogAccessor.listDatasetHandles("root", mockPlugin);
+    List<DatasetHandle> datasetHandles = ImmutableList.copyOf(datasetHandleListing.iterator());
+
+    assertNotNull(datasetHandles);
+    assertEquals(1, datasetHandles.size());
+    verify(mockRestCatalog, never()).listViews(any());
+  }
+
+  @Test
+  public void testListDatasetHandlesOnlyViews() throws ConnectorException {
+    TableIdentifier mockViewIdentifier = mock(TableIdentifier.class);
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+
+    when(mockRestCatalog.listTables(any())).thenReturn(List.of());
+    when(mockRestCatalog.listViews(any())).thenReturn(List.of(mockViewIdentifier));
+    when(mockViewIdentifier.namespace()).thenReturn(Namespace.of("root"));
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+
+    DatasetHandleListing datasetHandleListing =
+        restCatalogAccessorWithViewSupport.listDatasetHandles("root", mockPlugin);
+    List<DatasetHandle> datasetHandles = ImmutableList.copyOf(datasetHandleListing.iterator());
+
+    assertNotNull(datasetHandles);
+    assertEquals(1, datasetHandles.size());
+    assertDoesNotThrow(() -> datasetHandles.get(0).unwrap(ViewDatasetHandle.class));
+  }
+
+  @Test
+  public void testListDatasetHandlesNoTablesOrViews() throws ConnectorException {
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+    when(mockRestCatalog.listTables(any())).thenReturn(List.of());
+    when(mockRestCatalog.listViews(any())).thenReturn(List.of());
+
+    DatasetHandleListing datasetHandleListing =
+        restCatalogAccessorWithViewSupport.listDatasetHandles("root", mockPlugin);
+    List<DatasetHandle> datasetHandles = ImmutableList.copyOf(datasetHandleListing.iterator());
+
+    assertNotNull(datasetHandles);
+    assertTrue(datasetHandles.isEmpty());
+  }
+
+  @Test
+  public void testListDatasetHandlesReturnsEmptyOnException() throws ConnectorException {
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+    assertThat(restCatalogAccessorWithViewSupport.listDatasetHandles("root", mockPlugin).iterator())
+        .toIterable()
+        .isEmpty();
+  }
+
+  @Test
+  public void testGetViewMetadataDataset() {
+    // Mock the behavior of the viewHandle
+    DatasetHandle mockViewHandle = mock(DatasetHandle.class);
+    IcebergCatalogViewProvider mockViewProvider = mock(IcebergCatalogViewProvider.class);
+    when(mockViewHandle.unwrap(IcebergCatalogViewProvider.class)).thenReturn(mockViewProvider);
+
+    // Call the method
+    DatasetMetadata result = restCatalogAccessor.getViewMetadata(mockViewHandle);
+
+    // Verify the result
+    assertNotNull(result);
+    assertEquals(mockViewProvider, result);
+  }
+
+  @Test
+  public void testGetDefaultBaseLocation() {
+    String defaultBaseLocationInCatalog = "s3://bucket/path";
+    when(mockRestCatalog.properties())
+        .thenReturn(ImmutableMap.of(DEFAULT_BASE_LOCATION, defaultBaseLocationInCatalog));
+    String expectedDefaultBaseLocation = restCatalogAccessor.getDefaultBaseLocation();
+    assertThat(expectedDefaultBaseLocation).isEqualTo(defaultBaseLocationInCatalog);
   }
 }

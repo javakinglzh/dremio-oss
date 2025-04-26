@@ -74,7 +74,7 @@ public class TestMinorDataSerDe extends ExecTest {
 
   @Test
   public void serializeJson() throws Exception {
-    TopN in = new TopN(OpProps.prototype(), null, 10, Collections.EMPTY_LIST, true);
+    TopN in = new TopN(OpProps.prototype(), null, 10, Collections.emptyList(), true);
     ByteString buffer = serDe.serializeObjectToJson(in);
     TopN out = serDe.deserializeObjectFromJson(TopN.class, buffer);
 

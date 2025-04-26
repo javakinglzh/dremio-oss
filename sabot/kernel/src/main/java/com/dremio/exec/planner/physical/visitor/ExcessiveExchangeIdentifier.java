@@ -17,7 +17,6 @@ package com.dremio.exec.planner.physical.visitor;
 
 import com.dremio.exec.planner.fragment.DistributionAffinity;
 import com.dremio.exec.planner.physical.BridgeExchangePrel;
-import com.dremio.exec.planner.physical.BridgeReaderPrel;
 import com.dremio.exec.planner.physical.DistributionTrait;
 import com.dremio.exec.planner.physical.ExchangePrel;
 import com.dremio.exec.planner.physical.LeafPrel;
@@ -77,19 +76,11 @@ public class ExcessiveExchangeIdentifier
   @Override
   public Prel visitLeaf(LeafPrel prel, MajorFragmentStat s) throws RuntimeException {
     s.addScan(prel);
-    return prel;
-  }
-
-  public Prel visitBridgeReaderPrel(BridgeReaderPrel prel, MajorFragmentStat s)
-      throws RuntimeException {
     return (Prel) prel.copy(prel.getTraitSet(), prel.getInputs());
   }
 
   @Override
   public Prel visitPrel(Prel prel, MajorFragmentStat s) throws RuntimeException {
-    if (prel instanceof BridgeReaderPrel) {
-      return visitBridgeReaderPrel((BridgeReaderPrel) prel, s);
-    }
     List<RelNode> children = Lists.newArrayList();
     s.add(prel);
 

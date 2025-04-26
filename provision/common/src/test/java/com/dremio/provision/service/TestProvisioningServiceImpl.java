@@ -99,6 +99,8 @@ public class TestProvisioningServiceImpl extends DremioTest {
     ClusterConfig clusterConfig = new ClusterConfig(clusterType).setName("ClusterConfigName");
     Cluster cluster = new Cluster().setClusterConfig(clusterConfig);
     Cluster cluster2 = new Cluster().setClusterConfig(clusterConfig);
+    cluster.setState(ClusterState.CREATED);
+    cluster2.setState(ClusterState.CREATED);
 
     LegacyKVStore<ClusterId, Cluster> kvStore = mock(LegacyKVStore.class);
     when(kvStore.get(any(ClusterId.class))).thenReturn(cluster);

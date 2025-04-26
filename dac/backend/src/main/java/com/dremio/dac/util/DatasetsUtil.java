@@ -172,7 +172,6 @@ public class DatasetsUtil {
     virtualDataset.setParentsList(virtualDatasetUI.getParentsList());
     virtualDataset.setGrandParentsList(virtualDatasetUI.getGrandParentsList());
     virtualDataset.setVersion(virtualDatasetUI.getVersion());
-    virtualDataset.setFieldOriginsList(virtualDatasetUI.getFieldOriginsList());
     virtualDataset.setSqlFieldsList(virtualDatasetUI.getSqlFieldsList());
 
     return virtualDataset;
@@ -182,9 +181,32 @@ public class DatasetsUtil {
     if (vvds == null) {
       return null;
     }
-    final VirtualDatasetUI virtualDatasetUI = new VirtualDatasetUI();
 
-    final DatasetConfig datasetConfig = vvds.getDataset();
+    final VirtualDatasetUI virtualDatasetUI = toVirtualDatasetUI(vvds.getDataset());
+
+    virtualDatasetUI.setIsNamed(vvds.getNamed());
+    virtualDatasetUI.setState(vvds.getState());
+    virtualDatasetUI.setPreviousVersion(vvds.getPreviousVersion());
+    virtualDatasetUI.setLastTransform(vvds.getLastTransform());
+    virtualDatasetUI.setDerivation(vvds.getDerivation());
+    virtualDatasetUI.setReferencesList(vvds.getReferencesList());
+    virtualDatasetUI
+        .getState()
+        .setContextList(vvds.getDataset().getVirtualDataset().getContextList());
+
+    if (CollectionUtils.isEmpty(vvds.getState().getReferenceList())) {
+      virtualDatasetUI.getState().setReferenceList(vvds.getReferencesList());
+    }
+
+    return virtualDatasetUI;
+  }
+
+  public static VirtualDatasetUI toVirtualDatasetUI(DatasetConfig datasetConfig) {
+    if (datasetConfig == null) {
+      return null;
+    }
+
+    final VirtualDatasetUI virtualDatasetUI = new VirtualDatasetUI();
     final VirtualDataset virtualDataset = datasetConfig.getVirtualDataset();
 
     virtualDatasetUI.setOwner(datasetConfig.getOwner());
@@ -192,29 +214,17 @@ public class DatasetsUtil {
     virtualDatasetUI.setCreatedAt(datasetConfig.getCreatedAt());
     virtualDatasetUI.setFullPathList(datasetConfig.getFullPathList());
     virtualDatasetUI.setSavedTag(datasetConfig.getTag());
+    virtualDatasetUI.setRecordSchema(datasetConfig.getRecordSchema());
     if (datasetConfig.getId() != null) {
       virtualDatasetUI.setId(datasetConfig.getId().getId());
     }
-    virtualDatasetUI.setIsNamed(vvds.getNamed());
-    virtualDatasetUI.setSqlFieldsList(ViewFieldsHelper.getViewFields(datasetConfig));
-    virtualDatasetUI.setParentsList(virtualDataset.getParentsList());
-    virtualDatasetUI.setGrandParentsList(virtualDataset.getGrandParentsList());
-    virtualDatasetUI.setFieldOriginsList(virtualDataset.getFieldOriginsList());
-    virtualDatasetUI.setVersion(virtualDataset.getVersion());
 
-    virtualDatasetUI.setState(vvds.getState());
-    virtualDatasetUI.setPreviousVersion(vvds.getPreviousVersion());
-    virtualDatasetUI.setLastTransform(vvds.getLastTransform());
-
-    virtualDatasetUI.setDerivation(vvds.getDerivation());
-    virtualDatasetUI.setSql(virtualDataset.getSql());
-    virtualDatasetUI.setContextList(virtualDataset.getContextList());
-    virtualDatasetUI.setRecordSchema(datasetConfig.getRecordSchema());
-
-    virtualDatasetUI.getState().setContextList(virtualDataset.getContextList());
-    virtualDatasetUI.setReferencesList(vvds.getReferencesList());
-    if (CollectionUtils.isEmpty(vvds.getState().getReferenceList())) {
-      virtualDatasetUI.getState().setReferenceList(vvds.getReferencesList());
+    if (virtualDataset != null) {
+      virtualDatasetUI.setParentsList(virtualDataset.getParentsList());
+      virtualDatasetUI.setVersion(virtualDataset.getVersion());
+      virtualDatasetUI.setSql(virtualDataset.getSql());
+      virtualDatasetUI.setContextList(virtualDataset.getContextList());
+      virtualDatasetUI.setSqlFieldsList(ViewFieldsHelper.getViewFields(datasetConfig));
     }
 
     return virtualDatasetUI;
@@ -351,7 +361,7 @@ public class DatasetsUtil {
     List<org.apache.arrow.vector.types.pojo.Field> fields = Lists.newArrayList();
     final ByteString schemaBytes = DatasetHelper.getSchemaBytes(datasetConfig);
     if (schemaBytes == null) {
-      return null;
+      return fields;
     }
 
     final BatchSchema batchSchema = BatchSchema.deserialize(schemaBytes);

@@ -26,10 +26,9 @@ import com.dremio.common.types.MinorType;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.EntityExplorer;
-import com.dremio.exec.catalog.TableMetadataVerifyDataModifiedRequest;
 import com.dremio.exec.catalog.TableMetadataVerifyDataModifiedResult;
-import com.dremio.exec.catalog.TableMetadataVerifyResult;
 import com.dremio.exec.ops.SnapshotDiffContext;
+import com.dremio.exec.planner.IcebergTableUtils;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
@@ -70,7 +69,6 @@ import com.dremio.service.reflection.store.MaterializationStore;
 import com.google.common.base.Objects;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Iterables;
-import io.protostuff.ByteString;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -105,7 +103,6 @@ class RefreshDecisionMaker {
       CatalogService catalogService,
       MaterializationStore materializationStore,
       DependenciesStore dependencyStore,
-      ByteString matchingPlanBytes,
       RelNode expandedPlan,
       RelNode strippedPlan,
       Iterable<DremioTable> requestedTables,
@@ -166,7 +163,6 @@ class RefreshDecisionMaker {
     final Integer expandedPlanDatasetHash =
         DatasetHashUtils.computeDatasetHash(catalog, expandedPlan, true);
     decision.setDatasetHash(expandedPlanDatasetHash);
-    decision.setLogicalPlan(matchingPlanBytes);
 
     final Refresh refresh =
         materializationStore.getMostRecentRefresh(materialization.getReflectionId());
@@ -178,11 +174,18 @@ class RefreshDecisionMaker {
 
     // if this the first refresh of this materialization, let's do an initial refresh.
     if (refresh == null) {
-      logger.trace("No existing refresh, doing an initial refresh.");
+      // Check to see if refresh decision was already made and use that.
+      String decisionText =
+          (refreshDetails != null
+                  && refreshDetails.getFullRefreshReason() != null
+                  && !refreshDetails.getFullRefreshReason().isEmpty())
+              ? refreshDetails.getFullRefreshReason()
+              : "No existing refresh, doing an initial full refresh.";
+      logger.trace(decisionText);
       return new RefreshDecisionWrapper(
           decision.setInitialRefresh(true).setUpdateId(new UpdateId()).setSeriesId(newSeriesId),
           null,
-          "Full Refresh. \nNo existing refresh, doing an initial full refresh.",
+          String.format("Full Refresh. \n%s", decisionText),
           stopwatch.elapsed(TimeUnit.MILLISECONDS));
     }
 
@@ -494,7 +497,9 @@ class RefreshDecisionMaker {
     // go through the dependencies and determine if there's new data for refresh
     for (DependencyEntry dependency : dependencies) {
       if (dependency instanceof TableFunctionDependency) {
-        continue;
+        return String.format(
+            "Refresh couldn't be skipped because of table function dependency %s",
+            dependency.getId());
       } else if (dependency instanceof ReflectionDependency) {
         Materialization lastDone =
             materializationStore.getLastMaterializationDone(
@@ -540,49 +545,45 @@ class RefreshDecisionMaker {
                 .map(PhysicalDataset::getIcebergMetadata)
                 .map(IcebergMetadata::getSnapshotId)
                 .orElse(0L);
-        if (snapshotId != 0L && snapshotId != datasetDependency.getSnapshotId()) {
-          // there are new snapshot(s). Now check that there is at least one data modifying
-          // operation
-          final Optional<TableMetadataVerifyResult> tableMetadataVerifyResult =
-              catalog.verifyTableMetadata(
-                  key,
-                  new TableMetadataVerifyDataModifiedRequest(
-                      String.valueOf(datasetDependency.getSnapshotId()),
-                      String.valueOf(snapshotId)));
 
-          checkState(tableMetadataVerifyResult != null);
+        if (snapshotId == 0L) {
+          return String.format(
+              "Refresh couldn't be skipped because retrieving current snapshot ID for dataset dependency %s failed.",
+              schemaPath);
+        }
+        if (snapshotId == datasetDependency.getSnapshotId()) {
+          // Don't bother doing a metadata check if the snapshot ID hasn't changed
+          continue;
+        }
 
-          final TableMetadataVerifyDataModifiedResult verifyDataModifiedResult =
-              tableMetadataVerifyResult
-                  .filter(TableMetadataVerifyDataModifiedResult.class::isInstance)
-                  .map(TableMetadataVerifyDataModifiedResult.class::cast)
-                  .orElse(null);
+        TableMetadataVerifyDataModifiedResult verifyDataModifiedResult =
+            IcebergTableUtils.areNewSnapshotsDataModifying(
+                catalog, key, datasetDependency.getSnapshotId(), snapshotId);
 
-          if (verifyDataModifiedResult == null) {
-            // Something weird happened, so just refresh normally
-            logger.debug(
-                String.format(
-                    "Fail to verify the changes between snapshots %s and %s for base table %s",
-                    datasetDependency.getSnapshotId(), snapshotId, table.getPath()));
-            return String.format("Metadata request for dataset dependency %s failed", schemaPath);
-          }
+        if (verifyDataModifiedResult == null) {
+          // Something weird happened, so just refresh normally
+          logger.debug(
+              String.format(
+                  "Fail to verify the changes between snapshots %s and %s for base table %s",
+                  datasetDependency.getSnapshotId(), snapshotId, table.getPath()));
+          return String.format("Metadata request for dataset dependency %s failed", schemaPath);
+        }
 
-          checkState(verifyDataModifiedResult.getResultCode() != null);
+        checkState(verifyDataModifiedResult.getResultCode() != null);
 
-          switch (verifyDataModifiedResult.getResultCode()) {
-            case NOT_DATA_MODIFIED:
-              // there are new snapshots, but they didn't change table data. We may not need to
-              // refresh.
-              break;
-            case DATA_MODIFIED:
-            default:
-              // In any case where we don't explicitly have NOT_DATA_MODIFIED, we should just
-              // refresh.
-              // This includes INVALID_BEGIN_SNAPSHOT, INVALID_END_SNAPSHOT, and NOT_ANCESTOR
-              return String.format(
-                  "Dataset dependency %s had new snapshot(s) that caused a refresh.\nOld Snapshot dependency: %d\nNew snapshot dependency: %d",
-                  schemaPath, datasetDependency.getSnapshotId(), snapshotId);
-          }
+        switch (verifyDataModifiedResult.getResultCode()) {
+          case NOT_DATA_MODIFIED:
+            // there are new snapshots, but they didn't change table data. We may not need to
+            // refresh.
+            break;
+          case DATA_MODIFIED:
+          default:
+            // In any case where we don't explicitly have NOT_DATA_MODIFIED, we should just
+            // refresh.
+            // This includes INVALID_BEGIN_SNAPSHOT, INVALID_END_SNAPSHOT, and NOT_ANCESTOR
+            return String.format(
+                "Dataset dependency %s had new snapshot(s) that caused a refresh.\nOld Snapshot dependency: %d\nNew snapshot dependency: %d",
+                schemaPath, datasetDependency.getSnapshotId(), snapshotId);
         }
       }
     }

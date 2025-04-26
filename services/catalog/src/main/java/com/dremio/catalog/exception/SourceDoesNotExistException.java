@@ -15,6 +15,9 @@
  */
 package com.dremio.catalog.exception;
 
+import javax.ws.rs.NotFoundException;
+import javax.ws.rs.WebApplicationException;
+
 public class SourceDoesNotExistException extends CatalogException {
   private final String sourceName;
 
@@ -29,5 +32,10 @@ public class SourceDoesNotExistException extends CatalogException {
 
   public String getSourceName() {
     return sourceName;
+  }
+
+  @Override
+  public WebApplicationException toRestApiException() {
+    return new NotFoundException(getMessage(), this);
   }
 }

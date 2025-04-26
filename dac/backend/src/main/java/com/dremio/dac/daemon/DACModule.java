@@ -16,6 +16,7 @@
 package com.dremio.dac.daemon;
 
 import com.dremio.common.scanner.persistence.ScanResult;
+import com.dremio.dac.model.common.DeploymentConfigurationException;
 import com.dremio.dac.server.DACConfig;
 import com.dremio.service.SingletonRegistry;
 
@@ -34,4 +35,9 @@ public interface DACModule {
       ScanResult scanResult,
       DACConfig dacConfig,
       boolean isMaster);
+
+  default void validateDeploymentConfiguration(ScanResult scanResult, DACConfig dacConfig)
+      throws DeploymentConfigurationException {
+    // no op
+  }
 }

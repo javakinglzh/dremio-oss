@@ -46,6 +46,8 @@ public final class DremioPruneEmptyRules {
   public static final RelOptRule AGGREGATE_INSTANCE = PruneEmptyRules.AGGREGATE_INSTANCE;
   public static final RelOptRule JOIN_LEFT_INSTANCE = CalcitePruneEmptyRules.JOIN_LEFT_INSTANCE;
   public static final RelOptRule JOIN_RIGHT_INSTANCE = CalcitePruneEmptyRules.JOIN_RIGHT_INSTANCE;
+  public static final RelOptRule CORRELATE_LEFT_INSTANCE =
+      CalcitePruneEmptyRules.CORRELATE_LEFT_INSTANCE;
   public static final RelOptRule CORRELATE_RIGHT_INSTANCE =
       CalcitePruneEmptyRules.CORRELATE_RIGHT_INSTANCE;
 
@@ -138,6 +140,7 @@ public final class DremioPruneEmptyRules {
           AGGREGATE_INSTANCE,
           JOIN_LEFT_INSTANCE,
           JOIN_RIGHT_INSTANCE,
+          CORRELATE_LEFT_INSTANCE,
           CORRELATE_RIGHT_INSTANCE);
 
   private DremioPruneEmptyRules() {}

@@ -27,8 +27,10 @@ import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.CatalogConstants;
 import com.dremio.exec.catalog.CatalogServiceImpl;
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.store.CatalogService;
@@ -105,7 +107,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
     // add dfs_partition_inference.
     {
@@ -121,7 +123,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_partition_inference");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
     // add dfs_test
     {
@@ -137,7 +139,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_test");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
     addClasspathSource(catalogService);
     // add metadataSink.
@@ -150,7 +152,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_root");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     // add dacfs
@@ -162,7 +164,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dacfs");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     if (!pluginExists(catalogService, METADATA_STORAGE_PLUGIN_NAME)) {
@@ -176,7 +178,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName(METADATA_STORAGE_PLUGIN_NAME);
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     if (!pluginExists(catalogService, SYSTEM_ICEBERG_TABLES_PLUGIN_NAME)) {
@@ -190,14 +192,14 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName(SYSTEM_ICEBERG_TABLES_PLUGIN_NAME);
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     if (!pluginExists(catalogService, NodesHistoryStoreConfig.STORAGE_PLUGIN_NAME)) {
       SourceConfig c =
           NodeHistorySourceConfigFactory.newSourceConfig(
               new File(tmpDirPath).toURI(), DataCredentials.newBuilder().build());
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 
@@ -213,7 +215,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_hadoop");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
     // dfs_hadoop_mutable
     {
@@ -226,7 +228,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_hadoop_mutable");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     // add dfs_test
@@ -240,7 +242,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_test_hadoop");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     // Need to create a new source `dfs_static_test_hadoop` rooted at a known location because:
@@ -257,7 +259,7 @@ public class TestUtilities {
       c.setConnectionConf(conf);
       c.setName("dfs_static_test_hadoop");
       c.setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE);
-      systemUserCatalog.createSource(c);
+      systemUserCatalog.createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 
@@ -275,7 +277,9 @@ public class TestUtilities {
 
   public static void addClasspathSource(CatalogService catalogService) {
     // add cp.
-    catalogService.getSystemUserCatalog().createSource(cp());
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(cp(), SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   private static SourceConfig cp() {
@@ -323,7 +327,7 @@ public class TestUtilities {
       List<String> list = new ArrayList<>();
       list.add(NamespaceStore.DAC_NAMESPACE);
       list.add(NamespaceServiceImpl.PARTITION_CHUNKS);
-      list.add(CatalogServiceImpl.CATALOG_SOURCE_DATA_NAMESPACE);
+      list.add(CatalogConstants.CATALOG_SOURCE_DATA_NAMESPACE);
       list.add("wlmqueue");
       list.add("rulesmanager");
       list.add("wlmqueuecontainerversion");
@@ -393,7 +397,9 @@ public class TestUtilities {
     conf.path = tmpDirPath;
     conf.mutability = SchemaMutability.ALL;
     newConfig.setConfig(conf.toBytesString());
-    catalog.getSystemUserCatalog().updateSource(newConfig);
+    catalog
+        .getSystemUserCatalog()
+        .updateSource(newConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   public static boolean isAArch64() {

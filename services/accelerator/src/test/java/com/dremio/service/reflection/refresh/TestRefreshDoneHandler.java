@@ -22,27 +22,12 @@ import org.junit.Test;
 public class TestRefreshDoneHandler {
   @Test
   public void testGetIsEmptyReflection() {
-
     final Materialization materialization = new Materialization();
-    // test with new materialization
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, true, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, true, materialization));
-
-    // test with null isIcebergDataset
-    materialization.setIsIcebergDataset(null);
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, true, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, true, materialization));
-
     // test with Iceberg serialization
-    materialization.setIsIcebergDataset(true);
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, true, materialization));
+    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, false));
+    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(false, true));
     // this is the only case that is true, it is false in all other cases
-    Assert.assertTrue(RefreshDoneHandler.getIsEmptyReflection(true, false, materialization));
-    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, true, materialization));
+    Assert.assertTrue(RefreshDoneHandler.getIsEmptyReflection(true, false));
+    Assert.assertFalse(RefreshDoneHandler.getIsEmptyReflection(true, true));
   }
 }

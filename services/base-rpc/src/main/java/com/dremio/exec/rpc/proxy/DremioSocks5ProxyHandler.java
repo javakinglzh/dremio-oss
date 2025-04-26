@@ -36,7 +36,6 @@ import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthStatus;
 import io.netty.handler.proxy.ProxyConnectException;
 import io.netty.handler.proxy.ProxyHandler;
 import io.netty.util.NetUtil;
-import io.netty.util.internal.StringUtil;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.Arrays;
@@ -191,7 +190,8 @@ public class DremioSocks5ProxyHandler extends ProxyHandler {
       } else {
         if (!NetUtil.isValidIpV6Address(rhost)) {
           throw new ProxyConnectException(
-              this.exceptionMessage("unknown address type: " + StringUtil.simpleClassName(rhost)));
+              this.exceptionMessage(
+                  "unknown address type: " + (rhost == null ? "null" : rhost.getClass())));
         }
 
         addrType = Socks5AddressType.IPv6;

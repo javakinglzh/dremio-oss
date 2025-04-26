@@ -18,6 +18,8 @@ package com.dremio.exec.planner.physical;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.conf.SourceType;
+import com.dremio.exec.planner.decorrelation.DecorrelatorType;
+import com.dremio.exec.planner.trimmer.TrimmerType;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
 import com.dremio.exec.server.options.CachingOptionResolver;
 import com.dremio.exec.store.sys.statistics.StatisticsService;
@@ -40,6 +42,7 @@ import com.dremio.resource.GroupResourceInformation;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Supplier;
 import com.google.common.collect.ImmutableSet;
+import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -68,6 +71,8 @@ public class PlannerSettings implements Context {
   public static final double DEFAULT_FILTER_MIN_SELECTIVITY_ESTIMATE_FACTOR = 0.5d;
   public static final double DEFAULT_FILTER_MAX_SELECTIVITY_ESTIMATE_FACTOR = 1.0d;
   public static final double DEFAULT_ROW_GROUP_FILTER_REDUCTION_FACTOR = 0.9d;
+  public static final String MANUAL_REFLECTION_MODE = "Manual";
+
   // default off heap memory for planning (256M)
   private static final long DEFAULT_MAX_OFF_HEAP_ALLOCATION_IN_BYTES = 256 * 1024 * 1024;
   private static final long DEFAULT_BROADCAST_THRESHOLD = 10000000;
@@ -135,6 +140,9 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.enable_nljoin_for_scalar_only", false);
   public static final DoubleValidator JOIN_ROW_COUNT_ESTIMATE_FACTOR =
       new RangeDoubleValidator("planner.join.row_count_estimate_factor", 0, Double.MAX_VALUE, 1.0d);
+
+  public static BooleanValidator OUTER_JOIN_NULL_DIST =
+      new BooleanValidator("planner.join.null_dist", true);
   public static final BooleanValidator MUX_EXCHANGE =
       new BooleanValidator("planner.enable_mux_exchange", true);
   public static final BooleanValidator DEMUX_EXCHANGE =
@@ -165,8 +173,13 @@ public class PlannerSettings implements Context {
   public static final BooleanValidator ENHANCED_FILTER_JOIN_PUSHDOWN =
       new BooleanValidator("planner.enhanced_filter_join_pushdown", true);
 
+  public static final BooleanValidator ENABLE_CORRELATED_FILTER_PUSHDOWN =
+      new BooleanValidator("planner.enable_correlated_filter_pushdown", false);
+
   public static final BooleanValidator USE_ENHANCED_FILTER_JOIN_GUARDRAIL =
       new BooleanValidator("planner.enhanced_filter_join_guardrail", true);
+  public static final BooleanValidator USE_ENHANCED_FILTER_JOIN_GUARDRAIL_FOR_JOIN =
+      new BooleanValidator("planner.enhanced_filter_join_guardrail_for_join", true);
   public static final BooleanValidator TRANSITIVE_FILTER_JOIN_PUSHDOWN =
       new BooleanValidator("planner.filter.transitive_pushdown", true);
   public static final BooleanValidator ENABLE_RUNTIME_FILTER =
@@ -176,8 +189,14 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.cse_before_rf", true);
   public static final BooleanValidator ENABLE_TRANSPOSE_PROJECT_FILTER_LOGICAL =
       new BooleanValidator("planner.experimental.tpf_logical", false);
-  public static final BooleanValidator ENABLE_SIMPLE_AGG_JOIN =
+
+  public static final BooleanValidator AGG_PUSH_DOWN_PHASE =
+      new BooleanValidator("planner.agg_pushdown.phase", true);
+  public static final BooleanValidator AGG_PUSH_DOWN_SIMPLE_JOIN_RULE =
       new BooleanValidator("planner.agg_join.simple", true);
+  public static final BooleanValidator AGG_PUSH_DOWN_MERGE_RULE =
+      new BooleanValidator("planner.agg_merge", true);
+
   public static final BooleanValidator ENABLE_PROJECT_CLEANUP_LOGICAL =
       new BooleanValidator("planner.experimental.pclean_logical", false);
   public static final BooleanValidator ENABLE_CROSS_JOIN =
@@ -195,6 +214,8 @@ public class PlannerSettings implements Context {
   public static final BooleanValidator CTAS_ROUND_ROBIN =
       new BooleanValidator("planner.writer.round_robin", false);
 
+  public static final BooleanValidator CTAS_BALANCE =
+      new BooleanValidator("planner.writer.balanced", false);
   public static final LongValidator PLANNING_MAX_MILLIS =
       new LongValidator("planner.timeout_per_phase_ms", 60_000);
   public static final BooleanValidator TRIM_JOIN_BRANCH =
@@ -394,6 +415,9 @@ public class PlannerSettings implements Context {
       new BooleanValidator("reflections.planning.no_reflections", false);
   public static final BooleanValidator CURRENT_ICEBERG_DATA_ONLY =
       new BooleanValidator("reflections.planning.current_iceberg_data_only", false);
+  // Enables tracking of materialization staleness.
+  public static final BooleanValidator REFLECTION_MATERIALIZATION_STALENESS_ENABLED =
+      new BooleanValidator("reflection.materialization_staleness.enabled", true);
 
   // Allows ambiguous columns in select list subqueries, like
   // select * from (select 1 as a, 'one' as a)
@@ -422,16 +446,16 @@ public class PlannerSettings implements Context {
     PATH_AND_ATTEMPT_ID
   }
 
-  public static final OptionValidator STORE_QUERY_RESULTS =
-      new QueryLevelOptionValidation(
-          new EnumValidator<>(
-              "planner.store_query_results",
-              StoreQueryResultsPolicy.class,
-              StoreQueryResultsPolicy.NO));
+  public static final StringValidator STORE_QUERY_RESULTS =
+      new EnumValidator<>(
+          "planner.store_query_results", StoreQueryResultsPolicy.class, StoreQueryResultsPolicy.NO);
 
   public static final OptionValidator QUERY_RESULTS_STORE_TABLE =
       new QueryLevelOptionValidation(
           new StringValidator("planner.query_results_store_path", "null"));
+
+  public static final BooleanValidator USE_QUERY_RESULT_WRITER_REL =
+      new BooleanValidator("planner.query_results.use_result_writer_rel", false);
 
   // Enable filter reduce expressions rule for tableau's 1=0 queries.
   public static final BooleanValidator ENABLE_REDUCE_PROJECT =
@@ -497,6 +521,8 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.push_filter_past_flatten", true);
   public static final BooleanValidator VERBOSE_PROFILE =
       new BooleanValidator("planner.verbose_profile", false);
+  public static final BooleanValidator VERBOSE_ACCELERATION_PROFILE =
+      new BooleanValidator("planner.verbose_acceleration_profile", false);
   public static final BooleanValidator USE_STATISTICS =
       new BooleanValidator("planner.use_statistics", false);
   public static final BooleanValidator USE_MIN_SELECTIVITY_ESTIMATE_FACTOR_FOR_STAT =
@@ -534,6 +560,10 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.join.use_key_for_next_factor", false);
   public static final BooleanValidator JOIN_ROTATE_FACTORS =
       new BooleanValidator("planner.join.rotate_factors", true);
+
+  public static final BooleanValidator PUSH_FILTER_PAST_EXPANSIONS =
+      new BooleanValidator("planner.push_filters_past_expansions", true);
+
   public static final BooleanValidator ENABLE_RANGE_QUERY_REWRITE =
       new BooleanValidator("planner.enable_range_query_rewrite", false);
   public static final BooleanValidator ENABLE_COUNT_STAR_OPTIMIZATION =
@@ -542,11 +572,14 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.enable_multi_column_count_rewrite", true);
   public static final BooleanValidator ENABLE_QUALIFIED_AGGREGATE_REWRITE =
       new BooleanValidator("planner.enable_qualified_aggregate_rewrite", true);
-
+  public static final BooleanValidator CLEANUP_SUBQUERY_REMOVE_RULE =
+      new BooleanValidator("planner.cleanup_subquery_remove_rule", true);
+  public static final BooleanValidator REMOVE_SINGLE_VALUE_AGGREGATES_IN_EXPANSION =
+      new BooleanValidator("planner.remove_single_value_aggregates_in_expansion", true);
   public static final BooleanValidator REWRITE_LISTAGG_TO_ARRAY_AGG =
       new BooleanValidator("planner.rewrite_listagg_to_array_agg", false);
   public static final BooleanValidator PUSH_ARRAY_COLUMNS_INTO_SCAN =
-      new BooleanValidator("planner.push_array_columns_into_scan", false);
+      new BooleanValidator("planner.push_array_columns_into_scan", true);
 
   public static final DoubleValidator FILTER_MIN_SELECTIVITY_ESTIMATE_FACTOR =
       new RangeDoubleValidator(
@@ -604,8 +637,6 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.cost.minimum.enable", true);
   public static final DoubleValidator DEFAULT_SCAN_MIN_COST =
       new DoubleValidator("planner.default.min_cost_per_split", 0);
-  public static final DoubleValidator ADLS_SCAN_MIN_COST =
-      new DoubleValidator("planner.adl.min_cost_per_split", 1E6);
   public static final DoubleValidator AZURE_STORAGE_SCAN_MIN_COST =
       new DoubleValidator("planner.azure_storage.min_cost_per_split", 1E6);
   public static final DoubleValidator S3_SCAN_MIN_COST =
@@ -634,10 +665,6 @@ public class PlannerSettings implements Context {
       new DoubleValidator("planner.nas.min_cost_per_split", 0);
   public static final BooleanValidator LEGACY_SERIALIZER_ENABLED =
       new BooleanValidator("planner.legacy_serializer_enabled", false);
-  public static final BooleanValidator PLAN_SERIALIZATION =
-      new BooleanValidator("planner.plan_serialization", true);
-  public static final LongValidator PLAN_SERIALIZATION_LENGTH_LIMIT =
-      new PositiveLongValidator("planner.plan_serialization_length_limit", Long.MAX_VALUE, 100000);
   public static final BooleanValidator USE_SQL_TO_REL_SUB_QUERY_EXPANSION =
       new BooleanValidator("planner.sql_to_rel_sub_query_expansion", false);
   public static final BooleanValidator FIX_CORRELATE_VARIABLE_SCHEMA =
@@ -648,7 +675,6 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.enforce_valid_json_date_format_enabled", true);
   private static final Set<String> SOURCES_WITH_MIN_COST =
       ImmutableSet.of(
-          "adl",
           "s3",
           "acceleration",
           "home",
@@ -679,6 +705,21 @@ public class PlannerSettings implements Context {
   public static final BooleanValidator USE_LEGACY_DECORRELATOR =
       new BooleanValidator("planner.use_legacy_decorrelator", false);
 
+  public static final BooleanValidator MAKE_CORRELATE_IDS_DISTINCT =
+      new BooleanValidator("planner.make_correlate_ids_distinct", true);
+
+  public static final BooleanValidator FORCE_VALUE_GENERATION =
+      new BooleanValidator("planner.decorrelation.force_value_generation", true);
+
+  public static final EnumValidator<DecorrelatorType> DECORRELATION_TYPE =
+      new EnumValidator<>(
+          "planner.decorrelation.type",
+          DecorrelatorType.class,
+          DecorrelatorType.CALCITE_WITH_FORCE_VALUE_GENERATION);
+
+  public static final EnumValidator<TrimmerType> TRIMMER_TYPE =
+      new EnumValidator<>("planner.trimmer_type", TrimmerType.class, TrimmerType.CALCITE);
+
   /**
    * Options to reject queries which will attempt to process more than this many splits: per
    * dataset, and per query
@@ -689,15 +730,27 @@ public class PlannerSettings implements Context {
   public static final PositiveLongValidator DATASET_MAX_SPLIT_LIMIT =
       new PositiveLongValidator("planner.dataset_max_split_limit", Integer.MAX_VALUE, 300_000);
 
+  // Query Plan Cache: Start
   /** Options to enable/disable plan cache and set plan cache policy */
   public static final BooleanValidator QUERY_PLAN_CACHE_ENABLED =
       new BooleanValidator("planner.query_plan_cache_enabled", true);
 
+  public static final BooleanValidator QUERY_PLAN_USE_LEGACY_CACHE =
+      new BooleanValidator("planner.query_plan_use_legacy_cache", false);
+
+  public static final BooleanValidator QUERY_PLAN_CACHE_FALL_THROUGH =
+      new BooleanValidator("planner.query_plan_cache_enabled_fall_through", true);
+
   public static final BooleanValidator QUERY_PLAN_CACHE_ENABLED_SECURITY_FIX =
       new BooleanValidator("planner.query_plan_cache_enabled_security_fix", false);
 
+  public static final BooleanValidator QUERY_PLAN_CACHE_SERIALIZE_PLAN =
+      new BooleanValidator("planner.plan_cache.serialize_plan", false);
+
   public static final BooleanValidator QUERY_PLAN_CACHE_ENABLED_SECURED_USER_BASED_CACHING =
       new BooleanValidator("planner.query_plan_cache_enabled_secured_user_based_caching", true);
+
+  // Query Plan Cache: End
 
   public static final BooleanValidator REFLECTION_ROUTING_INHERITANCE_ENABLED =
       new BooleanValidator("planner.reflection_routing_inheritance_enabled", false);
@@ -705,11 +758,19 @@ public class PlannerSettings implements Context {
   public static final BooleanValidator REFLECTION_LINEAGE_TABLE_FUNCTION_ENABLED =
       new BooleanValidator("reflection.reflection_lineage_table_function.enabled", true);
 
-  public static final BooleanValidator EXPERIMENTAL_FUNCTIONS =
+  public static final BooleanValidator ENABLE_EXPERIMENTAL_FUNCTIONS =
       new BooleanValidator("planner.enable_experimental_functions", false);
+
+  public static final BooleanValidator ENABLE_TEST_ONLY_FUNCTIONS =
+      new BooleanValidator("planner.enable_test_only_functions", false);
 
   public static final TypeValidators.BooleanValidator PREFER_CACHED_METADATA =
       new TypeValidators.BooleanValidator("planner.prefer_cached_metadata", false);
+  public static final BooleanValidator VALUES_CAST_ENABLED =
+      new BooleanValidator("planner.values.cast.enable", false);
+
+  public static StringValidator REFRESH_MODE_STRING =
+      new StringValidator("planner.reflection_refresh_mode_string", MANUAL_REFLECTION_MODE);
 
   private final SabotConfig sabotConfig;
   private final ExecutionControls executionControls;
@@ -766,10 +827,6 @@ public class PlannerSettings implements Context {
 
   public OptionResolver getOptions() {
     return options;
-  }
-
-  public boolean isPlannerVerbose() {
-    return options.getOption(VERBOSE_PROFILE);
   }
 
   public boolean isLeafLimitsEnabled() {
@@ -1016,10 +1073,6 @@ public class PlannerSettings implements Context {
     return options.getOption(ENABLE_PROJECT_CLEANUP_LOGICAL);
   }
 
-  public boolean isSimpleAggJoinEnabled() {
-    return options.getOption(ENABLE_SIMPLE_AGG_JOIN);
-  }
-
   public boolean isCrossJoinEnabled() {
     return options.getOption(ENABLE_CROSS_JOIN);
   }
@@ -1166,14 +1219,6 @@ public class PlannerSettings implements Context {
     return options.getOption(ENABLE_TRIVIAL_SINGULAR);
   }
 
-  public long getSerializationLengthLimit() {
-    return options.getOption(PLAN_SERIALIZATION_LENGTH_LIMIT);
-  }
-
-  public boolean isPlanSerializationEnabled() {
-    return options.getOption(PLAN_SERIALIZATION);
-  }
-
   public double getMinimumCostPerSplit(SourceType sourceType) {
     if (SOURCES_WITH_MIN_COST.contains(sourceType.value().toLowerCase())) {
       if (logger.isDebugEnabled()) {
@@ -1251,6 +1296,10 @@ public class PlannerSettings implements Context {
     return options.getOption(SARGABLE_FILTER_TRANSFORM);
   }
 
+  public boolean isValueCastEnabled() {
+    return options.getOption(VALUES_CAST_ENABLED);
+  }
+
   public boolean isPrettyPlanScrapingEnabled() {
     return options.getOption(PRETTY_PLAN_SCRAPING);
   }
@@ -1305,5 +1354,10 @@ public class PlannerSettings implements Context {
 
   public boolean isCancelledByHeapMonitor() {
     return isCancelledByHeapMonitor;
+  }
+
+  public StoreQueryResultsPolicy storeQueryResultsPolicy() {
+    String value = options.getOption(STORE_QUERY_RESULTS);
+    return StoreQueryResultsPolicy.valueOf(value.toUpperCase(Locale.ROOT));
   }
 }

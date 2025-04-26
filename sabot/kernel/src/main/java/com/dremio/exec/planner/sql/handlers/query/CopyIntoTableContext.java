@@ -19,6 +19,7 @@ package com.dremio.exec.planner.sql.handlers.query;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.BasePath;
 import com.dremio.common.utils.PathUtils;
+import com.dremio.exec.expr.fn.impl.DateFunctionsUtils;
 import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo;
 import com.dremio.exec.planner.sql.parser.SqlCopyIntoTable;
 import com.dremio.exec.planner.sql.parser.TableVersionSpec;
@@ -303,6 +304,13 @@ public final class CopyIntoTableContext {
       case DATE_FORMAT:
       case TIME_FORMAT:
       case TIMESTAMP_FORMAT:
+        try {
+          DateFunctionsUtils.getSQLFormatterForFormatString(value);
+        } catch (UserException e) {
+          throw UserException.parseError()
+              .message("Copy option %s has invalid value '%s'", option.name(), value)
+              .buildSilently();
+        }
         return value;
       case SKIP_LINES:
         try {
@@ -534,6 +542,13 @@ public final class CopyIntoTableContext {
     return serializedTransformationProperties;
   }
 
+  public static final Set<FormatOption> FORBIDDEN_FORMAT_OPTIONS_FOR_TRANSFORMATIONS =
+      ImmutableSet.of(
+          FormatOption.DATE_FORMAT,
+          FormatOption.TIME_FORMAT,
+          FormatOption.TIMESTAMP_FORMAT,
+          FormatOption.NULL_IF);
+
   public enum FileTypeSpecificFormatOptions {
     TEXT(
         ImmutableSet.of(
@@ -557,7 +572,7 @@ public final class CopyIntoTableContext {
             FormatOption.TIMESTAMP_FORMAT,
             FormatOption.TRIM_SPACE,
             FormatOption.EMPTY_AS_NULL)),
-    PARQUET(Collections.EMPTY_SET);
+    PARQUET(Collections.emptySet());
 
     private final Set<FormatOption> options;
 

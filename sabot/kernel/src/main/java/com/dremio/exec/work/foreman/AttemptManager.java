@@ -30,6 +30,7 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.maestro.MaestroObserver;
 import com.dremio.exec.maestro.MaestroService;
 import com.dremio.exec.ops.QueryContext;
+import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.planner.common.PlannerMetrics;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObservers;
@@ -47,6 +48,7 @@ import com.dremio.exec.proto.UserBitShared.QueryData;
 import com.dremio.exec.proto.UserBitShared.QueryId;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.proto.UserBitShared.QueryResult.QueryState;
+import com.dremio.exec.proto.UserBitShared.WorkloadType;
 import com.dremio.exec.rpc.Acks;
 import com.dremio.exec.rpc.Response;
 import com.dremio.exec.rpc.ResponseSender;
@@ -55,7 +57,6 @@ import com.dremio.exec.rpc.RpcOutcomeListener;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.testing.ControlsInjector;
 import com.dremio.exec.testing.ControlsInjectorFactory;
-import com.dremio.exec.util.Utilities;
 import com.dremio.exec.work.protector.UserRequest;
 import com.dremio.exec.work.protector.UserResult;
 import com.dremio.exec.work.user.OptionProvider;
@@ -147,7 +148,12 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
   @VisibleForTesting
   public static final String INJECTOR_DURING_PLANNING_PAUSE = "during-planning-pause";
 
-  @VisibleForTesting public static final String INJECTOR_COMMIT_FAILURE = "commit-failure";
+  @VisibleForTesting
+  public static final String INJECTOR_COMMITTER_CHECKED_EXCEPTION = "commit-checked-exception";
+
+  @VisibleForTesting
+  public static final String INJECTOR_COMMITTER_UNCHECKED_EXCEPTION =
+      "committer-unchecked-exception";
 
   @VisibleForTesting public static final String INJECTOR_CLEANING_FAILURE = "cleaning-failure";
 
@@ -322,6 +328,21 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
     public void failed(Exception ex) {
       addToEventQueue(QueryState.FAILED, ex);
     }
+
+    @Override
+    public void putExecutorProfile(String nodeEndpoint) {
+      getObserver().putExecutorProfile(nodeEndpoint);
+    }
+
+    @Override
+    public void removeExecutorProfile(String nodeEndpoint) {
+      getObserver().removeExecutorProfile(nodeEndpoint);
+    }
+
+    @Override
+    public void queryClosed() {
+      getObserver().queryClosed();
+    }
   }
 
   public QueryId getQueryId() {
@@ -478,6 +499,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         logger.error(
             "Query canceled with {} has reason {}", PlannerMetrics.CANCEL_UNCLASSIFIED, reason);
       }
+      getProfileTracker().setCancelType(cancelType);
       jobsFailedCounter
           .withTags(
               PlannerMetrics.ERROR_TYPE_KEY,
@@ -501,6 +523,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
    */
   public void cancelLocal(String reason, Throwable e) {
     getProfileTracker().setCancelReason(reason + e.getMessage());
+    getProfileTracker().setCancelType(PlannerMetrics.CANCEL_RESOURCE_UNAVAILABLE);
     moveToState(QueryState.CANCELED, null);
     jobsFailedCounter
         .withTags(
@@ -535,6 +558,10 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
    */
   protected void checkRunQueryAccessPrivilege(GroupResourceInformation groupResourceInformation)
       throws UserException {
+    return;
+  }
+
+  protected void preExecuteQuery(PhysicalPlan plan) {
     return;
   }
 
@@ -602,6 +629,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
           queryCleaner = asyncCommand.getPhysicalPlan().getCleaner();
 
           moveToState(QueryState.STARTING, null);
+          preExecuteQuery(asyncCommand.getPhysicalPlan());
           maestroService.executeQuery(
               queryId,
               queryContext,
@@ -874,6 +902,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
                   break;
               }
             }
+            getProfileTracker().setCancelType(errorTypeStr);
             jobsFailedCounter
                 .withTags(
                     PlannerMetrics.ERROR_TYPE_KEY,
@@ -939,6 +968,8 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
 
       resultState = QueryState.FAILED;
       resultException = exception;
+      logger.debug(
+          "{}: AttemptResult resultState forcefully updated to {}", queryIdString, resultState);
     }
 
     /**
@@ -991,6 +1022,8 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         // This can happen if the AttemptManager closes the result first (on error), and later,
         // receives the completion
         // callback from maestro.
+        logger.debug(
+            "{}: AttemptResult already closed. Skipping closing of foremenResult", queryIdString);
         return;
       }
 
@@ -1008,7 +1041,16 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
               UnsupportedOperationException.class);
 
           if (resultState == QueryState.CANCELED || resultState == QueryState.FAILED) {
-            Context.current().fork().run(() -> queryCleaner.ifPresent(Runnable::run));
+            Context.current()
+                .fork()
+                .run(
+                    () ->
+                        queryCleaner.ifPresent(
+                            (it) -> {
+                              logger.debug("{}: Calling Query cleaner", queryIdString);
+                              it.run();
+                              logger.debug("{}: Query cleaner called successfully", queryIdString);
+                            }));
           }
         } catch (Exception e) {
           addException(e);
@@ -1027,7 +1069,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         }
         sendFinalQueryTimeMetrics();
 
-        logger.debug(queryIdString + ": cleaning up.");
+        logger.info("{}: cleaning up.", queryIdString);
         injector.injectPause(queryContext.getExecutionControls(), "foreman-cleanup", logger);
 
         suppressingClose(queryContext);
@@ -1070,7 +1112,11 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         try {
           // send whatever result we ended up with
           injector.injectUnchecked(queryContext.getExecutionControls(), INJECTOR_TAIL_PROFLE_ERROR);
-          queryProfile = getProfileTracker().sendTailProfile(uex);
+          getProfileTracker().sendUserException(uex);
+          queryProfile = getProfileTracker().getPlanningProfile();
+          if (!queryContext.getOptions().getOption(ExecConstants.JOB_PROFILE_ASYNC_UPDATE)) {
+            getProfileTracker().sendTailProfile(queryProfile);
+          }
         } catch (Exception e) {
           jobTelemetryClient
               .getSuppressedErrorCounter()
@@ -1088,26 +1134,29 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
           queryProfile = profileTracker.getPlanningProfileNoException();
         }
 
-        // Reflection queries are dependant on stats in Executor Profile, so fetching full profile
-        // instead of just planning profile
-        if (Utilities.isAccelerationType(queryContext.getWorkloadType())) {
-          try {
-            logger.debug("Fetching full profile for Acceleration type queries.");
-            queryProfile = getProfileTracker().getFullProfile();
-
-            // full profile from store will not have latest info when sendTailProfile fails, so
-            // update with in-memory state
-            if (sendTailProfileFailed) {
-              QueryProfile.Builder profileBuilder = queryProfile.toBuilder();
-              getProfileTracker().addLatestState(profileBuilder);
-              queryProfile = profileBuilder.build();
+        if (!queryContext.getOptions().getOption(ExecConstants.JOB_PROFILE_ASYNC_UPDATE)) {
+          // Reflection queries are dependent on stats in Executor Profile, so fetching full profile
+          // instead of just planning profile
+          if (queryContext.getWorkloadType() == WorkloadType.ACCELERATOR) {
+            try {
+              logger.debug("Fetching full profile for Acceleration type queries.");
+              queryProfile = getProfileTracker().getFullProfile();
+              // full profile from store will not have the latest info when sendTailProfile fails,
+              // so
+              // update with in-memory state
+              if (sendTailProfileFailed) {
+                QueryProfile.Builder profileBuilder = queryProfile.toBuilder();
+                getProfileTracker().addLatestState(profileBuilder);
+                queryProfile = profileBuilder.build();
+              }
+            } catch (Exception e) {
+              logger.warn("Exception while getting full profile. ", e);
+              // As full profile cannot be retrieved and as we are marking the query as failed, let
+              // us
+              // get the planning profile
+              // to use in query result.
+              queryProfile = getProfileTracker().getPlanningProfileNoException();
             }
-          } catch (Exception e) {
-            logger.warn("Exception while getting full profile. ", e);
-            // As full profile cannot be retrieved and as we are marking the query as failed, let us
-            // get the planning profile
-            // to use in query result.
-            queryProfile = getProfileTracker().getPlanningProfileNoException();
           }
         }
 
@@ -1246,7 +1295,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
             }
         }
 
-        // $FALL-THROUGH$
+      // $FALL-THROUGH$
 
       case RUNNING:
         {
@@ -1284,25 +1333,41 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
                 assert exception == null;
 
                 try {
+                  injector.injectUnchecked(
+                      queryContext.getExecutionControls(), INJECTOR_COMMITTER_UNCHECKED_EXCEPTION);
                   injector.injectChecked(
                       queryContext.getExecutionControls(),
-                      INJECTOR_COMMIT_FAILURE,
-                      ForemanException.class);
+                      INJECTOR_COMMITTER_CHECKED_EXCEPTION,
+                      Exception.class);
                   // The commit handler can internally invoke other grpcs. So, forking the context
                   // here.
-                  Context.current().fork().run(() -> committer.ifPresent(Runnable::run));
-                } catch (ForemanException e) {
+                  Context.current()
+                      .fork()
+                      .run(
+                          () ->
+                              committer.ifPresent(
+                                  (it) -> {
+                                    logger.debug("{}: Committer about to be called", queryIdString);
+                                    it.run();
+                                    logger.debug(
+                                        "{}: Committer called successfully", queryIdString);
+                                  }));
+
+                } catch (Throwable throwable) {
                   logger.error(
-                      "Error running plan committer for query {}. Moving query state from RUNNING --> FAILED instead of RUNNING --> COMPLETED",
+                      "{}: Exception occurred moving job state from RUNNING to COMPLETED",
                       queryIdString,
-                      e);
-                  moveToState(QueryState.FAILED, e);
+                      throwable);
+                  UserException uex = UserException.dataWriteError(throwable).buildSilently();
+                  moveToState(QueryState.FAILED, uex);
                   return;
                 }
 
                 recordNewState(QueryState.COMPLETED);
                 foremanResult.setCompleted(QueryState.COMPLETED);
+                logger.debug("{}: Closing foremanResult", queryIdString);
                 foremanResult.close();
+                logger.debug("{}: Successfully closed foremanResult", queryIdString);
                 return;
               }
 
@@ -1393,6 +1458,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         .setAttribute("dremio.attempt_manager.query_id", queryIdString)
         .setAttribute("dremio.attempt_manager.current_query_state", state.toString())
         .setAttribute("dremio.attempt_manager.new_query_state", newState.toString());
+    logger.debug("{}: AttemptManager local state updated to {}", queryIdString, state);
   }
 
   private boolean isTerminalStage(AttemptEvent.State stage) {
@@ -1442,64 +1508,102 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
         "{} : lastNodeCompletionRpcReceivedAt : {}",
         queryIdString,
         lastNodeCompletionRpcReceivedAt);
+
+    updateExecutionCompleteMetrics(
+        endTime, screenOperatorCompletionTime, lastNodeCompletionRpcStartedAt);
+    updateLastNodeCompleteMetrics(endTime, lastNodeCompletionRpcReceivedAt);
+    updateScreenCompleteToLastNodeMetrics(
+        screenCompletionRpcReceivedAt, lastNodeCompletionRpcReceivedAt);
+    updateExecToCoordScreenCompleteMetrics(
+        screenOperatorCompletionTime,
+        screenCompletionRpcReceivedAt,
+        lastNodeCompletionRpcStartedAt,
+        lastNodeCompletionRpcReceivedAt);
+  }
+
+  private void updateExecutionCompleteMetrics(
+      long endTime, long screenOperatorCompletionTime, long lastNodeCompletionRpcStartedAt) {
     try {
-      long executionCompleteToQueryCompleteTime =
-          screenOperatorCompletionTime == 0
-              ? endTime - lastNodeCompletionRpcStartedAt
-              : endTime - screenOperatorCompletionTime;
-      EXECUTION_COMPLETE_TO_QUERY_COMPLETE_TIMER.update(
-          executionCompleteToQueryCompleteTime, TimeUnit.MILLISECONDS);
-      logger.debug(
-          "{} : endTime - lastNodeCompletionRpcStartedAt : {}",
-          queryIdString,
-          endTime - lastNodeCompletionRpcStartedAt);
-      logger.debug(
-          "{} : endTime - screenOperatorCompletionTime : {}",
-          queryIdString,
-          endTime - screenOperatorCompletionTime);
+      long executionCompleteToQueryCompleteTime = 0;
+
+      if (screenOperatorCompletionTime != 0) {
+        executionCompleteToQueryCompleteTime = endTime - screenOperatorCompletionTime;
+      } else if (lastNodeCompletionRpcStartedAt != 0) {
+        executionCompleteToQueryCompleteTime = endTime - lastNodeCompletionRpcStartedAt;
+      }
+
+      if (executionCompleteToQueryCompleteTime > 0) {
+        EXECUTION_COMPLETE_TO_QUERY_COMPLETE_TIMER.update(
+            executionCompleteToQueryCompleteTime, TimeUnit.MILLISECONDS);
+        logger.debug(
+            "{} : Execution Complete to Query Complete Time : {}",
+            queryIdString,
+            executionCompleteToQueryCompleteTime);
+      }
     } catch (Exception e) {
       logger.warn("Failure updating {} metric", EXECUTION_COMPLETE_TO_QUERY_COMPLETE_TIMER, e);
     }
+  }
+
+  private void updateLastNodeCompleteMetrics(long endTime, long lastNodeCompletionRpcReceivedAt) {
     try {
-      long lastNodeCompleteToQueryCompleteTime = endTime - lastNodeCompletionRpcReceivedAt;
-      logger.debug(
-          "{} : endTime - lastNodeCompletionRpcReceivedAt : {}",
-          queryIdString,
-          endTime - lastNodeCompletionRpcReceivedAt);
-      LAST_NODE_COMPLETE_TO_QUERY_COMPLETE_TIMER.update(
-          lastNodeCompleteToQueryCompleteTime, TimeUnit.MILLISECONDS);
+      if (lastNodeCompletionRpcReceivedAt != 0) {
+        long lastNodeCompleteToQueryCompleteTime = endTime - lastNodeCompletionRpcReceivedAt;
+        LAST_NODE_COMPLETE_TO_QUERY_COMPLETE_TIMER.update(
+            lastNodeCompleteToQueryCompleteTime, TimeUnit.MILLISECONDS);
+        logger.debug(
+            "{} : endTime - lastNodeCompletionRpcReceivedAt : {}",
+            queryIdString,
+            lastNodeCompleteToQueryCompleteTime);
+      }
     } catch (Exception e) {
       logger.warn("Failure updating {} metric", LAST_NODE_COMPLETE_TO_QUERY_COMPLETE_TIMER, e);
     }
+  }
+
+  private void updateScreenCompleteToLastNodeMetrics(
+      long screenCompletionRpcReceivedAt, long lastNodeCompletionRpcReceivedAt) {
     try {
       long screenCompleteToLastNodeCompleteTime =
-          screenCompletionRpcReceivedAt == 0
+          (screenCompletionRpcReceivedAt == 0)
               ? 0
               : lastNodeCompletionRpcReceivedAt - screenCompletionRpcReceivedAt;
+
       SCREEN_COMPLETE_TO_LAST_NODE_COMPLETE_TIMER.update(
           screenCompleteToLastNodeCompleteTime, TimeUnit.MILLISECONDS);
       logger.debug(
           "{} : lastNodeCompletionRpcReceivedAt - screenCompletionRpcReceivedAt : {}",
           queryIdString,
-          lastNodeCompletionRpcReceivedAt - screenCompletionRpcReceivedAt);
+          screenCompleteToLastNodeCompleteTime);
     } catch (Exception e) {
       logger.warn("Failure updating {} metric", SCREEN_COMPLETE_TO_LAST_NODE_COMPLETE_TIMER, e);
     }
+  }
+
+  private void updateExecToCoordScreenCompleteMetrics(
+      long screenOperatorCompletionTime,
+      long screenCompletionRpcReceivedAt,
+      long lastNodeCompletionRpcStartedAt,
+      long lastNodeCompletionRpcReceivedAt) {
     try {
-      long execToCoordScreenCompleteTime =
-          screenOperatorCompletionTime == 0
-              ? lastNodeCompletionRpcReceivedAt - lastNodeCompletionRpcStartedAt
-              : screenCompletionRpcReceivedAt - screenOperatorCompletionTime;
-      EXEC_TO_COORD_SCREEN_COMPLETE_TIMER.update(
-          execToCoordScreenCompleteTime, TimeUnit.MILLISECONDS);
-      logger.debug(
-          "{} : lastNodeCompletionRpcReceivedAt - lastNodeCompletionRpcStartedAt : {}",
-          queryIdString,
-          lastNodeCompletionRpcReceivedAt - lastNodeCompletionRpcStartedAt);
-      logger.debug(
-          "{} : screenCompletionRpcReceivedAt - screenOperatorCompletionTime : {}",
-          queryIdString,
-          screenCompletionRpcReceivedAt - screenOperatorCompletionTime);
+      long execToCoordScreenCompleteTime = 0;
+
+      if (screenOperatorCompletionTime != 0 && screenCompletionRpcReceivedAt != 0) {
+        execToCoordScreenCompleteTime =
+            screenCompletionRpcReceivedAt - screenOperatorCompletionTime;
+      } else if (lastNodeCompletionRpcStartedAt != 0 && lastNodeCompletionRpcReceivedAt != 0) {
+        execToCoordScreenCompleteTime =
+            lastNodeCompletionRpcReceivedAt - lastNodeCompletionRpcStartedAt;
+      }
+
+      if (execToCoordScreenCompleteTime > 0) {
+        EXEC_TO_COORD_SCREEN_COMPLETE_TIMER.update(
+            execToCoordScreenCompleteTime, TimeUnit.MILLISECONDS);
+        logger.debug(
+            "{} : Exec to Coord Screen Complete Time : {}",
+            queryIdString,
+            execToCoordScreenCompleteTime);
+      }
     } catch (Exception e) {
       logger.warn("Failure updating {} metric", EXEC_TO_COORD_SCREEN_COMPLETE_TIMER, e);
     }

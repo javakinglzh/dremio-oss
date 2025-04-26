@@ -237,6 +237,8 @@ public class UserSession {
   private boolean errorOnUnspecifiedVersion = false;
   private final CaseInsensitiveMap<VersionContext> sourceVersionMapping =
       CaseInsensitiveMap.newConcurrentMap();
+  private final CaseInsensitiveMap<SessionOptionValue> sessionOptionsMap =
+      CaseInsensitiveMap.newConcurrentMap();
 
   public static class Builder {
     private UserSession userSession;
@@ -379,6 +381,14 @@ public class UserSession {
       return this;
     }
 
+    public Builder withSessionOptions(Map<String, SessionOptionValue> sessionOptions) {
+      if (sessionOptions != null) {
+        userSession.sessionOptionsMap.clear();
+        userSession.sessionOptionsMap.putAll(sessionOptions);
+      }
+      return this;
+    }
+
     public UserSession build() {
       UserSession session = userSession;
       userSession = null;
@@ -427,6 +437,7 @@ public class UserSession {
     this.neverPromote = userSession.neverPromote;
     this.errorOnUnspecifiedVersion = userSession.errorOnUnspecifiedVersion;
     this.sourceVersionMapping.putAll(userSession.sourceVersionMapping);
+    this.sessionOptionsMap.putAll(userSession.sessionOptionsMap);
   }
 
   public boolean isSupportComplexTypes() {
@@ -633,5 +644,13 @@ public class UserSession {
 
   void setErrorOnUnspecifiedVersion(boolean value) {
     errorOnUnspecifiedVersion = value;
+  }
+
+  public CaseInsensitiveMap<SessionOptionValue> getSessionOptionsMap() {
+    return CaseInsensitiveMap.newImmutableMap(sessionOptionsMap);
+  }
+
+  public void setSessionOption(String key, SessionOptionValue value) {
+    sessionOptionsMap.put(key, value);
   }
 }

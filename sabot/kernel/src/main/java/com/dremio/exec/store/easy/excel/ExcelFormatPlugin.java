@@ -19,16 +19,16 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.proto.UserBitShared.CoreOperatorType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.EasyCoercionReader;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.easy.EasyFormatPlugin;
 import com.dremio.exec.store.dfs.easy.EasySubScan;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -45,29 +45,22 @@ public class ExcelFormatPlugin extends EasyFormatPlugin<ExcelFormatPluginConfig>
   public static final String NAME = "excel";
   private final long maxExcelFileSize;
 
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
   public ExcelFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       ExcelFormatPluginConfig formatConfig,
-      FileSystemPlugin fsPlugin) {
+      SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         formatConfig,
-        true,
-        false,
         /* splittable= */ false,
         /* compressible= */ false,
         formatConfig.getExtensions(),
-        NAME,
-        fsPlugin);
+        NAME);
     maxExcelFileSize =
         context.getOptionManager().getOption(ExecConstants.EXCEL_MAX_FILE_SIZE_VALIDATOR);
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return false;
   }
 
   @Override

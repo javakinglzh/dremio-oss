@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import com.dremio.exec.catalog.DatasetViewMetadata;
 import java.util.List;
 import java.util.Map;
 import org.apache.iceberg.Schema;
@@ -24,7 +25,7 @@ import org.apache.iceberg.Schema;
  * interface is used by the DataplanePlugin caching and Catalog layers to retrieve Iceberg view
  * metadata.
  */
-public interface IcebergViewMetadata {
+public interface IcebergViewMetadata extends DatasetViewMetadata {
 
   /**
    * Currently supported Iceberg versions by Dremio. (See org/apache/iceberg/view/ViewMetadata.java
@@ -159,6 +160,15 @@ public interface IcebergViewMetadata {
    * @return
    */
   String getDialect();
+
+  /**
+   * Default catalog name when the view was created
+   *
+   * @return
+   */
+  default String getCatalog() {
+    return null;
+  }
 
   /**
    * Json representation of the view metadata

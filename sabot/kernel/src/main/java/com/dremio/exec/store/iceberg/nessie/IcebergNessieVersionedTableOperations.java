@@ -210,7 +210,7 @@ public class IcebergNessieVersionedTableOperations extends BaseMetastoreTableOpe
           NessieCommitUsernameContext.CTX_KEY, new NessieCommitUsernameContext(userName));
     }
     return currentContext
-        .with(UserContext.CTX_KEY, new UserContext(nessieCommitUserId))
+        .with(UserContext.CTX_KEY, UserContext.of(nessieCommitUserId))
         .with(NessieCommitUsernameContext.CTX_KEY, new NessieCommitUsernameContext(userName));
   }
 

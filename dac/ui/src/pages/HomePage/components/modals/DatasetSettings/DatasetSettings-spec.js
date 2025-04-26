@@ -192,7 +192,7 @@ describe("DatasetSettings", () => {
       const instance = wrapper.instance();
       instance.componentDidMount();
       expect(context.router.replace).to.not.be.called;
-      expect(wrapper.find("NavPanel").props().activeTab).to.be.eql("overview");
+      expect(instance.props.tab).to.be.eql("overview");
     });
   });
 

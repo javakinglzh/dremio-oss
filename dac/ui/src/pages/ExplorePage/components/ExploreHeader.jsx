@@ -71,7 +71,7 @@ import SaveMenu, {
 import BreadCrumbs, { formatFullPath } from "components/BreadCrumbs";
 import DatasetItemLabel from "components/Dataset/DatasetItemLabel";
 import { getIconPath } from "#oss/utils/getIconPath";
-import { Button } from "dremio-ui-lib/components";
+import { Button, IconButton } from "dremio-ui-lib/components";
 import { showQuerySpinner } from "@inject/pages/ExplorePage/utils";
 import { getIconDataTypeFromDatasetType } from "utils/iconUtils";
 import { NoticeTag } from "dremio-ui-common/components/NoticeTag.js";
@@ -130,6 +130,7 @@ import { ScriptsResource } from "dremio-ui-common/sonar/scripts/resources/Script
 
 import * as classes from "./ExploreHeader.module.less";
 import "./ExploreHeader.less";
+import { isTemporaryScriptName } from "dremio-ui-common/sonar/SqlRunnerSession/utilities/temporaryTabs.js";
 
 export const TABLEAU_TOOL_NAME = "Tableau";
 export const QLIK_TOOL_NAME = "Qlik Sense";
@@ -575,59 +576,6 @@ export class ExploreHeader extends PureComponent {
     ) : null;
   }
 
-  renderDatasetLabel(dataset) {
-    const nameForDisplay = ExploreHeader.getNameForDisplay(dataset);
-    const isEditedDataset = this.isEditedDataset();
-    const nameStyle = isEditedDataset ? { fontStyle: "italic" } : {};
-    const fullPath = ExploreHeader.getFullPathListForDisplay(dataset);
-    const edited = this.props.intl.formatMessage({ id: "Dataset.Edited" });
-    return (
-      <DatasetItemLabel
-        customNode={
-          // todo: string replace loc
-          <div className="flexbox-truncate-text-fix">
-            <div style={{ ...style.dbName }} data-qa={nameForDisplay}>
-              <EllipsedText
-                style={nameStyle}
-                text={`${nameForDisplay}${isEditedDataset ? edited : ""}`}
-                className="heading"
-              >
-                <span>{nameForDisplay}</span>
-                <span data-qa="dataset-edited">
-                  {isEditedDataset ? edited : ""}
-                </span>
-              </EllipsedText>
-              {this.renderCopyToClipBoard(constructFullPath(fullPath))}
-            </div>
-            {fullPath && (
-              <BreadCrumbs
-                hideLastItem
-                fullPath={fullPath}
-                pathname={this.props.location.pathname}
-              />
-            )}
-            {
-              <DocumentTitle
-                title={
-                  fullPath
-                    ? formatFullPath(fullPath).join(".") +
-                      (isEditedDataset ? "*" : "")
-                    : nameForDisplay
-                }
-              />
-            }
-          </div>
-        }
-        isNewQuery={dataset.get("isNewQuery")}
-        showFullPath
-        fullPath={fullPath}
-        placement="right"
-        typeIcon={getIconDataTypeFromDatasetType(dataset.get("datasetType"))}
-        shouldShowOverlay={false}
-      />
-    );
-  }
-
   wrapWithTooltip(button, title, cmd, disabled, disabledTooltip) {
     const tooltip = cmd ? (
       <div
@@ -751,6 +699,7 @@ export class ExploreHeader extends PureComponent {
                     this.doButtonAction(ExploreHeaderActions.PREVIEW)
                   }
                   disabled={disablePreviewButton || disableButtons}
+                  aria-label={previewText}
                 >
                   <dremio-icon
                     name="sql-editor/preview"
@@ -874,7 +823,7 @@ export class ExploreHeader extends PureComponent {
         onClick={onclick}
         className={className}
         disabled={this.getExtraSaveDisable(dataset)}
-        aria-label={icon}
+        aria-label={name}
         style={{ minWidth: "auto" }}
       >
         {icon === "corporate/tableau" ? (
@@ -913,9 +862,13 @@ export class ExploreHeader extends PureComponent {
 
     const currentSql = getCurrentSql();
 
+    const scriptIsTemporary =
+      activeScript?.name && isTemporaryScriptName(activeScript.name);
+
     const allowsPrivModal =
       hasPermission &&
-      !exploreUtils.isEditedScript(activeScript, getCurrentSql());
+      !exploreUtils.isEditedScript(activeScript, getCurrentSql()) &&
+      !scriptIsTemporary;
 
     let tooltipWording;
     if (allowsPrivModal) {
@@ -928,35 +881,30 @@ export class ExploreHeader extends PureComponent {
     }
 
     return (
-      hasPermission && (
-        <Tooltip
-          title={formatMessage({ id: tooltipWording })}
-          placement="top"
-          enterDelay={500}
-          enterNextDelay={500}
+      hasPermission &&
+      !scriptIsTemporary && (
+        <IconButton
+          onClick={
+            allowsPrivModal
+              ? () => {
+                  openPrivilegesModalForScript({
+                    router,
+                    location,
+                    script: activeScript,
+                    VIEW_ID: SCRIPTS_VIEW_ID,
+                  });
+                }
+              : null
+          }
+          tooltip={formatMessage({ id: tooltipWording })}
+          disabled={!allowsPrivModal}
+          className={classes["privilegesIcon"]}
         >
           <dremio-icon
             name="interface/privilege"
             alt="Open privileges window"
-            onClick={
-              allowsPrivModal
-                ? () => {
-                    openPrivilegesModalForScript({
-                      router,
-                      location,
-                      script: activeScript,
-                      VIEW_ID: SCRIPTS_VIEW_ID,
-                    });
-                  }
-                : null
-            }
-            class={
-              allowsPrivModal
-                ? classes["privilegesIcon"]
-                : classes["privilegesIcon--disabled"]
-            }
           ></dremio-icon>
-        </Tooltip>
+        </IconButton>
       )
     );
   };
@@ -1013,25 +961,19 @@ export class ExploreHeader extends PureComponent {
       id: `SQL.SQLEditor.${sqlState ? "Hide" : "Show"}SQLPane`,
     });
     return (
-      <Tooltip
-        title={message}
-        placement="top"
-        enterDelay={500}
-        enterNextDelay={500}
+      <IconButton
+        data-qa="show-hide-sql-btn"
+        className="show-hide-sql-btn"
+        onClick={toggleSqlPaneDisplay}
+        tooltip={message}
       >
-        <div
-          data-qa="show-hide-sql-btn"
-          className="show-hide-sql-btn"
-          onClick={toggleSqlPaneDisplay}
-        >
-          <dremio-icon
-            name={`sql-editor/panel-${sqlState ? "hide" : "show"}`}
-            alt="+"
-            class="show-hide-sql-btn__icon"
-          />
-          <span className="noText">{message}</span>
-        </div>
-      </Tooltip>
+        <dremio-icon
+          name={`sql-editor/panel-${sqlState ? "hide" : "show"}`}
+          alt="+"
+          class="show-hide-sql-btn__icon"
+        />
+        <span className="noText">{message}</span>
+      </IconButton>
     );
   };
 
@@ -1098,6 +1040,7 @@ export class ExploreHeader extends PureComponent {
       activeScript,
       numberOfMineScripts,
       isMultiTabEnabled,
+      intl,
     } = this.props;
     const canAlter = dataset.getIn(["permissions", "canAlter"]);
     const canSelect = dataset.getIn(["permissions", "canSelect"]);
@@ -1118,6 +1061,7 @@ export class ExploreHeader extends PureComponent {
               ? this.getTabSaveButton()
               : this.getDefaultSaveButton()
           }
+          menuLabel={intl.formatMessage({ id: "NewQuery.MoreSaveOptions" })}
           menu={
             <SaveMenu
               action={this.doButtonAction}

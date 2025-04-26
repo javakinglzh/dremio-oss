@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.store.iceberg;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.physical.base.AbstractWriter;
 import com.dremio.exec.physical.base.OpProps;
@@ -33,7 +32,7 @@ import com.fasterxml.jackson.annotation.JsonTypeName;
 @JsonTypeName("iceberg-manifest-writer")
 public class IcebergManifestWriterPOP extends AbstractWriter {
   private final String location;
-  private final MutablePlugin plugin;
+  private final SupportsIcebergMutablePlugin plugin;
   private final boolean singleWriter;
 
   @JsonCreator
@@ -56,7 +55,7 @@ public class IcebergManifestWriterPOP extends AbstractWriter {
       PhysicalOperator child,
       String location,
       WriterOptions options,
-      MutablePlugin plugin,
+      SupportsIcebergMutablePlugin plugin,
       boolean singleWriter) {
     super(props, child, options);
     this.plugin = plugin;
@@ -88,7 +87,7 @@ public class IcebergManifestWriterPOP extends AbstractWriter {
   }
 
   @JsonIgnore
-  public MutablePlugin getPlugin() {
+  public SupportsIcebergMutablePlugin getPlugin() {
     return plugin;
   }
 }

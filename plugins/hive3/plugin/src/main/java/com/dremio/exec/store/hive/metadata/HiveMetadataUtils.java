@@ -44,9 +44,9 @@ import com.dremio.connector.metadata.options.RefreshTableFilterOption;
 import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.ColumnCountTooLargeException;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.TimedRunnable;
 import com.dremio.exec.store.deltalake.DeltaLakeSchemaConverter;
 import com.dremio.exec.store.deltalake.DeltaLakeTable;
@@ -111,6 +111,7 @@ import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -545,7 +546,7 @@ public class HiveMetadataUtils {
       final HiveSchemaTypeOptions typeOptions,
       final HiveConf hiveConf,
       final Hive3StoragePlugin plugin,
-      final SabotContext context)
+      final PluginSabotContext context)
       throws ConnectorException {
 
     try {
@@ -612,7 +613,7 @@ public class HiveMetadataUtils {
       final TimeTravelOption timeTravelOption,
       final HiveSchemaTypeOptions typeOptions,
       final Hive3StoragePlugin plugin,
-      final SabotContext context) {
+      final PluginSabotContext context) {
     checkArgument(internalMetadataTableOption != null);
 
     FileSystemPlugin<?> metaStoragePlugin =
@@ -1061,7 +1062,7 @@ public class HiveMetadataUtils {
             .setTableName(tableMetadata.getTable().getTableName())
             .setDbName(tableMetadata.getTable().getDbName())
             .build();
-    return Arrays.asList(DatasetSplit.of(Collections.EMPTY_LIST, 0, 0, splitExtended::writeTo));
+    return Arrays.asList(DatasetSplit.of(Collections.emptyList(), 0, 0, splitExtended::writeTo));
   }
 
   /**
@@ -1732,13 +1733,13 @@ public class HiveMetadataUtils {
           case TIMESTAMP:
             try {
               return PartitionValue.of(name, DateTimes.isoFormattedLocalTimestampToMillis(value));
-            } catch (IllegalArgumentException ex) {
+            } catch (DateTimeParseException ex) {
               return PartitionValue.of(name);
             }
           case DATE:
             try {
               return PartitionValue.of(name, DateTimes.isoFormattedLocalDateToMillis(value));
-            } catch (IllegalArgumentException ex) {
+            } catch (DateTimeParseException ex) {
               return PartitionValue.of(name);
             }
           case DECIMAL:
@@ -2049,7 +2050,7 @@ public class HiveMetadataUtils {
       final EntityPath datasetPath,
       final InternalMetadataTableOption internalMetadataTableOption,
       final Hive3StoragePlugin plugin,
-      final SabotContext context,
+      final PluginSabotContext context,
       MetadataVerifyRequest metadataVerifyRequest)
       throws ConnectorException {
 

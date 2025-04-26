@@ -90,7 +90,18 @@ class SingleEngineHeader extends PureComponent {
         }
       >
         <div style={styles.lefChildren}>
-          <div className="link" onClick={this.props.unselectEngine}>
+          <div
+            className="link"
+            role="link"
+            onClick={this.props.unselectEngine}
+            tabIndex={0}
+            aria-label="Engine listing"
+            onKeyDown={(e) => {
+              if (e.code === "Space" || e.code === "Enter") {
+                this.props.unselectEngine();
+              }
+            }}
+          >
             {laDeprecated("Engines")}
           </div>
           {doubleCaretIcon} {statusIcon} {engineName}

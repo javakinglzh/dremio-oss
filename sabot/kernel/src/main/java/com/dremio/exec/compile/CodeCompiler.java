@@ -21,6 +21,7 @@ import com.dremio.exec.exception.ClassTransformationException;
 import com.dremio.exec.expr.ClassGenerator;
 import com.dremio.exec.expr.CodeGenerator;
 import com.dremio.exec.expr.ExpressionEvalInfo;
+import com.dremio.exec.expr.fn.FunctionErrorContext;
 import com.dremio.options.OptionManager;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.cache.CacheBuilder;
@@ -31,7 +32,10 @@ import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -44,7 +48,7 @@ public class CodeCompiler {
   private final ClassCompilerSelector selector;
   private final LoadingCache<CodeGenerator.CodeDefinition<?>, GeneratedClassEntry>
       generatedCodeToCompiledClazzCache;
-  private final LoadingCache<ExpressionsHolder, GeneratedClassEntryWithFunctionErrorContextSizeInfo>
+  private final LoadingCache<ExpressionsHolder, GeneratedClassEntryWithFunctionErrorContextInfo>
       expressionsToCompiledClazzCache;
 
   @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
@@ -98,10 +102,11 @@ public class CodeCompiler {
       final ExpressionsHolder expressionsHolder, int instanceNumber) {
     try {
       ClassGenerator<?> rootGenerator = expressionsHolder.cg.getRoot();
-      final GeneratedClassEntryWithFunctionErrorContextSizeInfo ce =
+      final GeneratedClassEntryWithFunctionErrorContextInfo ce =
           expressionsToCompiledClazzCache.get(expressionsHolder);
       logger.debug("Expressions Cache access with key '{}' and value '{}'", expressionsHolder, ce);
-      rootGenerator.registerFunctionErrorContext(ce.functionErrorContextsCount);
+      rootGenerator.registerFunctionErrorContext(
+          ce.functionErrorContextsCount, ce.contextIdToFieldIdMap);
       expressionsHolder.cg = null;
       return getInstances(instanceNumber, ce.generatedClassEntry);
     } catch (ExecutionException
@@ -137,9 +142,9 @@ public class CodeCompiler {
   }
 
   private class ExpressionsToCompiledClazzCacheLoader
-      extends CacheLoader<ExpressionsHolder, GeneratedClassEntryWithFunctionErrorContextSizeInfo> {
+      extends CacheLoader<ExpressionsHolder, GeneratedClassEntryWithFunctionErrorContextInfo> {
     @Override
-    public GeneratedClassEntryWithFunctionErrorContextSizeInfo load(
+    public GeneratedClassEntryWithFunctionErrorContextInfo load(
         final ExpressionsHolder expressionsHolder) throws Exception {
       final QueryClassLoader loader = new QueryClassLoader(selector);
       ClassGenerator<?> rootGenerator = expressionsHolder.cg.getRoot();
@@ -154,9 +159,9 @@ public class CodeCompiler {
       final Class<?> c =
           transformer.getImplementationClass(
               loader, cgd.getDefinition(), cgd.getGeneratedCode(), cgd.getMaterializedClassName());
-      final GeneratedClassEntryWithFunctionErrorContextSizeInfo ce =
-          new GeneratedClassEntryWithFunctionErrorContextSizeInfo(
-              c, rootGenerator.getFunctionErrorContextsCount() - currentCount);
+      final GeneratedClassEntryWithFunctionErrorContextInfo ce =
+          new GeneratedClassEntryWithFunctionErrorContextInfo(
+              c, rootGenerator.getFunctionErrorContexts(currentCount));
       logger.debug("Expressions Cache loaded with key '{}' and value '{}'", expressionsHolder, ce);
       return ce;
     }
@@ -184,14 +189,24 @@ public class CodeCompiler {
     }
   }
 
-  private static class GeneratedClassEntryWithFunctionErrorContextSizeInfo {
+  private static class GeneratedClassEntryWithFunctionErrorContextInfo {
     private final GeneratedClassEntry generatedClassEntry;
+    private final Map<Integer, Integer> contextIdToFieldIdMap = new HashMap<>();
     private final int functionErrorContextsCount;
 
-    private GeneratedClassEntryWithFunctionErrorContextSizeInfo(
-        final Class<?> clazz, int functionErrorContextCount) {
+    private GeneratedClassEntryWithFunctionErrorContextInfo(
+        final Class<?> clazz, Iterator<FunctionErrorContext> errorContexts) {
+      int count = 0;
+      while (errorContexts.hasNext()) {
+        FunctionErrorContext errorContext = errorContexts.next();
+        int fieldId = errorContext.getOutputFieldId();
+        if (fieldId != -1) {
+          contextIdToFieldIdMap.put(count, fieldId);
+        }
+        ++count;
+      }
       this.generatedClassEntry = new GeneratedClassEntry(clazz);
-      this.functionErrorContextsCount = functionErrorContextCount;
+      this.functionErrorContextsCount = count;
     }
 
     @Override

@@ -28,6 +28,7 @@ import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
 import com.dremio.exec.util.ColumnUtils;
@@ -87,7 +88,7 @@ public class EasyScanOperatorCreator implements ProducerOperator.Creator<EasySub
       try {
         this.extended =
             LegacyProtobufSerializer.parseFrom(
-                EasyDatasetSplitXAttr.PARSER, split.getDatasetSplitInfo().getExtendedProperty());
+                EasyDatasetSplitXAttr.parser(), split.getDatasetSplitInfo().getExtendedProperty());
       } catch (InvalidProtocolBufferException e) {
         throw new RuntimeException("Could not deserialize split info", e);
       }
@@ -114,8 +115,12 @@ public class EasyScanOperatorCreator implements ProducerOperator.Creator<EasySub
     FileSystem fs;
     try {
       fs =
-          plugin.createFSWithAsyncOptions(
-              config.getFileConfig().getLocation(), config.getProps().getUserName(), context);
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(config.getFileConfig().getLocation())
+                  .userName(config.getProps().getUserName())
+                  .operatorContext(context)
+                  .datasetFromTablePaths(config.getReferencedTables()));
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
@@ -186,7 +191,7 @@ public class EasyScanOperatorCreator implements ProducerOperator.Creator<EasySub
                         try {
                           EasyProtobuf.EasyDatasetXAttr myXAttr =
                               LegacyProtobufSerializer.parseFrom(
-                                  EasyProtobuf.EasyDatasetXAttr.PARSER,
+                                  EasyProtobuf.EasyDatasetXAttr.parser(),
                                   config.getExtendedProperty().toByteArray());
                           basePath = myXAttr.getSelectionRoot();
                         } catch (InvalidProtocolBufferException e) {

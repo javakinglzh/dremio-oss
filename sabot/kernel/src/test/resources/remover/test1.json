@@ -25,19 +25,19 @@
             child: 1,
             pop:"filter",
             expr: "alternate()",
-            props: {"operatorId": 2, "schemaHashCode": -487557233}
+            props: {"operatorId": 2, "schemaHashCode": 957697386}
         },
         {
             id:3,
             child: 2,
             pop:"selection-vector-remover",
-            props: {"operatorId": 3, "targetBatchSize":15, "schemaHashCode": -487557233}
+            props: {"operatorId": 3, "targetBatchSize":15, "schemaHashCode": 957697386}
         },
         {
             id: 4,
             child: 3,
             pop: "screen",
-            props: {"operatorId": 4, "schemaHashCode": -487557233}
+            props: {"operatorId": 4, "schemaHashCode": 957697386}
         }
     ]
 }

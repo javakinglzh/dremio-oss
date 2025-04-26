@@ -31,13 +31,13 @@ import org.apache.calcite.rex.RexNode;
 
 /** Visits the elasticsearch subtree and collapses the tree. */
 public abstract class ElasticRuleRelVisitor extends RelVisitor {
-  protected RexNode filterExprs = null;
-  protected List<RexNode> projectExprs = null;
-  protected RelDataType projectDataType = null;
-  protected RelNode child = null;
-  protected List<ElasticsearchPrel> parents = new ArrayList<>();
-  protected boolean continueToChildren = true;
-  protected final RelNode input;
+  private RexNode filterExprs = null;
+  private List<RexNode> projectExprs = null;
+  private RelDataType projectDataType = null;
+  private RelNode child = null;
+  private List<ElasticsearchPrel> parents = new ArrayList<>();
+  private boolean continueToChildren = true;
+  private final RelNode input;
 
   public ElasticRuleRelVisitor(RelNode input) {
     this.input = input;
@@ -50,8 +50,8 @@ public abstract class ElasticRuleRelVisitor extends RelVisitor {
   public abstract void processSample(ElasticsearchSample node);
 
   public ElasticRuleRelVisitor go() {
-    go(input.accept(new SubsetRemover(false)));
-    assert child != null;
+    go(getInput().accept(new SubsetRemover(false)));
+    assert getChild() != null;
     return this;
   }
 
@@ -68,41 +68,41 @@ public abstract class ElasticRuleRelVisitor extends RelVisitor {
     } else if (node instanceof ElasticsearchSample) {
       processSample((ElasticsearchSample) node);
     } else {
-      child = node;
-      continueToChildren = false;
+      setChild(node);
+      setContinueToChildren(false);
     }
 
-    if (continueToChildren) {
+    if (isContinueToChildren()) {
       super.visit(node, ordinal, parent);
     }
   }
 
   public ElasticsearchPrel getConvertedTree() {
-    ElasticsearchPrel subTree = (ElasticsearchPrel) this.child;
+    ElasticsearchPrel subTree = (ElasticsearchPrel) this.getChild();
 
-    if (filterExprs != null) {
+    if (getFilterExprs() != null) {
       subTree =
           new ElasticsearchFilter(
               subTree.getCluster(),
               subTree.getTraitSet(),
               subTree,
-              filterExprs,
+              getFilterExprs(),
               subTree.getPluginId());
     }
 
-    if (projectExprs != null) {
+    if (getProjectExprs() != null) {
       subTree =
           new ElasticsearchProject(
               subTree.getCluster(),
               subTree.getTraitSet(),
               subTree,
-              projectExprs,
-              projectDataType,
+              getProjectExprs(),
+              getProjectDataType(),
               subTree.getPluginId());
     }
 
-    if (parents != null && !parents.isEmpty()) {
-      ListIterator<ElasticsearchPrel> iterator = parents.listIterator(parents.size());
+    if (getParents() != null && !getParents().isEmpty()) {
+      ListIterator<ElasticsearchPrel> iterator = getParents().listIterator(getParents().size());
       while (iterator.hasPrevious()) {
         final ElasticsearchPrel parent = iterator.previous();
         subTree =
@@ -112,5 +112,53 @@ public abstract class ElasticRuleRelVisitor extends RelVisitor {
     }
 
     return subTree;
+  }
+
+  protected RexNode getFilterExprs() {
+    return filterExprs;
+  }
+
+  protected void setFilterExprs(RexNode filterExprs) {
+    this.filterExprs = filterExprs;
+  }
+
+  protected void setProjectExprs(List<RexNode> projectExprs) {
+    this.projectExprs = projectExprs;
+  }
+
+  protected RelDataType getProjectDataType() {
+    return projectDataType;
+  }
+
+  protected void setProjectDataType(RelDataType projectDataType) {
+    this.projectDataType = projectDataType;
+  }
+
+  protected RelNode getChild() {
+    return child;
+  }
+
+  protected void setChild(RelNode child) {
+    this.child = child;
+  }
+
+  protected List<ElasticsearchPrel> getParents() {
+    return parents;
+  }
+
+  protected void setParents(List<ElasticsearchPrel> parents) {
+    this.parents = parents;
+  }
+
+  protected boolean isContinueToChildren() {
+    return continueToChildren;
+  }
+
+  protected void setContinueToChildren(boolean continueToChildren) {
+    this.continueToChildren = continueToChildren;
+  }
+
+  protected RelNode getInput() {
+    return input;
   }
 }

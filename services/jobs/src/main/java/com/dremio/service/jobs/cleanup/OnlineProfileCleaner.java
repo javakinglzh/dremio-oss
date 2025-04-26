@@ -25,15 +25,20 @@ import javax.inject.Provider;
 /** Online profile deletion using Job Telemetry Service Schedule in the background */
 public class OnlineProfileCleaner extends ExternalCleaner {
   private JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub jobTelemetryServiceStub;
+  private boolean onlyDeleteSubProfile;
 
-  public OnlineProfileCleaner(final Provider<JobTelemetryClient> jobTelemetryClientProvider) {
+  public OnlineProfileCleaner(
+      final Provider<JobTelemetryClient> jobTelemetryClientProvider,
+      final boolean onlyDeleteSubProfile) {
     this.jobTelemetryServiceStub = jobTelemetryClientProvider.get().getBlockingStub();
+    this.onlyDeleteSubProfile = onlyDeleteSubProfile;
   }
 
   @Override
   public void doGo(JobAttempt jobAttempt) {
     jobTelemetryServiceStub.deleteProfile(
         DeleteProfileRequest.newBuilder()
+            .setOnlyDeleteSubProfiles(onlyDeleteSubProfile)
             .setQueryId(AttemptIdUtils.fromString(jobAttempt.getAttemptId()).toQueryId())
             .build());
   }

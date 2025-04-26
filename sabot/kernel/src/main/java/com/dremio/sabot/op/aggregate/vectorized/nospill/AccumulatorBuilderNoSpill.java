@@ -200,7 +200,7 @@ public class AccumulatorBuilderNoSpill {
               // of NullableTimeMilli are the same as comparisons on the underlying int values
               return new MinAccumulatorsNoSpill.IntMinAccumulatorNoSpill(
                   incomingValues, outputVector);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of min(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values
@@ -264,7 +264,7 @@ public class AccumulatorBuilderNoSpill {
               // of NullableTimeMilli are the same as comparisons on the underlying int values
               return new MaxAccumulatorsNoSpill.IntMaxAccumulatorNoSpill(
                   incomingValues, outputVector);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of max(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values
@@ -361,7 +361,7 @@ public class AccumulatorBuilderNoSpill {
               // of NullableTimeMilli are the same as comparisons on the underlying int values
               return new NdvAccumulatorsNoSpill.IntNdvAccumulatorsNoSpill(
                   incomingValues, outputVector, bufferManager, reduceNdvHeap);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of min(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values

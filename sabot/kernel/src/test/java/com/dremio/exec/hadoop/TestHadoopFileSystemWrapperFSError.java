@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.hadoop;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.hadoop.FSErrorTestUtils.newFSError;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -76,7 +75,6 @@ public class TestHadoopFileSystemWrapperFSError {
 
   @Test
   public void test() throws Exception {
-    assumeNonMaprProfile();
     final IOException ioException = new IOException("test io exception");
     final FSError fsError = newFSError(ioException);
     org.apache.hadoop.fs.FileSystem underlyingFS =

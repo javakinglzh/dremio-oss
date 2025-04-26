@@ -434,7 +434,7 @@ public abstract class FieldBufferPreAllocedCopier {
     Preconditions.checkArgument(
         source.getClass() == target.getClass(), "Input and output vectors must be same type.");
     switch (CompleteType.fromField(source.getField()).toMinorType()) {
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case FLOAT8:
       case BIGINT:
       case INTERVALDAY:

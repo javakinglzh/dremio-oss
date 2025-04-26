@@ -142,7 +142,7 @@ public class BaseTestFunction extends BaseTestOperator {
     final BufferAllocator childAllocator =
         getTestAllocator().newChildAllocator("interp", 0, Long.MAX_VALUE);
     try (OperatorContextImpl context =
-            testContext.getNewOperatorContext(childAllocator, project, 1);
+            (OperatorContextImpl) testContext.getNewOperatorContext(childAllocator, project, 1);
         Generator generator = input.toGenerator(context.getAllocator());
         VectorContainer output = new VectorContainer(context.getAllocator()); ) {
 

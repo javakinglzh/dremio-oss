@@ -33,16 +33,19 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 /** Iceberg snapshots subscan POP */
 @JsonTypeName("iceberg-snapshots-sub-scan")
 public class IcebergSnapshotsSubScan extends SubScanWithProjection {
-  private static final Collection<List<String>> NO_REFERENCED_TABLES = Collections.EMPTY_LIST;
+  private static final Collection<List<String>> NO_REFERENCED_TABLES = Collections.emptyList();
 
   private final StoragePluginId pluginId;
   private final SnapshotsScanOptions snapshotsScanOptions;
   @JsonIgnore private List<SplitAndPartitionInfo> splits;
   private final String schemeVariate;
+  @Nullable private String userId;
+  private final List<String> tableName;
 
   public IcebergSnapshotsSubScan(
       @JsonProperty("props") OpProps props,
@@ -51,7 +54,9 @@ public class IcebergSnapshotsSubScan extends SubScanWithProjection {
       @JsonProperty("columns") List<SchemaPath> columns,
       @JsonProperty("snapshotsScanOptions") SnapshotsScanOptions snapshotsScanOptions,
       @JsonProperty("splitWorks") List<SplitWork> splitWorks,
-      @JsonProperty("schemeVariate") String schemeVariate) {
+      @JsonProperty("schemeVariate") String schemeVariate,
+      @JsonProperty("userId") String userId,
+      @JsonProperty("tableName") List<String> tableName) {
     super(props, fullSchema, NO_REFERENCED_TABLES, columns);
     this.pluginId = pluginId;
     this.snapshotsScanOptions = snapshotsScanOptions;
@@ -60,6 +65,8 @@ public class IcebergSnapshotsSubScan extends SubScanWithProjection {
       this.splits =
           splitWorks.stream().map(SplitWork::getSplitAndPartitionInfo).collect(Collectors.toList());
     }
+    this.userId = userId;
+    this.tableName = tableName;
   }
 
   public StoragePluginId getPluginId() {
@@ -76,6 +83,14 @@ public class IcebergSnapshotsSubScan extends SubScanWithProjection {
 
   public String getSchemeVariate() {
     return schemeVariate;
+  }
+
+  public String getUserId() {
+    return userId;
+  }
+
+  public List<String> getTableName() {
+    return tableName;
   }
 
   @Override

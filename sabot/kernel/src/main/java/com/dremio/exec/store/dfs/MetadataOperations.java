@@ -19,7 +19,7 @@ import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.ExecConstants;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
@@ -27,6 +27,7 @@ import com.dremio.exec.store.iceberg.model.IcebergModel;
 import com.dremio.io.file.Path;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
 import com.dremio.service.users.SystemUser;
@@ -39,7 +40,7 @@ import org.apache.iceberg.Schema;
 /** Base class to perform iceberg metadata operations */
 abstract class MetadataOperations {
   protected final DatasetConfig datasetConfig;
-  protected final SabotContext context;
+  protected final PluginSabotContext context;
   protected final StoragePlugin storagePlugin;
   protected final NamespaceKey table;
   protected final SchemaConfig schemaConfig;
@@ -48,7 +49,7 @@ abstract class MetadataOperations {
 
   public MetadataOperations(
       DatasetConfig datasetConfig,
-      SabotContext context,
+      PluginSabotContext context,
       NamespaceKey table,
       SchemaConfig schemaConfig,
       IcebergModel model,
@@ -104,10 +105,12 @@ abstract class MetadataOperations {
     datasetConfig.getPhysicalDataset().setIcebergMetadata(icebergMetadata);
   }
 
-  protected static void save(
-      NamespaceKey table, DatasetConfig datasetConfig, String userName, SabotContext context) {
+  protected static void updateDatasetInNamespaceService(
+      NamespaceKey table,
+      DatasetConfig datasetConfig,
+      DatasetNamespaceService userNamespaceService) {
     try {
-      context.getNamespaceService(userName).addOrUpdateDataset(table, datasetConfig);
+      userNamespaceService.addOrUpdateDataset(table, datasetConfig);
     } catch (NamespaceException e) {
       throw UserException.validationError(e)
           .message("Failure while updating dataset")

@@ -19,13 +19,13 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.connector.metadata.options.TimeTravelOption;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.physical.base.AbstractWriter;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.ScanStats;
 import com.dremio.exec.physical.base.WriterOptions;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.SplitAndPartitionInfo;
@@ -55,9 +55,7 @@ import java.util.List;
 public abstract class EasyFormatPlugin<T extends FormatPluginConfig> extends BaseFormatPlugin {
 
   private final BasicFormatMatcher matcher;
-  private final SabotContext context;
-  private final boolean readable;
-  private final boolean writable;
+  private final PluginSabotContext context;
   private final boolean blockSplittable;
   protected final FormatPluginConfig formatConfig;
   private final String name;
@@ -65,19 +63,13 @@ public abstract class EasyFormatPlugin<T extends FormatPluginConfig> extends Bas
 
   protected EasyFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       T formatConfig,
-      boolean readable,
-      boolean writable,
       boolean blockSplittable,
       boolean compressible,
       List<String> extensions,
-      String defaultName,
-      FileSystemPlugin<?> fsPlugin) {
-    super(context, fsPlugin);
+      String defaultName) {
     this.matcher = new BasicFormatMatcher(this, extensions, compressible);
-    this.readable = readable;
-    this.writable = writable;
     this.context = context;
     this.blockSplittable = blockSplittable;
     this.compressible = compressible;
@@ -91,11 +83,9 @@ public abstract class EasyFormatPlugin<T extends FormatPluginConfig> extends Bas
   }
 
   @Override
-  public SabotContext getContext() {
+  public PluginSabotContext getContext() {
     return context;
   }
-
-  public abstract boolean supportsPushDown();
 
   /**
    * Whether or not you can split the format based on blocks within file boundaries. If not, the
@@ -209,21 +199,6 @@ public abstract class EasyFormatPlugin<T extends FormatPluginConfig> extends Bas
   @Override
   public FormatPluginConfig getConfig() {
     return formatConfig;
-  }
-
-  @Override
-  public boolean supportsRead() {
-    return readable;
-  }
-
-  @Override
-  public boolean supportsWrite() {
-    return writable;
-  }
-
-  @Override
-  public boolean supportsAutoPartitioning() {
-    return false;
   }
 
   @Override

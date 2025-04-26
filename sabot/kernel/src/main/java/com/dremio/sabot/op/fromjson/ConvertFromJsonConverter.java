@@ -25,6 +25,7 @@ import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.ProjectPrel;
 import com.dremio.exec.planner.physical.visitor.BasePrelVisitor;
+import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.VectorAccessibleComplexWriter;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.store.CatalogService;
@@ -74,6 +75,7 @@ import org.apache.calcite.rex.RexRangeRef;
 import org.apache.calcite.rex.RexSubQuery;
 import org.apache.calcite.rex.RexTableInputRef;
 import org.apache.calcite.rex.RexVisitor;
+import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 
 public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, RuntimeException> {
@@ -111,10 +113,10 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
         RexCall call = (RexCall) n;
         if (call.getOperator().getName().equalsIgnoreCase("convert_fromjson")) {
           List<RexNode> args = call.getOperands();
-          Preconditions.checkArgument(args.size() == 1);
+          Preconditions.checkArgument(args.size() >= 1);
           RexNode input = args.get(0);
           String inputFieldName = topRel.getRowType().getFieldNames().get(fieldId);
-          InputFieldVisitor visitor = new InputFieldVisitor(input, inputRel, inputFieldName);
+          InputFieldVisitor visitor = new InputFieldVisitor(call, inputRel, inputFieldName);
           conversions.add(input.accept(visitor));
           bottomExprs.add(input);
           continue;
@@ -166,7 +168,7 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
     return UserException.validationError().message(FAILURE_MSG).build(logger);
   }
 
-  private static CompleteType getRawSchema(
+  private static CompleteType getRawSchemaFromDatasetConfig(
       QueryContext context, final List<String> tableSchemaPath, final String fieldname) {
     // originTable may come from materialization cache and may not contain up-to-date
     // datasetFieldsList info.
@@ -185,7 +187,7 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
         .orElse(new CompleteType(ArrowType.Struct.INSTANCE, Collections.<Field>emptyList()));
   }
 
-  private static CompleteType getLiteralSchema(QueryContext context, byte[] bytes) {
+  private static CompleteType discoverLiteralSchemaFromSample(QueryContext context, byte[] bytes) {
     try (BufferAllocator allocator =
             context
                 .getAllocator()
@@ -200,16 +202,10 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
           Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
       final int maxLeafLimit =
           Math.toIntExact(context.getOptions().getOption(CatalogOptions.METADATA_LEAF_COLUMN_MAX));
-      final int rowSizeLimit =
-          Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
-      final boolean rowSizeLimitEnabled =
-          context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
       JsonReader jsonReader =
           new JsonReader(
               bufferManager.getManagedBuffer(),
               sizeLimit,
-              rowSizeLimitEnabled,
-              rowSizeLimit,
               maxLeafLimit,
               context.getOptions().getOption(ExecConstants.JSON_READER_ALL_TEXT_MODE_VALIDATOR),
               false,
@@ -237,12 +233,12 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
 
   private class InputFieldVisitor implements RexVisitor<ConversionColumn> {
 
-    private final RexNode rexRoot;
+    private final RexCall rexCall;
     private final RelNode inputRel;
     private final String inputFieldName;
 
-    public InputFieldVisitor(RexNode rexRoot, RelNode inputRel, String inputFieldName) {
-      this.rexRoot = rexRoot;
+    public InputFieldVisitor(RexCall rexCall, RelNode inputRel, String inputFieldName) {
+      this.rexCall = rexCall;
       this.inputRel = inputRel;
       this.inputFieldName = inputFieldName;
     }
@@ -263,8 +259,9 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
       // only retrieve the discovered type info if the node we're visiting is the root of the
       // expression
       CompleteType type =
-          rexInputRef == rexRoot ? getRawSchema(context, tablePath, fieldName) : null;
-      return new ConversionColumn(OriginType.RAW, tablePath, fieldName, inputFieldName, type);
+          rexInputRef == rexCall.getOperands().get(0) ? getRawSchema(tablePath, fieldName) : null;
+      return new ConversionColumn(
+          OriginType.RAW, tablePath, fieldName, inputFieldName, type, getErrorMode());
     }
 
     @Override
@@ -280,15 +277,16 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
       // only retrieve the discovered type info if the node we're visiting is the root of the
       // expression
       CompleteType type =
-          rexFieldAccess == rexRoot
-              ? getRawSchema(context, conversionColumn.getOriginTable(), fieldName)
+          rexFieldAccess == rexCall.getOperands().get(0)
+              ? getRawSchema(conversionColumn.getOriginTable(), fieldName)
               : null;
       return new ConversionColumn(
           OriginType.RAW,
           conversionColumn.getOriginTable(),
           fieldName,
           conversionColumn.getInputField(),
-          type);
+          type,
+          getErrorMode());
     }
 
     @Override
@@ -309,7 +307,12 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
       }
 
       return new ConversionColumn(
-          OriginType.LITERAL, null, null, inputFieldName, getLiteralSchema(context, literalValue));
+          OriginType.LITERAL,
+          null,
+          null,
+          inputFieldName,
+          getLiteralSchema(literalValue),
+          getErrorMode());
     }
 
     @Override
@@ -350,6 +353,36 @@ public class ConvertFromJsonConverter extends BasePrelVisitor<Prel, Void, Runtim
     @Override
     public ConversionColumn visitPatternFieldRef(RexPatternFieldRef rexPatternFieldRef) {
       throw failed();
+    }
+
+    private ConvertFromErrorMode getErrorMode() {
+      if (rexCall.getOperands().size() == 2
+          && rexCall.getOperands().get(1).getKind() == SqlKind.LITERAL) {
+        RexLiteral errorModeLiteral = (RexLiteral) rexCall.getOperands().get(1);
+        return (ConvertFromErrorMode) errorModeLiteral.getValue();
+      }
+
+      return ConvertFromErrorMode.ERROR_ON_ERROR;
+    }
+
+    private CompleteType getRawSchema(List<String> tableSchemaPath, String fieldName) {
+      if (getErrorMode() == ConvertFromErrorMode.NULL_ON_ERROR) {
+        return CalciteArrowHelper.fieldFromCalciteRowType(inputFieldName, rexCall.getType())
+            .map(CompleteType::fromField)
+            .orElse(null);
+      } else {
+        return getRawSchemaFromDatasetConfig(context, tableSchemaPath, fieldName);
+      }
+    }
+
+    private CompleteType getLiteralSchema(byte[] bytes) {
+      if (getErrorMode() == ConvertFromErrorMode.NULL_ON_ERROR) {
+        return CalciteArrowHelper.fieldFromCalciteRowType(inputFieldName, rexCall.getType())
+            .map(CompleteType::fromField)
+            .orElse(null);
+      } else {
+        return discoverLiteralSchemaFromSample(context, bytes);
+      }
     }
   }
 }

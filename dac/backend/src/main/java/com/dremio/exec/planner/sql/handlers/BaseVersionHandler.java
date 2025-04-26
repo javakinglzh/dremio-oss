@@ -59,6 +59,17 @@ public abstract class BaseVersionHandler<T> implements SqlDirectHandler<T>, Dire
   }
 
   protected VersionedPlugin getVersionedPlugin(String sourceName) {
+    final StoragePlugin storagePlugin = getStoragePlugin(sourceName);
+    if (!storagePlugin.isWrapperFor(VersionedPlugin.class)) {
+      throw UserException.unsupportedError()
+          .message("Source %s does not support versioning.", sourceName)
+          .buildSilently();
+    }
+
+    return storagePlugin.unwrap(VersionedPlugin.class);
+  }
+
+  private StoragePlugin getStoragePlugin(String sourceName) {
     final StoragePlugin storagePlugin;
     try {
       storagePlugin = catalog.getSource(sourceName);
@@ -79,17 +90,23 @@ public abstract class BaseVersionHandler<T> implements SqlDirectHandler<T>, Dire
             .buildSilently();
       }
     }
-    if (storagePlugin == null || !(storagePlugin.isWrapperFor(VersionedPlugin.class))) {
-      throw UserException.unsupportedError()
-          .message("Source %s does not support versioning.", sourceName)
+    if (storagePlugin == null) {
+      throw UserException.validationError()
+          .message(
+              "Source [%s] was not properly functioning while this statement was executed. Please check your source and re-try.",
+              sourceName)
           .buildSilently();
     }
 
-    return storagePlugin.unwrap(VersionedPlugin.class);
+    return storagePlugin;
   }
 
   @Override
   public void validate(NamespaceKey key, VersionContext versionContext) {
     // no-op
+  }
+
+  protected Catalog getCatalog() {
+    return catalog;
   }
 }

@@ -37,8 +37,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.opentracing.contrib.grpc.TracingClientInterceptor;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Arrays;
-import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import javax.inject.Provider;
@@ -59,18 +58,19 @@ public class ConduitProviderImpl implements ConduitProvider, Service {
   private final Object lastMasterLock = new Object();
   private volatile NodeEndpoint lastMaster = null;
 
-  // all grpc services that conduit channels should be whitelisted here for
-  // retries
-  private static final List<String> serviceNames =
-      Arrays.asList(
-          "dremio.job.JobsService",
-          "dremio" + ".catalog.InformationSchemaService",
-          "dremio.job.Chronicle",
-          "dremio.maestroservice.MaestroService");
+  public ConduitProviderImpl(
+      Provider<NodeEndpoint> masterEndpoint, Optional<SSLEngineFactory> sslEngineFactory) {
+    this(
+        masterEndpoint,
+        sslEngineFactory,
+        DefaultGrpcServiceConfigProvider.getDefaultGrpcServiceConfig());
+  }
 
   @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
   public ConduitProviderImpl(
-      Provider<NodeEndpoint> masterEndpoint, Optional<SSLEngineFactory> sslEngineFactory) {
+      Provider<NodeEndpoint> masterEndpoint,
+      Optional<SSLEngineFactory> sslEngineFactory,
+      Map<String, Object> grpcServiceConfig) {
     this.masterEndpoint = masterEndpoint;
     this.managedChannels =
         CacheBuilder.newBuilder()
@@ -99,9 +99,8 @@ public class ConduitProviderImpl implements ConduitProvider, Service {
                             .intercept(
                                 ContextualizedClientInterceptor
                                     .buildSingleTenantClientInterceptor())
-                            .defaultServiceConfig(
-                                DefaultGrpcServiceConfigProvider.getDefaultGrpcServiceConfig(
-                                    serviceNames))
+                            // configures retry policy for services
+                            .defaultServiceConfig(grpcServiceConfig)
                             .maxRetryAttempts(GrpcChannelBuilderFactory.MAX_RETRY);
 
                     if (sslEngineFactory.isPresent()) {
@@ -243,10 +242,6 @@ public class ConduitProviderImpl implements ConduitProvider, Service {
       this.lastMaster = currentMaster;
       return getOrCreateChannel(currentMaster);
     }
-  }
-
-  public static List<String> getServiceNames() {
-    return serviceNames;
   }
 
   @Override

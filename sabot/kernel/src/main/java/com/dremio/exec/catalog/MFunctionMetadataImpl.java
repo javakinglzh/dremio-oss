@@ -63,7 +63,7 @@ public abstract class MFunctionMetadataImpl implements MFunctionMetadata {
   }
 
   @Override
-  public StoragePlugin getPlugin() {
+  public Optional<StoragePlugin> getPlugin() {
     return plugin.getPlugin();
   }
 

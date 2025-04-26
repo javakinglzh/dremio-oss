@@ -19,6 +19,8 @@ import com.dremio.PlanTestBase;
 import com.dremio.common.util.TestTools;
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
 import java.io.File;
+import java.util.List;
+import java.util.Map;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.AppendFiles;
@@ -441,6 +443,165 @@ public class TestCreateTable extends PlanTestBase {
       FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), newTblName1));
       FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), newTblName2));
       FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), newTblName3));
+    }
+  }
+
+  @Test
+  public void testCreateTableWithNullability() throws Exception {
+    String tableName = "createTableWithNullability";
+    try {
+      String createQuery =
+          String.format(
+              "create table %s.%s (id int not null, name varchar, distance Decimal(38, 3) not null)",
+              TEMP_SCHEMA, tableName);
+      test(createQuery);
+      String describeQuery = String.format("describe %s.%s", TEMP_SCHEMA, tableName);
+      String[] baselineCols =
+          new String[] {
+            "`COLUMN_NAME`",
+            "`DATA_TYPE`",
+            "`IS_NULLABLE`",
+            "`NUMERIC_PRECISION`",
+            "`NUMERIC_SCALE`",
+            "`EXTENDED_PROPERTIES`",
+            "`MASKING_POLICY`",
+            "`SORT_ORDER_PRIORITY`"
+          };
+      Object[][] baselineValues = {
+        {"id", "INTEGER", "NO", 32, 0, "[]", null, null},
+        {"name", "CHARACTER VARYING", "YES", null, null, "[]", null, null},
+        {"distance", "DECIMAL", "NO", 38, 3, "[]", null, null}
+      };
+      List<Map<String, Object>> baselineRecords =
+          prepareBaselineRecords(baselineCols, baselineValues);
+      testBuilder().sqlQuery(describeQuery).unOrdered().baselineRecords(baselineRecords).go();
+
+    } finally {
+      FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), tableName));
+    }
+  }
+
+  @Test
+  public void testCreateTableWithComplexTypesAndNullability() throws Exception {
+    final String tableName = "createTableComplexTypesAndNullability";
+    try {
+      // note: if the root complex type is nullable, all its children are nullable as well
+      // this is how calcite handles null propagation in complex types
+      final String createQuery =
+          String.format(
+              "create table %s.%s ("
+                  + "struct1 struct<x INT, y INT>, "
+                  + "struct2 struct<x INT, y INT> not null, "
+                  + "struct3 struct<x INT, y INT not null> not null, "
+                  + "structofstruct1 struct<x struct<z INT> not null>, "
+                  + "structofstruct2 struct<x struct<z INT>> not null, "
+                  + "structofstruct3 struct<x struct<z INT> not null> not null, "
+                  + "structofstruct4 struct<x struct<z INT not null> not null> not null, "
+                  + "structoflist1 struct<x array<INT>>, "
+                  + "structoflist2 struct<x array<INT>> not null, "
+                  + "structoflist3 struct<x array<INT> not null> not null, "
+                  + "structoflist4 struct<x array<INT not null> not null> not null, "
+                  + "structofmap1 struct<x map<INT, INT>>, "
+                  + "structofmap2 struct<x map<INT, INT>> not null, "
+                  + "structofmap3 struct<x map<INT, INT> not null> not null, "
+                  + "strucfofmap4 struct<x map<INT, INT not null> not null> not null, "
+                  + "list1 list<INT>, "
+                  + "list2 list<INT> not null, "
+                  + "list3 list<INT not null> not null, "
+                  + "listofstruct1 list<struct<x INT>>, "
+                  + "listofstruct2 list<struct<x INT>> not null, "
+                  + "listofstruct3 list<struct<x INT> not null> not null, "
+                  + "listofstruct4 list<struct<x INT not null> not null> not null, "
+                  + "listoflist1 list<list<INT>>, "
+                  + "listoflist2 list<list<INT>> not null, "
+                  + "listoflist3 list<list<INT> not null> not null, "
+                  + "listoflist4 list<list<INT not null> not null> not null, "
+                  + "listofmap1 list<map<INT, INT>>, "
+                  + "listofmap2 list<map<INT, INT>> not null, "
+                  + "listofmap3 list<map<INT, INT> not null> not null, "
+                  + "listofmap4 list<map<INT, INT not null> not null> not null, "
+                  + "map1 map<INT, INT>, "
+                  + "map2 map<INT, INT> not null, "
+                  + "map3 map<INT, INT not null> not null, "
+                  + "mapofstruct1 map<INT, struct<x INT>>, "
+                  + "mapofstruct2 map<INT, struct<x INT>> not null, "
+                  + "mapofstruct3 map<INT, struct<x INT> not null> not null, "
+                  + "mapofstruct4 map<INT, struct<x INT not null> not null> not null, "
+                  + "mapoflist1 map<INT, list<INT>>, "
+                  + "mapoflist2 map<INT, list<INT>> not null, "
+                  + "mapoflist3 map<INT, list<INT> not null> not null, "
+                  + "mapoflist4 map<INT, list<INT not null> not null> not null, "
+                  + "mapofmap1 map<INT, map<INT, INT>>, "
+                  + "mapofmap2 map<INT, map<INT, INT>> not null, "
+                  + "mapofmap3 map<INT, map<INT, INT> not null> not null,"
+                  + "mapofmap4 map<INT, map<INT, INT not null> not null> not null"
+                  + ")",
+              TEMP_SCHEMA, tableName);
+      test(createQuery);
+      String describeQuery = String.format("describe %s.%s", TEMP_SCHEMA, tableName);
+      String[] baselineCols =
+          new String[] {
+            "`COLUMN_NAME`",
+            "`DATA_TYPE`",
+            "`IS_NULLABLE`",
+            "`NUMERIC_PRECISION`",
+            "`NUMERIC_SCALE`",
+            "`EXTENDED_PROPERTIES`",
+            "`MASKING_POLICY`",
+            "`SORT_ORDER_PRIORITY`"
+          };
+      Object[][] baselineValues = {
+        new Object[] {"struct1", "ROW", "YES", null, null, "[]", null, null},
+        new Object[] {"struct2", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"struct3", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structofstruct1", "ROW", "YES", null, null, "[]", null, null},
+        new Object[] {"structofstruct2", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structofstruct3", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structofstruct4", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structoflist1", "ROW", "YES", null, null, "[]", null, null},
+        new Object[] {"structoflist2", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structoflist3", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structoflist4", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structofmap1", "ROW", "YES", null, null, "[]", null, null},
+        new Object[] {"structofmap2", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"structofmap3", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"strucfofmap4", "ROW", "NO", null, null, "[]", null, null},
+        new Object[] {"list1", "ARRAY", "YES", null, null, "[]", null, null},
+        new Object[] {"list2", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"list3", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofstruct1", "ARRAY", "YES", null, null, "[]", null, null},
+        new Object[] {"listofstruct2", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofstruct3", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofstruct4", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listoflist1", "ARRAY", "YES", null, null, "[]", null, null},
+        new Object[] {"listoflist2", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listoflist3", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listoflist4", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofmap1", "ARRAY", "YES", null, null, "[]", null, null},
+        new Object[] {"listofmap2", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofmap3", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"listofmap4", "ARRAY", "NO", null, null, "[]", null, null},
+        new Object[] {"map1", "MAP", "YES", null, null, "[]", null, null},
+        new Object[] {"map2", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"map3", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofstruct1", "MAP", "YES", null, null, "[]", null, null},
+        new Object[] {"mapofstruct2", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofstruct3", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofstruct4", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapoflist1", "MAP", "YES", null, null, "[]", null, null},
+        new Object[] {"mapoflist2", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapoflist3", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapoflist4", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofmap1", "MAP", "YES", null, null, "[]", null, null},
+        new Object[] {"mapofmap2", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofmap3", "MAP", "NO", null, null, "[]", null, null},
+        new Object[] {"mapofmap4", "MAP", "NO", null, null, "[]", null, null}
+      };
+      List<Map<String, Object>> baselineRecords =
+          prepareBaselineRecords(baselineCols, baselineValues);
+      testBuilder().sqlQuery(describeQuery).unOrdered().baselineRecords(baselineRecords).go();
+    } finally {
+      FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), tableName));
     }
   }
 }

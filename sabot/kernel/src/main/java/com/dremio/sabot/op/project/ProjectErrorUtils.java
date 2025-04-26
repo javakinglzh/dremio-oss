@@ -168,9 +168,9 @@ public final class ProjectErrorUtils {
   public static Iterator<ProjectionError> parseErrors(
       VarCharVector errorVector, Function<Integer, String> fieldIdResolver) {
     return new Iterator<>() {
-      private int remainingErrors = errorVector.getValueCount() - errorVector.getNullCount();
-      private int index = 0;
       private final int valueCount = errorVector.getValueCount();
+      private int remainingErrors = valueCount - errorVector.getNullCount();
+      private int index = -1;
 
       @Override
       public boolean hasNext() {
@@ -179,7 +179,7 @@ public final class ProjectErrorUtils {
 
       @Override
       public ProjectionError next() {
-        for (; index < valueCount; ++index) {
+        for (++index; index < valueCount; ++index) {
           Text errorValue = errorVector.getObject(index);
           if (errorValue != null) {
             --remainingErrors;

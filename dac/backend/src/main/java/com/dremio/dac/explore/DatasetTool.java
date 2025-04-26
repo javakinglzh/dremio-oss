@@ -15,7 +15,6 @@
  */
 package com.dremio.dac.explore;
 
-import static com.dremio.common.utils.Protos.listNotNull;
 import static com.dremio.dac.explore.model.InitialPreviewResponse.INITIAL_RESULTSET_SIZE;
 
 import com.dremio.catalog.model.VersionContext;
@@ -66,6 +65,7 @@ import com.dremio.dac.service.errors.NewDatasetQueryException;
 import com.dremio.dac.util.InvalidQueryErrorConverter;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
+import com.dremio.exec.catalog.SupportsMutatingViews;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.RecordBatchHolder;
 import com.dremio.exec.util.ViewFieldsHelper;
@@ -89,8 +89,6 @@ import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
-import com.dremio.service.namespace.dataset.proto.FieldOrigin;
-import com.dremio.service.namespace.dataset.proto.Origin;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
 import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.google.common.base.Throwables;
@@ -101,11 +99,9 @@ import java.security.AccessControlException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.arrow.memory.BufferAllocator;
@@ -1057,7 +1053,15 @@ public class DatasetTool {
 
     QuerySemantics.populateSemanticFields(
         JobsProtoUtil.toStuff(queryMetadata.getFieldTypeList()), newDataset.getState());
-    applyQueryMetadata(newDataset, jobInfo, queryMetadata);
+
+    applyQueryMetadata(
+        datasetService.getCatalog(),
+        newDataset,
+        Optional.ofNullable(jobInfo.getParentsList()),
+        Optional.ofNullable(jobInfo.getBatchSchema()).map(BatchSchema::deserialize),
+        Optional.ofNullable(jobInfo.getGrandParentsList()),
+        queryMetadata);
+
     if (from == null || from.wrap().getType() == FromType.SQL) {
       newDataset.setState(QuerySemantics.extract(queryMetadata));
     }
@@ -1239,7 +1243,9 @@ public class DatasetTool {
     DatasetVersion savedVersion = null;
     try {
       savedVersion =
-          versioned
+          (versioned
+                  || CatalogUtil.supportsInterface(
+                      namespaceKey, catalog, SupportsMutatingViews.class))
               ? datasetService.getLatestVersionByOrigin(
                   datasetPath, tipVersion, DatasetVersionOrigin.SAVE)
               : datasetService.get(datasetPath).getVersion();
@@ -1326,21 +1332,10 @@ public class DatasetTool {
   }
 
   public static void applyQueryMetadata(
-      VirtualDatasetUI dataset, JobInfo jobInfo, QueryMetadata metadata) {
-    applyQueryMetadata(
-        dataset,
-        Optional.ofNullable(jobInfo.getParentsList()),
-        Optional.ofNullable(jobInfo.getBatchSchema()).map(BatchSchema::deserialize),
-        Optional.ofNullable(jobInfo.getFieldOriginsList()),
-        Optional.ofNullable(jobInfo.getGrandParentsList()),
-        metadata);
-  }
-
-  public static void applyQueryMetadata(
+      Catalog userCatalog,
       VirtualDatasetUI dataset,
       Optional<List<ParentDatasetInfo>> parents,
       Optional<BatchSchema> batchSchema,
-      Optional<List<FieldOrigin>> fieldOrigins,
       Optional<List<ParentDataset>> grandParents,
       QueryMetadata metadata) {
     List<ViewFieldType> viewFieldTypesList = JobsProtoUtil.toStuff(metadata.getFieldTypeList());
@@ -1365,13 +1360,12 @@ public class DatasetTool {
       dataset.setParentsList(Collections.emptyList());
     }
 
-    dataset.setFieldOriginsList(fieldOrigins.orElse(Collections.emptyList()));
     dataset.setGrandParentsList(grandParents.orElse(Collections.emptyList()));
-    updateDerivationAfterLearningOriginsAndAncestors(dataset);
+    updateDerivationAfterLearningOriginsAndAncestors(userCatalog, dataset);
   }
 
   private static void updateDerivationAfterLearningOriginsAndAncestors(
-      VirtualDatasetUI newDataset) {
+      Catalog userCatalog, VirtualDatasetUI newDataset) {
     // only resolve if we need to, otherwise we should leave the previous derivation alone. (e.g.
     // during a transform)
     if (newDataset.getDerivation() != Derivation.DERIVED_UNKNOWN) {
@@ -1380,25 +1374,25 @@ public class DatasetTool {
 
     // if we have don't have one parent, we must have had issues detecting parents of SQL we
     // generated, fallback.
-    if (newDataset.getParentsList() != null && newDataset.getParentsList().size() != 1) {
+    if (newDataset.getParentsList() != null
+        && newDataset.getParentsList().size() != 1
+        && newDataset.getParentsList().get(0) != null) {
       newDataset.setDerivation(Derivation.UNKNOWN);
       return;
     }
 
-    final Set<List<String>> origins = new HashSet<>();
-    for (FieldOrigin col : listNotNull(newDataset.getFieldOriginsList())) {
-      for (Origin colOrigin : listNotNull(col.getOriginsList())) {
-        origins.add(colOrigin.getTableList());
-      }
-    }
+    List<NamespaceKey> parentsUpstreamPhysicalDatasets =
+        userCatalog.getUpstreamPhysicalDatasets(
+            new NamespaceKey(newDataset.getParentsList().get(0).getDatasetPathList()));
 
     // logic: if we have a single parent and that parent is also the only
-    // table listed in field origins, then we are derived from a physical
+    // table that we depend on, then we are derived from a physical
     // dataset. Otherwise, we are a virtual dataset.
-    if (origins.size() == 1
-        && origins
+    if (parentsUpstreamPhysicalDatasets.size() == 1
+        && parentsUpstreamPhysicalDatasets
             .iterator()
             .next()
+            .getPathComponents()
             .equals(newDataset.getParentsList().get(0).getDatasetPathList())) {
       newDataset.setDerivation(Derivation.DERIVED_PHYSICAL);
     } else {

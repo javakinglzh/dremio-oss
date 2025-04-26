@@ -17,7 +17,7 @@
 package com.dremio.exec.store.deltalake;
 
 import com.dremio.common.util.Retryer;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -53,7 +53,7 @@ public class DeltaMetadataFetchJob implements Supplier<DeltaLogSnapshot> {
   private final Path metadataDir;
   private final Path rootFolder;
   private final FileSystem fs;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final DeltaVersion version;
 
   private static Retryer retryer =
@@ -65,7 +65,7 @@ public class DeltaMetadataFetchJob implements Supplier<DeltaLogSnapshot> {
           .build();
 
   public DeltaMetadataFetchJob(
-      SabotContext context, Path metadataDir, FileSystem fs, DeltaVersion version) {
+      PluginSabotContext context, Path metadataDir, FileSystem fs, DeltaVersion version) {
     this.metadataDir = metadataDir;
     this.rootFolder = metadataDir.getParent();
     this.fs = fs;

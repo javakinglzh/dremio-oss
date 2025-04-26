@@ -25,7 +25,7 @@ import { StoreSubscriber } from "./StoreSubscriber";
 import { getViewState } from "#oss/selectors/resources";
 
 import { page, pageContent } from "uiTheme/radium/general";
-import ClusterListViewMixin from "dyn-load/pages/AdminPage/subpages/Provisioning/ClusterListViewMixin";
+import ClusterListViewMixin from "@inject/pages/AdminPage/subpages/Provisioning/ClusterListViewMixin";
 import EnginesFilter from "#oss/pages/AdminPage/subpages/Provisioning/components/EnginesFilter";
 import { getFilteredEngines } from "dyn-load/pages/AdminPage/subpages/Provisioning/EngineFilterHelper";
 import EngineStatus from "#oss/pages/AdminPage/subpages/Provisioning/components/EngineStatus";
@@ -39,7 +39,6 @@ import { CLUSTER_STATE } from "#oss/constants/provisioningPage/provisioningConst
 import { DEFAULT_ENGINE_FILTER_SELECTIONS } from "dyn-load/constants/provisioningPage/provisioningConstants";
 import { Table } from "leantable/react";
 import { getSortedTableData } from "#oss/components/Table/TableUtils";
-import { withIsInstanceFamilyEnabled } from "#oss/pages/AdminPage/subpages/Provisioning/withIsInstanceFamilyEnabled";
 
 export const VIEW_ID = "ClusterListView";
 export const STATUS_VIEW_ID = "ClusterListViewStatus";
@@ -64,7 +63,6 @@ export class ClusterListView extends Component {
     sortedColumns: PropTypes.any,
     scrolledDirections: PropTypes.any,
     scrollContainerRef: PropTypes.any,
-    isInstanceFamilyEnabled: PropTypes.bool,
   };
 
   static defaultProps = {
@@ -209,7 +207,6 @@ export class ClusterListView extends Component {
       scrolledDirections,
       scrollContainerRef,
       sortedColumns,
-      isInstanceFamilyEnabled,
     } = this.props;
     const tableData = this.getTableData();
 
@@ -219,7 +216,6 @@ export class ClusterListView extends Component {
       statusViewState: statusViewState,
       onRowClick: this.onRowClick,
       sort: sort,
-      isInstanceFamilyEnabled,
     });
 
     return (
@@ -236,7 +232,7 @@ export class ClusterListView extends Component {
             "dremio-scrolled-container--left": scrolledDirections.has("left"),
           })}
           style={{
-            width: "calc(100vw - 388px)",
+            width: "100%",
             ...pageContent,
           }}
           ref={scrollContainerRef}
@@ -263,6 +259,5 @@ function mapStateToProps(state) {
 
 export default compose(
   connect(mapStateToProps),
-  withIsInstanceFamilyEnabled,
   StoreSubscriber,
 )(ClusterListView);

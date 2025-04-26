@@ -15,26 +15,37 @@
  */
 package com.dremio.service.nessie.upgrade.storage;
 
-import com.dremio.common.SuppressForbidden;
 import com.dremio.dac.cmd.AdminLogger;
 import com.dremio.dac.cmd.upgrade.UpgradeContext;
 import com.dremio.dac.cmd.upgrade.UpgradeTask;
 import com.dremio.datastore.api.KVStore;
 import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.legacy.org.projectnessie.model.ContentKey;
+import com.dremio.legacy.org.projectnessie.server.store.proto.ObjectTypes;
+import com.dremio.legacy.org.projectnessie.versioned.GetNamedRefsParams;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceInfo;
+import com.dremio.legacy.org.projectnessie.versioned.ReferenceNotFoundException;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.ContentAndState;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyFilterPredicate;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.KeyListEntry;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
+import com.dremio.service.embedded.catalog.EmbeddedContent;
+import com.dremio.service.embedded.catalog.EmbeddedContentKey;
 import com.dremio.service.embedded.catalog.EmbeddedPointerStore;
-import com.dremio.service.nessie.AbstractNessieStoreBuilder;
 import com.dremio.service.nessie.DatastoreDatabaseAdapter;
 import com.dremio.service.nessie.DatastoreDatabaseAdapterFactory;
 import com.dremio.service.nessie.ImmutableDatastoreDbConfig;
-import com.dremio.service.nessie.NessieCommitLogStoreBuilder;
 import com.dremio.service.nessie.NessieDatastoreInstance;
-import com.dremio.service.nessie.NessieGlobalLogStoreBuilder;
-import com.dremio.service.nessie.NessieGlobalPointerStoreBuilder;
-import com.dremio.service.nessie.NessieKeyListStoreBuilder;
-import com.dremio.service.nessie.NessieNamedRefHeadsStoreBuilder;
-import com.dremio.service.nessie.NessieRefLogStoreBuilder;
-import com.dremio.service.nessie.NessieRefNamesStoreBuilder;
-import com.dremio.service.nessie.NessieRepoDescriptionStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.AbstractNessieStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieCommitLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieGlobalPointerStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieKeyListStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieNamedRefHeadsStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRefLogStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRefNamesStoreBuilder;
+import com.dremio.service.nessie.upgrade.kvstore.NessieRepoDescriptionStoreBuilder;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterators;
 import java.util.Collections;
@@ -45,19 +56,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.projectnessie.model.Content;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.model.Namespace;
-import org.projectnessie.server.store.proto.ObjectTypes;
-import org.projectnessie.versioned.GetNamedRefsParams;
-import org.projectnessie.versioned.ReferenceInfo;
-import org.projectnessie.versioned.ReferenceNotFoundException;
-import org.projectnessie.versioned.persist.adapter.ContentAndState;
-import org.projectnessie.versioned.persist.adapter.DatabaseAdapter;
-import org.projectnessie.versioned.persist.adapter.KeyFilterPredicate;
-import org.projectnessie.versioned.persist.adapter.KeyListEntry;
-import org.projectnessie.versioned.persist.nontx.ImmutableAdjustableNonTransactionalDatabaseAdapterConfig;
 
 /**
  * Migrates Nessie data stored in the "old" OSS Nessie data model ({@link DatabaseAdapter}) to the
@@ -134,8 +132,9 @@ public class MigrateToUnversionedStore extends UpgradeTask {
                       + main.getHash());
             }
 
-            Content content = parseContent(entry.getKey(), value);
-            unversionedStore.put(entry.getKey(), content);
+            EmbeddedContent content = parseContent(entry.getKey(), value);
+            EmbeddedContentKey key = EmbeddedContentKey.of(entry.getKey().getElements());
+            unversionedStore.put(key, content);
 
             if (count.incrementAndGet() % progressCycle == 0) {
               AdminLogger.log("Migrated {} embedded catalog entries.", count.get());
@@ -159,8 +158,7 @@ public class MigrateToUnversionedStore extends UpgradeTask {
     removeObsoleteEntries(storeProvider, NessieCommitLogStoreBuilder.class, progressCycle);
   }
 
-  @SuppressForbidden // This method has to use Nessie's relocated ByteString in method parameters.
-  private Content parseContent(ContentKey key, ContentAndState contentAndState) {
+  private EmbeddedContent parseContent(ContentKey key, ContentAndState contentAndState) {
     try {
       ObjectTypes.Content refState = ObjectTypes.Content.parseFrom(contentAndState.getRefState());
       ObjectTypes.Content.ObjectTypeCase type = refState.getObjectTypeCase();
@@ -168,7 +166,7 @@ public class MigrateToUnversionedStore extends UpgradeTask {
       if (type == ObjectTypes.Content.ObjectTypeCase.ICEBERG_METADATA_POINTER) {
         ObjectTypes.IcebergMetadataPointer pointer = refState.getIcebergMetadataPointer();
         String metadataLocation = pointer.getMetadataLocation();
-        return IcebergTable.of(metadataLocation, 0, 0, 0, 0, UUID.randomUUID().toString());
+        return EmbeddedContent.table(metadataLocation, UUID.randomUUID().toString());
       } else if (type == ObjectTypes.Content.ObjectTypeCase.ICEBERG_REF_STATE) {
         ObjectTypes.IcebergRefState icebergRefState = refState.getIcebergRefState();
         String metadataLocation = icebergRefState.getMetadataLocation();
@@ -188,9 +186,10 @@ public class MigrateToUnversionedStore extends UpgradeTask {
           ObjectTypes.IcebergMetadataPointer pointer = globalState.getIcebergMetadataPointer();
           metadataLocation = pointer.getMetadataLocation();
         }
-        return IcebergTable.of(metadataLocation, 0, 0, 0, 0, UUID.randomUUID().toString());
+        return EmbeddedContent.table(metadataLocation, UUID.randomUUID().toString());
       } else if (type == ObjectTypes.Content.ObjectTypeCase.NAMESPACE) {
-        return Namespace.of(key.getElements()).withId(UUID.randomUUID().toString());
+        return EmbeddedContent.namespace(
+            EmbeddedContentKey.of(key.getElements()), UUID.randomUUID().toString());
       } else {
         throw new IllegalStateException(
             "Unable to parse object type: " + type + " for key: " + key);

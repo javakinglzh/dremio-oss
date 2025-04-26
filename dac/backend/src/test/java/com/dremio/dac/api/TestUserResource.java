@@ -250,4 +250,45 @@ public class TestUserResource extends BaseTestServer {
         getBuilder(getHttpClient().getAPIv3().path(USER_PATH).path("by-name").path("invalid-name"))
             .buildGet());
   }
+
+  @Test // 200 without filter
+  public void testWebrootTrace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getWebRoot()).build("TRACE"));
+  }
+
+  @Test // 404 without filter
+  public void testApiTrace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED, getBuilder(getHttpClient().getAPIv3()).build("TRACE"));
+  }
+
+  @Test
+  public void testApiUserTrace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getAPIv3().path(USER_PATH)).build("TRACE"));
+  }
+
+  @Test
+  public void testApiUserBynameTrace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getAPIv3().path(USER_PATH).path("by-name")).build("TRACE"));
+  }
+
+  @Test // 200 without filter
+  public void testNonExistingWebRootApiTrace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getWebRoot().path("whatever")).build("TRACE"));
+  }
+
+  @Test // 404 without filter
+  public void testNonExistingApiV3Trace() throws Exception {
+    expectStatus(
+        Response.Status.METHOD_NOT_ALLOWED,
+        getBuilder(getHttpClient().getAPIv3().path("whatever")).build("TRACE"));
+  }
 }

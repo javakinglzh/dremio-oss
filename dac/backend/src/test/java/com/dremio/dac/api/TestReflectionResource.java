@@ -15,10 +15,11 @@
  */
 package com.dremio.dac.api;
 
-import static com.dremio.exec.ExecConstants.LAYOUT_REFRESH_MAX_ATTEMPTS;
 import static com.dremio.exec.ExecConstants.PARQUET_MAXIMUM_PARTITIONS_VALIDATOR;
 import static com.dremio.exec.planner.acceleration.IncrementalUpdateUtils.UPDATE_COLUMN;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.service.reflection.ReflectionOptions.ENABLE_EXPONENTIAL_BACKOFF_FOR_RETRY_POLICY;
+import static com.dremio.service.reflection.ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS;
 import static com.dremio.service.reflection.ReflectionStatus.AVAILABILITY_STATUS.NONE;
 import static com.dremio.service.reflection.ReflectionStatus.REFRESH_STATUS.GIVEN_UP;
 import static com.dremio.service.reflection.ReflectionStatus.REFRESH_STATUS.MANUAL;
@@ -46,6 +47,7 @@ import com.dremio.service.namespace.file.FileFormat;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.RefreshPolicyType;
+import com.dremio.service.reflection.ChangeCause;
 import com.dremio.service.reflection.ReflectionMonitor;
 import com.dremio.service.reflection.ReflectionService;
 import com.dremio.service.reflection.ReflectionStatusService;
@@ -139,6 +141,7 @@ public class TestReflectionResource extends AccelerationTestUtil {
   @Test
   public void testCreateReflection() {
     Reflection newReflection = createReflection();
+    newReflection.setReflectionMode(MANUAL_REFLECTION_MODE);
 
     Reflection response =
         expectSuccess(
@@ -150,6 +153,7 @@ public class TestReflectionResource extends AccelerationTestUtil {
     assertEquals(response.getName(), newReflection.getName());
     assertEquals(response.getType(), newReflection.getType());
     assertEquals(response.isEnabled(), newReflection.isEnabled());
+    assertEquals(response.getReflectionMode(), newReflection.getReflectionMode());
     assertNotNull(response.getCreatedAt());
     assertNotNull(response.getUpdatedAt());
     assertNotNull(response.getStatus());
@@ -165,7 +169,8 @@ public class TestReflectionResource extends AccelerationTestUtil {
         response.getPartitionDistributionStrategy(),
         newReflection.getPartitionDistributionStrategy());
 
-    getReflectionServiceHelper().removeReflection(response.getId());
+    getReflectionServiceHelper()
+        .removeReflection(response.getId(), ChangeCause.REST_DROP_BY_USER_CAUSE);
   }
 
   @Test
@@ -232,7 +237,8 @@ public class TestReflectionResource extends AccelerationTestUtil {
     assertEquals(
         response2.getPartitionDistributionStrategy(), response.getPartitionDistributionStrategy());
 
-    getReflectionServiceHelper().removeReflection(response2.getId());
+    getReflectionServiceHelper()
+        .removeReflection(response2.getId(), ChangeCause.REST_DROP_BY_USER_CAUSE);
   }
 
   @Test
@@ -244,16 +250,13 @@ public class TestReflectionResource extends AccelerationTestUtil {
             getBuilder(getHttpClient().getAPIv3().path(REFLECTIONS_PATH))
                 .buildPost(Entity.entity(newReflection, JSON)),
             Reflection.class);
-    assertFalse(response.isArrowCachingEnabled());
     Reflection request = createReflectionRequest(response);
-    request.setArrowCachingEnabled(true);
 
     response =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv3().path(REFLECTIONS_PATH).path(request.getId()))
                 .buildPut(Entity.entity(request, JSON)),
             Reflection.class);
-    assertTrue(response.isArrowCachingEnabled());
   }
 
   @Test
@@ -265,16 +268,13 @@ public class TestReflectionResource extends AccelerationTestUtil {
             getBuilder(getHttpClient().getAPIv3().path(REFLECTIONS_PATH))
                 .buildPost(Entity.entity(newReflection, JSON)),
             Reflection.class);
-    assertFalse(response.isArrowCachingEnabled());
     Reflection request = createReflectionRequest(response);
-    request.setArrowCachingEnabled(true);
 
     response =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv3().path(REFLECTIONS_PATH).path(request.getId()))
                 .buildPut(Entity.entity(request, JSON)),
             Reflection.class);
-    assertTrue(response.isArrowCachingEnabled());
   }
 
   @Test
@@ -339,14 +339,15 @@ public class TestReflectionResource extends AccelerationTestUtil {
       assertEquals(MANUAL, status2.getRefresh());
       assertEquals(1, status2.getFailureCount());
 
-      getReflectionServiceHelper().removeReflection(createResponse.getId());
+      getReflectionServiceHelper()
+          .removeReflection(createResponse.getId(), ChangeCause.REST_DROP_BY_USER_CAUSE);
     }
   }
 
   @Test
   public void testRetryUnavailableScheduled() throws Exception {
     try (AutoCloseable ignored1 = withSystemOption(PARQUET_MAXIMUM_PARTITIONS_VALIDATOR, 2);
-        AutoCloseable ignored2 = withSystemOption(LAYOUT_REFRESH_MAX_ATTEMPTS, 1)) {
+        AutoCloseable ignored2 = withSystemOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS, 1)) {
 
       // skip retry backoff and retry immediately for this test because
       // it will take too long to get a GIVEN_UP status to proceed to the next step
@@ -406,7 +407,8 @@ public class TestReflectionResource extends AccelerationTestUtil {
       assertEquals(GIVEN_UP, status2.getRefresh());
       assertEquals(1, status2.getFailureCount());
 
-      getReflectionServiceHelper().removeReflection(testReflectionId.getId());
+      getReflectionServiceHelper()
+          .removeReflection(testReflectionId.getId(), ChangeCause.REST_DROP_BY_USER_CAUSE);
     }
   }
 
@@ -432,14 +434,14 @@ public class TestReflectionResource extends AccelerationTestUtil {
         null,
         null,
         true,
-        false,
         null,
         dimensionFields,
         null,
         null,
         null,
         null,
-        PartitionDistributionStrategy.CONSOLIDATED);
+        PartitionDistributionStrategy.CONSOLIDATED,
+        MANUAL_REFLECTION_MODE);
   }
 
   private Reflection createReflection() {
@@ -465,13 +467,13 @@ public class TestReflectionResource extends AccelerationTestUtil {
         null,
         null,
         true,
-        false,
         null,
         displayFields,
         null,
         null,
         null,
-        PartitionDistributionStrategy.CONSOLIDATED);
+        PartitionDistributionStrategy.CONSOLIDATED,
+        MANUAL_REFLECTION_MODE);
   }
 
   /**
@@ -481,7 +483,7 @@ public class TestReflectionResource extends AccelerationTestUtil {
    * @return A Reflection object containing only the values in the REST API specification for
    *     requests.
    */
-  private Reflection createReflectionRequest(Reflection reflection) {
+  public static Reflection createReflectionRequest(Reflection reflection) {
     return new Reflection(
         reflection.getId(),
         reflection.getType(),
@@ -493,7 +495,6 @@ public class TestReflectionResource extends AccelerationTestUtil {
         null,
         null,
         reflection.isEnabled(),
-        reflection.isArrowCachingEnabled(),
         null,
         reflection.getDimensionFields(),
         reflection.getMeasureFields(),
@@ -501,7 +502,8 @@ public class TestReflectionResource extends AccelerationTestUtil {
         reflection.getDistributionFields(),
         reflection.getPartitionFields(),
         reflection.getSortFields(),
-        reflection.getPartitionDistributionStrategy());
+        reflection.getPartitionDistributionStrategy(),
+        reflection.getReflectionMode());
   }
 
   private Dataset createDataset() {

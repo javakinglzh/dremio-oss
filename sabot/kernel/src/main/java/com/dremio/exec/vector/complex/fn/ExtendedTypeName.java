@@ -23,6 +23,9 @@ public interface ExtendedTypeName {
   public static final String TIMESTAMP =
       "$date"; // ISO standard time (2009-02-23T00:00:00.000-08:00) [from Mongo]
   public static final String INTERVAL = "$interval"; // ISO standard duration (PT26.4S)
-  public static final String INTEGER = "$numberLong"; // 8 byte signed integer (123) [from Mongo]
-  public static final String DECIMAL = "$decimal"; // exact numeric value (123.123)
+  public static final String INTEGER = "$numberInt";
+  public static final String LONG = "$numberLong"; // 8 byte signed integer (123) [from Mongo]
+  public static final String DECIMAL = "$decimal";
+  public static final String DOUBLE = "$double";
+  public static final String FLOAT = "$float";
 }

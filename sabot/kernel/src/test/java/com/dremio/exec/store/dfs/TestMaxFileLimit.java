@@ -16,6 +16,7 @@
 package com.dremio.exec.store.dfs;
 
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.source.proto.SourceConfig;
@@ -77,7 +78,9 @@ public class TestMaxFileLimit extends TestSubPathFileSystemPlugin {
     config.setConfigOrdinal(null);
     config.setName("subPathDfs");
     config.setConfig(nasConf.toBytesString());
-    catalogService.getSystemUserCatalog().createSource(config);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @Test

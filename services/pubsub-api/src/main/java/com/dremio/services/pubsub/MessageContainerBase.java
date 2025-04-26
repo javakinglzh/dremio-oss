@@ -18,11 +18,12 @@ package com.dremio.services.pubsub;
 import com.dremio.context.RequestContext;
 import com.google.common.base.Preconditions;
 import com.google.protobuf.Message;
+import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 /**
  * Message contents with id. The implementations must add ack/nack logic. The clients use ack(),
- * nack() after processing on their side is complete. The clients may choose too accumulate messages
+ * nack() after processing on their side is complete. The clients may choose to accumulate messages
  * in batches and process them in bulk. The batch logic may be affected by the underlying
  * implementation of acknowledgements.
  */
@@ -55,6 +56,9 @@ public abstract class MessageContainerBase<M extends Message> {
    */
   public abstract CompletableFuture<MessageAckStatus> ack();
 
-  /** Acknowledges the message for re-delivery. */
+  /** Acknowledges the message for immediate re-delivery. */
   public abstract CompletableFuture<MessageAckStatus> nack();
+
+  /** Acknowledges the message for re-delivery with the specific delay. */
+  public abstract CompletableFuture<MessageAckStatus> nackWithDelay(Duration redeliveryDelay);
 }

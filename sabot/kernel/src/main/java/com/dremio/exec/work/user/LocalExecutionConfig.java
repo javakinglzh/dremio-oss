@@ -48,6 +48,7 @@ public class LocalExecutionConfig implements OptionProvider {
   private final String sessionId;
   private final Map<String, VersionContext> sourceVersionMapping;
   private final StoreQueryResultsPolicy storeQueryResultsPolicy;
+  private final String reflectionMode;
 
   LocalExecutionConfig(
       final boolean enableLeafLimits,
@@ -64,7 +65,8 @@ public class LocalExecutionConfig implements OptionProvider {
       final String engineName,
       final String sessionId,
       final Map<String, VersionContext> sourceVersionMapping,
-      final StoreQueryResultsPolicy storeQueryResultsPolicy) {
+      final StoreQueryResultsPolicy storeQueryResultsPolicy,
+      final String reflectionMode) {
     this.enableLeafLimits = enableLeafLimits;
     this.enableOutputLimits = enableOutputLimits;
     this.failIfNonEmptySent = failIfNonEmptySent;
@@ -81,6 +83,7 @@ public class LocalExecutionConfig implements OptionProvider {
     this.sessionId = sessionId;
     this.sourceVersionMapping = new HashMap<>(sourceVersionMapping);
     this.storeQueryResultsPolicy = storeQueryResultsPolicy;
+    this.reflectionMode = reflectionMode;
   }
 
   public String getUsername() {
@@ -159,6 +162,10 @@ public class LocalExecutionConfig implements OptionProvider {
       manager.setOption(
           createBoolean(QUERY, PlannerSettings.DISABLE_EXCHANGES.getOptionName(), true));
     }
+    if (reflectionMode != null) {
+      manager.setOption(
+          createString(QUERY, PlannerSettings.REFRESH_MODE_STRING.getOptionName(), reflectionMode));
+    }
   }
 
   public static class Builder {
@@ -179,6 +186,7 @@ public class LocalExecutionConfig implements OptionProvider {
     private String sessionId;
     private StoreQueryResultsPolicy storeQueryResultsPolicy =
         StoreQueryResultsPolicy.PATH_AND_ATTEMPT_ID;
+    private String reflectionMode;
 
     private Builder() {}
 
@@ -348,6 +356,17 @@ public class LocalExecutionConfig implements OptionProvider {
       return this;
     }
 
+    /**
+     * Sets the reflectionMode string
+     *
+     * @param reflectionMode
+     * @return this builder
+     */
+    public Builder setReflectionMode(String reflectionMode) {
+      this.reflectionMode = reflectionMode;
+      return this;
+    }
+
     public LocalExecutionConfig build() {
       return new LocalExecutionConfig(
           enableLeafLimits,
@@ -364,7 +383,8 @@ public class LocalExecutionConfig implements OptionProvider {
           engineName,
           sessionId,
           sourceVersionMapping,
-          storeQueryResultsPolicy);
+          storeQueryResultsPolicy,
+          reflectionMode);
     }
   }
 

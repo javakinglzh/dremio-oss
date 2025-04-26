@@ -135,7 +135,7 @@ public final class InformationSchemaCelFilter {
     String delimiter;
     switch (searchQuery.getQueryCase()) {
       case EQUALS:
-        // Intentional fallthrough
+      // Intentional fallthrough
       case LIKE:
         return leafSearchQueryToCelFiler(searchQuery, includeTableNameInQuery, sourceName);
       case AND:

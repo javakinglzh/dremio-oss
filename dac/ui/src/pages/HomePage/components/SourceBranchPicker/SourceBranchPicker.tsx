@@ -43,12 +43,13 @@ type ConnectedProps = {
 };
 
 type SourceBranchPickerProps = {
-  source: any;
+  source: { id: string; name: string; type: string };
   getAnchorEl?: () => HTMLElement;
   position?: any;
   prefix?: string;
   redirect?: boolean;
   onApply?: (stateKey: string, state: SetReferenceAction["payload"]) => void;
+  tabIndex?: number;
 };
 
 function SourceBranchPicker({
@@ -60,6 +61,7 @@ function SourceBranchPicker({
   prefix = "", //Prefix for redux state key
   redirectUrl,
   onApply,
+  tabIndex,
 }: SourceBranchPickerProps & ConnectedProps) {
   const endpoint = getEndpointFromSource(source);
   const pathProps = {
@@ -94,7 +96,6 @@ function SourceBranchPicker({
   if (isLoading) {
     return <Spinner />;
   }
-
   return (
     <div className="sources-branch-picker">
       <NessieContext.Provider value={context}>
@@ -103,6 +104,7 @@ function SourceBranchPicker({
           redirectUrl={redirectUrl}
           getAnchorEl={getAnchorEl}
           onApply={onApply}
+          tabIndex={tabIndex}
         />
       </NessieContext.Provider>
     </div>

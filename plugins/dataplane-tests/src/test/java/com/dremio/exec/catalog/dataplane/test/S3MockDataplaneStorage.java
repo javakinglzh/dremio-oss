@@ -48,6 +48,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 
 public class S3MockDataplaneStorage implements DataplaneStorage {
 
@@ -195,6 +196,8 @@ public class S3MockDataplaneStorage implements DataplaneStorage {
                     .endpointOverride(endpointUri)
                     .region(Region.US_EAST_1)
                     .credentialsProvider(credentialsProvider)
+                    .serviceConfiguration(
+                        S3Configuration.builder().pathStyleAccessEnabled(true).build())
                     .build());
     fileIO.initialize(Collections.emptyMap());
     return fileIO;
@@ -203,6 +206,11 @@ public class S3MockDataplaneStorage implements DataplaneStorage {
   @Override
   public String getWarehousePath() {
     return "s3://" + getBucketName(PRIMARY_BUCKET);
+  }
+
+  @Override
+  public String getWarehousePath(BucketSelection bucketName) {
+    return "s3://" + getBucketName(bucketName);
   }
 
   private String stripPrefix(BucketSelection bucketSelection, String objectPath) {

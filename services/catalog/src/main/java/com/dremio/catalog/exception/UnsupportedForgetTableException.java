@@ -16,8 +16,16 @@
 
 package com.dremio.catalog.exception;
 
+import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.Response;
+
 public class UnsupportedForgetTableException extends CatalogException {
   public UnsupportedForgetTableException(String errorMessage) {
     super(errorMessage);
+  }
+
+  @Override
+  public WebApplicationException toRestApiException() {
+    return new WebApplicationException(getMessage(), this, Response.Status.NOT_IMPLEMENTED);
   }
 }

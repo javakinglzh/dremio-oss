@@ -17,22 +17,27 @@
 package com.dremio.exec.store.iceberg;
 
 import com.dremio.common.logical.FormatPluginConfig;
+import com.dremio.exec.physical.base.OpProps;
+import com.dremio.exec.physical.config.TableFunctionConfig;
+import com.dremio.exec.store.BlockBasedSplitGenerator;
 import com.dremio.exec.store.dfs.FormatPlugin;
 import com.dremio.exec.store.iceberg.model.IcebergTableIdentifier;
+import com.dremio.exec.store.parquet.ScanTableFunction;
 import com.dremio.io.file.FileSystem;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import java.io.IOException;
 import java.util.List;
+import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.io.FileIO;
 
 /** Interface for plugins that support reading of iceberg root pointers. */
-public interface SupportsIcebergRootPointer {
+public interface SupportsIcebergRootPointer extends SupportsFsCreation {
 
   /**
    * @return A copy of the configuration to use for the plugin.
@@ -45,39 +50,9 @@ public interface SupportsIcebergRootPointer {
 
   /**
    * @param formatConfig
-   * @return Returns format plugin based on the the formatConfig.
+   * @return Returns format plugin based on the formatConfig.
    */
   FormatPlugin getFormatPlugin(FormatPluginConfig formatConfig);
-
-  /**
-   * @param filePath The filepath for the file system.
-   * @param userName The userName for the file system.
-   * @param operatorContext The operatorContext for creating the file system.
-   * @return The filesystem to use to access the iceberg tables.
-   * @throws IOException
-   */
-  FileSystem createFS(String filePath, String userName, OperatorContext operatorContext)
-      throws IOException;
-
-  /**
-   * @param filePath The filepath for the file system.
-   * @param userName The userName for the file system.
-   * @param operatorContext The operatorContext for creating the file system.
-   * @return The filesystem to use to access the iceberg tables.
-   * @throws IOException
-   */
-  FileSystem createFSWithAsyncOptions(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException;
-
-  /**
-   * @param filePath The filepath for the file system.
-   * @param userName The userName for the file system.
-   * @param operatorContext The operatorContext for creating the file system.
-   * @return The filesystem without using hadoop fs cache.
-   * @throws IOException
-   */
-  FileSystem createFSWithoutHDFSCache(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException;
 
   default boolean supportsColocatedReads() {
     return true;
@@ -93,7 +68,10 @@ public interface SupportsIcebergRootPointer {
    * operations.
    */
   TableOperations createIcebergTableOperations(
-      FileIO fileIO, String queryUserName, IcebergTableIdentifier tableIdentifier);
+      FileIO fileIO,
+      IcebergTableIdentifier tableIdentifier,
+      @Nullable String queryUserName,
+      @Nullable String queryUserId);
 
   FileIO createIcebergFileIO(
       FileSystem fs,
@@ -101,6 +79,17 @@ public interface SupportsIcebergRootPointer {
       List<String> dataset,
       String datasourcePluginUID,
       Long fileLength);
+
+  /** Creates the plugin-specific split creator. */
+  BlockBasedSplitGenerator.SplitCreator createSplitCreator(
+      OperatorContext context, byte[] extendedBytes, boolean isInternalIcebergTable);
+
+  /** Creates the plugin-specific Scan Table Function. */
+  ScanTableFunction createScanTableFunction(
+      FragmentExecutionContext fec,
+      OperatorContext context,
+      OpProps props,
+      TableFunctionConfig functionConfig);
 
   /** Loads Iceberg Table Metadata for Iceberg Catalog table */
   default TableMetadata loadTableMetadata(

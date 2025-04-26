@@ -18,10 +18,12 @@ package com.dremio.service.grpc;
 import com.dremio.common.SuppressForbidden;
 import com.google.common.base.Throwables;
 import com.google.common.io.ByteStreams;
-import io.grpc.internal.ReadableBuffer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.arrow.memory.ArrowBuf;
 
@@ -39,22 +41,30 @@ public class StreamToByteBufReader {
   private static final Field READABLE_BUFFER;
   private static final Class<?> BUFFER_INPUT_STREAM;
 
+  private static final Method READ_BYTES_METHOD;
+
   static {
-    Field tmpField = null;
-    Class<?> tmpClazz = null;
+    Field readableBufferField = null;
+    Class<?> bufferInputStreamClass = null;
+    Method readBytesMethod = null;
     try {
       Class<?> clazz = Class.forName("io.grpc.internal.ReadableBuffers$BufferInputStream");
 
-      Field f = clazz.getDeclaredField("buffer");
-      f.setAccessible(true);
+      Field bufferField = clazz.getDeclaredField("buffer");
+      bufferField.setAccessible(true);
+
+      Class<?> readableBufferClazz = Class.forName("io.grpc.internal.ReadableBuffer");
+      readBytesMethod = readableBufferClazz.getDeclaredMethod("readBytes", ByteBuffer.class);
+
       // don't set until we've gotten past all exception cases.
-      tmpField = f;
-      tmpClazz = clazz;
+      readableBufferField = bufferField;
+      bufferInputStreamClass = clazz;
     } catch (Exception e) {
       LOGGER.warn("Unable to setup optimal read path.", e);
     }
-    READABLE_BUFFER = tmpField;
-    BUFFER_INPUT_STREAM = tmpClazz;
+    READABLE_BUFFER = readableBufferField;
+    BUFFER_INPUT_STREAM = bufferInputStreamClass;
+    READ_BYTES_METHOD = readBytesMethod;
   }
 
   /**
@@ -63,14 +73,16 @@ public class StreamToByteBufReader {
    * @param is Must be an instance of io.grpc.internal.ReadableBuffers$BufferInputStream or null
    *     will be returned.
    */
-  public static ReadableBuffer getReadableBuffer(InputStream is) {
+  private static Object getReadableBuffer(InputStream is) {
 
-    if (BUFFER_INPUT_STREAM == null || !is.getClass().equals(BUFFER_INPUT_STREAM)) {
+    if (BUFFER_INPUT_STREAM == null
+        || READ_BYTES_METHOD == null
+        || !is.getClass().equals(BUFFER_INPUT_STREAM)) {
       return null;
     }
 
     try {
-      return (ReadableBuffer) READABLE_BUFFER.get(is);
+      return READABLE_BUFFER.get(is);
     } catch (Exception ex) {
       throw Throwables.propagate(ex);
     }
@@ -87,11 +99,16 @@ public class StreamToByteBufReader {
   public static void readIntoBuffer(final InputStream stream, final ArrowBuf buf, final int size)
       throws IOException {
 
-    ReadableBuffer readableBuffer = getReadableBuffer(stream);
+    Object readableBuffer = getReadableBuffer(stream);
     if (readableBuffer != null) {
-      readableBuffer.readBytes(buf.nioBuffer(0, size));
-    } else {
-      LOGGER.warn(
+      try {
+        READ_BYTES_METHOD.invoke(readableBuffer, buf.nioBuffer(0, size));
+      } catch (IllegalAccessException | InvocationTargetException e) {
+        readableBuffer = null;
+      }
+    }
+    if (readableBuffer == null) {
+      LOGGER.debug(
           "Entered non optimal read path {} number of times", NON_OPTIMAL_READ.incrementAndGet());
       byte[] heapBytes = new byte[size];
       ByteStreams.readFully(stream, heapBytes);

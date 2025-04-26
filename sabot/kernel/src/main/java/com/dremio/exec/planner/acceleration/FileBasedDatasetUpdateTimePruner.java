@@ -68,14 +68,14 @@ public final class FileBasedDatasetUpdateTimePruner {
 
     // only text, json, and excel datasets qualify for this
     switch (dataset.getPhysicalDataset().getFormatSettings().getType()) {
-        // text formats
+      // text formats
       case TEXT:
       case CSV:
       case TSV:
       case PSV:
-        // json format
+      // json format
       case JSON:
-        // excel formats
+      // excel formats
       case EXCEL:
       case XLS:
         return true;

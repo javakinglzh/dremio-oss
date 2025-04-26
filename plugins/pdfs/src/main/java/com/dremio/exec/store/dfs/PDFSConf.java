@@ -15,10 +15,10 @@
  */
 package com.dremio.exec.store.dfs;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.io.file.Path;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
@@ -67,8 +67,10 @@ public class PDFSConf extends FileSystemConf<PDFSConf, FileSystemPlugin<PDFSConf
 
   @Override
   public FileSystemPlugin<PDFSConf> newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new FileSystemPlugin<>(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new FileSystemPlugin<>(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   @Override

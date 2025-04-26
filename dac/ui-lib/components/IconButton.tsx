@@ -48,6 +48,9 @@ function validateProps(props: IconButtonProps) {
   );
 }
 
+/**
+ * @deprecated import from `@dremio/design-system/components` instead
+ */
 export const IconButton: any = React.forwardRef<
   HTMLButtonElement,
   IconButtonProps
@@ -73,10 +76,10 @@ export const IconButton: any = React.forwardRef<
     as === "button" && !props.type ? { type: "button" } : {};
 
   const ButtonElement = React.createElement(as, {
+    tabIndex: 0,
     ...defaultTypeProp,
     ...rest,
     className: clsx(className, "dremio-icon-button"),
-    tabIndex: 0,
     "aria-label": ariaLabel,
     "aria-labelledby": id,
     ref,

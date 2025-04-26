@@ -964,7 +964,7 @@ public class TestBuilder {
         return "date";
       case TIME:
         return "time";
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return "timestamp";
       case VARBINARY:
         return "binary";

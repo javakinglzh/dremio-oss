@@ -236,7 +236,10 @@ public class DeltaLakeHistoryScanPlanBuilder {
                 case "operation":
                   projectExpressions.add(createInputRef(input, SystemSchemas.OPERATION));
                   break;
-
+                case "is_current_ancestor":
+                  projectExpressions.add(
+                      cluster.getRexBuilder().makeLiteral(false, convertFieldType(field)));
+                  break;
                 default:
                   projectExpressions.add(
                       cluster.getRexBuilder().makeNullLiteral(convertFieldType(field)));
@@ -261,7 +264,7 @@ public class DeltaLakeHistoryScanPlanBuilder {
   }
 
   private RelDataType convertFieldType(Field field) {
-    return CalciteArrowHelper.wrap(CompleteType.fromField(field))
+    return CalciteArrowHelper.wrap(CompleteType.fromField(field), field.isNullable())
         .toCalciteType(cluster.getTypeFactory(), true);
   }
 }

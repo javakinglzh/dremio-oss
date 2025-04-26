@@ -49,13 +49,13 @@ public class MockPartitionStatsStoreProvider<K, V> implements PartitionStatsCach
 
   @Override
   public <K, V, T extends TransientStore<K, V>> T getStore(
-      Format<K> keyFormat, Format<V> valueFormat) {
+      Format<K> keyFormat, Format<V> valueFormat, String... tags) {
     return null;
   }
 
   @Override
   public <K, V, T extends TransientStore<K, V>> T getStore(
-      Format<K> keyFormat, Format<V> valueFormat, int ttl) {
+      Format<K> keyFormat, Format<V> valueFormat, int ttl, String... tags) {
     return (T) mockedPartitionStatsStore;
   }
 
@@ -119,6 +119,11 @@ public class MockPartitionStatsStoreProvider<K, V> implements PartitionStatsCach
     @Override
     public Iterable<Document<K, V>> find(String pattern, KVStore.GetOption... options) {
       return null;
+    }
+
+    @Override
+    public void deleteAll() {
+      // pass
     }
   }
 }

@@ -347,9 +347,6 @@ public class DatasetCatalogServiceImpl
     } catch (NamespaceNotFoundException e) {
       logger.error("NamespaceNotFoundException", e);
       responseObserver.onError(Status.NOT_FOUND.withCause(e).asException());
-    } catch (NamespaceInvalidStateException e) {
-      logger.error("NamespaceInvalidStateException", e);
-      responseObserver.onError(Status.INTERNAL.withCause(e).asException());
     } catch (Exception e) {
       logger.error("Exception", e);
       responseObserver.onError(Status.UNKNOWN.withCause(e).asException());

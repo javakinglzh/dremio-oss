@@ -510,7 +510,7 @@ export class SqlEditorController extends PureComponent {
 
     const sqlStyle = this.props.sqlState
       ? {}
-      : { height: 0, overflow: "hidden" };
+      : { height: 0, overflow: "hidden", visibility: "hidden" };
 
     const sqlBlock = (
       <SqlAutoComplete
@@ -543,9 +543,9 @@ export class SqlEditorController extends PureComponent {
           onClick={this.hideDropDown}
           style={styles.base}
         >
-          <div className="sql-functions">{this.renderFunctionsSQLPanel()}</div>
-          <div className="sql-extra-panel">{this.renderExtraSQLPanel()}</div>
           <div style={sqlStyle}>{sqlBlock}</div>
+          <div className="sql-extra-panel">{this.renderExtraSQLPanel()}</div>
+          <div className="sql-functions">{this.renderFunctionsSQLPanel()}</div>
         </div>
       </div>
     );
@@ -612,6 +612,5 @@ const styles = {
     display: "flex",
     alignItems: "center",
     marginRight: 10,
-    position: "relative",
   },
 };

@@ -17,6 +17,7 @@ package com.dremio.exec.expr;
 
 import static com.dremio.exec.compile.sig.GeneratorMapping.GM;
 
+import com.dremio.common.StackTrace;
 import com.dremio.common.expression.CodeModelArrowHelper;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.FieldReference;
@@ -76,6 +77,7 @@ public class ClassGenerator<T> {
   }
 
   private final long maxExpressionsInFunction;
+  private final boolean allowEmptyBlock;
   // It is impossible (and hence a safe limit) for a single expression to have 100000 functions and
   // not hit
   // code size limits
@@ -131,6 +133,11 @@ public class ClassGenerator<T> {
                 ExecConstants.CODE_GEN_FUNCTION_EXPRESSION_COUNT_THRESHOLD
                     .getDefault()
                     .getNumVal());
+    this.allowEmptyBlock =
+        Optional.ofNullable(functionContext)
+            .map(FunctionContext::getCompilationOptions)
+            .map(CompilationOptions::getAllowEmptyBlock)
+            .orElse(ExecConstants.CODE_GEN_ALLOW_EMPTY_BLOCK.getDefault().getBoolVal());
     blocks = new LinkedList[sig.size()];
 
     for (int i = 0; i < sig.size(); i++) {
@@ -198,12 +205,18 @@ public class ClassGenerator<T> {
   }
 
   public JBlock getBlock(String methodName) {
-    JBlock blk = this.blocks[sig.get(methodName)].getLast().getBlock();
-    Preconditions.checkNotNull(
-        blk,
-        "Requested method name of %s was not available for signature %s.",
-        methodName,
-        this.sig);
+    if (this.blocks[sig.get(methodName)].isEmpty()) {
+      logger.warn("getBlock has no blocks to return. {}", methodName);
+      logger.trace("empty block requested by {}", new StackTrace());
+      if (allowEmptyBlock) {
+        rotateBlock();
+      }
+    }
+    JBlock blk = null;
+    if (!this.blocks[sig.get(methodName)].isEmpty()) {
+      blk = this.blocks[sig.get(methodName)].getLast().getBlock();
+    }
+    Preconditions.checkNotNull(blk, "Internal method %s has no blocks.", methodName);
     return blk;
   }
 
@@ -246,8 +259,11 @@ public class ClassGenerator<T> {
   private int innerMethodCount = 0;
 
   public JMethod innerMethod(CompleteType type) {
-    JMethod method =
-        clazz.method(JMod.PRIVATE, type.getHolderClass(), "inner_method_" + innerMethodCount++);
+    return innerMethod(type.getHolderClass());
+  }
+
+  public JMethod innerMethod(Class<?> type) {
+    JMethod method = clazz.method(JMod.PRIVATE, type, "inner_method_" + innerMethodCount++);
     String methodName = getCurrentMapping().getMethodName(BlockType.EVAL);
     CodeGeneratorMethod cgm = sig.get(sig.get(methodName));
     for (CodeGeneratorArgument arg : cgm) {
@@ -282,24 +298,34 @@ public class ClassGenerator<T> {
 
   public void nestEvalBlock(JBlock block) {
     String methodName = getCurrentMapping().getMethodName(BlockType.EVAL);
+    logger.trace("nestEvalBlock {}", methodName);
     evaluationVisitor.newScope();
     this.blocks[sig.get(methodName)].addLast(new SizedJBlock(block));
   }
 
   public void unNestEvalBlock() {
     String methodName = getCurrentMapping().getMethodName(BlockType.EVAL);
+    logger.trace("unNestEvalBlock {}", methodName);
     evaluationVisitor.leaveScope();
     this.blocks[sig.get(methodName)].removeLast();
+    if (this.blocks[sig.get(methodName)].isEmpty()) {
+      logger.trace("unNestEvalBlock 0 blocks left by: {}", new StackTrace());
+    }
   }
 
   public void nestSetupBlock(JBlock block) {
     String methodName = getCurrentMapping().getMethodName(BlockType.SETUP);
+    logger.trace("nestSetupBlock {}", methodName);
     this.blocks[sig.get(methodName)].addLast(new SizedJBlock(block));
   }
 
   public void unNestSetupBlock() {
     String methodName = getCurrentMapping().getMethodName(BlockType.SETUP);
+    logger.trace("unNestSetupBlock {}", methodName);
     this.blocks[sig.get(methodName)].removeLast();
+    if (this.blocks[sig.get(methodName)].isEmpty()) {
+      logger.trace("unNestSetupBlock 0 blocks left by: {}", new StackTrace());
+    }
   }
 
   public JLabel getEvalBlockLabel(String prefix) {
@@ -415,8 +441,12 @@ public class ClassGenerator<T> {
     return evaluationVisitor.getFunctionErrorContextsCount();
   }
 
-  public void registerFunctionErrorContext(int count) {
-    // if expressionEvalInfos is not empty, then they are not added to evaluationvisitor,
+  public Iterator<FunctionErrorContext> getFunctionErrorContexts(int fromIndex) {
+    return evaluationVisitor.getFunctionErrorContexts(fromIndex);
+  }
+
+  public void registerFunctionErrorContext(int count, Map<Integer, Integer> contextIdToFieldIdMap) {
+    // if expressionEvalInfos is not empty, then they are not added to evaluationVisitor,
     // hence we need to register function error context.
     if (expressionEvalInfos.isEmpty()) {
       return;
@@ -425,30 +455,15 @@ public class ClassGenerator<T> {
         count >= 0 && count < MAX_EXPECTED_FUNCTIONS_IN_SINGLE_EXPRESSION,
         "Encountered unexpected function error count corruption");
     for (int i = 0; i < count; ++i) {
-      FunctionErrorContext errorContext = null;
-      errorContext = FunctionErrorContextBuilder.builder().build();
+      FunctionErrorContext errorContext = FunctionErrorContextBuilder.builder().build();
       codeGenerator.getFunctionContext().registerFunctionErrorContext(errorContext);
-      registerFieldIdToErrorContext(i, errorContext);
-    }
-    expressionEvalInfos.clear();
-  }
-
-  /*
-   * Expressions of query plans are cached i.e. the generated Projector class instances can be
-   * reused, but they don't retain any state of ErrorContext instances. ErrorContext's are rather
-   * recreated separately in this code snippet, so we need to register the output field ID of
-   * ValueVectorWriteExpressions in the caching case here too.
-   */
-  private void registerFieldIdToErrorContext(int index, FunctionErrorContext errorContext) {
-    if (expressionEvalInfos.size() > index) {
-      ExpressionEvalInfo evalInfo = expressionEvalInfos.get(index);
-      if (evalInfo.getExp() instanceof ValueVectorWriteExpression) {
-        TypedFieldId typedFieldId = ((ValueVectorWriteExpression) evalInfo.getExp()).getFieldId();
-        if (typedFieldId != null && typedFieldId.getFieldIds().length > 0) {
-          errorContext.registerOutputFieldId(typedFieldId.getFieldIds()[0]);
-        }
+      Integer fieldId = contextIdToFieldIdMap.get(errorContext.getId());
+      if (fieldId != null) {
+        assert fieldId >= 0;
+        errorContext.registerOutputFieldId(fieldId);
       }
     }
+    expressionEvalInfos.clear();
   }
 
   public void lazyAddExp(LogicalExpression ex, BlockCreateMode mode, boolean allowInnerMethods) {

@@ -176,7 +176,7 @@ public class TestSchemaConverter extends DremioTest {
             .addField(
                 new Field(
                     "map",
-                    new FieldType(true, CompleteType.MAP.getType(), null),
+                    new FieldType(false, CompleteType.MAP.getType(), null),
                     Arrays.asList(struct)))
             .build();
 
@@ -243,7 +243,14 @@ public class TestSchemaConverter extends DremioTest {
     Configuration conf = new Configuration();
 
     FileSystemPlugin fileSystemPlugin = BaseTestQuery.getMockedFileSystemPlugin();
-    IcebergHadoopModel icebergHadoopModel = new IcebergHadoopModel(fileSystemPlugin);
+    IcebergHadoopModel icebergHadoopModel =
+        new IcebergHadoopModel(
+            "",
+            fileSystemPlugin.getFsConfCopy(),
+            fileSystemPlugin.createIcebergFileIO(
+                fileSystemPlugin.getSystemUserFS(), null, null, null, null),
+            null,
+            null);
     when(fileSystemPlugin.getIcebergModel()).thenReturn(icebergHadoopModel);
 
     IcebergOpCommitter createTableCommitter =
@@ -453,8 +460,7 @@ public class TestSchemaConverter extends DremioTest {
         new Field(
             "map",
             FieldType.nullable(CompleteType.MAP.getType()),
-            Arrays.asList(
-                CompleteType.struct(children).toField(MapVector.DATA_VECTOR_NAME, false)));
+            Arrays.asList(CompleteType.struct(children).toField(MapVector.DATA_VECTOR_NAME, true)));
     Types.NestedField nestedField =
         schemaConverter.toIcebergColumn(mapField, new SeededFieldIdBroker(columnIdMapping));
     assertEquals(nestedField, icebergSchema.columns().get(0));

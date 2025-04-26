@@ -24,28 +24,28 @@ import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
 
 public final class BitArrayAggAccumulator extends ArrayAggAccumulator<Integer> {
-  private final int maxFieldSizeBytes;
+  private final int maxArrayAggSize;
 
   public BitArrayAggAccumulator(
       FieldVector input,
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
-    this.maxFieldSizeBytes = maxFieldSizeBytes;
+    this.maxArrayAggSize = maxArrayAggSize;
   }
 
   @Override
   public int getDataBufferSize() {
-    return maxFieldSizeBytes;
+    return maxArrayAggSize;
   }
 
   @Override
@@ -67,7 +67,7 @@ public final class BitArrayAggAccumulator extends ArrayAggAccumulator<Integer> {
 
   @Override
   protected ArrayAggAccumulatorHolder<Integer> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new BitArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

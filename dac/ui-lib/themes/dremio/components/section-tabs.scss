@@ -30,6 +30,10 @@
   &:hover {
     color: var(--text--brand);
   }
+  &:focus-visible {
+    color: var(--text--brand);
+    outline: 1px auto -webkit-focus-ring-color !important;
+  }
 
   &[aria-current="true"],
   &[aria-current="page"],

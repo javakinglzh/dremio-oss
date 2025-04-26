@@ -51,8 +51,8 @@ public class TestTDigestFunctions extends PlanTestBase {
   private void runTestExpected(boolean twoPhase) throws Exception {
     final String sql =
         "select tdigest(distinct l_orderkey) as td from cp.\"tpch/lineitem.parquet\"";
-    final String twoPhase1 = "StreamAgg(group=[{}], td=[TDIGEST_MERGE($0)])";
-    final String twoPhase2 = "StreamAgg(group=[{}], td=[TDIGEST($0)])";
+    final String twoPhase1 = "StreamAgg(group=[{}], td=[TDIGEST_MERGE($0)]";
+    final String twoPhase2 = "StreamAgg(group=[{}], td=[TDIGEST($0)]";
     if (twoPhase) {
       test("set planner.slice_target = 1");
       testPlanSubstrPatterns(sql, new String[] {twoPhase1, twoPhase2}, null);

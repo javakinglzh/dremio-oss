@@ -46,8 +46,8 @@ class RepeatedVarCharOutput extends TextOutput {
   static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(RepeatedVarCharOutput.class);
 
-  private static final String COL_NAME = "columns";
-  static final SchemaPath COLUMNS = SchemaPath.getSimplePath("columns");
+  static final String COL_NAME = "columns";
+  static final SchemaPath COLUMNS = SchemaPath.getSimplePath(COL_NAME);
   public static final int MAXIMUM_NUMBER_COLUMNS = 64 * 1024;
 
   private final OutputMutator output;
@@ -182,6 +182,7 @@ class RepeatedVarCharOutput extends TextOutput {
     fieldIndex = index;
     collect = collectedFields[index];
     fieldOpen = true;
+    charLengthOffset = 0;
     if (!hasData) {
       rootWriter.setPosition(batchIndex);
       listWriter.startList();
@@ -193,7 +194,6 @@ class RepeatedVarCharOutput extends TextOutput {
   public boolean endField() {
     fieldOpen = false;
     listWriter.varChar().writeVarChar(0, charLengthOffset, tmpBuf);
-    charLengthOffset = 0;
     return true;
   }
 
@@ -287,5 +287,30 @@ class RepeatedVarCharOutput extends TextOutput {
       finishRecord();
     }
     rootWriter.setValueCount(batchIndex);
+  }
+
+  @Override
+  int currentFieldIndex() {
+    return fieldIndex;
+  }
+
+  @Override
+  int currentBatchIndex() {
+    return batchIndex;
+  }
+
+  @Override
+  boolean hasSelectedColumns() {
+    for (boolean collectedField : collectedFields) {
+      if (collectedField) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @Override
+  public int getFieldCurrentDataPointer() {
+    return charLengthOffset;
   }
 }

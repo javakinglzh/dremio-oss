@@ -54,7 +54,6 @@ import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.protobuf.ByteString;
-import com.google.protobuf.GeneratedMessageV3;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Parser;
 import io.protostuff.LinkedBuffer;
@@ -95,7 +94,7 @@ public final class JobsProtoUtil {
    * @param <T> Type of Protobuff
    * @return Converted object as Protobuf
    */
-  private static <M extends GeneratedMessageV3, T extends Message<T> & Schema<T>> M toBuf(
+  private static <M extends com.google.protobuf.Message, T extends Message<T> & Schema<T>> M toBuf(
       Parser<M> protobufParser, T protostuff) {
     try {
       LinkedBuffer buffer = LinkedBuffer.allocate();
@@ -117,8 +116,8 @@ public final class JobsProtoUtil {
    * @param <T> Type of Protostuff
    * @return Converted object as Protostuff
    */
-  private static <M extends GeneratedMessageV3, T extends Message<T> & Schema<T>> T toStuff(
-      Schema<T> protostuffSchema, M protobuf) {
+  private static <M extends com.google.protobuf.Message, T extends Message<T> & Schema<T>>
+      T toStuff(Schema<T> protostuffSchema, M protobuf) {
     T message = protostuffSchema.newMessage();
     ProtobufIOUtil.mergeFrom(protobuf.toByteArray(), message, protostuffSchema);
     return message;

@@ -268,7 +268,7 @@ public class TestFunctionsWithTypeExpoQueries extends BaseTestQuery {
             + "limit 0";
 
     final List<Pair<SchemaPath, MajorType>> expectedSchema = Lists.newArrayList();
-    final MajorType majorType = Types.required(MinorType.TIMESTAMP);
+    final MajorType majorType = Types.required(MinorType.TIMESTAMPMILLI);
 
     expectedSchema.add(Pair.of(SchemaPath.getSimplePath("col"), majorType));
 

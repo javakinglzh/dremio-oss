@@ -33,6 +33,7 @@ import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.SchemaConverter;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants;
 import com.dremio.exec.util.VectorUtil;
@@ -119,7 +120,13 @@ public class FooterReadTableFunction extends AbstractTableFunction {
     }
 
     try {
-      fs = storagePlugin.createFS(path, props.getUserName(), context);
+      fs =
+          storagePlugin.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(path)
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .datasetFromTableFunctionConfig(functionConfig));
       return fs;
     } catch (IOException e) {
       throw UserException.ioExceptionError(e).buildSilently();

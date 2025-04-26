@@ -34,6 +34,7 @@ import com.dremio.exec.store.TableMetadata;
 import com.dremio.exec.store.dfs.FilterableScan;
 import com.dremio.exec.store.dfs.FilterableScan.PartitionStatsStatus;
 import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.partitionstats.cache.PartitionStatsCache;
 import com.dremio.sabot.exec.context.OpProfileDef;
@@ -246,9 +247,11 @@ public class PartitionStatsBasedPrunerCache implements RecordPrunerCache {
     return icebergRootPointerPlugin
         .createIcebergFileIO(
             icebergRootPointerPlugin.createFS(
-                partitionStatsFile,
-                context.getContextInformation().getQueryUser(),
-                operatorContext),
+                SupportsFsCreation.builder()
+                    .filePath(partitionStatsFile)
+                    .userName(context.getContextInformation().getQueryUser())
+                    .operatorContext(operatorContext)
+                    .dataset(scan.getTableMetadata().getDatasetConfig().getFullPathList())),
             operatorContext,
             scan.getTableMetadata().getDatasetConfig().getFullPathList(),
             scan.getPluginId().getName(),

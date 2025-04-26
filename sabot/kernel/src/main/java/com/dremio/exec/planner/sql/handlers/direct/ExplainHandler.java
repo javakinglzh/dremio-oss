@@ -18,7 +18,6 @@ package com.dremio.exec.planner.sql.handlers.direct;
 import static com.dremio.exec.planner.physical.PlannerSettings.QUERY_PLAN_CACHE_ENABLED;
 
 import com.dremio.common.logical.PlanProperties.Generator.ResultMode;
-import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.query.DeleteHandler;
@@ -33,6 +32,7 @@ import com.dremio.options.OptionValue;
 import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlExplain;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.sql.SqlLiteral;
@@ -44,10 +44,10 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
       org.slf4j.LoggerFactory.getLogger(ExplainHandler.class);
 
   private final SqlHandlerConfig config;
-  private Rel logicalPlan;
+  private RelNode logicalPlan;
   private SqlNode innerNode;
 
-  public ExplainHandler(SqlHandlerConfig config) {
+  public ExplainHandler(SqlHandlerConfig config, ResultMode resultMode) {
     super();
     this.config =
         new SqlHandlerConfig(
@@ -55,6 +55,13 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
             config.getConverter(),
             config.getObserver(),
             config.getMaterializations().orElse(null));
+    if (resultMode != null) {
+      this.config.setResultMode(resultMode);
+    }
+  }
+
+  public ExplainHandler(SqlHandlerConfig config) {
+    this(config, null);
   }
 
   @Override
@@ -80,7 +87,10 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
                       OptionValue.OptionType.QUERY,
                       QUERY_PLAN_CACHE_ENABLED.getOptionName(),
                       false));
-          mode = ResultMode.LOGICAL;
+          mode =
+              ResultMode.CONVERT_ONLY.equals(config.getResultMode())
+                  ? ResultMode.CONVERT_ONLY
+                  : ResultMode.LOGICAL;
           break;
         case PHYSICAL:
           mode = ResultMode.PHYSICAL;
@@ -93,7 +103,7 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
       innerNode = node.operand(0);
       SqlToPlanHandler innerNodeHandler;
       switch (innerNode.getKind()) {
-          // We currently only support OrderedQueryOrExpr and Insert/Delete/Update/Merge
+        // We currently only support OrderedQueryOrExpr and Insert/Delete/Update/Merge
         case INSERT:
           innerNodeHandler = new InsertTableHandler();
           break;
@@ -106,7 +116,7 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
         case UPDATE:
           innerNodeHandler = new UpdateHandler();
           break;
-          // for OrderedQueryOrExpr such as select, use NormalHandler
+        // for OrderedQueryOrExpr such as select, use NormalHandler
         default:
           innerNodeHandler = setupInnerHandlerForDefaultCase();
       }
@@ -115,9 +125,9 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
           config, innerNode.toSqlString(CalciteSqlDialect.DEFAULT).getSql(), innerNode);
 
       String planAsText;
-      if (mode == ResultMode.LOGICAL) {
+      if (mode == ResultMode.LOGICAL || mode == ResultMode.CONVERT_ONLY) {
         planAsText = RelOptUtil.toString(innerNodeHandler.getLogicalPlan(), level);
-        this.logicalPlan = innerNodeHandler.getLogicalPlan();
+        this.logicalPlan = innerNodeHandler.getPlanForExplain();
       } else {
         planAsText = innerNodeHandler.getTextPlan();
       }
@@ -150,7 +160,7 @@ public class ExplainHandler implements SqlDirectHandler<ExplainHandler.Explain> 
     }
   }
 
-  public Rel getLogicalPlan() {
+  public RelNode getLogicalPlan() {
     return logicalPlan;
   }
 

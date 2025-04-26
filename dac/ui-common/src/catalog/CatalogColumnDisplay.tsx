@@ -15,12 +15,12 @@
  */
 
 import { forwardRef } from "react";
-import { CommunityDataset } from "@dremio/dremio-js/interfaces";
+import type { DatasetCatalogObject } from "@dremio/dremio-js/oss";
 import { CatalogColumnIcon } from "./CatalogColumnIcon";
 
 export const CatalogColumnDisplay = forwardRef<
   HTMLDivElement,
-  { tableColumn: CommunityDataset["fields"][number] }
+  { tableColumn: DatasetCatalogObject["fields"][number] }
 >((props, ref) => (
   <div
     className="flex flex-row items-center gap-05"

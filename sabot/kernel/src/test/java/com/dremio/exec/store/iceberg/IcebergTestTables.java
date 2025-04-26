@@ -38,7 +38,20 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 
-/** Helper class for preparing Iceberg tables for tests. */
+/**
+ * Helper class for preparing Iceberg tables for tests.
+ *
+ * <p><b>WARNING:</b> Please refrain from referencing this class and its objects!
+ *
+ * <p>IcebergTestTable objects are hack-generated with an external iceberg-table generator. When
+ * these tables are used, test flakiness rises. The more test suite references to the tables, the
+ * more pressure we add to our test-workers. This results in test failures due to parallelism /
+ * timeouts. To avoid further damage, DO NOT ADD any more references of this class to your test
+ * benches.
+ *
+ * <p>See DX-63598 for problem history
+ */
+@Deprecated
 public final class IcebergTestTables {
 
   private static final org.slf4j.Logger LOGGER =

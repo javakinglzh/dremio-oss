@@ -27,6 +27,7 @@ import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.NamespaceTestUtils;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -89,7 +90,6 @@ public class TestResourceTree extends BaseTestServer {
     final SourceConfig src =
         new SourceConfig()
             .setName(name)
-            .setCtime(100L)
             .setConnectionConf(conf)
             .setAccelerationRefreshPeriod(TimeUnit.HOURS.toMillis(24))
             .setAccelerationGracePeriod(TimeUnit.HOURS.toMillis(48));
@@ -591,5 +591,19 @@ public class TestResourceTree extends BaseTestServer {
 
     final JsonNode state = jsonNode.get("resources").get(0).get("state");
     assertEquals("good", state.get("status").asText());
+  }
+
+  @Test
+  public void testResourceTreeSourceActionState() {
+    ResourceList resourceList =
+        expectSuccess(
+            getBuilder(
+                    getHttpClient().getAPIv2().path("resourcetree").queryParam("showSources", true))
+                .buildGet(),
+            ResourceList.class);
+
+    assertEquals(
+        resourceList.getResources().get(0).getSourceChangeState(),
+        SourceChangeState.SOURCE_CHANGE_STATE_NONE);
   }
 }

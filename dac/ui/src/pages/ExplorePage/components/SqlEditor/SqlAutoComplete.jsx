@@ -43,6 +43,7 @@ import {
   renderExtraSQLKeyboardShortcutMessages,
 } from "@inject/utils/sql-editor-extra";
 import SqlEditorContainer from "./SqlEditorContainer";
+import { intl } from "#oss/utils/intl";
 
 import "./SqlAutoComplete.less";
 
@@ -417,7 +418,8 @@ export class SqlAutoComplete extends Component {
   };
 
   showAutocomplete() {
-    const { supportFlags, isDarkMode } = this.props;
+    const { supportFlags, isDarkMode, isGrayed } = this.props;
+
     //  if its enterprise read supportFlag from dremioConfig else read it from API
     const isEnterpriseFlag = isEnterprise && isEnterprise();
     const isCommunityFlag = isCommunity && isCommunity();
@@ -437,6 +439,7 @@ export class SqlAutoComplete extends Component {
         className: isDarkMode ? "sql__darkIcon" : "sql__lightIcon",
         id: "toggle--autocomplete-icon",
         dataQa: "toggle-autocomplete-icon",
+        disabled: isGrayed,
       });
     } else return null;
   }
@@ -510,6 +513,7 @@ export class SqlAutoComplete extends Component {
                   className={`sqlAutocomplete__contextText-${
                     isDarkMode ? "dark" : "light"
                   }`}
+                  disabled={isGrayed}
                 />
               )}
             {this.renderIconButton({
@@ -518,6 +522,7 @@ export class SqlAutoComplete extends Component {
               source: "sql-editor/function",
               tooltip: "Functions",
               id: "toggle-icon",
+              disabled: isGrayed,
             })}
             {this.showAutocomplete()}
             <span
@@ -527,7 +532,10 @@ export class SqlAutoComplete extends Component {
               onFocus={this.onMouseEnter}
               onBlur={this.onMouseLeave}
               ref={this.ref.targetRef}
-              tabIndex={0}
+              tabIndex={isGrayed ? -1 : 0}
+              aria-label={intl.formatMessage({
+                id: "KeyboardShortcuts.Shortcuts",
+              })}
             >
               <dremio-icon
                 name="sql-editor/keyboard"
@@ -543,30 +551,31 @@ export class SqlAutoComplete extends Component {
                 container={this}
                 tooltipInnerClass="textWithHelp__tooltip --white keyboardShortcutTooltip"
                 tooltipArrowClass="--white"
+                style={{ zIndex: 360 }}
               >
                 <p className="tooltip-content__heading">
                   <FormattedMessage id="KeyboardShortcuts.Shortcuts" />
                 </p>
                 <div className="divider" />
                 <ul className="tooltip-content__list">
-                  <li>
+                  <li aria-live="polite">
                     <FormattedMessage id="Common.Run" />
                     <span>{keyboardShortcuts.run}</span>
                   </li>
-                  <li>
+                  <li aria-live="polite">
                     <FormattedMessage id="Common.Preview" />
                     <span>{keyboardShortcuts.preview}</span>
                   </li>
-                  <li>
+                  <li aria-live="polite">
                     <FormattedMessage id="KeyboardShortcuts.Comment" />
                     <span>{keyboardShortcuts.comment}</span>
                   </li>
-                  <li>
+                  <li aria-live="polite">
                     <FormattedMessage id="KeyboardShortcuts.Find" />
                     <span>{keyboardShortcuts.find}</span>
                   </li>
                   {this.state.isAutocomplete ? (
-                    <li>
+                    <li aria-live="polite">
                       <FormattedMessage id="KeyboardShortcuts.Autocomplete" />
                       <span>{keyboardShortcuts.autocomplete}</span>
                     </li>
@@ -574,7 +583,7 @@ export class SqlAutoComplete extends Component {
                     <></>
                   )}
                   {isFormatterEnabled ? (
-                    <li>
+                    <li aria-live="polite">
                       <FormattedMessage id="SQL.Format" />
                       <span>{keyboardShortcuts.format}</span>
                     </li>
@@ -592,7 +601,8 @@ export class SqlAutoComplete extends Component {
               renderExtraSQLToolbarIcons({
                 renderIconButton: this.renderIconButton,
                 toggleExtraSQLPanel: toggleExtraSQLPanel,
-                isDarkMode: isDarkMode,
+                isDarkMode,
+                disabled: isGrayed,
               })}
           </div>
           <SqlEditorContainer
@@ -611,6 +621,7 @@ export class SqlAutoComplete extends Component {
             queryContext={context}
             serverSqlErrors={serverSqlErrors}
             style={{ height: sqlSize - 2 }} // account for top/bottom 1px borders
+            readOnly={isGrayed}
           />
           {this.props.children}
         </div>

@@ -16,6 +16,8 @@
 package com.dremio.exec.physical.impl.join;
 
 import com.dremio.PlanTestBase;
+import com.dremio.exec.ExecConstants;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import org.junit.Test;
 
 public class TestJoinPlanning extends PlanTestBase {
@@ -33,5 +35,25 @@ public class TestJoinPlanning extends PlanTestBase {
     // join keys
     testPlanMatchingPatterns(
         sql, new String[] {"(?s)HashJoin.*Project.*HashJoin.*Project.*HashJoin"});
+  }
+
+  @Test
+  public void testLeftJoinNullDistribution() throws Exception {
+    String sql =
+        "select count(*) cnt from \"lineitem.parquet\" left join \"orders.parquet\" on l_orderkey = o_orderkey";
+    try (AutoCloseable ac = withOption(PlannerSettings.OUTER_JOIN_NULL_DIST, true);
+        AutoCloseable ac2 = withOption(ExecConstants.SLICE_TARGET_OPTION, 1);
+        AutoCloseable ac3 = withOption(PlannerSettings.BROADCAST_THRESHOLD, 1)) {
+      testNoResult("use cp.tpch");
+      testPlanMatchingPatterns(sql, new String[] {"IS\\sNULL.*RAND"});
+      testBuilder().sqlQuery(sql).unOrdered().baselineColumns("cnt").baselineValues(60175L).go();
+    }
+    try (AutoCloseable ac = withOption(PlannerSettings.OUTER_JOIN_NULL_DIST, false);
+        AutoCloseable ac2 = withOption(ExecConstants.SLICE_TARGET_OPTION, 1);
+        AutoCloseable ac3 = withOption(PlannerSettings.BROADCAST_THRESHOLD, 1)) {
+      testNoResult("use cp.tpch");
+      testPlanMatchingPatterns(sql, new String[] {}, "IS\\sNULL.*RAND");
+      testBuilder().sqlQuery(sql).unOrdered().baselineColumns("cnt").baselineValues(60175L).go();
+    }
   }
 }

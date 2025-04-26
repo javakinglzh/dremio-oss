@@ -20,6 +20,7 @@ import static org.apache.iceberg.FileFormat.PARQUET;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import org.apache.commons.lang3.function.TriConsumer;
 import org.apache.hadoop.fs.Path;
@@ -49,6 +50,9 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
   private final List<Integer> equalityFieldIds;
   private final Function<Schema, MessageType> schemaConverter;
   private final TriConsumer<Schema, RecordConsumer, StructLike> recordWriter;
+  private final Map<String, String> tableProperties;
+
+  private final boolean withFullStats;
 
   public SimpleParquetAppenderFactory(
       final Table table,
@@ -57,6 +61,24 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
       final List<Integer> equalityFieldIds,
       final Function<Schema, MessageType> schemaConverter,
       final TriConsumer<Schema, RecordConsumer, StructLike> recordWriter) {
+    this(
+        table,
+        positionDeleteSchema,
+        equalityDeleteSchema,
+        equalityFieldIds,
+        schemaConverter,
+        recordWriter,
+        false);
+  }
+
+  public SimpleParquetAppenderFactory(
+      final Table table,
+      final Schema positionDeleteSchema,
+      final Schema equalityDeleteSchema,
+      final List<Integer> equalityFieldIds,
+      final Function<Schema, MessageType> schemaConverter,
+      final TriConsumer<Schema, RecordConsumer, StructLike> recordWriter,
+      boolean withFullStats) {
     this.schema = table.schema();
     this.spec = table.spec();
     this.positionDeleteSchema = positionDeleteSchema;
@@ -64,6 +86,8 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
     this.equalityFieldIds = equalityFieldIds;
     this.schemaConverter = schemaConverter;
     this.recordWriter = recordWriter;
+    this.withFullStats = withFullStats;
+    this.tableProperties = table.properties();
   }
 
   @Override
@@ -74,7 +98,8 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
           new ParquetWriter<>(
               new Path(outputFile.location()),
               new IcebergParquetRecordWriter<>(schema, schemaConverter, recordWriter));
-      return new SimpleParquetAppender<>(writer, outputFile);
+      return new SimpleParquetAppender<>(
+          writer, outputFile, schema, withFullStats, tableProperties);
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
@@ -105,7 +130,7 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
               new IcebergParquetRecordWriter<>(
                   equalityDeleteSchema, schemaConverter, recordWriter));
       return new EqualityDeleteWriter<>(
-          new SimpleParquetAppender<>(writer, outputFile.encryptingOutputFile()),
+          new SimpleParquetAppender<>(writer, outputFile.encryptingOutputFile(), schema),
           format,
           outputFile.encryptingOutputFile().location(),
           spec,
@@ -130,7 +155,7 @@ public class SimpleParquetAppenderFactory implements FileAppenderFactory<StructL
               new IcebergParquetRecordWriter<>(
                   positionDeleteSchema, schemaConverter, recordWriter));
       return new PositionDeleteWriter<>(
-          new SimpleParquetAppender<>(writer, outputFile.encryptingOutputFile()),
+          new SimpleParquetAppender<>(writer, outputFile.encryptingOutputFile(), schema),
           format,
           outputFile.encryptingOutputFile().location(),
           spec,

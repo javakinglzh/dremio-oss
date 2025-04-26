@@ -41,6 +41,7 @@ type SummaryStatsProps = {
   lastModified?: Date;
   detailsView?: boolean;
   versionContext?: VersionContextType;
+  hideAllActions: boolean;
 };
 
 const SummaryStats = ({
@@ -55,6 +56,7 @@ const SummaryStats = ({
   location,
   detailsView,
   versionContext,
+  hideAllActions,
 }: SummaryStatsProps) => {
   const dispatch = useDispatch();
   const currentRoute = location.pathname + location?.search;
@@ -78,6 +80,7 @@ const SummaryStats = ({
   // 1) The user must have the "canAnalyzeWithBITools" permission for the dataset
   // 2) At least one of the analyze support keys must be enabled
   const shouldShowAnalyzeButtons =
+    !hideAllActions &&
     canAnalyzeWithBITools &&
     (analyzeButtonsConfig["client.tools.tableau"] ||
       analyzeButtonsConfig["client.tools.powerbi"]);

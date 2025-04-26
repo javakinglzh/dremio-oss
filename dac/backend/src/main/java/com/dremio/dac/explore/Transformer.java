@@ -286,10 +286,10 @@ public class Transformer {
     baseDataset.setLastTransform(transform.wrap());
     if (actor != null && actor.hasMetadata()) {
       DatasetTool.applyQueryMetadata(
+          datasetVersionMutator.getCatalog(),
           baseDataset,
           actor.getParents(),
           actor.getBatchSchema(),
-          actor.getFieldOrigins(),
           actor.getGrandParents(),
           actor.getMetadata());
     }
@@ -468,10 +468,10 @@ public class Transformer {
             // save this dataset version.
             if (actor.hasMetadata()) {
               DatasetTool.applyQueryMetadata(
+                  datasetVersionMutator.getCatalog(),
                   dataset,
                   actor.getParents(),
                   actor.getBatchSchema(),
-                  actor.getFieldOrigins(),
                   actor.getGrandParents(),
                   actor.getMetadata());
               dataset.setState(QuerySemantics.extract(actor.getMetadata()));

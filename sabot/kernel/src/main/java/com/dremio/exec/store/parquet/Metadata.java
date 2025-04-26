@@ -41,8 +41,9 @@ import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.apache.parquet.schema.GroupType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DateLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import org.apache.parquet.schema.Type;
 
@@ -179,12 +180,12 @@ public class Metadata {
     }
   }
 
-  private OriginalType getOriginalType(Type type, String[] path, int depth) {
+  private LogicalTypeAnnotation getLogicalTypeAnnotation(Type type, String[] path, int depth) {
     if (type.isPrimitive()) {
-      return type.getOriginalType();
+      return type.getLogicalTypeAnnotation();
     }
     Type t = ((GroupType) type).getType(path[depth]);
-    return getOriginalType(t, path, depth + 1);
+    return getLogicalTypeAnnotation(t, path, depth + 1);
   }
 
   private ParquetFileMetadata getParquetFileMetadata(
@@ -202,10 +203,11 @@ public class Metadata {
 
     final MessageType schema = metadata.getFileMetaData().getSchema();
 
-    Map<SchemaPath, OriginalType> originalTypeMap = Maps.newHashMap();
+    Map<SchemaPath, LogicalTypeAnnotation> logicalTypeAnnotationMap = Maps.newHashMap();
     schema.getPaths();
     for (String[] path : schema.getPaths()) {
-      originalTypeMap.put(SchemaPath.getCompoundPath(path), getOriginalType(schema, path, 0));
+      logicalTypeAnnotationMap.put(
+          SchemaPath.getCompoundPath(path), getLogicalTypeAnnotation(schema, path, 0));
     }
 
     List<RowGroupMetadata> rowGroupMetadataList = Lists.newArrayList();
@@ -242,7 +244,7 @@ public class Metadata {
         SchemaPath columnSchemaName = SchemaPath.getCompoundPath(columnName);
         ColumnTypeMetadata columnTypeMetadata =
             new ColumnTypeMetadata(
-                columnName, col.getType(), originalTypeMap.get(columnSchemaName));
+                columnName, col.getType(), logicalTypeAnnotationMap.get(columnSchemaName));
 
         columnTypeInfo.put(new ColumnTypeMetadata.Key(columnTypeMetadata.name), columnTypeMetadata);
         if (statsAvailable) {
@@ -254,7 +256,7 @@ public class Metadata {
             mxValue = stats.genericGetMax();
             if (containsCorruptDates
                     == ParquetReaderUtility.DateCorruptionStatus.META_SHOWS_CORRUPTION
-                && columnTypeMetadata.originalType == OriginalType.DATE) {
+                && columnTypeMetadata.logicalTypeAnnotation instanceof DateLogicalTypeAnnotation) {
               mxValue = ParquetReaderUtility.autoCorrectCorruptedDate((Integer) mxValue);
             }
           }
@@ -363,8 +365,8 @@ public class Metadata {
       return getColumnTypeInfo(columnName).primitiveType;
     }
 
-    public OriginalType getOriginalType(String[] columnName) {
-      return getColumnTypeInfo(columnName).originalType;
+    public LogicalTypeAnnotation getLogicalTypeAnnotation(String[] columnName) {
+      return getColumnTypeInfo(columnName).logicalTypeAnnotation;
     }
   }
 
@@ -413,13 +415,15 @@ public class Metadata {
   public static class ColumnTypeMetadata {
     private final String[] name;
     private final PrimitiveTypeName primitiveType;
-    private final OriginalType originalType;
+    private final LogicalTypeAnnotation logicalTypeAnnotation;
 
     public ColumnTypeMetadata(
-        String[] name, PrimitiveTypeName primitiveType, OriginalType originalType) {
+        String[] name,
+        PrimitiveTypeName primitiveType,
+        LogicalTypeAnnotation logicalTypeAnnotation) {
       this.name = name;
       this.primitiveType = primitiveType;
-      this.originalType = originalType;
+      this.logicalTypeAnnotation = logicalTypeAnnotation;
     }
 
     @Override
@@ -428,8 +432,8 @@ public class Metadata {
           + Arrays.toString(name)
           + ", primitiveType="
           + primitiveType
-          + ", originalType="
-          + originalType
+          + ", logicalTypeAnnotation="
+          + logicalTypeAnnotation
           + "]";
     }
 

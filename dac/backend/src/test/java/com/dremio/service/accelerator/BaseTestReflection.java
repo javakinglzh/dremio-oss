@@ -17,6 +17,7 @@ package com.dremio.service.accelerator;
 
 import static com.dremio.common.utils.PathUtils.parseFullPath;
 import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.options.OptionValue.OptionType.SYSTEM;
 import static com.dremio.service.accelerator.proto.SubstitutionState.CHOSEN;
 import static com.dremio.service.reflection.ReflectionOptions.MATERIALIZATION_CACHE_ENABLED;
@@ -43,10 +44,15 @@ import com.dremio.dac.server.JobsServiceTestUtils;
 import com.dremio.dac.server.test.SampleDataPopulator;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.CachingCatalog;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.CatalogUser;
+import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.server.MaterializationDescriptorProvider;
+import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionValue;
@@ -86,6 +92,7 @@ import com.dremio.service.reflection.ReflectionOptions;
 import com.dremio.service.reflection.ReflectionService;
 import com.dremio.service.reflection.ReflectionServiceImpl;
 import com.dremio.service.reflection.ReflectionStatusService;
+import com.dremio.service.reflection.descriptor.DescriptorHelper;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
 import com.dremio.service.reflection.proto.ReflectionDetails;
@@ -110,6 +117,7 @@ import com.google.common.collect.Iterables;
 import java.io.File;
 import java.io.PrintStream;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -118,6 +126,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.GenericType;
 import org.apache.arrow.memory.BufferAllocator;
@@ -213,6 +222,26 @@ public class BaseTestReflection extends BaseTestServer {
     return (ReflectionServiceImpl) l(ReflectionService.class);
   }
 
+  protected static DescriptorHelper getDescriptorHelper() {
+    return ((ReflectionServiceImpl) l(ReflectionService.class))
+        .getRefreshHelper()
+        .getDescriptorHelper();
+  }
+
+  protected static Catalog getCatalog() {
+    final Catalog catalogNoCheckValidity =
+        getSabotContext()
+            .getCatalogService()
+            .getCatalog(
+                MetadataRequestOptions.newBuilder()
+                    .setSchemaConfig(
+                        SchemaConfig.newBuilder(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
+                            .build())
+                    .setCheckValidity(false)
+                    .build());
+    return new CachingCatalog(catalogNoCheckValidity);
+  }
+
   protected static ReflectionStatusService getReflectionStatusService() {
     return l(ReflectionStatusService.class);
   }
@@ -288,7 +317,6 @@ public class BaseTestReflection extends BaseTestServer {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE)
             .setFullPathList(path.toPathList())
             .setName(path.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -388,6 +416,12 @@ public class BaseTestReflection extends BaseTestServer {
 
   protected ReflectionId createRawOnVds(
       String datasetId, String reflectionName, List<String> rawFields) throws Exception {
+    return createRawOnVds(datasetId, reflectionName, rawFields, MANUAL_REFLECTION_MODE);
+  }
+
+  protected ReflectionId createRawOnVds(
+      String datasetId, String reflectionName, List<String> rawFields, String reflectionMode)
+      throws Exception {
     return getReflectionService()
         .create(
             new ReflectionGoal()
@@ -399,7 +433,8 @@ public class BaseTestReflection extends BaseTestServer {
                         .setDisplayFieldList(
                             rawFields.stream()
                                 .map(ReflectionField::new)
-                                .collect(Collectors.toList()))));
+                                .collect(Collectors.toList())))
+                .setIsDremioManaged(!MANUAL_REFLECTION_MODE.equals(reflectionMode)));
   }
 
   protected void onlyAllowPeriodicWakeup(boolean periodicOnly) {
@@ -412,8 +447,18 @@ public class BaseTestReflection extends BaseTestServer {
   protected ReflectionId createRawFromQuery(
       String query, String testSpace, List<String> rawFields, String reflectionName)
       throws Exception {
+    return createRawFromQuery(query, testSpace, rawFields, reflectionName, MANUAL_REFLECTION_MODE);
+  }
+
+  protected ReflectionId createRawFromQuery(
+      String query,
+      String testSpace,
+      List<String> rawFields,
+      String reflectionName,
+      String reflectionMode)
+      throws Exception {
     final DatasetUI datasetUI = createVdsFromQuery(query, testSpace);
-    return createRawOnVds(datasetUI.getId(), reflectionName, rawFields);
+    return createRawOnVds(datasetUI.getId(), reflectionName, rawFields, reflectionMode);
   }
 
   protected static void setMaterializationCacheSettings(boolean enabled) {
@@ -476,13 +521,21 @@ public class BaseTestReflection extends BaseTestServer {
   protected void setDatasetAccelerationSettings(
       NamespaceKey key, long refreshPeriod, long gracePeriod) {
     setDatasetAccelerationSettings(
-        key, refreshPeriod, gracePeriod, false, null, false, false, RefreshPolicyType.PERIOD);
+        key, refreshPeriod, gracePeriod, false, null, false, false, RefreshPolicyType.PERIOD, true);
   }
 
   protected void setDatasetAccelerationSettings(
       NamespaceKey key, long refreshPeriod, long gracePeriod, boolean neverExpire) {
     setDatasetAccelerationSettings(
-        key, refreshPeriod, gracePeriod, false, null, neverExpire, false, RefreshPolicyType.PERIOD);
+        key,
+        refreshPeriod,
+        gracePeriod,
+        false,
+        null,
+        neverExpire,
+        false,
+        RefreshPolicyType.PERIOD,
+        true);
   }
 
   protected void setDatasetAccelerationSettings(
@@ -493,7 +546,15 @@ public class BaseTestReflection extends BaseTestServer {
       boolean neverRefresh,
       RefreshPolicyType refreshPolicyType) {
     setDatasetAccelerationSettings(
-        key, refreshPeriod, gracePeriod, false, null, neverExpire, neverRefresh, refreshPolicyType);
+        key,
+        refreshPeriod,
+        gracePeriod,
+        false,
+        null,
+        neverExpire,
+        neverRefresh,
+        refreshPolicyType,
+        true);
   }
 
   protected void setDatasetAccelerationSettings(
@@ -510,7 +571,8 @@ public class BaseTestReflection extends BaseTestServer {
         refreshField,
         false,
         false,
-        RefreshPolicyType.PERIOD);
+        RefreshPolicyType.PERIOD,
+        true);
   }
 
   protected void setDatasetAccelerationSettings(
@@ -522,6 +584,28 @@ public class BaseTestReflection extends BaseTestServer {
       boolean neverExpire,
       boolean neverRefresh,
       RefreshPolicyType refreshPolicyType) {
+    setDatasetAccelerationSettings(
+        key,
+        refreshPeriod,
+        gracePeriod,
+        incremental,
+        refreshField,
+        neverExpire,
+        neverRefresh,
+        refreshPolicyType,
+        true);
+  }
+
+  protected void setDatasetAccelerationSettings(
+      NamespaceKey key,
+      long refreshPeriod,
+      long gracePeriod,
+      boolean incremental,
+      String refreshField,
+      boolean neverExpire,
+      boolean neverRefresh,
+      RefreshPolicyType refreshPolicyType,
+      boolean snapshotBased) {
     // update dataset refresh/grace period
     getReflectionService()
         .getReflectionSettings()
@@ -531,7 +615,7 @@ public class BaseTestReflection extends BaseTestServer {
                 .setMethod(incremental ? RefreshMethod.INCREMENTAL : RefreshMethod.FULL)
                 .setRefreshPeriod(refreshPeriod)
                 .setGracePeriod(gracePeriod)
-                .setSnapshotBased(true)
+                .setSnapshotBased(snapshotBased)
                 .setRefreshField(refreshField)
                 .setNeverExpire(neverExpire)
                 .setNeverRefresh(neverRefresh)
@@ -760,7 +844,7 @@ public class BaseTestReflection extends BaseTestServer {
             .anyMatch(r -> r.getMaterialization().getId().equals(parent.getId().getId())));
 
     assertTrue(
-        "child refresh started before parent load materialization job finished",
+        "child refresh started before parent refresh finished",
         JobsProtoUtil.getLastAttempt(childRefreshReflectionJobDetails).getInfo().getStartTime()
             >= JobsProtoUtil.getLastAttempt(parentRefreshReflectionJobDetails)
                 .getInfo()
@@ -837,7 +921,8 @@ public class BaseTestReflection extends BaseTestServer {
       f2.println("{colour:\"green\", sum_price:50.0, count_price:5}");
     }
 
-    getSourceService().registerSourceWithRuntime(source);
+    getSourceService()
+        .registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     // create PDS for json file
     final DatasetPath path1 = new DatasetPath(ImmutableList.of(sourceName, "file1.json"));
@@ -846,7 +931,6 @@ public class BaseTestReflection extends BaseTestServer {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path1.toPathList())
             .setName(path1.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -859,7 +943,6 @@ public class BaseTestReflection extends BaseTestServer {
             .setType(DatasetType.PHYSICAL_DATASET_SOURCE_FOLDER)
             .setFullPathList(path2.toPathList())
             .setName(path2.getLeaf().getName())
-            .setCreatedAt(System.currentTimeMillis())
             .setTag(null)
             .setOwner(DEFAULT_USERNAME)
             .setPhysicalDataset(
@@ -886,6 +969,10 @@ public class BaseTestReflection extends BaseTestServer {
   }
 
   protected static JobId runQuery(final String query) {
+    return runQuery(query, 10);
+  }
+
+  protected static JobId runQuery(final String query, int timeoutInSeconds) {
     final CompletableFuture<JobId> future = new CompletableFuture<>();
     final Thread thread =
         new Thread(
@@ -902,7 +989,7 @@ public class BaseTestReflection extends BaseTestServer {
     thread.start();
 
     try {
-      return future.get(10, SECONDS);
+      return future.get(timeoutInSeconds, SECONDS);
     } catch (final InterruptedException | ExecutionException | TimeoutException e) {
       Assert.fail(query);
       return null;
@@ -987,5 +1074,33 @@ public class BaseTestReflection extends BaseTestServer {
           plan.contains(
               String.format("\"%s\"", ReflectionServiceImpl.ACCELERATOR_STORAGEPLUGIN_NAME)));
     }
+  }
+
+  protected static boolean isQueryAccelerated(UserBitShared.QueryProfile profile) {
+    return profile.getPlan().contains("__accelerator");
+  }
+
+  protected static boolean isQueryAcceleratedByReflection(
+      UserBitShared.QueryProfile profile, String reflectionId) {
+    return profile.getPlan().contains(String.format("__accelerator\".\"%s\"", reflectionId));
+  }
+
+  public static ReflectionId createReflection(String sql) {
+    submitJobAndWaitUntilCompletion(
+        JobRequest.newBuilder()
+            .setSqlQuery(new SqlQuery(sql, DEFAULT_USERNAME))
+            .setQueryType(QueryType.ACCELERATOR_CREATE)
+            .setDatasetPath(DatasetPath.NONE.toNamespaceKey())
+            .build());
+    // Get the reflection goal with the latest createdAt timestamp because there might be several
+    // goals in the system
+    ReflectionId id =
+        StreamSupport.stream(getReflectionService().getAllReflections().spliterator(), false)
+            .max(Comparator.comparingLong(ReflectionGoal::getCreatedAt))
+            .map(ReflectionGoal::getId)
+            .get();
+
+    newReflectionMonitor().waitUntilCanAccelerate(id);
+    return id;
   }
 }

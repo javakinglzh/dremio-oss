@@ -18,6 +18,7 @@ package com.dremio.plugins.awsglue.store;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.dremio.BaseTestQuery;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.store.CatalogService;
@@ -47,9 +48,7 @@ public class AWSGlueStoragePluginTest extends BaseTestQuery {
   private static S3Mock s3Mock;
 
   @BeforeClass
-  public static void setupDefaultTestCluster() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
-
+  public static void setupClass() throws Exception {
     setupS3Mock();
 
     setupBucketAndFile();
@@ -58,7 +57,7 @@ public class AWSGlueStoragePluginTest extends BaseTestQuery {
   }
 
   @AfterClass
-  public static void teardownDefaultTestCluster() throws Exception {
+  public static void teardownClass() throws Exception {
     if (s3Mock != null) {
       s3Mock.shutdown();
       s3Mock = null;
@@ -242,6 +241,8 @@ public class AWSGlueStoragePluginTest extends BaseTestQuery {
     sc.setType(conf.getType());
     sc.setConfig(conf.toBytesString());
     sc.setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY);
-    catalogService.getSystemUserCatalog().createSource(sc);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(sc, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 }

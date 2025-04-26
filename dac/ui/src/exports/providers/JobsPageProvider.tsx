@@ -40,7 +40,7 @@ import {
 import { usePrevious } from "#oss/utils/jobsUtils";
 import { useResourceSnapshotDeep } from "../utilities/useDeepResourceSnapshot";
 import { useResourceStatus } from "smart-resource/react";
-import { Intervals } from "#oss/pages/JobPage/components/JobsFilters/StartTimeSelect/utils";
+import { Intervals } from "#oss/pages/JobsPage/components/JobsFilters/utils";
 
 const debouncedFetch = debounce(
   (pagesRequested: number, query: JobsQueryParams) =>

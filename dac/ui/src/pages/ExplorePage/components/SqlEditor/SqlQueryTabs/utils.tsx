@@ -22,7 +22,7 @@ import { Tooltip } from "dremio-ui-lib";
 
 export type QueryStatusType = {
   sqlStatement: string;
-  cancelled: boolean;
+  cancelled: boolean; // indicates queries were removed before they were submitted
   error?: any;
   jobId?: string;
   version?: string;
@@ -96,7 +96,10 @@ export const renderTabs = (
         )
       }
       label={
-        <div className="button-label">
+        <div
+          className="button-label"
+          aria-label={intl.formatMessage({ id: "NewQuery.QueryList" })}
+        >
           <dremio-icon
             name="navigation-bar/jobs"
             class="button-label-icon"

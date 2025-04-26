@@ -80,7 +80,7 @@ public class TestSplitGenTableFunction extends BaseTestQuery {
             mtimeVector.set(idx, mtime);
           };
       SplitGenTableFunction tableFunction =
-          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.EMPTY_LIST, false));
+          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.emptyList(), false));
       long currentTime = System.currentTimeMillis();
       incomingRow.accept("file1.parquet", 1024L, currentTime);
       incomingRow.accept("file2.parquet", 2054L, currentTime);
@@ -140,7 +140,7 @@ public class TestSplitGenTableFunction extends BaseTestQuery {
             mtimeVector.set(idx, mtime);
           };
       SplitGenTableFunction tableFunction =
-          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.EMPTY_LIST, false));
+          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.emptyList(), false));
       long currentTime = System.currentTimeMillis();
       long sizeThatCrossesBoundaries =
           blockSize * batchSize * 2; // fills up two batches of splits from a single input row
@@ -211,7 +211,7 @@ public class TestSplitGenTableFunction extends BaseTestQuery {
             mtimeVector.set(idx, mtime);
           };
       SplitGenTableFunction tableFunction =
-          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.EMPTY_LIST, true));
+          new SplitGenTableFunction(null, getOpCtx(), getConfig(Collections.emptyList(), true));
       long currentTime = System.currentTimeMillis();
       long sizeThatCrossesBoundaries =
           blockSize * 9 + 10; // enforce trying to split to multiple blocks

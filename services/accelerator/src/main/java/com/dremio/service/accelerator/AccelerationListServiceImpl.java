@@ -36,7 +36,7 @@ import io.grpc.stub.ServerCallStreamObserver;
 import io.grpc.stub.StreamObserver;
 import java.util.Iterator;
 import java.util.Optional;
-import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,19 +54,19 @@ public class AccelerationListServiceImpl
       reflectionAdministrationServiceFactory;
   private final Provider<com.dremio.service.reflection.ReflectionService> reflectionService;
   private final MaterializationStore materializationStore;
-  private final Provider<Executor> executor;
+  private final Provider<ExecutorService> executor;
 
   public AccelerationListServiceImpl(
       Provider<ReflectionStatusService> reflectionStatusService,
       Provider<com.dremio.service.reflection.ReflectionService> reflectionService,
       Provider<ReflectionAdministrationService.Factory> reflectionAdministrationServiceFactory,
       Provider<LegacyKVStoreProvider> storeProvider,
-      Provider<Executor> executor) {
+      Provider<ExecutorService> executorService) {
     this.reflectionStatusService = reflectionStatusService;
     this.reflectionService = reflectionService;
     this.reflectionAdministrationServiceFactory = reflectionAdministrationServiceFactory;
     this.materializationStore = new MaterializationStore(storeProvider);
-    this.executor = executor;
+    this.executor = executorService;
   }
 
   private com.dremio.service.reflection.ReflectionService getReflectionService() {

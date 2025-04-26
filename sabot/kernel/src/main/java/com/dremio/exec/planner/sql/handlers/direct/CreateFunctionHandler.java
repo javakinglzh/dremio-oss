@@ -457,7 +457,7 @@ public final class CreateFunctionHandler extends SimpleDirectHandler {
     // But the main logic should happen now in CreateFunctionHandler
     final SqlKind kind = node.getKind();
     switch (kind) {
-        // These are the node types that we know are already a query.
+      // These are the node types that we know are already a query.
       case SELECT:
       case UNION:
       case INTERSECT:

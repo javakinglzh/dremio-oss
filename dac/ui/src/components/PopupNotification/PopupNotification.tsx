@@ -35,7 +35,7 @@ const unmountPopup = (anchorClass?: string) => {
 type PopupNotificationProps = {
   message: string;
   type?: "success" | "error" | "warning" | "default";
-  autoClose?: number;
+  autoClose?: number | null;
   anchorClass?: string;
 };
 
@@ -86,12 +86,19 @@ export default function openPopupNotification(
   renderProps: PopupNotificationProps,
 ): void {
   const autoClose = renderProps.autoClose ? renderProps.autoClose : 2000;
-  const popup = <PopupNotification {...renderProps} autoClose={autoClose} />;
+  const popup = (
+    <PopupNotification
+      {...renderProps}
+      autoClose={renderProps.autoClose === null ? null : autoClose}
+    />
+  );
   const anchorElement = renderProps.anchorClass
     ? document.querySelector(`.${renderProps.anchorClass}`)
     : document.querySelector(".popup-notifications");
 
   ReactDOM.render(popup, anchorElement);
+
+  if (renderProps.autoClose === null) return;
 
   const timeout = setTimeout(() => unmountPopup(), renderProps.autoClose);
 

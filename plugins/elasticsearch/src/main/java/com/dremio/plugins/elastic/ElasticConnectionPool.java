@@ -32,22 +32,17 @@ import com.dremio.plugins.elastic.ElasticActions.Result;
 import com.dremio.plugins.elastic.mapping.ElasticMappingSet;
 import com.dremio.service.namespace.SourceState.Message;
 import com.dremio.service.namespace.SourceState.MessageLevel;
-import com.dremio.service.namespace.capabilities.BooleanCapabilityValue;
-import com.dremio.service.namespace.capabilities.SourceCapabilities;
 import com.dremio.ssl.SSLHelper;
 import com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
-import com.google.common.io.CharStreams;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.SettableFuture;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -120,26 +115,8 @@ public class ElasticConnectionPool implements AutoCloseable {
    */
   private boolean enableNewFeatures;
 
-  /**
-   * Flag to indicate if the current cluster has a high enough version for 5x features. For example,
-   * boolean group by is supported for 5x cluster.
-   */
-  private boolean enable5vFeatures;
-
-  /**
-   * Flag to indicate if contains is supported. A typo between v5.0.0 and v5.2.x causes query
-   * failure with contains
-   */
-  private boolean enableContains;
-
   /** The lowest version found in the cluster. */
   private Version minVersionInCluster;
-
-  /**
-   * Flag to indicate if the current cluster has a high enough version for 7x features. For example,
-   * boolean group by is supported for 7x cluster.
-   */
-  private boolean enable7vFeatures;
 
   private int elasticVersion;
 
@@ -186,10 +163,10 @@ public class ElasticConnectionPool implements AutoCloseable {
     switch (sslMode) {
       case UNSECURE:
         builder.sslContext(SSLHelper.newAllTrustingSSLContext("SSL"));
-        // fall-through
+      // fall-through
       case VERIFY_CA:
         builder.hostnameVerifier(SSLHelper.newAllValidHostnameVerifier());
-        // fall-through
+      // fall-through
       case STRICT:
         break;
 
@@ -363,15 +340,6 @@ public class ElasticConnectionPool implements AutoCloseable {
     updateClients();
   }
 
-  public SourceCapabilities getCapabilities() {
-    return new SourceCapabilities(
-        new BooleanCapabilityValue(ElasticsearchStoragePlugin.ENABLE_V7_FEATURES, enable7vFeatures),
-        new BooleanCapabilityValue(ElasticsearchStoragePlugin.ENABLE_V5_FEATURES, enable5vFeatures),
-        new BooleanCapabilityValue(
-            ElasticsearchStoragePlugin.SUPPORTS_NEW_FEATURES, enableNewFeatures),
-        new BooleanCapabilityValue(SourceCapabilities.SUPPORTS_CONTAINS, enableContains));
-  }
-
   public Version getMinVersionInCluster() {
     return minVersionInCluster;
   }
@@ -476,19 +444,6 @@ public class ElasticConnectionPool implements AutoCloseable {
               ElasticsearchConstants.MIN_ELASTICSEARCH_VERSION, minVersionInCluster));
     }
 
-    enableNewFeatures =
-        minVersionInCluster.compareTo(ElasticsearchConstants.MIN_VERSION_TO_ENABLE_NEW_FEATURES)
-            >= 0;
-
-    enable5vFeatures =
-        minVersionInCluster.compareTo(ElasticsearchConstants.ELASTICSEARCH_VERSION_5X) >= 0;
-
-    enableContains =
-        minVersionInCluster.compareTo(ElasticsearchConstants.ELASTICSEARCH_VERSION_5_3_X) >= 0;
-
-    enable7vFeatures =
-        minVersionInCluster.compareTo(ElasticsearchConstants.ELASTICSEARCH_VERSION_7_0_X) >= 0;
-
     elasticVersion = minVersionInCluster.getMajor();
 
     return hosts;
@@ -572,8 +527,7 @@ public class ElasticConnectionPool implements AutoCloseable {
     try {
       builder.addContext("Response Status", response.getStatusInfo().getStatusCode());
       builder.addContext("Response Reason", response.getStatusInfo().getReasonPhrase());
-      String string =
-          CharStreams.toString(new InputStreamReader((InputStream) response.getEntity()));
+      String string = response.readEntity(String.class);
       builder.addContext("Response Body", string);
     } catch (Exception ex) {
       logger.warn("Failure while decoding exception", ex);
@@ -814,10 +768,6 @@ public class ElasticConnectionPool implements AutoCloseable {
 
     public Version getESVersionInCluster() {
       return ElasticConnectionPool.this.getMinVersionInCluster();
-    }
-
-    public boolean enable7vFeatures() {
-      return ElasticConnectionPool.this.enable7vFeatures;
     }
   }
 

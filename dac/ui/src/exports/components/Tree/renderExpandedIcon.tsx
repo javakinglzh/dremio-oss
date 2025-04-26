@@ -15,13 +15,19 @@
  */
 
 import clsx from "clsx";
+import { Spinner } from "dremio-ui-lib/components";
 
-export const renderExpandedIcon = (expanded: boolean) => (
-  <dremio-icon
-    name="interface/right-chevron"
-    class={clsx("h-3 w-3 icon-primary animate-icon-rotate", {
-      "rotate-90": expanded,
-    })}
-    alt=""
-  />
-);
+export const renderExpandedIcon = (expanded: boolean, isFetching?: boolean) =>
+  isFetching ? (
+    <div style={{ paddingInline: "2px" }}>
+      <Spinner />
+    </div>
+  ) : (
+    <dremio-icon
+      name="interface/right-chevron"
+      class={clsx("h-3 w-3 icon-primary animate-icon-rotate", {
+        "rotate-90": expanded,
+      })}
+      alt=""
+    />
+  );

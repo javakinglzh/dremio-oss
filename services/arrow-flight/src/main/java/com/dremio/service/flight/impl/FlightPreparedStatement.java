@@ -121,17 +121,30 @@ public class FlightPreparedStatement {
   public ActionCreatePreparedStatementResult createAction() {
     final UserProtos.PreparedStatementArrow preparedStatement =
         responseHandler.get().getPreparedStatement();
-    final Schema schema = buildSchema(preparedStatement.getArrowSchema());
-    final ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+
+    final Schema datasetSchema = buildSchema(preparedStatement.getArrowSchema());
+    final ByteArrayOutputStream datasetSchemaBytes = new ByteArrayOutputStream();
     try {
-      MessageSerializer.serialize(new WriteChannel(Channels.newChannel(outputStream)), schema);
+      MessageSerializer.serialize(
+          new WriteChannel(Channels.newChannel(datasetSchemaBytes)), datasetSchema);
     } catch (IOException e) {
-      throw new RuntimeException("IO Error when serializing schema '" + schema + "'.", e);
+      throw new RuntimeException(
+          "IO Error when serializing dataset schema '" + datasetSchema + "'.", e);
+    }
+
+    final Schema paramSchema = buildSchema(preparedStatement.getParameterArrowSchema());
+    final ByteArrayOutputStream paramSchemaBytes = new ByteArrayOutputStream();
+    try {
+      MessageSerializer.serialize(
+          new WriteChannel(Channels.newChannel(paramSchemaBytes)), paramSchema);
+    } catch (IOException e) {
+      throw new RuntimeException(
+          "IO Error when serializing parameter schema '" + paramSchema + "'.", e);
     }
 
     return ActionCreatePreparedStatementResult.newBuilder()
-        .setDatasetSchema(ByteString.copyFrom(ByteBuffer.wrap(outputStream.toByteArray())))
-        .setParameterSchema(ByteString.EMPTY)
+        .setDatasetSchema(ByteString.copyFrom(ByteBuffer.wrap(datasetSchemaBytes.toByteArray())))
+        .setParameterSchema(ByteString.copyFrom(ByteBuffer.wrap(paramSchemaBytes.toByteArray())))
         .setPreparedStatementHandle(preparedStatement.toByteString())
         .build();
   }

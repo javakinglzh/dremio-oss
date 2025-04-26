@@ -1058,15 +1058,14 @@ public abstract class BaseTestJoin extends BaseTestOperator {
         expected);
   }
 
-  protected void baseManyColumnsDecimal() throws Exception {
+  protected void baseManyColumnsDecimal(JoinRelType joinType) throws Exception {
     int columns = 1000;
     int leftColumns = columns;
     int rightColumns = columns;
 
     JoinInfo joinInfo =
         getJoinInfo(
-            Arrays.asList(new JoinCondition("EQUALS", f("left_1"), f("right_1"))),
-            JoinRelType.LEFT);
+            Arrays.asList(new JoinCondition("EQUALS", f("left_1"), f("right_1"))), joinType);
 
     Table expected =
         t(

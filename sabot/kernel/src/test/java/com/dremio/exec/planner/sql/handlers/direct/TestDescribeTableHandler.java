@@ -43,6 +43,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rel.type.RelDataTypeSystem;
@@ -50,7 +51,7 @@ import org.apache.calcite.rel.type.RelRecordType;
 import org.apache.calcite.rel.type.StructKind;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.parser.SqlParserPos;
-import org.apache.calcite.sql.type.BasicSqlType;
+import org.apache.calcite.sql.type.SqlTypeFactoryImpl;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.After;
 import org.junit.Before;
@@ -105,13 +106,23 @@ public class TestDescribeTableHandler extends BaseTestQuery {
   }
 
   private List<RelDataTypeField> generateFields() {
+    RelDataTypeFactory typeFactory = new SqlTypeFactoryImpl(RelDataTypeSystem.DEFAULT);
     return Lists.newArrayList(
         new RelDataTypeFieldImpl(
-            "col1", 0, new BasicSqlType(RelDataTypeSystem.DEFAULT, SqlTypeName.VARCHAR)),
+            "col1",
+            0,
+            typeFactory.createTypeWithNullability(
+                typeFactory.createSqlType(SqlTypeName.VARCHAR), true)),
         new RelDataTypeFieldImpl(
-            "col2", 1, new BasicSqlType(RelDataTypeSystem.DEFAULT, SqlTypeName.BOOLEAN)),
+            "col2",
+            1,
+            typeFactory.createTypeWithNullability(
+                typeFactory.createSqlType(SqlTypeName.BOOLEAN), false)),
         new RelDataTypeFieldImpl(
-            "col3", 2, new BasicSqlType(RelDataTypeSystem.DEFAULT, SqlTypeName.DECIMAL, 5, 2)));
+            "col3",
+            2,
+            typeFactory.createTypeWithNullability(
+                typeFactory.createSqlType(SqlTypeName.DECIMAL, 5, 2), false)));
   }
 
   private Map<String, List<ColumnExtendedProperty>> generateExtendedProperties() {
@@ -143,12 +154,20 @@ public class TestDescribeTableHandler extends BaseTestQuery {
     final List<DescribeTableHandler.DescribeResult> expectedResults =
         Lists.newArrayList(
             new DescribeTableHandler.DescribeResult(
-                "col1", "CHARACTER VARYING", null, null, "[]", "[]", null),
+                "col1", "CHARACTER VARYING", true, null, null, "[]", "[]", null),
             new DescribeTableHandler.DescribeResult(
-                "col2", "BOOLEAN", null, null, "[{\"key\":\"one\",\"value\":\"foo\"}]", "[]", null),
+                "col2",
+                "BOOLEAN",
+                false,
+                null,
+                null,
+                "[{\"key\":\"one\",\"value\":\"foo\"}]",
+                "[]",
+                null),
             new DescribeTableHandler.DescribeResult(
                 "col3",
                 "DECIMAL",
+                false,
                 5,
                 2,
                 "[{\"key\":\"two\",\"value\":\"bar\"},{\"key\":\"three\",\"value\":\"baz\"}]",

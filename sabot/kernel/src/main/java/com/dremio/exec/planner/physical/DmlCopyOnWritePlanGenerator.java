@@ -356,7 +356,8 @@ public class DmlCopyOnWritePlanGenerator extends DmlPlanGeneratorBase {
   /**
    * Acquires the update column of the Copy On Write Join Plan.
    *
-   * @return Expression which calculates index of the correct update-"Copy_On_Write"-output col
+   * @return Expression which adjusts the nullability, and calculates index of the correct
+   *     update-"Copy_On_Write"-output col.
    */
   @Override
   protected RexNode getUpdateRexNodeExpr(
@@ -368,12 +369,22 @@ public class DmlCopyOnWritePlanGenerator extends DmlPlanGeneratorBase {
       RexNode rowIndexNullCondition,
       RexNode rightRowIndexNullCondition) {
 
+    // In general, while doing a (left) join, the right columns are made nullable.
+    // This is achieved in calcite when Join::deriveRowType is called which constructs
+    // Join's RowType from the left RowType and the right RowType by forcing
+    // the right RowType including all its fields to be nullable.
+    // Here, the update column type is made nullable so that the update expression
+    // satisfies the RexChecker's comparison with the relevant column type in HashJoinPrel.
+    // The RexChecker itself is triggered by the ProjectPrel's (HashJoinPrel's parent) constructor.
+    RelDataType rightNullableDataType =
+        getCluster().getTypeFactory().createTypeWithNullability(field.getType(), true);
+
     return rexBuilder.makeCall(
         SqlStdOperatorTable.CASE,
         rightRowIndexNullCondition,
         rexBuilder.makeInputRef(field.getType(), field.getIndex()),
         rexBuilder.makeInputRef(
-            field.getType(),
+            rightNullableDataType,
             leftFieldCount.get()
                 + insertedFieldCount
                 + DmlUtils.SYSTEM_COLUMN_COUNT
@@ -527,7 +538,6 @@ public class DmlCopyOnWritePlanGenerator extends DmlPlanGeneratorBase {
         filePathHashExchPrel.getTraitSet(),
         filePathHashExchPrel,
         groupSet,
-        ImmutableList.of(groupSet),
         ImmutableList.of(aggRowCount),
         null);
   }
@@ -594,7 +604,6 @@ public class DmlCopyOnWritePlanGenerator extends DmlPlanGeneratorBase {
             filterPrel.getTraitSet(),
             filterPrel,
             ImmutableBitSet.of(),
-            ImmutableList.of(),
             ImmutableList.of(aggRowCount),
             null);
 

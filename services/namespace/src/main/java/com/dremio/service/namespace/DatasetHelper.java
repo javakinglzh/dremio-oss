@@ -101,10 +101,14 @@ public final class DatasetHelper {
   /**
    * Checks if dataset is (Native) iceberg dataset
    *
-   * @param dataset Dataset to check
+   * @param datasetConfig DatasetConfig to check
    * @return true if dataset is an iceberg dataset
    */
-  public static boolean isIcebergDataset(DatasetConfig dataset) {
+  public static boolean isIcebergDataset(DatasetConfig datasetConfig) {
+    return isIcebergTable(datasetConfig) || isIcebergView(datasetConfig);
+  }
+
+  public static boolean isIcebergTable(DatasetConfig dataset) {
     if (dataset.getPhysicalDataset() == null) {
       return false;
     }
@@ -117,6 +121,12 @@ public final class DatasetHelper {
     }
 
     return DatasetHelper.isIcebergFile(dataset.getPhysicalDataset().getFormatSettings());
+  }
+
+  public static boolean isIcebergView(DatasetConfig datasetConfig) {
+    return (datasetConfig.getType() == DatasetType.VIRTUAL_DATASET)
+        && (datasetConfig.getVirtualDataset() != null)
+        && (datasetConfig.getVirtualDataset().getIcebergViewAttributes()) != null;
   }
 
   public static boolean isJsonDataset(DatasetConfig dataset) {

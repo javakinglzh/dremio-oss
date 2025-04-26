@@ -16,11 +16,13 @@
 package com.dremio.exec.planner.physical.relbuilder;
 
 import com.dremio.exec.planner.physical.HashJoinPrel;
+import com.dremio.exec.planner.physical.MergeJoinPrel;
 import com.dremio.exec.planner.physical.NestedLoopJoinPrel;
 import com.dremio.exec.planner.physical.Prel;
 import org.apache.calcite.plan.Context;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptSchema;
+import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.JoinRelType;
@@ -44,6 +46,21 @@ public class PrelBuilder extends RelBuilder {
             right,
             joinType,
             condition);
+    push(join);
+    return this;
+  }
+
+  public PrelBuilder mergeJoin(JoinRelType joinType, RexNode condition) {
+    RelNode right = build();
+    RelNode left = build();
+    RelNode join =
+        MergeJoinPrel.create(
+            cluster,
+            left.getTraitSet().plus(RelCollations.EMPTY),
+            left,
+            right,
+            condition,
+            joinType);
     push(join);
     return this;
   }
@@ -117,7 +134,74 @@ public class PrelBuilder extends RelBuilder {
   }
 
   @Override
+  public PrelBuilder values(String[] fieldNames, Object... values) {
+    super.values(fieldNames, values);
+    return this;
+  }
+
+  @Override
+  public PrelBuilder sort(int... fields) {
+    super.sort(fields);
+    return this;
+  }
+
+  /** */
+  public PrelBuilder rel(RelCreator relCreator) {
+    try {
+      push(relCreator.create());
+    } catch (InvalidRelException invalidRelException) {
+      throw new RuntimeException(invalidRelException);
+    }
+    return this;
+  }
+
+  /**
+   * Some calcite apis are not open so this a is a work-around for inline rel creation.
+   *
+   * @param addSingleRel function to create new Prel
+   * @return new Prel
+   */
+  public PrelBuilder singleRel(SingleRelCreator addSingleRel) {
+    Prel prel = build();
+    try {
+      push(addSingleRel.create(prel));
+    } catch (InvalidRelException invalidRelException) {
+      throw new RuntimeException(invalidRelException);
+    }
+    return this;
+  }
+
+  /**
+   * Some calcite apis are not open so this a is a work-around for inline rel creation.
+   *
+   * @param biRelCreator function to create new Prel
+   * @return new Prel
+   */
+  public PrelBuilder biRel(BiRelCreator biRelCreator) {
+    RelNode right = build();
+    RelNode left = build();
+    try {
+      push(biRelCreator.create((Prel) left, (Prel) right));
+    } catch (InvalidRelException invalidRelException) {
+      throw new RuntimeException(invalidRelException);
+    }
+    return this;
+  }
+
+  @Override
   public Prel build() {
     return (Prel) super.build();
+  }
+
+  public interface SingleRelCreator {
+    Prel create(Prel prel) throws InvalidRelException;
+  }
+
+  public interface BiRelCreator {
+    Prel create(Prel left, Prel right) throws InvalidRelException;
+  }
+
+  public interface RelCreator {
+    Prel create() throws InvalidRelException;
   }
 }

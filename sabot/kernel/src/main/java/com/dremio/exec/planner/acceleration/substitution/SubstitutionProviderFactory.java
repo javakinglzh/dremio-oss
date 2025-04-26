@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.acceleration.substitution;
 
 import com.dremio.common.config.SabotConfig;
+import com.dremio.exec.planner.events.PlannerEventBus;
 import com.dremio.options.OptionResolver;
 
 /**
@@ -24,5 +25,8 @@ import com.dremio.options.OptionResolver;
  */
 public interface SubstitutionProviderFactory {
   SubstitutionProvider getSubstitutionProvider(
-      SabotConfig config, MaterializationProvider materializationProvider, OptionResolver options);
+      SabotConfig config,
+      MaterializationProvider materializationProvider,
+      OptionResolver options,
+      PlannerEventBus plannerEventBus);
 }

@@ -39,6 +39,9 @@ import org.apache.arrow.vector.util.Text;
 
 public class RecordBatchValidatorDefaultImpl implements RecordBatchValidator {
 
+  /** A specific expected value to be used to accept any values in the actual data set */
+  public static final Object IGNORE_VALUE = new Object();
+
   protected final RecordSet recordSet;
 
   public RecordBatchValidatorDefaultImpl(RecordSet recordSet) {
@@ -304,6 +307,10 @@ public class RecordBatchValidatorDefaultImpl implements RecordBatchValidator {
   }
 
   protected boolean compareValue(Object expectedValue, FieldReader actual) {
+    if (expectedValue == IGNORE_VALUE) {
+      return true;
+    }
+
     if (!actual.isSet() || expectedValue == null) {
       return !actual.isSet() && expectedValue == null;
     }

@@ -123,7 +123,7 @@ public class YarnDaemon implements Runnable, AutoCloseable {
     livenessService.addHealthMonitor(ClasspathHealthMonitor.newInstance());
 
     DremioConfig dremioConfig = daemon.getDACConfig().getConfig();
-    final long watchedPID = Long.parseLong(VM.getProcessId());
+    final long watchedPID = VM.getProcessId();
     final long pollTimeoutMs = dremioConfig.getMilliseconds(POLL_TIMEOUT_MS);
     final long pollIntervalMs = dremioConfig.getMilliseconds(POLL_INTERVAL_MS);
     final int missedPollsBeforeKill = dremioConfig.getInt(MISSED_POLLS_BEFORE_KILL);

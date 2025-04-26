@@ -74,7 +74,7 @@ public final class CorrelatedUnnestQueryBuilder {
     RelNode unnest =
         relBuilder
             .project(rewrittenArrayExpression)
-            .uncollect(Collections.EMPTY_LIST, false)
+            .uncollect(Collections.emptyList(), false)
             .build();
 
     return new AfterCorrelatedUnnest(relBuilder, unnest, correlationId);

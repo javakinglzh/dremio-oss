@@ -510,7 +510,6 @@ public class DmlPositionalMergeOnReadPlanGenerator extends DmlPlanGeneratorBase 
             filterPrel.getTraitSet(),
             filterPrel,
             ImmutableBitSet.of(),
-            ImmutableList.of(),
             aggregateCalls,
             null);
 

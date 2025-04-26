@@ -27,23 +27,32 @@ import static com.dremio.common.expression.CompleteType.TIME;
 import static com.dremio.common.expression.CompleteType.TIMESTAMP;
 import static com.dremio.common.expression.CompleteType.VARCHAR;
 import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.CONCURRENT_MODIFICATION;
+import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.UNSUPPORTED_OPERATION;
+import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.VALIDATION;
+import static com.dremio.exec.store.iceberg.IcebergUtils.PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY;
 import static com.dremio.exec.store.iceberg.model.IcebergCommandType.INCREMENTAL_METADATA_REFRESH;
 import static com.dremio.exec.store.iceberg.model.IcebergCommandType.PARTIAL_METADATA_REFRESH;
 import static com.dremio.exec.store.iceberg.model.IncrementalMetadataRefreshCommitter.MAX_NUM_SNAPSHOTS_TO_EXPIRE;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.expression.CompleteType;
+import com.dremio.exec.catalog.PartitionSpecAlterOption;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
+import com.dremio.exec.planner.sql.PartitionTransform;
+import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.manifestwriter.IcebergCommitOpHelper;
 import com.dremio.exec.store.iceberg.model.IcebergCommandType;
 import com.dremio.exec.store.iceberg.model.IcebergDmlOperationCommitter;
 import com.dremio.exec.store.iceberg.model.IcebergOpCommitter;
+import com.dremio.exec.store.iceberg.model.IcebergTableIdentifier;
 import com.dremio.exec.store.iceberg.model.IncrementalMetadataRefreshCommitter;
 import com.dremio.io.file.Path;
+import com.dremio.sabot.op.writer.WriterCommitterOperator;
 import com.dremio.service.catalog.GetDatasetRequest;
 import com.dremio.service.catalog.UpdatableDatasetConfigFields;
 import com.dremio.service.namespace.dataset.proto.DatasetCommonProtobuf;
@@ -535,6 +544,18 @@ public class TestIcebergOpCommitter extends TestIcebergCommitterBase {
       final int numExpiredSnapshots = numTotalSnapshots - numSnapshotsAfterExpiry;
       Assert.assertEquals(MAX_NUM_SNAPSHOTS_TO_EXPIRE, numExpiredSnapshots);
       Assert.assertEquals(22, orphanFiles.size());
+
+      assertEquals(
+          42L, operatorStats.getLongStat(WriterCommitterOperator.Metric.NUM_TOTAL_SNAPSHOTS));
+      assertEquals(
+          15L, operatorStats.getLongStat(WriterCommitterOperator.Metric.NUM_EXPIRED_SNAPSHOTS));
+      assertEquals(
+          22L, operatorStats.getLongStat(WriterCommitterOperator.Metric.NUM_ORPHAN_FILES_DELETED));
+
+      assertEquals(
+          0L,
+          (long) operatorStats.getDoubleStat(WriterCommitterOperator.Metric.NUM_EXPIRED_SNAPSHOTS));
+
       // Only need to loop through valid snapshots (not all remaining snapshots) to determine final
       // orphan files.
       Assert.assertEquals(20, numValidSnapshots.intValue());
@@ -786,6 +807,57 @@ public class TestIcebergOpCommitter extends TestIcebergCommitterBase {
           SchemaConverter.getBuilder().setTableName(table.name()).build();
       Assert.assertTrue(
           consolidatedSchema.equalsTypesWithoutPositions(schemaConverter.fromIceberg(sc)));
+    } finally {
+      FileUtils.deleteDirectory(tableFolder);
+    }
+  }
+
+  @Test
+  public void testMetadataRefreshSchemaComplexTypeNotUpdate() throws IOException {
+    final String tableName = UUID.randomUUID().toString();
+    final File tableFolder = new File(folder, tableName);
+    final List<String> datasetPath = Lists.newArrayList("dfs", tableName);
+    try {
+      List<Field> childrenField1 = ImmutableList.of(VARCHAR.toField("doubleCol"));
+
+      Field structField1 =
+          new Field("structField", FieldType.nullable(STRUCT.getType()), childrenField1);
+      Field dremioUpdateField = INT.toField(IncrementalUpdateUtils.UPDATE_COLUMN);
+      BatchSchema schema1 =
+          new BatchSchema(Arrays.asList(INT.toField("field1"), dremioUpdateField, structField1));
+      DatasetConfig datasetConfig = getDatasetConfig(datasetPath);
+      String metadataFileLocation = initialiseTableWithLargeSchema(schema1, tableName);
+      IcebergMetadata icebergMetadata = new IcebergMetadata();
+      icebergMetadata.setMetadataFileLocation(metadataFileLocation);
+      datasetConfig.getPhysicalDataset().setIcebergMetadata(icebergMetadata);
+      Table initialTable = getIcebergTable(icebergModel, tableFolder);
+      IcebergOpCommitter insertTableCommitter =
+          icebergModel.getIncrementalMetadataRefreshCommitter(
+              operatorContext,
+              tableName,
+              datasetPath,
+              tableFolder.toPath().toString(),
+              tableName,
+              icebergModel.getTableIdentifier(tableFolder.toPath().toString()),
+              schema1,
+              Collections.emptyList(),
+              true,
+              datasetConfig,
+              localFs,
+              null,
+              INCREMENTAL_METADATA_REFRESH,
+              null,
+              initialTable.currentSnapshot().snapshotId(),
+              false);
+
+      BatchSchema schema2 = new BatchSchema(Arrays.asList(INT.toField("field1"), structField1));
+      insertTableCommitter.updateSchema(schema2);
+      Assert.assertEquals(
+          "Complex field type is not updated",
+          0,
+          ((IncrementalMetadataRefreshCommitter) insertTableCommitter)
+              .getUpdatedColumnTypes()
+              .size());
     } finally {
       FileUtils.deleteDirectory(tableFolder);
     }
@@ -2355,6 +2427,191 @@ public class TestIcebergOpCommitter extends TestIcebergCommitterBase {
       expectedDeletedFilesIncludeDataFiles =
           ImmutableSet.of(m.path(), getManifestCrcFileName(m.path()));
       Assert.assertEquals(expectedDeletedFilesIncludeDataFiles, actualDeletedFiles);
+    } finally {
+      FileUtils.deleteDirectory(tableFolder);
+    }
+  }
+
+  @Test
+  public void testDropNonExistPartitionSpec() throws IOException {
+    final String tableName = UUID.randomUUID().toString();
+    final File tableFolder = new File(folder, tableName);
+    final List<String> datasetPath = Lists.newArrayList("dfs", tableName);
+    try {
+      DatasetConfig datasetConfig = getDatasetConfig(datasetPath);
+      String metadataFileLocation = initialiseTableWithLargeSchema(schema, tableName);
+      IcebergMetadata icebergMetadata = new IcebergMetadata();
+      icebergMetadata.setMetadataFileLocation(metadataFileLocation);
+      datasetConfig.getPhysicalDataset().setIcebergMetadata(icebergMetadata);
+
+      Table icebergTable = getIcebergTable(icebergModel, tableFolder);
+      Assert.assertFalse("Non-partitioned table", icebergTable.spec().isPartitioned());
+
+      IcebergTableIdentifier tableIdentifier =
+          icebergModel.getTableIdentifier(tableFolder.toPath().toString());
+      PartitionTransform idTransform = new PartitionTransform(ID_COLUMN);
+      PartitionSpecAlterOption addOption =
+          new PartitionSpecAlterOption(idTransform, SqlAlterTablePartitionColumns.Mode.ADD);
+      // Add Partition Fields
+      icebergModel.alterTable(tableIdentifier, addOption);
+      icebergTable.refresh();
+      Assert.assertTrue("Partitioned table", icebergTable.spec().isPartitioned());
+
+      PartitionTransform dataTransform = new PartitionTransform(DATA_COLUMN);
+      PartitionSpecAlterOption dropOption =
+          new PartitionSpecAlterOption(dataTransform, SqlAlterTablePartitionColumns.Mode.DROP);
+      // Drop a non-partitioned field
+      UserExceptionAssert.assertThatThrownBy(
+              () -> {
+                icebergModel.alterTable(tableIdentifier, dropOption);
+                Assert.fail();
+              })
+          .hasErrorType(UNSUPPORTED_OPERATION)
+          .hasMessageContaining("Cannot find partition field to remove: ref(name=\"data\")");
+    } finally {
+      FileUtils.deleteDirectory(tableFolder);
+    }
+  }
+
+  @Test
+  public void testSequenceNumberTableProperty() throws IOException {
+    final String tableName = UUID.randomUUID().toString();
+    final File tableFolder = new File(folder, tableName);
+    final List<String> datasetPath = Lists.newArrayList("dfs", tableName);
+    try {
+      DatasetConfig datasetConfig = getDatasetConfig(datasetPath);
+      String metadataFileLocation = initialiseTableWithLargeSchema(schema, tableName);
+      IcebergMetadata icebergMetadata = new IcebergMetadata();
+      icebergMetadata.setMetadataFileLocation(metadataFileLocation);
+      datasetConfig.getPhysicalDataset().setIcebergMetadata(icebergMetadata);
+
+      Table icebergTable = getIcebergTable(icebergModel, tableFolder);
+      Assert.assertFalse("Non-partitioned table", icebergTable.spec().isPartitioned());
+
+      IcebergTableIdentifier tableIdentifier =
+          icebergModel.getTableIdentifier(tableFolder.toPath().toString());
+      PartitionTransform idTransform = new PartitionTransform(ID_COLUMN);
+      PartitionSpecAlterOption addOption =
+          new PartitionSpecAlterOption(idTransform, SqlAlterTablePartitionColumns.Mode.ADD);
+      // Add Partition Field
+      icebergModel.alterTable(tableIdentifier, addOption);
+      icebergTable.refresh();
+      Assert.assertTrue("Partitioned table", icebergTable.spec().isPartitioned());
+      Assert.assertFalse(
+          "The table property should not be set",
+          icebergTable.properties().containsKey(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY));
+
+      PartitionSpecAlterOption dropOption =
+          new PartitionSpecAlterOption(idTransform, SqlAlterTablePartitionColumns.Mode.DROP);
+      // Drop the partitioned field
+      icebergModel.alterTable(tableIdentifier, dropOption);
+      icebergTable.refresh();
+
+      // Test to add sequence number table property
+      Assert.assertTrue(
+          "The table property should be set",
+          icebergTable.properties().containsKey(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY));
+      Assert.assertEquals(
+          "2", icebergTable.properties().get(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY));
+
+      // Add Partition Field again, and remove sequence number table property
+      icebergModel.alterTable(tableIdentifier, addOption);
+      icebergTable.refresh();
+      Assert.assertFalse(
+          "The table property should be removed",
+          icebergTable.properties().containsKey(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY));
+    } finally {
+      FileUtils.deleteDirectory(tableFolder);
+    }
+  }
+
+  @Test
+  public void testAddChangeAndDropColumn() throws IOException {
+    final String tableName = UUID.randomUUID().toString();
+    final File tableFolder = new File(folder, tableName);
+    final List<String> datasetPath = Lists.newArrayList("dfs", tableName);
+    try {
+      DatasetConfig datasetConfig = getDatasetConfig(datasetPath);
+      BatchSchema schemaWithNonNullableColumns =
+          BatchSchema.of(
+              Field.notNullable("required_int", new ArrowType.Int(32, true)),
+              Field.notNullable(
+                  "required_float", new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
+              Field.nullable(
+                  "optional_double", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)));
+      String metadataFileLocation =
+          initialiseTableWithLargeSchema(schemaWithNonNullableColumns, tableName);
+      IcebergMetadata icebergMetadata = new IcebergMetadata();
+      icebergMetadata.setMetadataFileLocation(metadataFileLocation);
+      datasetConfig.getPhysicalDataset().setIcebergMetadata(icebergMetadata);
+
+      Table icebergTable = getIcebergTable(icebergModel, tableFolder);
+      IcebergTableIdentifier tableIdentifier =
+          icebergModel.getTableIdentifier(tableFolder.toPath().toString());
+
+      // Add an optional column.
+      SchemaConverter schemaConverter = SchemaConverter.getBuilder().build();
+      icebergModel.addColumns(
+          tableIdentifier,
+          schemaConverter.toIcebergFields(
+              List.of(Field.nullable("optional_bool", new ArrowType.Bool()))));
+      icebergTable.refresh();
+      Assert.assertTrue(icebergTable.schema().findField("optional_bool") != null);
+
+      // Change a required column to optional.
+      icebergModel.changeColumn(
+          tableIdentifier,
+          "required_int",
+          Field.nullable("optional_int", new ArrowType.Int(32, true)));
+      icebergTable.refresh();
+      Assert.assertTrue(icebergTable.schema().findField("optional_int") != null);
+      Assert.assertTrue(icebergTable.schema().findField("required_int") == null);
+
+      // Try to promote a column from INTEGER to FLOAT.
+      UserExceptionAssert.assertThatThrownBy(
+              () -> {
+                icebergModel.changeColumn(
+                    tableIdentifier,
+                    "optional_int",
+                    Field.nullable(
+                        "optional_int",
+                        new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)));
+              })
+          .hasErrorType(VALIDATION)
+          .hasMessageContaining(
+              "Cannot change data type of column [optional_int] from INTEGER to FLOAT");
+
+      UserExceptionAssert.assertThatThrownBy(
+              () -> {
+                icebergModel.changeColumn(
+                    tableIdentifier,
+                    "optional_int",
+                    Field.nullable(
+                        "optional_float",
+                        new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)));
+              })
+          .hasErrorType(VALIDATION)
+          .hasMessageContaining(
+              "Cannot change data type of column [optional_int] from INTEGER to FLOAT");
+
+      UserExceptionAssert.assertThatThrownBy(
+              () -> {
+                icebergModel.changeColumn(
+                    tableIdentifier,
+                    "optional_double",
+                    Field.notNullable(
+                        "required_double",
+                        new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)));
+              })
+          .hasErrorType(VALIDATION)
+          .hasMessageContaining(
+              "Cannot change column nullability: optional_double: optional -> required");
+
+      // Drop a column.
+      icebergModel.dropColumn(tableIdentifier, "optional_int");
+      icebergTable.refresh();
+      Assert.assertTrue(icebergTable.schema().findField("optional_int") == null);
+      Assert.assertEquals(3, icebergTable.schema().columns().size());
     } finally {
       FileUtils.deleteDirectory(tableFolder);
     }

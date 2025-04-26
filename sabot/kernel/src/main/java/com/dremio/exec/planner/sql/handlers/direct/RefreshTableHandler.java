@@ -28,7 +28,6 @@ import com.dremio.exec.store.metadatarefresh.MetadataRefreshQuery;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.file.proto.FileConfig;
@@ -49,12 +48,9 @@ public class RefreshTableHandler extends SimpleDirectHandler {
 
   private final Catalog catalog;
   private final boolean errorOnConcurrentRefresh;
-  private final NamespaceService namespaceService;
 
-  public RefreshTableHandler(
-      Catalog catalog, NamespaceService namespaceService, boolean errorOnConcurrentRefresh) {
+  public RefreshTableHandler(Catalog catalog, boolean errorOnConcurrentRefresh) {
     this.catalog = catalog;
-    this.namespaceService = namespaceService;
     this.errorOnConcurrentRefresh = errorOnConcurrentRefresh;
   }
 
@@ -157,7 +153,7 @@ public class RefreshTableHandler extends SimpleDirectHandler {
 
   private DatasetConfig getConfigFromNamespace(NamespaceKey key) {
     try {
-      return namespaceService.getDataset(key);
+      return catalog.getDataset(key);
     } catch (NamespaceNotFoundException ex) {
       return null;
     } catch (NamespaceException ex) {

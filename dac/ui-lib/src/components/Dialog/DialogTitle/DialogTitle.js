@@ -62,7 +62,18 @@ const DialogTitle = (props) => {
       <div className="dialogTitle__endChildren">
         {endChildren && endChildren}
         {onClose && (
-          <span className="dialogTitle__icon margin-left" onClick={onClose}>
+          <span
+            className="dialogTitle__icon margin-left"
+            onClick={onClose}
+            tabIndex={0}
+            aria-label="close dialog"
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                e.preventDefault();
+                onClose();
+              }
+            }}
+          >
             <CloseIcon />
           </span>
         )}

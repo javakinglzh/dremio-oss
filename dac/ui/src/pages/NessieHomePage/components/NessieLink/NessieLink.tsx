@@ -18,6 +18,12 @@ import { useNessieContext } from "../../utils/context";
 
 function NessieLink({ to, ...props }: any) {
   const { baseUrl } = useNessieContext();
-  return <Link {...props} to={`${baseUrl}${to}`} />;
+  return (
+    <Link
+      {...props}
+      tabIndex={props.disabled ? -1 : 0}
+      to={`${baseUrl}${to}`}
+    />
+  );
 }
 export default NessieLink;

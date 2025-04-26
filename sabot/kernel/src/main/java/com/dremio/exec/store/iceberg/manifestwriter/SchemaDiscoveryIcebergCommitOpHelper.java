@@ -78,7 +78,7 @@ public class SchemaDiscoveryIcebergCommitOpHelper extends IcebergCommitOpHelper
     super(context, config, fs);
     this.partitionColumns =
         Optional.ofNullable(config.getIcebergTableProps().getPartitionColumnNames())
-            .orElse(Collections.EMPTY_LIST);
+            .orElse(Collections.emptyList());
     this.implicitColSize =
         (int)
             partitionColumns.stream().filter(IncrementalUpdateUtils.UPDATE_COLUMN::equals).count();

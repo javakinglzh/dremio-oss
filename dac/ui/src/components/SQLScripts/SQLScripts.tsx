@@ -63,7 +63,6 @@ import {
   handleOpenTabScript,
 } from "./sqlScriptsUtils";
 import { $SqlRunnerSession } from "dremio-ui-common/sonar/SqlRunnerSession/resources/SqlRunnerSessionResource.js";
-import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
 
 import SQLScriptRenameDialog from "./components/SQLScriptRenameDialog/SQLScriptRenameDialog";
 import { ScriptsResource } from "dremio-ui-common/sonar/scripts/resources/ScriptsResource.js";

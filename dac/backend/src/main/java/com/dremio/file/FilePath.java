@@ -15,6 +15,8 @@
  */
 package com.dremio.file;
 
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
+
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.model.common.LeafEntity;
 import com.dremio.dac.model.common.NamespacePath;
@@ -65,7 +67,7 @@ public final class FilePath extends NamespacePath {
     if (TempSpace.isTempSpace(name)) {
       return TempSpace.impl();
     }
-    if (name.startsWith(HomeName.HOME_PREFIX)) {
+    if (isHomeSpace(name)) {
       return new HomeName(name);
     }
     return new SpaceName(name);

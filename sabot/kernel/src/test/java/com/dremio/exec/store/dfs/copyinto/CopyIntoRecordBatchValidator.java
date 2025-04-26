@@ -81,6 +81,9 @@ public class CopyIntoRecordBatchValidator extends RecordBatchValidatorDefaultImp
       return !fileReader.isSet() && expectedValue == null;
     }
     String actualValue = fileReader.readObject().toString();
+    if (Objects.equals(expectedValue, actualValue)) {
+      return true;
+    }
     CopyIntoFileLoadInfo expectedInfo =
         FileLoadInfo.Util.getInfo(expectedValue, CopyIntoFileLoadInfo.class);
     CopyIntoFileLoadInfo actualInfo =

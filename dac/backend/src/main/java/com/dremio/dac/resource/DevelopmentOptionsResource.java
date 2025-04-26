@@ -17,14 +17,11 @@ package com.dremio.dac.resource;
 
 import com.dremio.dac.annotations.RestResource;
 import com.dremio.dac.annotations.Secured;
-import com.dremio.dac.proto.model.acceleration.SystemSettingsApiDescriptor;
+import com.dremio.dac.options.ReflectionUserOptions;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
-import com.dremio.exec.ExecConstants;
 import com.dremio.exec.server.options.ProjectOptionManager;
 import com.dremio.options.OptionValue;
-import com.dremio.service.reflection.ReflectionOptions;
 import com.dremio.service.reflection.ReflectionService;
-import com.google.common.base.Preconditions;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
 import javax.ws.rs.Consumes;
@@ -59,7 +56,8 @@ public class DevelopmentOptionsResource {
   @Path("/acceleration/enabled")
   @Produces(MediaType.APPLICATION_JSON)
   public String isGlobalAccelerationEnabled() {
-    return Boolean.toString(reflectionServiceHelper.isSubstitutionEnabled());
+    return Boolean.toString(
+        projectOptionManager.getOption(ReflectionUserOptions.REFLECTION_ENABLE_SUBSTITUTION));
   }
 
   @GET
@@ -75,7 +73,11 @@ public class DevelopmentOptionsResource {
   @Produces(MediaType.APPLICATION_JSON)
   public String setAccelerationEnabled(/* Body */ String body) {
     boolean enabled = Boolean.valueOf(body);
-    reflectionServiceHelper.setSubstitutionEnabled(enabled);
+    projectOptionManager.setOption(
+        OptionValue.createBoolean(
+            OptionValue.OptionType.SYSTEM,
+            ReflectionUserOptions.REFLECTION_ENABLE_SUBSTITUTION.getOptionName(),
+            enabled));
     return body;
   }
 
@@ -95,54 +97,5 @@ public class DevelopmentOptionsResource {
   @Path("/acceleration/clean")
   public void clean() {
     reflectionService.clean();
-  }
-
-  @GET
-  @Path("/acceleration/settings")
-  @Produces(MediaType.APPLICATION_JSON)
-  public SystemSettingsApiDescriptor getSystemSettings() {
-    return new SystemSettingsApiDescriptor()
-        .setLimit((int) projectOptionManager.getOption(ReflectionOptions.MAX_AUTOMATIC_REFLECTIONS))
-        .setAccelerateAggregation(
-            projectOptionManager.getOption(ReflectionOptions.ENABLE_AUTOMATIC_AGG_REFLECTIONS))
-        .setAccelerateRaw(
-            projectOptionManager.getOption(ReflectionOptions.ENABLE_AUTOMATIC_RAW_REFLECTIONS))
-        .setLayoutRefreshMaxAttempts(
-            (int) projectOptionManager.getOption(ExecConstants.LAYOUT_REFRESH_MAX_ATTEMPTS));
-  }
-
-  @PUT
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
-  @Path("/acceleration/settings")
-  public void saveSystemSettings(final SystemSettingsApiDescriptor descriptor) {
-    Preconditions.checkArgument(descriptor.getLimit() != null, "limit is required");
-    Preconditions.checkArgument(descriptor.getLimit() > 0, "limit must be positive");
-    Preconditions.checkArgument(
-        descriptor.getAccelerateAggregation() != null, "accelerateAggregation is required");
-    Preconditions.checkArgument(descriptor.getAccelerateRaw() != null, "accelerateRaw is required");
-
-    projectOptionManager.setOption(
-        OptionValue.createLong(
-            OptionValue.OptionType.SYSTEM,
-            ReflectionOptions.MAX_AUTOMATIC_REFLECTIONS.getOptionName(),
-            descriptor.getLimit()));
-    projectOptionManager.setOption(
-        OptionValue.createBoolean(
-            OptionValue.OptionType.SYSTEM,
-            ReflectionOptions.ENABLE_AUTOMATIC_AGG_REFLECTIONS.getOptionName(),
-            descriptor.getAccelerateAggregation()));
-    projectOptionManager.setOption(
-        OptionValue.createBoolean(
-            OptionValue.OptionType.SYSTEM,
-            ReflectionOptions.ENABLE_AUTOMATIC_RAW_REFLECTIONS.getOptionName(),
-            descriptor.getAccelerateRaw()));
-    if (descriptor.getLayoutRefreshMaxAttempts() != null) {
-      projectOptionManager.setOption(
-          OptionValue.createLong(
-              OptionValue.OptionType.SYSTEM,
-              ExecConstants.LAYOUT_REFRESH_MAX_ATTEMPTS.getOptionName(),
-              descriptor.getLayoutRefreshMaxAttempts()));
-    }
   }
 }

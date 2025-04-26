@@ -16,7 +16,6 @@
 package com.dremio.exec.planner.serializer.core;
 
 import com.dremio.exec.planner.serializer.RelNodeSerde;
-import com.dremio.exec.planner.serializer.RelTraitSetSerde;
 import com.dremio.plan.serialization.PAbstractRelNode;
 import com.dremio.plan.serialization.PCollect;
 import com.dremio.plan.serialization.PSingleRel;

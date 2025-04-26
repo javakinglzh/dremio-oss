@@ -227,7 +227,7 @@ public class TestFilterCostEstimation {
             DremioTest.DEFAULT_SABOT_CONFIG, optionManager, () -> clusterResourceInformation);
     RelOptPlanner planner = new VolcanoPlanner(new DremioCost.Factory(), plannerSettings);
     RelOptCluster cluster = RelOptCluster.create(planner, rexBuilder);
-    cluster.setMetadataQuery(DremioRelMetadataQuery.QUERY_SUPPLIER);
+    cluster.setMetadataQuerySupplier(DremioRelMetadataQuery.QUERY_SUPPLIER);
 
     when(dataset.getDatasetConfig()).thenReturn(datasetConfig);
     when(dataset.getSplitRatio()).thenReturn(1.0d);

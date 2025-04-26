@@ -812,4 +812,41 @@ public class TestIncrementalUpdateServiceUtils extends BaseTestQuery {
     assertEquals(tableMetadata, refreshDetails.getBaseTableMetadata());
     assertEquals(snapshotId, refreshDetails.getBaseTableSnapshotId());
   }
+
+  @Test
+  public void testMultipleDynamicFunctionInstances() throws Exception {
+    final String sql =
+        String.format("SELECT now() n1, now() n2, * FROM %s", icebergTable.getTableName());
+
+    final SqlNode node = converter.parse(sql);
+
+    final ConvertedRelNode convertedRelNode =
+        SqlToRelTransformer.validateAndConvert(sqlHandlerConfig, node);
+
+    AccelerationSettings accelerationSettings =
+        new AccelerationSettings().setMethod(RefreshMethod.INCREMENTAL).setRefreshField("abc");
+    when(reflectionSettings.getReflectionSettings(any(CatalogEntityKey.class)))
+        .thenReturn(accelerationSettings);
+    when(optionManager.getOption(
+            ReflectionOptions.REFLECTION_ICEBERG_SNAPSHOT_BASED_INCREMENTAL_ENABLED))
+        .thenReturn(true);
+    when(optionManager.getOption(
+            ReflectionOptions.REFLECTION_UNLIMITED_SPLITS_SNAPSHOT_BASED_INCREMENTAL))
+        .thenReturn(true);
+
+    // TEST
+    IncrementalUpdateServiceUtils.RefreshDetails refreshDetails =
+        IncrementalUpdateServiceUtils.extractRefreshDetails(
+            convertedRelNode.getConvertedNode(),
+            reflectionSettings,
+            reflectionService,
+            optionManager,
+            config,
+            ImmutableList.of(DremioSqlOperatorTable.NOW, DremioSqlOperatorTable.NOW));
+
+    // Assert refresh decision message only references the function once
+    assertEquals(
+        "Cannot do incremental update because the reflection has dynamic function(s): NOW",
+        refreshDetails.getFullRefreshReason());
+  }
 }

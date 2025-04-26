@@ -225,6 +225,16 @@ public class LocalClusterCoordinator extends ClusterCoordinator {
     }
 
     @Override
+    public void forceDeleteParticipantNode(String expectedNodeData) {
+      // no op
+    }
+
+    @Override
+    public DistributedLease acquire(long time, TimeUnit unit, byte[] nodeData) throws Exception {
+      return acquire(1, time, unit);
+    }
+
+    @Override
     public DistributedLease acquire(int numPermits, long timeout, TimeUnit timeUnit)
         throws Exception {
       Preconditions.checkArgument(numPermits > 0, "numPermits must be a positive integer");

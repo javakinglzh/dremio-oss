@@ -21,15 +21,14 @@
   "type": "module",
   "exports": {
     "./cloud": "./dist/src/cloud/index.js",
-    "./community": "./dist/src/community/index.js",
     "./enterprise": "./dist/src/enterprise/index.js",
-    "./interfaces": "./dist/src/interfaces/index.js"
+    "./oss": "./dist/src/oss/index.js"
   },
   "scripts": {
     "apiTypes": "openapi-typescript \"../../../openapi/community/v4/components/*.yaml\" --output ./apiTypes/v4/components/ && openapi-typescript \"../../../openapi/community/v2/endpoints/*.yaml\" --output ./apiTypes/v2/endpoints/ && openapi-typescript \"../../../openapi/community/v3/endpoints/*.yaml\" --output ./apiTypes/v3/endpoints/",
     "check-licenses": "jsgl --local .",
     "dist": "tsc",
-    "docs": "typedoc src/community/index.ts",
+    "docs": "typedoc src/oss/index.ts --hideGenerator --out ./docs/oss && typedoc src/enterprise/index.ts --hideGenerator --out ./docs/enterprise && typedoc src/cloud/index.ts --hideGenerator --out ./docs/cloud",
     "lint": "eslint src",
     "prepare": "node --run dist"
   },
@@ -44,6 +43,7 @@
   "devDependencies": {
     "@eslint/js": "9.9.1",
     "@types/deep-equal": "1.0.4",
+    "apache-arrow": ">=17",
     "eslint": "9.9.1",
     "eslint-config-prettier": "9.1.0",
     "eslint-plugin-perfectionist": "3.2.0",
@@ -51,8 +51,9 @@
     "js-green-licenses": "4.0.0",
     "openapi-typescript": "6.6.0",
     "prettier": "3.3.2",
-    "typedoc": "0.26.2",
-    "typescript": "5.5.4",
+    "temporal-polyfill": ">=0.2.5",
+    "typedoc": "0.27.6",
+    "typescript": "5.7.2",
     "typescript-eslint": "8.2.0"
   },
   "peerDependencies": {
@@ -67,5 +68,5 @@
       "optional": true
     }
   },
-  "packageManager": "pnpm@9.9.0"
+  "packageManager": "pnpm@9.13.2"
 }

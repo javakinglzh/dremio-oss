@@ -33,6 +33,7 @@ import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
+import com.dremio.exec.catalog.FunctionManagingPlugin;
 import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.SourceCatalog;
 import com.dremio.exec.catalog.VersionedPlugin;
@@ -131,6 +132,8 @@ public class TestUserDefinedFunctionCatalogImpl {
     when(mockVersionedPlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(mockVersionedPlugin.isWrapperFor(MutablePlugin.class)).thenReturn(true);
     when(mockVersionedPlugin.unwrap(MutablePlugin.class)).thenReturn(mockVersionedPlugin);
+    when(mockVersionedPlugin.isWrapperFor(FunctionManagingPlugin.class)).thenReturn(true);
+    when(mockVersionedPlugin.unwrap(FunctionManagingPlugin.class)).thenReturn(mockVersionedPlugin);
     UserSession userSession = mock(UserSession.class);
     when(queryContext.getSession()).thenReturn(userSession);
     VersionContext testBranchVersionContext = VersionContext.ofBranch("test_branch");
@@ -191,5 +194,6 @@ public class TestUserDefinedFunctionCatalogImpl {
     assertThatNoException().isThrownBy(() -> newUDFCatalog().getAllFunctions());
   }
 
-  private interface MockVersionedPlugin extends VersionedPlugin, MutablePlugin {}
+  private interface MockVersionedPlugin
+      extends VersionedPlugin, MutablePlugin, FunctionManagingPlugin {}
 }

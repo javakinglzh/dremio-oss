@@ -45,6 +45,7 @@ import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -64,9 +65,7 @@ public class TestChronicle extends BaseTestServer {
         InProcessServerBuilder.forName(name)
             .directExecutor()
             .addService(new JobsServiceAdapter(p(LocalJobsService.class)))
-            .addService(
-                new Chronicle(
-                    p(LocalJobsService.class), () -> getSabotContext().getExecutorService()))
+            .addService(new Chronicle(p(LocalJobsService.class), p(ExecutorService.class)))
             .build();
     server.start();
 

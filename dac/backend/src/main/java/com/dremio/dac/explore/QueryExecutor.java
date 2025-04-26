@@ -21,7 +21,6 @@ import static java.lang.String.format;
 
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserRemoteException;
-import com.dremio.common.util.DremioEdition;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.model.common.DACRuntimeException;
 import com.dremio.dac.model.job.JobData;
@@ -161,7 +160,7 @@ public class QueryExecutor {
 
     try {
       // don't check the cache for UI_RUN queries
-      if (queryType != QueryType.UI_RUN && DremioEdition.get() != DremioEdition.MARKETPLACE) {
+      if (queryType != QueryType.UI_RUN) {
         final SearchJobsRequest.Builder requestBuilder =
             SearchJobsRequest.newBuilder()
                 .setLimit(MAX_JOBS_TO_SEARCH)

@@ -26,7 +26,6 @@ import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.lang.reflect.InvocationTargetException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
@@ -393,29 +392,12 @@ public class YarnExecutorLogsProvider implements ExecutorLogsProvider {
         if (Response.Status.UNAUTHORIZED.getStatusCode() == verificationResponse.getStatus()) {
           authenticationRequired = true;
           authHeaders = String.join(",", authenticateHeader);
-          // If MAPR ..
-          if (authenticateHeader.contains("MAPR-Negotiate")) {
-            @SuppressWarnings("unchecked")
-            Class<? extends Authenticator> authenticatorClass =
-                (Class<? extends Authenticator>)
-                    Class.forName("com.mapr.security.maprauth.MaprAuthenticator");
-            authenticator = authenticatorClass.getDeclaredConstructor().newInstance();
-          } else {
-            // If not Not MAPR, we just use default authenticator.
-            hadoopUserGroupInfo = UserGroupInformation.getLoginUser();
-            if (hadoopUserGroupInfo.isFromKeytab()) {
-              hadoopUserGroupInfo.checkTGTAndReloginFromKeytab();
-            }
-            authenticator = new KerberosAuthenticator();
+          hadoopUserGroupInfo = UserGroupInformation.getLoginUser();
+          if (hadoopUserGroupInfo.isFromKeytab()) {
+            hadoopUserGroupInfo.checkTGTAndReloginFromKeytab();
           }
+          authenticator = new KerberosAuthenticator();
         }
-      } catch (ClassNotFoundException
-          | InstantiationException
-          | IllegalAccessException
-          | NoSuchMethodException e) {
-        throw new LogsProviderException("Could not find MAPR Auth class", e);
-      } catch (InvocationTargetException e) {
-        throw new LogsProviderException("Error performing kerberos login", e.getCause());
       } catch (IOException e) {
         throw new LogsProviderException("Error performing kerberos login", e);
       }

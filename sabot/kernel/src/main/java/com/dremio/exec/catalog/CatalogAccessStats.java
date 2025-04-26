@@ -16,38 +16,37 @@
 package com.dremio.exec.catalog;
 
 import com.dremio.catalog.model.CatalogEntityKey;
-import com.dremio.common.utils.PathUtils;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import javax.annotation.concurrent.ThreadSafe;
+import org.apache.commons.lang3.tuple.Pair;
 import org.immutables.value.Value;
 
 @ThreadSafe
 public class CatalogAccessStats {
 
-  private final ConcurrentMap<CatalogEntityKey, Stats> stats;
+  private final ConcurrentMap<Pair<CatalogIdentity, CatalogEntityKey>, Stats> stats;
+  private final ConcurrentMap<Pair<CatalogIdentity, CatalogEntityKey>, Boolean> requestedDatasets;
 
   public CatalogAccessStats() {
     this.stats = new ConcurrentHashMap<>();
+    this.requestedDatasets = new ConcurrentHashMap<>();
   }
 
-  private static String formatVersionContext(CatalogEntityKey key) {
-    if (key.getTableVersionContext() != null) {
-      return String.format(" [%s] ", key.getTableVersionContext());
-    }
-    return " ";
+  public void addRequestedDataset(CatalogIdentity identity, CatalogEntityKey key) {
+    requestedDatasets.putIfAbsent(Pair.of(identity, key), Boolean.TRUE);
   }
 
-  public void add(
-      CatalogEntityKey key, long accessTimeMillis, int resolutionCount, DatasetType datasetType) {
+  public void addLoadedDataset(
+      CatalogIdentity identity,
+      CatalogEntityKey key,
+      long accessTimeMillis,
+      int resolutionCount,
+      DatasetType datasetType) {
     stats.compute(
-        key,
+        Pair.of(identity, key),
         (k, v) ->
             v == null
                 ? Stats.builder()
@@ -64,50 +63,68 @@ public class CatalogAccessStats {
 
   public CatalogAccessStats merge(CatalogAccessStats other) {
     CatalogAccessStats merged = new CatalogAccessStats();
+    requestedDatasets.forEach((k, v) -> merged.addRequestedDataset(k.getLeft(), k.getRight()));
+    other.requestedDatasets.forEach(
+        (k, v) -> merged.addRequestedDataset(k.getLeft(), k.getRight()));
     stats.forEach(
-        (k, v) -> merged.add(k, v.accessTimeMillis(), v.resolutionCount(), v.datasetType()));
+        (k, v) ->
+            merged.addLoadedDataset(
+                k.getLeft(),
+                k.getRight(),
+                v.accessTimeMillis(),
+                v.resolutionCount(),
+                v.datasetType()));
     other.stats.forEach(
-        (k, v) -> merged.add(k, v.accessTimeMillis(), v.resolutionCount(), v.datasetType()));
+        (k, v) ->
+            merged.addLoadedDataset(
+                k.getLeft(),
+                k.getRight(),
+                v.accessTimeMillis(),
+                v.resolutionCount(),
+                v.datasetType()));
     return merged;
   }
 
-  public List<UserBitShared.PlanPhaseProfile> toPlanPhaseProfiles() {
-    List<UserBitShared.PlanPhaseProfile> phaseProfiles = new ArrayList<>(stats.size() + 1);
+  public boolean isEmpty() {
+    return requestedDatasets.isEmpty();
+  }
 
+  public int getTotalDatasets() {
+    return stats.size();
+  }
+
+  public int getTotalResolvedKeys() {
+    return stats.values().stream().mapToInt(Stats::resolutionCount).sum();
+  }
+
+  public UserBitShared.PlanPhaseProfile getAverageCatalogAccessProfile() {
     double avgTime = stats.values().stream().mapToLong(Stats::accessTimeMillis).average().orElse(0);
     long totalResolutions = stats.values().stream().mapToInt(Stats::resolutionCount).sum();
+    return UserBitShared.PlanPhaseProfile.newBuilder()
+        .setPhaseName(
+            String.format(
+                "Average Catalog Access for %d Total Dataset(s): using %d resolved key(s)",
+                stats.size(), totalResolutions))
+        .setDurationMillis((long) avgTime)
+        .build();
+  }
 
-    phaseProfiles.add(
-        UserBitShared.PlanPhaseProfile.newBuilder()
-            .setPhaseName(
+  @Override
+  public String toString() {
+    StringBuilder builder = new StringBuilder();
+    builder.append("\nRequested Datasets:\n");
+    requestedDatasets.forEach((k, v) -> builder.append(k.getRight()).append("\n"));
+    builder.append(
+        String.format(
+            "\nCatalog Access for %d dataset(s) using %d resolved key(s):\n",
+            getTotalDatasets(), getTotalResolvedKeys()));
+    stats.forEach(
+        (k, v) ->
+            builder.append(
                 String.format(
-                    "Average Catalog Access for %d Total Dataset(s): using %d resolved key(s)",
-                    stats.size(), totalResolutions))
-            .setDurationMillis((long) avgTime)
-            .build());
-
-    Comparator<Map.Entry<CatalogEntityKey, Stats>> orderByTime =
-        Comparator.comparingLong(e -> e.getValue().accessTimeMillis());
-
-    stats.entrySet().stream()
-        .sorted(orderByTime.reversed())
-        .forEach(
-            entry -> {
-              CatalogEntityKey catalogEntityKey = entry.getKey();
-              phaseProfiles.add(
-                  UserBitShared.PlanPhaseProfile.newBuilder()
-                      .setPhaseName(
-                          String.format(
-                              "Catalog Access for %s%s(%s): using %d resolved key(s)",
-                              PathUtils.constructFullPath(catalogEntityKey.getKeyComponents()),
-                              formatVersionContext(catalogEntityKey),
-                              entry.getValue().datasetType(),
-                              entry.getValue().resolutionCount()))
-                      .setDurationMillis(entry.getValue().accessTimeMillis())
-                      .build());
-            });
-
-    return phaseProfiles;
+                    "%s(%s): using %d resolved key(s) (%d ms)\n",
+                    k.getRight(), v.datasetType(), v.resolutionCount(), v.accessTimeMillis())));
+    return builder.toString();
   }
 
   @Value.Immutable

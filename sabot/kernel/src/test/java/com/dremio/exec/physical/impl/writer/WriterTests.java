@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.physical.impl.writer;
 
-import static com.dremio.exec.planner.sql.DmlQueryTestUtils.createBasicTable;
+import static com.dremio.exec.planner.sql.DmlQueryTestUtils.createBasicTableWithIcebergProperties;
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.testDmlQuery;
 import static com.dremio.sabot.op.sender.partition.vectorized.AdaptiveVectorizedPartitionSenderOperator.calculateDop;
 import static com.dremio.test.scaffolding.ScaffoldingRel.TYPE_FACTORY;
@@ -50,6 +50,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.Float8Vector;
@@ -59,6 +60,7 @@ import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.Pair;
 import org.apache.commons.io.FileUtils;
+import org.apache.iceberg.TableProperties;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -66,6 +68,16 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 import org.mockito.Mockito;
 
+/**
+ * Note: Writing small Parquet files with accurate size is a difficult problem. This is because we
+ * are trying to estimate the size of the row group before actually compress the pages and write the
+ * related metadata. To support more accurate estimates, we use uncompressed pages in this test. In
+ * this case however the generated files will be larger than the target file size because of the
+ * overhead of the footer. (These kinds of issues are less likely to occur in larger files because
+ * we generate more data pages so we estimate the final size of the row groups better.)
+ *
+ * <p>For example the target file size of 2000 bytes results ~3400 bytes files in this test.
+ */
 public class WriterTests extends BaseTestQuery {
   private static final String SOURCE = TEMP_SCHEMA_HADOOP;
 
@@ -166,6 +178,16 @@ public class WriterTests extends BaseTestQuery {
     }
   }
 
+  private Map<String, String> createTblProps(long targetFileSize) {
+    return Map.of(
+        TableProperties.WRITE_TARGET_FILE_SIZE_BYTES,
+        Long.toString(targetFileSize),
+        // We are using uncompressed pages to make the estimate of the row group size during the
+        // writing more predictable. (See more details at the class comment.)
+        TableProperties.PARQUET_COMPRESSION,
+        "uncompressed");
+  }
+
   private void testCombiningSmallFiles(
       Long smallFileThreshold,
       Long firstRoundWritingTargetFileSize,
@@ -184,7 +206,10 @@ public class WriterTests extends BaseTestQuery {
     setSessionOption(
         ExecConstants.TARGET_COMBINED_SMALL_PARQUET_BLOCK_SIZE_VALIDATOR,
         secondRoundWritingTargetFileSize);
-    try (DmlQueryTestUtils.Table table = createBasicTable(SOURCE, columnCount, rowCount)) {
+
+    try (DmlQueryTestUtils.Table table =
+        createBasicTableWithIcebergProperties(
+            SOURCE, columnCount, rowCount, createTblProps(firstRoundWritingTargetFileSize))) {
       Object[][] expectedData = table.originalData;
 
       // verify Insert writing results
@@ -238,24 +263,24 @@ public class WriterTests extends BaseTestQuery {
   public void testCombiningSmallFilesForUnpartitionedAndSinglePartitionedTableNoSmallFiles()
       throws Exception {
     // first round writing target size = 2000 bytes
-    // real parquet file size from first round ~ 2368 bytes
+    // real parquet file size from first round ~ 3400 bytes (see details at the class comment)
     // small file threshold = 1000, which is smaller than real parquet file size from first round.
     // Second-round writing is not supposed to be triggered
     // data files in Iceberg table are from first-round writing (10)
 
     // unparitioned table
-    testCombiningSmallFiles(1000L, 2000L, 10000L, null, 3, 1000, 10, 10L, 2000);
+    testCombiningSmallFiles(1000L, 2000L, 10000L, null, 3, 1000, 10, 10L, 1500);
 
     // single partitioned table
-    testCombiningSmallFiles(1000L, 2000L, 10000L, 1, 3, 1000, 10, 10L, 1500);
+    testCombiningSmallFiles(1000L, 2000L, 10000L, 1, 3, 1000, 10, 10L, 1400);
   }
 
   @Test
   public void testCombiningSmallFilesForUnpartitionedAndSinglePartitionedTableMoreSmallFiles()
       throws Exception {
     // first round writing target size = 4000 bytes
-    // real parquet file size from first round ~ 3374 bytes
-    // small file threshold = 4000, which is bigger than real parquet file size from first round.
+    // real parquet file size from first round ~ 5200 bytes
+    // small file threshold = 5500, which is bigger than real parquet file size from first round.
     // Second-round writing is triggered
     // files generated from first-round writing: 6
     // files generated from second-round writing: 10, because the target file size on the
@@ -263,17 +288,17 @@ public class WriterTests extends BaseTestQuery {
     // data files in Iceberg table are from second-round writing (10)
 
     // unparitioned table
-    testCombiningSmallFiles(4000L, 4000L, 2000L, null, 3, 1000, 10, 10L, 2000);
+    testCombiningSmallFiles(5500L, 4000L, 2000L, null, 3, 1000, 10, 10L, 1600);
 
     // single partitioned table
-    testCombiningSmallFiles(4000L, 4000L, 2000L, 1, 3, 1000, 10, 10L, 1000);
+    testCombiningSmallFiles(5500L, 4000L, 2000L, 1, 3, 1000, 10, 10L, 1000);
   }
 
   @Test
   public void testCombiningSmallFilesForUnpartitionedAndSinglePartitionedTableLessSmallFiles()
       throws Exception {
     // first round writing target size = 2000 bytes
-    // real parquet file size from first round ~ 2372 bytes
+    // real parquet file size from first round ~ 3400 bytes (see details at the class comment)
     // small file threshold = 3000, which is bigger than real parquet file size from first round.
     // Second-round writing is triggered
     // files generated from first-round writing: 10
@@ -283,10 +308,10 @@ public class WriterTests extends BaseTestQuery {
     // data files in Iceberg table are from second-round writing (6)
 
     // unparitioned table
-    testCombiningSmallFiles(3000L, 2000L, 4000L, null, 3, 1000, 6, 6L, 3000);
+    testCombiningSmallFiles(3500L, 2000L, 4000L, null, 3, 1000, 6, 6L, 1800);
 
     // single partitioned table
-    testCombiningSmallFiles(3000L, 2000L, 4000L, 1, 3, 1000, 6, 6L, 2000);
+    testCombiningSmallFiles(3500L, 2000L, 4000L, 1, 3, 1000, 6, 6L, 1500);
   }
 
   @Test
@@ -294,7 +319,7 @@ public class WriterTests extends BaseTestQuery {
       testCombiningSmallFilesForUnpartitionedAndSinglePartitionedTableCombinedAllSmallFiles()
           throws Exception {
     // first round writing target size = 2000 bytes
-    // real parquet file size from first round ~ 2372 bytes
+    // real parquet file size from first round ~ 3400 bytes (see details at the class comment)
     // small file threshold = 3000, which is bigger than real parquet file size from first round.
     // Second-round writing is triggered
     // files generated from first-round writing: 10
@@ -304,10 +329,10 @@ public class WriterTests extends BaseTestQuery {
     // data files in Iceberg table are from second-round writing (1)
 
     // unparitioned table
-    testCombiningSmallFiles(3000L, 2000L, 30000L, null, 3, 1000, 1, 1L, 10000);
+    testCombiningSmallFiles(3500L, 2000L, 30000L, null, 3, 1000, 1, 1L, 4500);
 
     // single partitioned table
-    testCombiningSmallFiles(3000L, 2000L, 30000L, 1, 3, 1000, 1, 1L, 5000);
+    testCombiningSmallFiles(3500L, 2000L, 30000L, 1, 3, 1000, 1, 1L, 2600);
   }
 
   @Test
@@ -315,7 +340,7 @@ public class WriterTests extends BaseTestQuery {
       testCombiningSmallFilesForUnpartitionedAndSinglePartitionedTableCombinedAllSmallFilesDml()
           throws Exception {
     // first round writing target size = 2000 bytes
-    // real parquet file size from first round ~ 2372 bytes
+    // real parquet file size from first round ~ 3400 bytes (see details at the class comment)
     // small file threshold = 3000, which is bigger than real parquet file size from first round.
     // Second-round writing is triggered
     // files generated from first-round writing: 10
@@ -325,10 +350,10 @@ public class WriterTests extends BaseTestQuery {
     // data files in Iceberg table are from second-round writing (1)
 
     // unparitioned table
-    testCombiningSmallFiles(3000L, 2000L, 30000L, null, 3, 1000, 1, 1L, 10000);
+    testCombiningSmallFiles(3500L, 2000L, 30000L, null, 3, 1000, 1, 1L, 4500);
 
     // single partitioned table
-    testCombiningSmallFiles(3000L, 2000L, 30000L, 1, 3, 1000, 1, 1L, 5000);
+    testCombiningSmallFiles(3500L, 2000L, 30000L, 1, 3, 1000, 1, 1L, 2600);
   }
 
   @Test
@@ -336,7 +361,7 @@ public class WriterTests extends BaseTestQuery {
     try (AutoCloseable ignored =
         withOption(ExecConstants.PARQUET_AUTO_CORRECT_DATES_VALIDATOR, true)) {
       // unparitioned table
-      testCombiningSmallFiles(3000L, 2000L, 30000L, null, 3, 1000, 1, 1L, 10000);
+      testCombiningSmallFiles(3500L, 2000L, 30000L, null, 3, 1000, 1, 1L, 4500);
     }
   }
 
@@ -355,11 +380,14 @@ public class WriterTests extends BaseTestQuery {
     setSessionOption(
         ExecConstants.SMALL_PARQUET_BLOCK_SIZE_RATIO,
         smallFileThreshold / (double) smallFileTargetFileSize);
+
     // set target small file size the same as PARQUET_BLOCK_SIZE. thus, no small file combination
     // happened
     setSessionOption(
         ExecConstants.TARGET_COMBINED_SMALL_PARQUET_BLOCK_SIZE_VALIDATOR, smallFileTargetFileSize);
-    try (DmlQueryTestUtils.Table table = createBasicTable(SOURCE, columnCount, rowCount)) {
+    try (DmlQueryTestUtils.Table table =
+        createBasicTableWithIcebergProperties(
+            SOURCE, columnCount, rowCount, createTblProps(smallFileTargetFileSize))) {
       Object[][] expectedData = table.originalData;
 
       // verify Insert writing results
@@ -385,7 +413,7 @@ public class WriterTests extends BaseTestQuery {
     /*
     1. generate 10 small files via insert command
         // first round writing target size = 2000 bytes
-        // real parquet file size from first round ~ 2372 bytes
+        // real parquet file size from first round ~ 3400 bytes (see details at the class comment)
         // small file threshold = 3000, which is bigger than real parquet file size from first round.
         // Second-round writing is triggered
         // files generated from first-round writing: 10
@@ -393,7 +421,7 @@ public class WriterTests extends BaseTestQuery {
         Since the small file threshold and small file combination target file size are overidden
         by Optimize's MIN_FILE_SIZE_MB and TARGET_FILE_SIZE_MB. Small file combination does not happen
      */
-    testOptimizeCommand(3000L, 2000L, 1L, 3, 1000, 10, 1, 1L, 10000);
+    testOptimizeCommand(3500L, 2000L, 1L, 3, 1000, 10, 1, 1L, 4500);
   }
 
   private static Set<String> getDataFilePaths(DmlQueryTestUtils.Table table) throws Exception {
@@ -696,8 +724,7 @@ public class WriterTests extends BaseTestQuery {
             SqlTypeFactoryImpl.INSTANCE.createStructType(
                 ImmutableList.of(
                     Maps.immutableEntry("id", TYPE_FACTORY.createSqlType(SqlTypeName.BIGINT)))),
-            null,
-            1L);
+            ImmutableList.of());
 
     DistributionTrait.DistributionField distributionField =
         new DistributionTrait.DistributionField(0);

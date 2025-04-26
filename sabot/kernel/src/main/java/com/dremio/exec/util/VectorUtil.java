@@ -26,8 +26,19 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorWrapper;
 import com.google.common.base.Joiner;
 import com.google.common.collect.Lists;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import org.apache.arrow.vector.BigIntVector;
+import org.apache.arrow.vector.Float4Vector;
+import org.apache.arrow.vector.Float8Vector;
+import org.apache.arrow.vector.IntVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VarBinaryVector;
+import org.apache.arrow.vector.VarCharVector;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.MapVector;
+import org.apache.arrow.vector.complex.StructVector;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.LocalDateTime;
@@ -230,5 +241,81 @@ public class VectorUtil {
     return vectorAccessible
         .getValueAccessorById(TypeHelper.getValueVectorClass(field), typedFieldId.getFieldIds())
         .getValueVector();
+  }
+
+  public static Object getValueAt(ValueVector vector, int index) {
+    if (vector == null || vector.getValueCount() <= index || index < 0) {
+      return null; // Out of bounds or null vector
+    }
+
+    if (vector.isNull(index)) {
+      return null; // Null value at the specified index
+    }
+
+    if (vector instanceof StructVector) {
+      // Handle StructVector
+      StructVector structVector = (StructVector) vector;
+      Map<String, Object> structValue = new HashMap<>();
+      for (String childName : structVector.getChildFieldNames()) {
+        ValueVector childVector = structVector.getChild(childName);
+        structValue.put(childName, getValueAt(childVector, index));
+      }
+      return structValue;
+    } else if (vector instanceof ListVector) {
+      // Handle ListVector
+      ListVector listVector = (ListVector) vector;
+      return listVector.getObject(index);
+    } else if (vector instanceof MapVector) {
+      // Handle MapVector
+      MapVector mapVector = (MapVector) vector;
+      return mapVector.getObject(index);
+    } else if (vector instanceof VarCharVector) {
+      return vector.getObject(index).toString();
+    } else {
+      // Handle primitive types
+      return vector.getObject(index);
+    }
+  }
+
+  public static void setValue(ValueVector vector, int index, Object value) {
+    if (value == null) {
+      return;
+    }
+
+    if (vector instanceof IntVector) {
+      ((IntVector) vector).setSafe(index, (Integer) value);
+    } else if (vector instanceof BigIntVector) {
+      ((BigIntVector) vector).setSafe(index, (Long) value);
+    } else if (vector instanceof Float4Vector) {
+      ((Float4Vector) vector).setSafe(index, (Float) value);
+    } else if (vector instanceof Float8Vector) {
+      ((Float8Vector) vector).setSafe(index, (Double) value);
+    } else if (vector instanceof VarCharVector) {
+      ((VarCharVector) vector).setSafe(index, value != null ? value.toString().getBytes() : null);
+    } else if (vector instanceof VarBinaryVector) {
+      ((VarBinaryVector) vector).setSafe(index, value != null ? (byte[]) value : null);
+    } else if (vector instanceof StructVector) {
+      setStructValue((StructVector) vector, index, value);
+    } else if (vector instanceof ListVector) {
+      // todo
+    } else {
+      throw new UnsupportedOperationException(
+          "Unsupported vector type: " + vector.getClass().getName());
+    }
+  }
+
+  public static void setStructValue(StructVector vector, int index, Object value) {
+    if (value instanceof Map) {
+      Map<String, Object> structValue = (Map<String, Object>) value;
+      for (String fieldName : structValue.keySet()) {
+        ValueVector childVector = vector.getChild(fieldName);
+        if (childVector != null) {
+          setValue(childVector, index, structValue.get(fieldName));
+        }
+      }
+      vector.setIndexDefined(index);
+    } else {
+      throw new IllegalArgumentException("StructVector requires a Map<String, Object> value.");
+    }
   }
 }

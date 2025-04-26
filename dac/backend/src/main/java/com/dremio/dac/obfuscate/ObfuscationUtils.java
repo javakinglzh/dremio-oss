@@ -42,13 +42,21 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import javax.inject.Provider;
+import org.apache.calcite.sql.SqlCall;
+import org.apache.calcite.sql.SqlNodeList;
+import org.apache.calcite.sql.util.SqlBasicVisitor;
 
 /**
  * Utils functions related to obfuscation. Each public util function should first check whether to
  * obfuscate and next step the actual obfuscation should be done.
+ *
+ * <p>Partial Obfuscation is the default behavior and results in obfuscation of all SQL literals and
+ * no obfuscation of SQL identifiers. Full Obfuscation results in obfuscation of both SQL literals
+ * and SQL identifiers
  */
 @Options
 public class ObfuscationUtils {
+
   private static final String FULL_OBFUSCATION_PROPERTY_NAME =
       "dremio.supportconsole.fullobfuscation.enabled";
   private static boolean fullObfuscation = Boolean.getBoolean(FULL_OBFUSCATION_PROPERTY_NAME);
@@ -495,5 +503,34 @@ public class ObfuscationUtils {
       return str;
     }
     return Integer.toHexString(str.toLowerCase().hashCode());
+  }
+
+  /**
+   * Skips obfuscation for specific system jobs so that we can preserve any SQL comments for
+   * supportability
+   *
+   * @param sqlNodeList
+   * @return
+   */
+  public static boolean shouldSkipObfuscation(SqlNodeList sqlNodeList) {
+    if (ObfuscationUtils.shouldObfuscateFull()) {
+      return false;
+    }
+    String operator =
+        sqlNodeList
+            .get(0)
+            .accept(
+                new SqlBasicVisitor<>() {
+                  @Override
+                  public String visit(SqlCall call) {
+                    return call.getOperator().getName();
+                  }
+                });
+    switch (operator) {
+      case "REFRESH_REFLECTION":
+        return true;
+      default:
+        return false;
+    }
   }
 }

@@ -17,6 +17,7 @@ package com.dremio.dac.api;
 
 import com.dremio.dac.model.spaces.HomeName;
 import com.dremio.dac.proto.model.collaboration.CollaborationTag;
+import com.dremio.service.namespace.SourceChangeStateUtils;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.function.proto.FunctionConfig;
@@ -29,9 +30,13 @@ import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.Lists;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Catalog Item */
 public class CatalogItem {
+  private static final Logger logger = LoggerFactory.getLogger(CatalogItem.class);
+
   /** Catalog Item Type */
   public enum CatalogItemType {
     DATASET,
@@ -64,6 +69,7 @@ public class CatalogItem {
   private final CollaborationTag tags;
   private final CatalogItemStats stats;
   @JsonISODateTime private final Long createdAt;
+  private final String sourceChangeState; // only for sources
 
   @JsonCreator
   protected CatalogItem(
@@ -75,7 +81,8 @@ public class CatalogItem {
       @JsonProperty("containerType") ContainerSubType containerType,
       @JsonProperty("tags") CollaborationTag tags,
       @JsonProperty("stats") CatalogItemStats stats,
-      @JsonProperty("createdAt") Long createdAt) {
+      @JsonProperty("createdAt") Long createdAt,
+      @JsonProperty("sourceChangeState") String sourceChangeState) {
     this.id = id;
     this.path = path;
     this.type = type;
@@ -85,6 +92,7 @@ public class CatalogItem {
     this.tags = tags;
     this.stats = stats;
     this.createdAt = createdAt;
+    this.sourceChangeState = sourceChangeState;
   }
 
   private static CatalogItem fromSourceConfig(SourceConfig sourceConfig, CollaborationTag tags) {
@@ -96,6 +104,9 @@ public class CatalogItem {
         .setContainerType(ContainerSubType.SOURCE)
         .setTags(tags)
         .setCreatedAt(sourceConfig.getCtime())
+        .setSourceChangeState(
+            SourceChangeStateUtils.convertFromSourceChangeState(
+                sourceConfig.getSourceChangeState()))
         .build();
   }
 
@@ -132,9 +143,12 @@ public class CatalogItem {
 
   private static CatalogItem fromFunctionConfig(
       FunctionConfig functionConfig, CollaborationTag tags) {
+    if (functionConfig.getFullPathList() == null) {
+      logger.warn("Function [{}] full path is null.", functionConfig.getName());
+    }
     return new Builder()
         .setId(functionConfig.getId().getId())
-        .setPath(Lists.newArrayList(functionConfig.getFullPathList()))
+        .setPath(functionConfig.getFullPathList())
         .setTag(String.valueOf(functionConfig.getTag()))
         .setType(CatalogItemType.CONTAINER)
         .setContainerType(ContainerSubType.FUNCTION)
@@ -215,6 +229,10 @@ public class CatalogItem {
 
   public Long getCreatedAt() {
     return createdAt;
+  }
+
+  public String getSourceChangeState() {
+    return sourceChangeState;
   }
 
   public static CatalogItem fromNamespaceContainer(NameSpaceContainer container) {
@@ -304,6 +322,7 @@ public class CatalogItem {
     private Integer datasetCount;
     private boolean datasetCountBounded;
     private Long createdAt;
+    private String sourceChangeState;
 
     public Builder() {}
 
@@ -316,7 +335,8 @@ public class CatalogItem {
           .setDatasetType(item.getDatasetType())
           .setContainerType(item.getContainerType())
           .setTags(item.getTags())
-          .setCreatedAt(item.getCreatedAt());
+          .setCreatedAt(item.getCreatedAt())
+          .setSourceChangeState(item.getSourceChangeState());
 
       if (stats != null) {
         this.setDatasetCount(stats.getDatasetCount())
@@ -374,9 +394,23 @@ public class CatalogItem {
       return this;
     }
 
+    public Builder setSourceChangeState(String sourceChangeState) {
+      this.sourceChangeState = sourceChangeState;
+      return this;
+    }
+
     public CatalogItem build() {
       return new CatalogItem(
-          id, path, tag, type, datasetType, containerType, tags, getStats(), createdAt);
+          id,
+          path,
+          tag,
+          type,
+          datasetType,
+          containerType,
+          tags,
+          getStats(),
+          createdAt,
+          sourceChangeState);
     }
 
     public String getId() {
@@ -416,6 +450,10 @@ public class CatalogItem {
 
     public Long getCreatedAt() {
       return createdAt;
+    }
+
+    public String getSourceChangeState() {
+      return sourceChangeState;
     }
   }
 }

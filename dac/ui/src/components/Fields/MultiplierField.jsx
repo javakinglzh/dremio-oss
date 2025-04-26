@@ -38,6 +38,7 @@ export default class MultiplierField extends Component {
     from: PropTypes.string,
     classes: PropTypes.object,
     isFullSpacedEvenly: PropTypes.bool,
+    container: PropTypes.node,
   };
 
   static defaultProps = {
@@ -126,7 +127,8 @@ export default class MultiplierField extends Component {
   }
 
   render() {
-    const { className, style, from, classes, isFullSpacedEvenly } = this.props;
+    const { className, style, from, classes, isFullSpacedEvenly, container } =
+      this.props;
     return (
       <span
         className={classNames(["field", rowOfInputsSpacing, className])}
@@ -165,6 +167,7 @@ export default class MultiplierField extends Component {
             ...(isFullSpacedEvenly ? fullEvenStyles.select : styles.select),
             ...(from === "queueControl" && { width: "225px" }),
           }}
+          container={container}
         />
       </span>
     );

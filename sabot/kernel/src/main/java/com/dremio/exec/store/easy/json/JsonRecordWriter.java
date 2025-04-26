@@ -23,9 +23,9 @@ import com.dremio.exec.store.EventBasedRecordWriter;
 import com.dremio.exec.store.EventBasedRecordWriter.FieldConverter;
 import com.dremio.exec.store.JSONOutputRecordWriter;
 import com.dremio.exec.store.WritePartition;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.easy.json.JSONFormatPlugin.JSONFormatConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.vector.complex.fn.BasicJsonOutput;
 import com.dremio.exec.vector.complex.fn.ExtendedJsonOutput;
 import com.dremio.exec.vector.complex.fn.JsonWriter;
@@ -51,7 +51,7 @@ public class JsonRecordWriter extends JSONOutputRecordWriter {
   private static final String LINE_FEED = String.format("%n");
 
   private final OperatorContext context;
-  private final FileSystemPlugin<?> plugin;
+  private final SupportsFsCreation fileSystemCreator;
   private final String queryUser;
 
   private String location;
@@ -89,12 +89,14 @@ public class JsonRecordWriter extends JSONOutputRecordWriter {
     this.uglify =
         !formatConfig.prettyPrint
             || context.getOptions().getOption(ExecConstants.JSON_WRITER_UGLIFY);
-    this.plugin = writer.getFormatPlugin().getFsPlugin();
+    this.fileSystemCreator = writer.getFileSystemCreator();
   }
 
   @Override
   public void setup() throws IOException {
-    this.fs = plugin.createFS(queryUser, context);
+    this.fs =
+        fileSystemCreator.createFS(
+            SupportsFsCreation.builder().userName(queryUser).operatorContext(context));
   }
 
   @Override

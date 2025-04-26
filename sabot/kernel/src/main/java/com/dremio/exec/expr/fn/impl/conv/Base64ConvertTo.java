@@ -41,7 +41,7 @@ public class Base64ConvertTo implements SimpleFunction {
   public void eval() {
     final String inputStr =
         com.dremio.exec.expr.fn.impl.StringFunctionHelpers.getStringFromNullableVarCharHolder(in);
-    final byte[] outBytea = javax.xml.bind.DatatypeConverter.parseBase64Binary(inputStr);
+    final byte[] outBytea = java.util.Base64.getDecoder().decode(inputStr);
     buffer = buffer.reallocIfNeeded(outBytea.length);
     out.buffer = buffer;
     out.buffer.setBytes(0, outBytea);

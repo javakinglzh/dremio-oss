@@ -19,13 +19,9 @@ import static org.projectnessie.tools.compatibility.internal.VersionsToExercise.
 import static org.projectnessie.tools.compatibility.internal.VersionsToExercise.valueFromResource;
 import static org.projectnessie.tools.compatibility.internal.VersionsToExercise.versionsFromValue;
 
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.Collections;
 import java.util.SortedSet;
-import java.util.function.Function;
-import java.util.function.Predicate;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.projectnessie.client.api.NessieApi;
 import org.projectnessie.tools.compatibility.api.Version;
@@ -36,16 +32,6 @@ import org.projectnessie.tools.compatibility.api.Version;
  * favour of interfacing with Nessie OSS code directly.
  */
 public class NessieTestApiBridge {
-
-  public static <A extends Annotation> void populateAnnotatedFields(
-      ExtensionContext context,
-      Object instance,
-      Class<A> annotationType,
-      Predicate<A> annotationFilter,
-      Function<Field, Object> fieldValue) {
-    AnnotatedFields.populateAnnotatedFields(
-        context, instance, annotationType, annotationFilter, fieldValue);
-  }
 
   public static SortedSet<Version> versionsFromResource() {
     return versionsFromValue(valueFromResource(NESSIE_VERSIONS_PROPERTY));

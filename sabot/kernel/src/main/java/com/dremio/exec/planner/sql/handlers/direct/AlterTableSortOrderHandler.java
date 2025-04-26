@@ -17,7 +17,6 @@ package com.dremio.exec.planner.sql.handlers.direct;
 
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
-import com.dremio.common.exceptions.UserException;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
@@ -48,6 +47,8 @@ public class AlterTableSortOrderHandler extends SimpleDirectHandlerWithValidator
     this.catalog = catalog;
     this.config = config;
   }
+
+  protected void handleCommandOptionConflicts(DremioTable table, NamespaceKey path) {}
 
   @Override
   public List<SimpleCommandResult> toResult(String sql, SqlNode sqlNode) throws Exception {
@@ -94,15 +95,7 @@ public class AlterTableSortOrderHandler extends SimpleDirectHandlerWithValidator
       message = String.format("Sort order has been removed from Table: [%S]", path.getRoot());
     } else {
       // Update Sort Order
-
-      // check if the table has clustering keys
-      if (IcebergUtils.hasClusteringColumns(table)) {
-        throw UserException.unsupportedError()
-            .message(
-                "Table: [%s] has clustering key already defined, please unset clustering keys before adding sort order",
-                path.getName())
-            .buildSilently();
-      }
+      handleCommandOptionConflicts(table, path);
       Set<String> fieldSet =
           table.getSchema().getFields().stream().map(Field::getName).collect(Collectors.toSet());
 

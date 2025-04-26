@@ -17,6 +17,7 @@ package com.dremio.common.util;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.SchemaPath;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,6 +51,10 @@ public class TestSchemaPathDeserializer {
         Arguments.of(SchemaPath.getCompoundPath("level1", "escape.needed")),
         Arguments.of(SchemaPath.getCompoundPath("level1", "escape`enclosing")),
         Arguments.of(SchemaPath.getSimplePath("escape`enclosing")),
+        Arguments.of(
+            new SchemaPath(
+                new PathSegment.NameSegment(
+                    "a", new PathSegment.ArraySegment(0, new PathSegment.ArraySegment(1))))),
         Arguments.of(SchemaPath.getSimplePath(".")),
         Arguments.of(SchemaPath.getSimplePath("`")),
         Arguments.of(SchemaPath.getSimplePath("\"")),

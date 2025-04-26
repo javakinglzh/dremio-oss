@@ -124,7 +124,8 @@ public class BlockJoinTableTest {
             ArgumentMatchers.<Class<LBlockHashTableFactory>>any());
     doReturn(mockedHashTable)
         .when(mockedHashTableFactory)
-        .getInstance(eq(optionManager), ArgumentMatchers.<HashTable.HashTableCreateArgs>any());
+        .getInstanceForHashJoin(
+            eq(optionManager), ArgumentMatchers.<HashTable.HashTableCreateArgs>any());
 
     // Instantiation
     try (BlockJoinTable table =

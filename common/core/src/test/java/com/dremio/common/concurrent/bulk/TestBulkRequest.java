@@ -202,4 +202,38 @@ public class TestBulkRequest extends BulkTestBase {
             "bc-xform=x;part=2"),
         ImmutableMap.of("c", new RuntimeException("failed")));
   }
+
+  @Test
+  public void testNonUniqueKeyTransformations() throws Exception {
+    BulkRequest<String> request = new BulkRequest<>(ImmutableSet.of("a", "b"));
+
+    // key transformation that transforms multiple keys to the same value
+    Function<String, String> keyTransformer = k -> "x";
+
+    // transform returned value from "val" to "transformedkey=val"
+    ValueTransformer<String, String, String, String> valueTransformer =
+        (transformedKey, originalKey, value) -> originalKey + "=" + value;
+
+    ValueTransformer<String, String, String, CompletionStage<String>> asyncValueTransformer =
+        (transformedKey, originalKey, value) ->
+            CompletableFuture.completedFuture(originalKey + "=" + value);
+
+    // bulk function which returns "key=y"
+    BulkFunction<String, String> bulkFunction =
+        req -> req.handleRequests(k -> CompletableFuture.completedFuture(k + "=y"));
+
+    BulkResponse<String, String> response;
+
+    response = request.bulkTransformAndHandleRequests(bulkFunction, keyTransformer);
+    validateResponses(response, ImmutableMap.of("a", "x=y", "b", "x=y"), ImmutableMap.of());
+
+    response =
+        request.bulkTransformAndHandleRequests(bulkFunction, keyTransformer, valueTransformer);
+    validateResponses(response, ImmutableMap.of("a", "a=x=y", "b", "b=x=y"), ImmutableMap.of());
+
+    response =
+        request.bulkTransformAndHandleRequestsAsync(
+            bulkFunction, keyTransformer, asyncValueTransformer);
+    validateResponses(response, ImmutableMap.of("a", "a=x=y", "b", "b=x=y"), ImmutableMap.of());
+  }
 }

@@ -62,6 +62,9 @@ public interface TableFormatWriterOptions {
   @Nullable
   Long getTargetFileSize();
 
+  @Nullable
+  ClusteringOptions getClusteringOptions();
+
   @Value.Default
   default IcebergWriterOptions getIcebergSpecificOptions() {
     return IcebergWriterOptions.makeDefault();

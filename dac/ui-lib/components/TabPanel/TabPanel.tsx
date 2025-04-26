@@ -19,6 +19,7 @@
 import * as React from "react";
 import clsx from "clsx";
 import { createElement, useState } from "react";
+import { useTabsKeyboardListener } from "../utilities/useTabsKeyboardListener";
 
 export const getControlledTabProps = ({
   id,
@@ -34,7 +35,7 @@ export const getControlledTabProps = ({
     id,
     "aria-controls": controls,
     "aria-selected": isSelected,
-    tabIndex: 0,
+    tabIndex: isSelected ? 0 : -1,
   };
 };
 
@@ -102,13 +103,17 @@ export const TabList = (props: {
   children: React.ReactNode;
   "aria-label": string;
   className?: string;
-}) => (
-  <div
-    {...props}
-    role="tablist"
-    className={clsx("tabpanel-tablist", props.className)}
-  />
-);
+}) => {
+  const { setTabsEl } = useTabsKeyboardListener();
+  return (
+    <div
+      {...props}
+      ref={(r) => setTabsEl(r)}
+      role="tablist"
+      className={clsx("tabpanel-tablist", props.className)}
+    />
+  );
+};
 
 type TabProps = {
   as?: any;

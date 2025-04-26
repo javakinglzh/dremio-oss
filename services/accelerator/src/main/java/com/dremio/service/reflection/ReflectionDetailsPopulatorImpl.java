@@ -30,6 +30,7 @@ import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.reflection.hints.ReflectionExplanationsAndQueryDistance;
 import com.dremio.sabot.kernel.proto.ReflectionExplanation;
@@ -37,6 +38,7 @@ import com.dremio.service.Pointer;
 import com.dremio.service.accelerator.AccelerationDetailsUtils;
 import com.dremio.service.accelerator.AccelerationUtils;
 import com.dremio.service.accelerator.proto.AccelerationDetails;
+import com.dremio.service.accelerator.proto.BucketTransform;
 import com.dremio.service.accelerator.proto.DatasetDetails;
 import com.dremio.service.accelerator.proto.LayoutDescriptor;
 import com.dremio.service.accelerator.proto.LayoutDetailsDescriptor;
@@ -44,11 +46,15 @@ import com.dremio.service.accelerator.proto.LayoutDimensionFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutId;
 import com.dremio.service.accelerator.proto.LayoutMeasureFieldDescriptor;
+import com.dremio.service.accelerator.proto.LayoutPartitionFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutType;
 import com.dremio.service.accelerator.proto.MaterializationDetails;
 import com.dremio.service.accelerator.proto.MeasureType;
 import com.dremio.service.accelerator.proto.ReflectionRelationship;
 import com.dremio.service.accelerator.proto.SubstitutionState;
+import com.dremio.service.accelerator.proto.Transform;
+import com.dremio.service.accelerator.proto.Transform.Type;
+import com.dremio.service.accelerator.proto.TruncateTransform;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -108,6 +114,23 @@ class ReflectionDetailsPopulatorImpl implements AccelerationDetailsPopulator {
   ReflectionDetailsPopulatorImpl(ReflectionService reflections, CatalogService catalogService) {
     this.reflections = reflections;
     this.catalogService = catalogService;
+  }
+
+  @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile) {
+    try {
+      // reflection was considered
+      final ReflectionState state =
+          new ReflectionState(
+              profile.getMaterializationId(),
+              profile.getLayoutId(),
+              false,
+              profile.getSnowflake(),
+              profile.getDefaultReflection());
+      consideredReflections.put(profile.getLayoutId(), state);
+    } catch (Exception e) {
+      logger.error("AccelerationDetails populator failed to handle planConsidered()", e);
+    }
   }
 
   @Override
@@ -328,7 +351,7 @@ class ReflectionDetailsPopulatorImpl implements AccelerationDetailsPopulator {
 
         substitutionInfos.add(
             String.format(
-                "Default Reflections Used: %d, Expansion Replacements: %d, Algebraic Replacements: %d, Replacements Chosen: %d",
+                "Default Matching Chosen: %d, Expansion Matching Replacements: %d, Algebraic Matching Replacements: %d, Replacements Chosen: %d",
                 replacementsDRR, replacementsExpansion, replacementsAlgebraic, replacementsChosen));
       }
     } catch (Exception e) {
@@ -445,7 +468,8 @@ class ReflectionDetailsPopulatorImpl implements AccelerationDetailsPopulator {
         .setDetails(
             new LayoutDetailsDescriptor()
                 .setPartitionFieldList(
-                    toLayoutFieldDescriptorsFromPartitionField(details.getPartitionFieldList()))
+                    toLayoutPartitionFieldDescriptorsFromPartitionField(
+                        details.getPartitionFieldList()))
                 .setDimensionFieldList(
                     toLayoutDimensionFieldDescriptors(details.getDimensionFieldList()))
                 .setMeasureFieldList(toLayoutMeasureFieldDescriptors(details.getMeasureFieldList()))
@@ -462,14 +486,33 @@ class ReflectionDetailsPopulatorImpl implements AccelerationDetailsPopulator {
                             .STRIPED));
   }
 
-  private static List<LayoutFieldDescriptor> toLayoutFieldDescriptorsFromPartitionField(
-      final List<ReflectionPartitionField> fields) {
+  private static List<LayoutPartitionFieldDescriptor>
+      toLayoutPartitionFieldDescriptorsFromPartitionField(
+          final List<ReflectionPartitionField> fields) {
     return FluentIterable.from(AccelerationUtils.selfOrEmpty(fields))
         .transform(
-            new Function<ReflectionPartitionField, LayoutFieldDescriptor>() {
+            new Function<ReflectionPartitionField, LayoutPartitionFieldDescriptor>() {
               @Override
-              public LayoutFieldDescriptor apply(final ReflectionPartitionField field) {
-                return toLayoutFieldDescriptor(field);
+              public LayoutPartitionFieldDescriptor apply(final ReflectionPartitionField field) {
+                LayoutPartitionFieldDescriptor descriptor = new LayoutPartitionFieldDescriptor();
+                descriptor.setName(field.getName());
+                if (field.getTransform() != null) {
+                  Transform transform = new Transform();
+                  transform.setType(Type.valueOf(field.getTransform().getType().getNumber()));
+                  if (field.getTransform().getBucketTransform() != null) {
+                    transform.setBucketTransform(
+                        new BucketTransform()
+                            .setBucketCount(
+                                field.getTransform().getBucketTransform().getBucketCount()));
+                  } else if (field.getTransform().getTruncateTransform() != null) {
+                    transform.setTruncateTransform(
+                        new TruncateTransform()
+                            .setTruncateLength(
+                                field.getTransform().getTruncateTransform().getTruncateLength()));
+                  }
+                  descriptor.setTransform(transform);
+                }
+                return descriptor;
               }
             })
         .toList();

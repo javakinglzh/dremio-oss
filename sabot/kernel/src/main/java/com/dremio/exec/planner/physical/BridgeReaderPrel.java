@@ -21,6 +21,7 @@ import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.config.BridgeFileReader;
 import com.dremio.exec.planner.cost.DremioCost;
 import com.dremio.exec.planner.cost.ScanCostFactor;
+import com.dremio.exec.planner.fragment.DistributionAffinity;
 import com.dremio.exec.planner.physical.visitor.PrelVisitor;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
@@ -38,7 +39,7 @@ import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
 
-public class BridgeReaderPrel extends AbstractRelNode implements Prel {
+public class BridgeReaderPrel extends AbstractRelNode implements LeafPrel {
   private BatchSchema schema;
 
   private final String bridgeSetId;
@@ -134,7 +135,7 @@ public class BridgeReaderPrel extends AbstractRelNode implements Prel {
   @Override
   public <T, X, E extends Throwable> T accept(PrelVisitor<T, X, E> logicalVisitor, X value)
       throws E {
-    return logicalVisitor.visitPrel(this, value);
+    return logicalVisitor.visitLeaf(this, value);
   }
 
   @Override
@@ -154,5 +155,24 @@ public class BridgeReaderPrel extends AbstractRelNode implements Prel {
 
   public String getBridgeSetId() {
     return bridgeSetId;
+  }
+
+  @Override
+  public DistributionAffinity getDistributionAffinity() {
+    return DistributionAffinity.HARD;
+  }
+
+  @Override
+  public int getMaxParallelizationWidth() {
+    // Should not be used for computing parallelism. BridgeReader derives its parallelism directly
+    // from sending exchanges. Therefore, setting to -1.
+    return -1;
+  }
+
+  @Override
+  public int getMinParallelizationWidth() {
+    // Should not be used for computing parallelism. BridgeReader derives its parallelism directly
+    // from sending exchanges. Therefore, setting to -1.
+    return -1;
   }
 }

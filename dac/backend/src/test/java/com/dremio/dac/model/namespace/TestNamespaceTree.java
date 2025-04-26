@@ -15,12 +15,23 @@
  */
 package com.dremio.dac.model.namespace;
 
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.dremio.dac.model.folder.SourceFolderPath;
+import com.dremio.dac.service.datasets.DatasetVersionMutator;
+import com.dremio.options.OptionManager;
+import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.dataset.proto.DatasetConfig;
+import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.dremio.service.namespace.space.proto.FolderConfig;
+import java.util.Collections;
+import java.util.List;
 import org.junit.Test;
 
 public class TestNamespaceTree {
@@ -42,5 +53,35 @@ public class TestNamespaceTree {
     assertFalse(
         "Folder should not be file system folder if source is not file system source",
         namespaceTree.getFolders().get(0).isFileSystemFolder());
+  }
+
+  @Test
+  public void testVirtualDatasetListingWhenRestCatalogViewsSupportedIsFalse()
+      throws NamespaceException {
+    // Initialize
+    DatasetVersionMutator datasetService = mock(DatasetVersionMutator.class);
+    OptionManager optionManager = mock(OptionManager.class);
+
+    // Arrange
+    when(optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(false);
+
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+    datasetConfig.setFullPathList(List.of("root", "path"));
+    datasetConfig.setName("testDataset");
+
+    NameSpaceContainer container = new NameSpaceContainer();
+    container.setType(Type.DATASET);
+    container.setDataset(datasetConfig);
+    container.setFullPathList(List.of("root", "path", "testDataset"));
+
+    List<NameSpaceContainer> children = Collections.singletonList(container);
+
+    // Act & Assert
+    // Should not add anyu entries to namespace tree from source
+    NamespaceTree namespaceTree =
+        NamespaceTree.newInstance(
+            datasetService, children, Type.SOURCE, null, null, null, optionManager);
+    assertTrue(namespaceTree.totalCount() == 0);
   }
 }

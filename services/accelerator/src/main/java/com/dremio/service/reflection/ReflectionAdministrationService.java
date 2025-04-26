@@ -39,9 +39,9 @@ public interface ReflectionAdministrationService {
 
   ReflectionId create(ReflectionGoal goal);
 
-  void update(ReflectionGoal goal);
+  void update(ReflectionGoal goal, ChangeCause changeCause);
 
-  void remove(ReflectionGoal goal);
+  void remove(ReflectionGoal goal, ChangeCause changeCause);
 
   Optional<ReflectionGoal> getGoal(ReflectionId reflectionId);
 

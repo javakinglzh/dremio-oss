@@ -15,22 +15,23 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
+import static com.dremio.plugins.icebergcatalog.store.IcebergCatalogPluginUtils.NAMESPACE_SEPARATOR;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.PHYSICAL_DATASET;
 
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.EntityPath;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.store.iceberg.BaseIcebergExecutionDatasetAccessor;
 import com.dremio.exec.store.iceberg.TableSchemaProvider;
 import com.dremio.exec.store.iceberg.TableSnapshotProvider;
 import com.dremio.options.OptionResolver;
+import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.IcebergFileConfig;
 import com.dremio.service.namespace.file.proto.ParquetFileConfig;
+import java.util.List;
 import java.util.function.Supplier;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 
 public class IcebergCatalogTableProvider extends BaseIcebergExecutionDatasetAccessor {
@@ -40,19 +41,10 @@ public class IcebergCatalogTableProvider extends BaseIcebergExecutionDatasetAcce
   public IcebergCatalogTableProvider(
       EntityPath datasetPath,
       Supplier<Table> tableSupplier,
-      Configuration configuration,
       TableSnapshotProvider tableSnapshotProvider,
-      MutablePlugin plugin,
       TableSchemaProvider tableSchemaProvider,
       OptionResolver optionResolver) {
-    super(
-        datasetPath,
-        tableSupplier,
-        configuration,
-        tableSnapshotProvider,
-        plugin,
-        tableSchemaProvider,
-        optionResolver);
+    super(datasetPath, tableSupplier, tableSnapshotProvider, tableSchemaProvider, optionResolver);
     this.tableSupplier = tableSupplier;
   }
 
@@ -62,6 +54,21 @@ public class IcebergCatalogTableProvider extends BaseIcebergExecutionDatasetAcce
         .setParquetDataFormat(new ParquetFileConfig())
         .asFileConfig()
         .setLocation(tableSupplier.get().location());
+  }
+
+  @Override
+  protected IcebergProtobuf.IcebergDatasetSplitXAttr getIcebergDatasetSplitXAttr() {
+    List<String> dataset = getDatasetPath().getComponents();
+    String namespaceIdentifier =
+        String.join(NAMESPACE_SEPARATOR, dataset.subList(1, dataset.size() - 1));
+    String tableName = getDatasetPath().getName();
+    String splitPath = getMetadataLocation();
+
+    return IcebergProtobuf.IcebergDatasetSplitXAttr.newBuilder()
+        .setPath(splitPath)
+        .setDbName(namespaceIdentifier)
+        .setTableName(tableName)
+        .build();
   }
 
   @Override

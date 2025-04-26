@@ -18,6 +18,7 @@ package com.dremio.sabot.op.fromjson;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.ProjectPrel;
 import com.dremio.exec.planner.physical.visitor.BasePrelVisitor;
+import com.dremio.exec.planner.sql.ConvertFromOperators;
 import com.google.common.collect.Lists;
 import java.util.ArrayList;
 import java.util.List;
@@ -26,6 +27,7 @@ import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 
@@ -122,12 +124,7 @@ public final class ConvertFromUnnester extends BasePrelVisitor<Prel, Void, Runti
 
     @Override
     public RexNode visitCall(RexCall call) {
-      boolean noConvertFrom =
-          call.getOperands().stream()
-              .noneMatch(
-                  operand ->
-                      operand instanceof RexCall
-                          && ((RexCall) operand).op.getName().equalsIgnoreCase("convert_fromjson"));
+      boolean noConvertFrom = call.getOperands().stream().noneMatch(this::isConvertFrom);
       if (noConvertFrom) {
         return super.visitCall(call);
       }
@@ -135,9 +132,7 @@ public final class ConvertFromUnnester extends BasePrelVisitor<Prel, Void, Runti
       List<RexNode> rewrittenOperands = new ArrayList<>();
       for (RexNode operand : call.getOperands()) {
         RexNode rewrittenOperand;
-        boolean isConvertFrom =
-            operand instanceof RexCall
-                && ((RexCall) operand).op.getName().equalsIgnoreCase("convert_fromjson");
+        boolean isConvertFrom = isConvertFrom(operand);
         if (!isConvertFrom) {
           rewrittenOperand = operand.accept(this);
         } else {
@@ -150,6 +145,26 @@ public final class ConvertFromUnnester extends BasePrelVisitor<Prel, Void, Runti
 
       // Keep the same return type to avoid an inferReturnType call that will fail for CAST
       return rexBuilder.makeCall(call.getType(), call.op, rewrittenOperands);
+    }
+
+    @Override
+    public RexNode visitFieldAccess(RexFieldAccess fieldAccess) {
+      if (!isConvertFrom(fieldAccess.getReferenceExpr())) {
+        return super.visitFieldAccess(fieldAccess);
+      }
+
+      RexNode rewrittenReferenceExpr =
+          rexBuilder.makeInputRef(fieldAccess.getReferenceExpr().getType(), counter++);
+      convertFroms.add(fieldAccess.getReferenceExpr());
+      return rexBuilder.makeFieldAccess(rewrittenReferenceExpr, fieldAccess.getField().getIndex());
+    }
+
+    private boolean isConvertFrom(RexNode rexNode) {
+      return rexNode instanceof RexCall
+          && ((RexCall) rexNode)
+              .getOperator()
+              .getName()
+              .equalsIgnoreCase(ConvertFromOperators.CONVERT_FROMJSON.getName());
     }
   }
 }

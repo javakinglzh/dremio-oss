@@ -348,10 +348,6 @@ public class MaterializationStore {
     return findLastMaterializationByState(id, MaterializationState.FAILED);
   }
 
-  public Materialization getLastMaterializationCompacted(final ReflectionId id) {
-    return findLastMaterializationByState(id, MaterializationState.COMPACTED);
-  }
-
   public Materialization getLastMaterialization(final ReflectionId id) {
     final LegacyFindByCondition condition =
         new LegacyFindByCondition()
@@ -438,6 +434,30 @@ public class MaterializationStore {
                 and(
                     newTermQuery(ReflectionIndexKeys.MATERIALIZATION_REFLECTION_ID, id.getId()),
                     newTermQuery(ReflectionIndexKeys.MATERIALIZATION_STATE, state.name())));
+
+    Entry<MaterializationId, Materialization> entry =
+        Iterables.getFirst(materializationStore.get().find(condition), null);
+    if (entry == null) {
+      return null;
+    }
+
+    Materialization value = entry.getValue();
+    materializationGoalVersionUpdate(value);
+    return value;
+  }
+
+  public Materialization getLastMaterializationFinished(final ReflectionId id) {
+    final LegacyFindByCondition condition =
+        new LegacyFindByCondition()
+            .addSorting(LAST_REFRESH_SUBMIT)
+            .setLimit(1)
+            .setCondition(
+                and(
+                    or(
+                        newTermQuery(MATERIALIZATION_STATE, MaterializationState.DONE.name()),
+                        newTermQuery(MATERIALIZATION_STATE, MaterializationState.FAILED.name()),
+                        newTermQuery(MATERIALIZATION_STATE, MaterializationState.CANCELED.name())),
+                    newTermQuery(ReflectionIndexKeys.MATERIALIZATION_REFLECTION_ID, id.getId())));
 
     Entry<MaterializationId, Materialization> entry =
         Iterables.getFirst(materializationStore.get().find(condition), null);
@@ -612,8 +632,8 @@ public class MaterializationStore {
       writer.write(MATERIALIZATION_REFLECTION_ID, document.getReflectionId().getId());
       writer.write(MATERIALIZATION_INIT_REFRESH_SUBMIT, document.getInitRefreshSubmit());
       writer.write(MATERIALIZATION_SERIES_ID, document.getSeriesId());
-      writer.write(ReflectionIndexKeys.MATERIALIZATION_EXPIRATION, document.getExpiration());
-      writer.write(ReflectionIndexKeys.MATERIALIZATION_MODIFIED_AT, document.getModifiedAt());
+      writer.write(MATERIALIZATION_EXPIRATION, document.getExpiration());
+      writer.write(MATERIALIZATION_MODIFIED_AT, document.getModifiedAt());
     }
   }
 

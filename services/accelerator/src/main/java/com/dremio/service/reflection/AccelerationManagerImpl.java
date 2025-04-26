@@ -82,8 +82,9 @@ public class AccelerationManagerImpl implements AccelerationManager {
   }
 
   @Override
+  @Deprecated
   public ExcludedReflectionsProvider getExcludedReflectionsProvider() {
-    return reflectionService.get().getExcludedReflectionsProvider();
+    return reflectionService.get().getExcludedReflectionsProvider(false);
   }
 
   @Override
@@ -142,7 +143,6 @@ public class AccelerationManagerImpl implements AccelerationManager {
             : PartitionDistributionStrategy.CONSOLIDATED);
 
     goal.setName(definition.getName());
-    goal.setArrowCachingEnabled(definition.getArrowCachingEnabled());
     goal.setState(ReflectionGoalState.ENABLED);
     goal.setType(
         definition.getType() == Type.AGGREGATE ? ReflectionType.AGGREGATION : ReflectionType.RAW);
@@ -289,7 +289,7 @@ public class AccelerationManagerImpl implements AccelerationManager {
         administrationReflectionService.getReflectionsByDatasetId(
             tableWithPath.getTable().getDatasetConfig().getId().getId())) {
       if (rg.getId().getId().equals(layoutIdOrName) || layoutIdOrName.equals(rg.getName())) {
-        administrationReflectionService.remove(rg);
+        administrationReflectionService.remove(rg, ChangeCause.SQL_DROP_BY_USER_CAUSE);
         // only match first and exist.
         return;
       }
@@ -337,7 +337,7 @@ public class AccelerationManagerImpl implements AccelerationManager {
 
       try {
         g.setState(enable ? ReflectionGoalState.ENABLED : ReflectionGoalState.DISABLED);
-        administrationReflectionService.update(g);
+        administrationReflectionService.update(g, ChangeCause.REST_UPDATE_BY_USER_CAUSE);
       } catch (Exception e) {
         if (ex == null) {
           ex = e;

@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 syntax = "proto2";
+import "google/protobuf/descriptor.proto";
+
 package exec.user;
 
 option java_package = "com.dremio.exec.proto";
@@ -51,6 +53,27 @@ message SubstitutionSettingsRPC {
   repeated string inclusions = 2;
 }
 
+message SessionOptionValue {
+  message StringListValue {
+    repeated string values = 1;
+  }
+
+  oneof oneOfValue {
+    string string_value = 1;
+    bool bool_value = 2;
+    sfixed32 int32_value = 3;
+    sfixed64 int64_value = 4;
+    float float_value = 5;
+    double double_value = 6;
+    StringListValue string_list_value = 7;
+  }
+}
+
+message SessionOptions {
+  map<string, SessionOptionValue> sessionOptionsMap = 1;
+}
+
+
 message UserSessionRPC {
   optional exec.shared.QueryId lastQueryIda = 1;
   optional bool supportComplexTypes = 2;
@@ -75,4 +98,5 @@ message UserSessionRPC {
   optional bool checkMetadataValidity = 20;
   optional bool neverPromote = 21;
   optional bool errorOnUnspecifiedVersion = 22;
+  optional SessionOptions sessionOptions = 23;
 }

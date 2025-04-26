@@ -19,7 +19,6 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPL
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_COLUMN_DEFINITION;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_COUNT_COLUMN;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.convertFolderNameToList;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchFromBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
@@ -30,11 +29,8 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.create
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTableAsQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTableQueryWithAt;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQueryWithFrom;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropBranchForceQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropTableQuery;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropTagQuery;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateNestedFolderPath;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueBranchName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueFolderName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
@@ -49,17 +45,15 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tableP
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useTagQuery;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertIcebergTableExistsAtSubPath;
-import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertLastCommitMadeBySpecifiedAuthor;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieDoesNotHaveEntity;
-import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieDoesNotHaveNamespace;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieHasCommitForTable;
-import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieHasNamespace;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieHasTable;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.getSubPathFromNessieTableContent;
+import static com.dremio.exec.store.iceberg.IcebergUtils.DEFAULT_TABLE_PROPERTIES;
+import static java.util.stream.Collectors.toMap;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.dremio.BaseTestQuery;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.exec.catalog.dataplane.test.ITDataplanePluginTestSetup;
@@ -70,6 +64,7 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.projectnessie.model.Operation;
@@ -391,64 +386,6 @@ public class ITDataplanePluginCreate extends ITDataplanePluginTestSetup {
   }
 
   @Test
-  public void createFolder() throws Exception {
-    // Arrange
-    final String folderName = generateUniqueFolderName();
-    final List<String> folderPath = Collections.singletonList(folderName);
-
-    // Act
-    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
-
-    // Assert
-    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
-    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
-  }
-
-  @Test
-  public void createNestedFolder() throws Exception {
-    // Arrange
-    final String folderName1 = generateUniqueFolderName();
-    final String folderName2 = generateUniqueFolderName();
-    final List<String> folderPath = generateNestedFolderPath(folderName1, folderName2);
-    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
-
-    // Assert
-    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
-    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
-  }
-
-  @Test
-  public void createFolderWithSingleElementWithContext() throws Exception {
-    BaseTestQuery.test(String.format("USE %s", DATAPLANE_PLUGIN_NAME));
-    // Arrange
-    final String folderName = generateUniqueFolderName();
-    final List<String> sqlFolderPath = convertFolderNameToList(folderName);
-    // since sqlFolderPath only has the name of the folder, its namespaceKey should be
-    // DATAPLANE_PLUGIN_NAME.folderName
-
-    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, sqlFolderPath));
-
-    // Act
-    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
-    assertNessieHasNamespace(Collections.singletonList(folderName), DEFAULT_BRANCH_NAME, this);
-  }
-
-  @Test
-  public void createFolderUsingAt() throws Exception {
-    // Arrange
-    final String folderName = generateUniqueFolderName();
-    final List<String> folderPath = Collections.singletonList(folderName);
-
-    runSQL(
-        createFolderAtQuery(
-            DATAPLANE_PLUGIN_NAME, folderPath, VersionContext.ofBranch(DEFAULT_BRANCH_NAME)));
-
-    // Act
-    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
-    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
-  }
-
-  @Test
   public void createTableWithImplicitFolders() throws Exception {
     // Arrange
     final String tableName = generateUniqueTableName();
@@ -462,95 +399,6 @@ public class ITDataplanePluginCreate extends ITDataplanePluginTestSetup {
   }
 
   @Test
-  public void testCreateFolderWithAtTag() throws Exception {
-    String tagName = "myTag";
-    final String folderName = generateUniqueFolderName();
-    final List<String> folderPath = Collections.singletonList(folderName);
-    runSQL(createTagQuery(tagName, DEFAULT_BRANCH_NAME));
-    // expect error for TAG
-    assertThatThrownBy(
-            () ->
-                runSQL(
-                    createFolderAtQuery(
-                        DATAPLANE_PLUGIN_NAME,
-                        folderPath,
-                        VersionContext.ofTag(DEFAULT_BRANCH_NAME))))
-        .isInstanceOf(UserRemoteException.class);
-  }
-
-  @Test
-  public void testCreateFolderWithAtCommit() throws Exception {
-    String commitHash = "c7a79c74adf76649e643354c34ed69abfee5a3b070ef68cbe782a072b0a418ba";
-    final String folderName = generateUniqueFolderName();
-    final List<String> folderPath = Collections.singletonList(folderName);
-    // expect error for TAG
-    assertThatThrownBy(
-            () ->
-                runSQL(
-                    createFolderAtQuery(
-                        DATAPLANE_PLUGIN_NAME, folderPath, VersionContext.ofCommit(commitHash))))
-        .isInstanceOf(UserRemoteException.class);
-  }
-
-  @Test
-  public void testCreateTagFromNonExistentBranch() throws Exception {
-    final String tagName = generateUniqueTagName();
-    final String branchName = generateUniqueBranchName();
-
-    // Assert
-    assertQueryThrowsExpectedError(
-        createTagQueryWithFrom(tagName, branchName),
-        String.format(
-            "VALIDATION ERROR: Source branch %s not found in source %s",
-            branchName, DATAPLANE_PLUGIN_NAME));
-  }
-
-  @Test
-  public void testCreateFolderWithContext() throws Exception {
-    // Arrange
-    final String folderName = generateUniqueFolderName();
-    final List<String> folderPath = Collections.singletonList(folderName);
-
-    // Act
-    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
-
-    // Assert
-    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
-    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
-
-    final String folderName2 = generateUniqueFolderName();
-    final List<String> folderPath2 = Collections.singletonList(folderName2);
-    final String branch2 = "branch2";
-
-    runSQL(createBranchAtBranchQuery(branch2, DEFAULT_BRANCH_NAME));
-    // set current context to branch2
-    runSQL(useBranchQuery(branch2));
-    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath2));
-
-    // Assert that when we do not have [AT] token, we use
-    // context as a default.
-    assertLastCommitMadeBySpecifiedAuthor(branch2, this);
-    assertNessieHasNamespace(folderPath2, branch2, this);
-    assertNessieDoesNotHaveNamespace(folderPath2, DEFAULT_BRANCH_NAME, this);
-
-    final String folderName3 = generateUniqueFolderName();
-    final List<String> folderPath3 = Collections.singletonList(folderName3);
-    final String branch3 = "branch3";
-
-    // create folder3 at branch3 with current context branch2
-    runSQL(createBranchAtBranchQuery(branch3, DEFAULT_BRANCH_NAME));
-    runSQL(
-        createFolderAtQuery(DATAPLANE_PLUGIN_NAME, folderPath3, VersionContext.ofBranch(branch3)));
-
-    // the version context specified in AT token should override the context.
-    // Therefore we have folder in branch3 not in branch2 nor main.
-    assertLastCommitMadeBySpecifiedAuthor(branch3, this);
-    assertNessieHasNamespace(folderPath3, branch3, this);
-    assertNessieDoesNotHaveNamespace(folderPath3, DEFAULT_BRANCH_NAME, this);
-    assertNessieDoesNotHaveNamespace(folderPath3, branch2, this);
-  }
-
-  @Test
   public void createEmptyTableWithSameNameInMultipleBranches() throws Exception {
     // Arrange
     final String tableName = generateUniqueTableName();
@@ -561,29 +409,6 @@ public class ITDataplanePluginCreate extends ITDataplanePluginTestSetup {
     runSQL(createBranchFromBranchQuery(devBranch, DEFAULT_BRANCH_NAME));
     runSQL(createEmptyTableQuery(tablePath));
     runSQL(createEmptyTableQueryWithAt(tablePath, devBranch));
-  }
-
-  @Test
-  public void createTagsToCompareHashWithBranch() throws Exception {
-    // Arrange
-    final String tagWithFrom = generateUniqueTagName();
-    final String tagWithAt = generateUniqueTagName();
-    final String branchHash = getCommitHashForBranch(DEFAULT_BRANCH_NAME);
-
-    // Act, create tag and get commitHash
-    runSQL(createTagQueryWithFrom(tagWithFrom, DEFAULT_BRANCH_NAME));
-    runSQL(createTagQuery(tagWithAt, DEFAULT_BRANCH_NAME));
-
-    final String tagWithFromHash = getCommitHashForTag(tagWithFrom);
-    final String tagWithAtHash = getCommitHashForTag(tagWithAt);
-
-    // Assert
-    assertThat(branchHash).isEqualTo(tagWithFromHash);
-    assertThat(branchHash).isEqualTo(tagWithAtHash);
-
-    // cleanup
-    runSQL(dropTagQuery(tagWithFrom));
-    runSQL(dropTagQuery(tagWithAt));
   }
 
   @Test
@@ -823,5 +648,26 @@ public class ITDataplanePluginCreate extends ITDataplanePluginTestSetup {
               }
             });
     assertThat(foundFlag.get()).isTrue();
+  }
+
+  @Test
+  public void testDefaultTablePropertiesSetAfterCreate() throws Exception {
+    // Arrange
+    final String tableName = generateUniqueTableName();
+    final List<String> tablePath = tablePathWithFolders(tableName);
+
+    // Act
+    runSQL(createEmptyTableQuery(tablePath));
+
+    // Assert
+    assertNessieHasTable(tablePath, DEFAULT_BRANCH_NAME, this);
+    assertIcebergTableExistsAtSubPath(
+        getSubPathFromNessieTableContent(tablePath, DEFAULT_BRANCH_NAME, this), this);
+    Map<String, String> tableProperties =
+        runSqlWithResults(showTablePropertiesQuery(tablePath)).stream()
+            .filter(pair -> pair.size() == 2)
+            .collect(toMap(pair -> pair.get(0), pair -> pair.get(1)));
+
+    assertThat(tableProperties.entrySet()).containsAll(DEFAULT_TABLE_PROPERTIES.entrySet());
   }
 }

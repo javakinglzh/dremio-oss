@@ -62,7 +62,7 @@ public class DACAuthFilter implements ContainerRequestFilter {
       requestContext.setSecurityContext(
           new DACSecurityContext(userName, userConfig, requestContext));
       requestContext.setProperty(
-          USER_CONTEXT_ATTRIBUTE, new UserContext(userConfig.getUID().getId()));
+          USER_CONTEXT_ATTRIBUTE, UserContext.of(userConfig.getUID().getId()));
     } catch (UserNotFoundException | NotAuthorizedException e) {
       requestContext.abortWith(Response.status(Response.Status.UNAUTHORIZED).build());
     }

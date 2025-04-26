@@ -31,6 +31,17 @@ public interface DistributedSemaphore {
   }
 
   /**
+   * Acquire with extra data put in the node when acquired
+   *
+   * @param time the duration to wait for the semaphore
+   * @param unit the duration unit
+   * @param nodeData useful data to be put in the node
+   * @return the lease
+   * @throws Exception
+   */
+  DistributedLease acquire(long time, TimeUnit unit, byte[] nodeData) throws Exception;
+
+  /**
    * Try to acquire multiple permits in the semaphore
    *
    * @param numPermits the number of permits to acquire, must be a positive integer
@@ -46,6 +57,16 @@ public interface DistributedSemaphore {
    * @return number of permits
    */
   boolean hasOutstandingPermits();
+
+  /**
+   * Forcefully deletes a lease path.
+   *
+   * <p>Note: This is a workaround for occasional leaks in Curator library when an acquire semaphore
+   * call is interrupted.
+   *
+   * @param expectedNodeData Expected node data; delete if and only if node data matches this.
+   */
+  void forceDeleteParticipantNode(String expectedNodeData);
 
   /**
    * Register a listener that is updated every time this semaphore changes.

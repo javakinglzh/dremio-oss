@@ -14,28 +14,19 @@
  * limitations under the License.
  */
 
-import type { Config, RequestFn } from "./types/Config.js";
-import { HttpError } from "../common/HttpError.js";
-import {
-  networkError,
-  systemError,
-  tokenInvalidError,
-} from "./SharedErrors.js";
+import type { Config, RequestFn } from "./types/Config.ts";
+import { HttpError } from "../common/HttpError.ts";
+import type { Problem } from "../common/Problem.ts";
 
-const getTokenFromConfig = (token: string | (() => string)): string => {
-  if (typeof token === "string") {
-    return token;
+const getHeadersFromConfig = async (
+  config: Config,
+): Promise<RequestInit["headers"]> => {
+  if (config.credentials) {
+    return {
+      Authorization: `Bearer ${await config.credentials.get(config)}`,
+    };
   }
-
-  return token();
-};
-
-const getHeadersFromConfig = (config: Config): RequestInit["headers"] => {
-  return {
-    ...(config.token && {
-      Authorization: `Bearer ${getTokenFromConfig(config.token)}`,
-    }),
-  };
+  return {};
 };
 
 /**
@@ -44,45 +35,50 @@ const getHeadersFromConfig = (config: Config): RequestInit["headers"] => {
  */
 export const createRequest = (config: Config): RequestFn => {
   const fetch = (config.fetch as typeof globalThis.fetch) || globalThis.fetch;
-  return (path, init) => {
+  return async (path, init) => {
     const start = performance.now();
     return fetch(new URL(path, config.origin), {
       ...init,
-      headers: { ...getHeadersFromConfig(config), ...init?.headers },
+      headers: { ...(await getHeadersFromConfig(config)), ...init?.headers },
     })
       .then(async (res) => {
         config.logger?.debug(
           `${init?.method?.toUpperCase() || "GET"} ${path} (${res.status}) [${Math.round(performance.now() - start)}ms]`,
         );
         if (!res.ok) {
-          switch (res.status) {
-            case 401:
-              throw new (Error as any)(tokenInvalidError.title, {
-                cause: tokenInvalidError,
-              });
-
-            case 500:
-            case 502:
-            case 503:
-            case 504:
-              throw new (Error as any)(systemError.title, {
-                cause: systemError,
-              });
-
-            default:
-              throw await HttpError.fromResponse(res);
-          }
+          throw await HttpError.fromResponse(res);
         }
         return res;
       })
-      .catch((err) => {
-        if (err instanceof TypeError) {
-          throw new (Error as any)(networkError.title, {
+      .catch((err: unknown) => {
+        if (isFetchFailedError(err)) {
+          throw new Error(networkError.title, {
             cause: { ...networkError, additionalDetails: err },
           });
-        } else {
-          throw err;
         }
+        throw err;
       });
   };
+};
+
+const networkError = {
+  title:
+    "A network error occurred while processing your request. Please ensure that you have a working connection to Dremio.",
+  type: "https://api.dremio.dev/problems/network-error",
+} as const satisfies Problem;
+
+const isFetchFailedError = (err: unknown): boolean => {
+  // Browser and Node fetch
+  if (err instanceof TypeError) {
+    return true;
+  }
+
+  // Bun fetch
+  if (typeof err === "object" && err !== null) {
+    if ("code" in err) {
+      return err.code === "ConnectionRefused";
+    }
+  }
+
+  return false;
 };

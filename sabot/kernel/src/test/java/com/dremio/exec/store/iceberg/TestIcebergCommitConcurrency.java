@@ -1359,7 +1359,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1427,7 +1428,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1519,7 +1521,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1617,7 +1620,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1630,7 +1634,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer2 instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter2 =
           (IcebergOptimizeOperationCommitter) committer2;
@@ -1711,7 +1716,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1808,7 +1814,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1821,7 +1828,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer2 instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter2 =
           (IcebergOptimizeOperationCommitter) committer2;
@@ -1897,7 +1905,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -1983,7 +1992,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;
@@ -2076,7 +2086,8 @@ public class TestIcebergCommitConcurrency extends TestIcebergCommitterBase {
               2L,
               tableBefore.currentSnapshot().snapshotId(),
               tableProps,
-              localFs);
+              localFs,
+              null);
       Assert.assertTrue(committer instanceof IcebergOptimizeOperationCommitter);
       IcebergOptimizeOperationCommitter optimizeCommitter =
           (IcebergOptimizeOperationCommitter) committer;

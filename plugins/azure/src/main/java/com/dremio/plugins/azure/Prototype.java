@@ -125,4 +125,10 @@ class Prototype {
           ClientCredentialsBasedTokenProviderImpl.class.getName());
     }
   }
+
+  public void setImpl(Configuration conf, String tokenProvider) {
+    conf.set(String.format("fs.%s.impl", scheme), fsImpl.getName());
+    conf.set(ConfigurationKeys.FS_AZURE_ACCOUNT_AUTH_TYPE_PROPERTY_NAME, "SAS");
+    conf.set(ConfigurationKeys.FS_AZURE_ACCOUNT_TOKEN_PROVIDER_TYPE_PROPERTY_NAME, tokenProvider);
+  }
 }

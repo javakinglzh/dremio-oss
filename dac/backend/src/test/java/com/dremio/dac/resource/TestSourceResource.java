@@ -45,7 +45,6 @@ import java.util.concurrent.TimeUnit;
 import javax.ws.rs.client.Entity;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.Disabled;
 import org.junit.rules.TemporaryFolder;
 
 /** Tests {@link SourceResource} API */
@@ -349,7 +348,6 @@ public class TestSourceResource extends BaseTestServer {
   }
 
   @Test
-  @Disabled("DX-95117: Will be re-enabled when async source modification flag is on")
   public void testSourceResourceReturnsCorrectSourceChangeState() throws Exception {
     final String sourceName = "tmpSrc";
     {

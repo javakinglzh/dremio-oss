@@ -16,6 +16,7 @@
 
 package com.dremio.plugins;
 
+import static com.dremio.plugins.NessieClient.Properties.NAMESPACE_URI_LOCATION;
 import static com.dremio.plugins.NessieClientOptions.BYPASS_CONTENT_CACHE;
 import static com.dremio.plugins.NessieClientOptions.NESSIE_CONTENT_CACHE_SIZE_ITEMS;
 import static com.dremio.plugins.NessieClientOptions.NESSIE_CONTENT_CACHE_TTL_MINUTES;
@@ -27,6 +28,8 @@ import com.dremio.common.VM;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.context.RequestContext;
 import com.dremio.context.UserContext;
+import com.dremio.exec.catalog.ImmutablePluginFolder;
+import com.dremio.exec.catalog.PluginFolder;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.catalog.VersionedPlugin.EntityType;
 import com.dremio.exec.store.ChangeInfo;
@@ -92,6 +95,7 @@ import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.IcebergView;
 import org.projectnessie.model.ImmutableIcebergTable;
 import org.projectnessie.model.ImmutableIcebergView;
+import org.projectnessie.model.ImmutableNamespace;
 import org.projectnessie.model.ImmutableUDF;
 import org.projectnessie.model.LogResponse.LogEntry;
 import org.projectnessie.model.MergeBehavior;
@@ -525,8 +529,28 @@ public class NessieClientImpl implements NessieClient {
 
   @Override
   @WithSpan
-  public void createNamespace(List<String> namespacePathList, VersionContext version) {
-    metrics.log("create_namespace", () -> createNamespaceHelper(namespacePathList, version));
+  public Stream<List<String>> listEntriesChangedBetween(
+      String fromCommitHash, String toCommitHash) {
+    return metrics.log(
+        "list_entries_changed_between",
+        () ->
+            nessieApi.getDiff().fromHashOnRef(fromCommitHash).toHashOnRef(toCommitHash).stream()
+                .map(entry -> entry.getKey().getElements()));
+  }
+
+  @Override
+  @WithSpan
+  public Optional<PluginFolder> createNamespace(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri) {
+    return metrics.log(
+        "create_namespace", () -> createNamespaceHelper(namespacePathList, version, storageUri));
+  }
+
+  @Override
+  public Optional<PluginFolder> updateNamespace(
+      List<String> namespacePathList, VersionContext version, String storageUri) {
+    return metrics.log(
+        "update_namespace", () -> updateNamespaceHelper(namespacePathList, version, storageUri));
   }
 
   private Optional<String> getAuthorFromCurrentContext() {
@@ -537,40 +561,83 @@ public class NessieClientImpl implements NessieClient {
         : Optional.empty();
   }
 
-  private void createNamespaceHelper(List<String> namespacePathList, VersionContext version) {
+  private Optional<PluginFolder> createNamespaceHelper(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri) {
+    return namespaceHelper(namespacePathList, version, storageUri, true);
+  }
+
+  private Optional<PluginFolder> updateNamespaceHelper(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri) {
+    return namespaceHelper(namespacePathList, version, storageUri, false);
+  }
+
+  private Optional<PluginFolder> namespaceHelper(
+      List<String> namespacePathList,
+      VersionContext version,
+      @Nullable String storageUri,
+      boolean isCreate) {
     ResolvedVersionContext resolvedVersion = resolveVersionContext(version);
     ContentKey contentKey = ContentKey.of(namespacePathList);
     final String authorName = getAuthorFromCurrentContext().orElse(null);
-    CommitMeta commitMeta =
-        CommitMeta.builder().author(authorName).message("CREATE FOLDER " + contentKey).build();
+    final String commitMessage = (isCreate ? "CREATE FOLDER " : "UPDATE FOLDER ") + contentKey;
+    CommitMeta commitMeta = CommitMeta.builder().author(authorName).message(commitMessage).build();
+
     if (!resolvedVersion.isBranch()) {
       throw UserException.validationError()
           .message(
-              "Create folder is only supported for branches - not on tags or commits. %s is not a branch. ",
-              resolvedVersion.getRefName())
+              "%s is only supported for branches - not on tags or commits. %s is not a branch.",
+              isCreate ? "Create folder" : "Update folder", resolvedVersion.getRefName())
           .buildSilently();
     }
 
-    // we are checking if the namespace already exists in nessie.
-    // if we already have the content, we are creating duplicate namespace so we are throwing an
-    // error.
     Optional<Content> content = getContent(contentKey, resolvedVersion);
-    if (content.isPresent()) {
+    if (isCreate && content.isPresent()) {
       throw new NamespaceAlreadyExistsException(
           String.format("Folder %s already exists", contentKey.toPathString()));
+    } else if (!isCreate && content.isEmpty()) {
+      throw new NamespaceNotFoundException(
+          String.format("Folder %s not found", contentKey.toPathString()));
     }
+
+    ImmutableNamespace.Builder nsBuilder = Namespace.builder().addAllElements(namespacePathList);
+    if (storageUri != null) {
+      nsBuilder.putProperties(NAMESPACE_URI_LOCATION, storageUri);
+    }
+    if (!isCreate) {
+      nsBuilder.id(content.get().getId());
+    }
+
     RetriableCommitWithNamespaces retriableCommitWithNamespaces =
         new RetriableCommitWithNamespaces(
             nessieApi,
             (Branch) toRef(resolvedVersion),
             commitMeta,
-            Operation.Put.of(contentKey, Namespace.of(namespacePathList)));
+            Operation.Put.of(contentKey, nsBuilder.build()));
+
+    Branch targetBranch = (Branch) toRef(resolvedVersion);
     try {
-      retriableCommitWithNamespaces.commit();
+      targetBranch = retriableCommitWithNamespaces.commit();
     } catch (NessieConflictException e) {
-      // Throw new RuntimeException(e) in order to preserve original behavior.
       throw new RuntimeException(e);
     }
+    resolvedVersion =
+        ResolvedVersionContext.ofBranch(targetBranch.getName(), targetBranch.getHash());
+    content = getContent(contentKey, resolvedVersion);
+    if (content.isEmpty()) {
+      throw UserException.validationError()
+          .message(
+              "Unable to create folder %s in Nessie. Folder not found after commit.",
+              contentKey.toPathString())
+          .buildSilently();
+    }
+    return Optional.of(
+        new ImmutablePluginFolder.Builder()
+            .addAllFolderPath(namespacePathList)
+            .setContentId(content.get().getId())
+            .setResolvedVersionContext(
+                ResolvedVersionContext.ofBranch(targetBranch.getName(), targetBranch.getHash()))
+            .setStorageUri(storageUri)
+            .build());
   }
 
   @Override

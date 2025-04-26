@@ -75,6 +75,7 @@ export class SelectView extends PureComponent {
     hasSpecialIcon: PropTypes.bool,
     iconId: PropTypes.string,
     iconTooltip: PropTypes.string,
+    container: PropTypes.any,
   };
 
   static defaultProps = {
@@ -178,7 +179,7 @@ export class SelectView extends PureComponent {
           })}
           style={style}
           data-qa={dataQa}
-          tabIndex={0}
+          tabIndex={disabled ? -1 : 0}
           onKeyDown={
             open
               ? null
@@ -205,6 +206,7 @@ export class SelectView extends PureComponent {
           clickAwayMouseEvent={MouseEvents.onClick}
           listWidthSameAsAnchorEl={listWidthSameAsAnchorEl}
           popoverFilters={popoverFilters}
+          container={this.props.container || document.body}
         >
           <div onClick={closeOnSelect && this.closeDD}>
             {menuHeader && this.renderMenuHeader()}

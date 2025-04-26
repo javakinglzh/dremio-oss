@@ -18,8 +18,8 @@ package com.dremio.plugins.elastic;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.plugins.Version;
 import com.google.common.collect.ImmutableSet;
+import java.util.Base64;
 import java.util.Set;
-import javax.xml.bind.DatatypeConverter;
 
 /** Common constant values */
 public interface ElasticsearchConstants {
@@ -30,31 +30,7 @@ public interface ElasticsearchConstants {
 
   public static final Version VERSION_0_0 = new Version(0, 0, 0);
 
-  public static final Version MIN_ELASTICSEARCH_VERSION = new Version(2, 0, 0);
-
-  // Defines a cutoff for enabling newer features that have been added to elasticsearch. Rather than
-  // maintain an exact matrix of what is supported, We simply try to make use of all features
-  // available
-  // above this version and disable them for connections to any version below. This cutoff is
-  // inclusive
-  // on the ENABLE side so all new features must be available in 2.1.2 and up. Everything missing in
-  // a version between 2.0 and 2.1.1 is disabled for all versions in that range.
-  public static final Version MIN_VERSION_TO_ENABLE_NEW_FEATURES = new Version(2, 1, 2);
-
-  // Version 5x or higher
-  public static final Version ELASTICSEARCH_VERSION_5X = new Version(5, 0, 0);
-
-  // Version 5.3.x or higher
-  public static final Version ELASTICSEARCH_VERSION_5_3_X = new Version(5, 3, 0);
-
-  // Version 6.0.x or higher
-  public static final Version ELASTICSEARCH_VERSION_DEFAULT = new Version(6, 0, 0);
-
-  // Version 6.8.x or higher
-  public static final Version ELASTICSEARCH_VERSION_6_8_X = new Version(6, 8, 0);
-
-  // Version 7.0.x or higher
-  public static final Version ELASTICSEARCH_VERSION_7_0_X = new Version(7, 0, 0);
+  public static final Version MIN_ELASTICSEARCH_VERSION = new Version(7, 0, 0);
 
   // Elasticsearch formats
   public static final String ES_GENERIC_FORMAT1 = "[ddMMMyyyy:HH:mm:ss";
@@ -99,7 +75,7 @@ public interface ElasticsearchConstants {
 
   /* Elastic dremio internal constants */
   String NULL_BOOLEAN_TAG = "NULL_BOOLEAN_TAG";
-  String NULL_BYTE_TAG = DatatypeConverter.printBase64Binary("NULL_BINARY_TAG".getBytes());
+  String NULL_BYTE_TAG = Base64.getEncoder().encodeToString("NULL_BINARY_TAG".getBytes());
   String NULL_STRING_TAG = "NULL_STRING_TAG";
   Integer NULL_INTEGER_TAG = Integer.MIN_VALUE;
   Long NULL_LONG_TAG = Long.MIN_VALUE;

@@ -21,6 +21,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -50,6 +51,7 @@ import org.asynchttpclient.ListenableFuture;
 import org.asynchttpclient.Request;
 import org.asynchttpclient.Response;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 
 /** Tests for AzureAsyncContainerProvider */
 public class TestAzureAsyncContainerProvider {
@@ -228,6 +230,30 @@ public class TestAzureAsyncContainerProvider {
         new AzureAsyncContainerProvider(
             client, AZURE_ENDPOINT, "azurestoragev2hier", credentials, parentClass, true);
     containerProvider.assertContainerExists("container");
+  }
+
+  @Test
+  public void testDoesContainerExistsWithSasToken()
+      throws ExecutionException, InterruptedException {
+    AzureStorageFileSystem parentClass = mock(AzureStorageFileSystem.class);
+    AzureStorageCredentials credentials = getMockStorageCredentials();
+    AsyncHttpClient client = mock(AsyncHttpClient.class);
+    Response response = mock(Response.class);
+    when(response.getHeader(any(String.class))).thenReturn("");
+    when(response.getStatusCode()).thenReturn(200);
+    ListenableFuture<Response> future = mock(ListenableFuture.class);
+    when(future.get()).thenReturn(response);
+    when(client.executeRequest(any(Request.class))).thenReturn(future);
+    when(credentials.getSasSignature(true)).thenReturn("path/to/file?sas-token");
+    AzureAsyncContainerProvider containerProvider =
+        new AzureAsyncContainerProvider(
+            client, AZURE_ENDPOINT, "azurestoragev2hier", credentials, parentClass, true);
+    containerProvider.assertContainerExists("container");
+    var argumentCaptor = ArgumentCaptor.forClass(Request.class);
+    verify(client).executeRequest(argumentCaptor.capture());
+    assertEquals(
+        "https://azurestoragev2hier.dfs.core.windows.net/path/to/file?sas-token",
+        argumentCaptor.getValue().getUrl());
   }
 
   @Test
@@ -430,7 +456,8 @@ public class TestAzureAsyncContainerProvider {
   private AzureStorageCredentials getMockStorageCredentials() {
     AzureStorageCredentials credentials = mock(AzureStorageCredentials.class);
     when(credentials.checkAndUpdateToken()).thenReturn(false);
-    when(credentials.getAuthzHeaderValue(any(Request.class))).thenReturn("Bearer testtoken");
+    when(credentials.getAuthorizationHeader(any(Request.class))).thenReturn("Bearer testtoken");
+    when(credentials.getSasSignature(anyBoolean())).thenReturn("");
     return credentials;
   }
 }

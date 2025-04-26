@@ -16,6 +16,9 @@
 
 import { dremio } from "#oss/dremio";
 import { queryOptions } from "@tanstack/react-query";
+import { getSupportFlagUrl } from "#oss/exports/endpoints/SupportFlags/getSupportFlag";
+import { queryClient } from "#oss/queryClient";
+import { getApiContext } from "dremio-ui-common/contexts/ApiContext.js";
 
 export type SupportKeyState = {
   id: string;
@@ -28,7 +31,7 @@ export type SupportKeyState = {
   | { type: "TEXT"; value: string }
 );
 
-const getTypeString = (v: string | number | boolean) => {
+export const getTypeString = (v: string | number | boolean) => {
   switch (typeof v) {
     case "number":
       return "INTEGER";
@@ -67,3 +70,24 @@ export const supportKey =
       retry: false,
       staleTime: Infinity,
     });
+
+export const supportKeyMutation = (pid: string) => (key: string) => ({
+  mutationFn: (value: SupportKeyState["value"]) =>
+    getApiContext()
+      .fetch(getSupportFlagUrl(key), {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          id: key,
+          type: getTypeString(value),
+          value: value,
+        }),
+        keepalive: true,
+      })
+      .then((res: any) => res.json()),
+  onSuccess: (value: SupportKeyState["value"]) => {
+    queryClient.setQueryData(["support-key", key], value);
+  },
+});

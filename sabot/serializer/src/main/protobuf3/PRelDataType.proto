@@ -163,3 +163,11 @@ message PSymbol {
   string clazz = 1;
   string name = 2;
 }
+
+enum PJoinType {
+  UNKNOWN = 0;
+  INNER = 1;
+  LEFT = 2;
+  RIGHT = 3;
+  FULL = 4;
+}

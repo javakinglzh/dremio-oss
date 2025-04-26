@@ -151,7 +151,11 @@ public class UnionFunctions {
 
       byte[] type;
       if (input.isSet()) {
-        type = input.getMinorType().name().getBytes();
+        if (input.getMinorType() == org.apache.arrow.vector.types.Types.MinorType.TIMESTAMPMILLI) {
+          type = "TIMESTAMP".getBytes();
+        } else {
+          type = input.getMinorType().name().getBytes();
+        }
       } else {
         type = org.apache.arrow.vector.types.Types.MinorType.NULL.name().getBytes();
       }

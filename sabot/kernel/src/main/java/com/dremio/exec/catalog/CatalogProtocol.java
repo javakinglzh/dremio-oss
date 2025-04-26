@@ -115,14 +115,14 @@ class CatalogProtocol implements FabricProtocol, AutoCloseable {
     switch (rpcType) {
       case RpcType.REQ_SOURCE_CONFIG_VALUE:
         {
-          final SourceWrapper wrapper = get(pBody, SourceWrapper.PARSER);
+          final SourceWrapper wrapper = get(pBody, SourceWrapper.parser());
           serializedExecutor.execute(new MessageHandler(wrapper, sender, true));
           break;
         }
 
       case RpcType.REQ_DEL_SOURCE_VALUE:
         {
-          final SourceWrapper wrapper = get(pBody, SourceWrapper.PARSER);
+          final SourceWrapper wrapper = get(pBody, SourceWrapper.parser());
           serializedExecutor.execute(new MessageHandler(wrapper, sender, false));
           break;
         }

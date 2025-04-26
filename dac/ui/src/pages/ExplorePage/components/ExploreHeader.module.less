@@ -15,16 +15,15 @@
  */
 
 .privilegesIcon {
-  color: var(--icon--primary);
-  inline-size: 24px;
-  block-size: 24px;
-  cursor: pointer;
+  color: var(--icon--primary) !important;
 
-  &--disabled {
-    cursor: default;
-    inline-size: 24px;
-    block-size: 24px;
-    color: var(--icon--disabled);
+  &:hover,
+  &:focus {
+    color: var(--text--brand) !important;
+  }
+
+  &[disabled] {
+    color: var(--icon--disabled) !important;
   }
 }
 

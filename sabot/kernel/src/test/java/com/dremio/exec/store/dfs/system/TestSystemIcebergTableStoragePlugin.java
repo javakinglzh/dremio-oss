@@ -40,7 +40,6 @@ public class TestSystemIcebergTableStoragePlugin extends BaseTestQuery {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
-    setupDefaultTestCluster();
     storagePlugin = getCatalogService().getSource(SYSTEM_ICEBERG_TABLES_PLUGIN_NAME);
     hadoopCatalog = new HadoopCatalog();
     hadoopCatalog.setConf(new Configuration());

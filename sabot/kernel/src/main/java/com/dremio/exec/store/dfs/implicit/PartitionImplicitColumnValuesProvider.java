@@ -81,7 +81,7 @@ public class PartitionImplicitColumnValuesProvider implements ImplicitColumnValu
       case TIME:
         return new ConstantColumnPopulators.TimeMilliNameValuePair(
             field.getName(), getInt(partitionValue));
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return new ConstantColumnPopulators.TimeStampMilliNameValuePair(
             field.getName(), getLong(partitionValue));
       case DECIMAL:

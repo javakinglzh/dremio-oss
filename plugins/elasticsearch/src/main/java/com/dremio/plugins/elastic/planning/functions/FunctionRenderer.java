@@ -24,19 +24,13 @@ public class FunctionRenderer {
     PAINLESS
   }
 
-  private final boolean supportsV5Features;
   private final boolean scriptsEnabled;
-
   private final RenderMode mode;
   private final RexVisitor<FunctionRender> visitor;
 
   public FunctionRenderer(
-      boolean supportsV5Features,
-      boolean scriptsEnabled,
-      RenderMode mode,
-      RexVisitor<FunctionRender> visitor) {
+      boolean scriptsEnabled, RenderMode mode, RexVisitor<FunctionRender> visitor) {
     super();
-    this.supportsV5Features = supportsV5Features;
     this.scriptsEnabled = scriptsEnabled;
     this.mode = mode;
     this.visitor = visitor;
@@ -48,10 +42,6 @@ public class FunctionRenderer {
 
   public boolean isUsingPainless() {
     return mode == RenderMode.PAINLESS;
-  }
-
-  public boolean isSupportsV5Features() {
-    return supportsV5Features;
   }
 
   public boolean isScriptsEnabled() {

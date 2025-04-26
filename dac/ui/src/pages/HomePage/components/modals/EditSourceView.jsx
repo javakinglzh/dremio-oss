@@ -19,6 +19,7 @@ import { connect } from "react-redux";
 import Immutable from "immutable";
 import mergeWith from "lodash/mergeWith";
 
+import { rmProjectBase } from "dremio-ui-common/utilities/projectBase.js";
 import {
   createSource,
   loadSource,
@@ -32,6 +33,8 @@ import SourceFormJsonPolicy from "utils/FormUtils/SourceFormJsonPolicy";
 import { showConfirmationDialog } from "actions/confirmation";
 import { passDataBetweenTabs } from "actions/modals/passDataBetweenTabs";
 import ViewStateWrapper from "components/ViewStateWrapper";
+import { store } from "#oss/store/store";
+import { resetHomeContents } from "#oss/actions/home";
 import Message from "components/Message";
 import ConfigurableSourceForm from "pages/HomePage/components/modals/ConfigurableSourceForm";
 
@@ -48,6 +51,7 @@ import {
 
 import { viewStateWrapper } from "uiTheme/less/forms.less";
 import { trimObjectWhitespace } from "./utils";
+import { getSourceNameFromUrl } from "#oss/utils/pathUtils";
 import { isVersionedReflectionsEnabled } from "./AddEditSourceUtils";
 import { isVersionedSource } from "@inject/utils/sourceUtils";
 import { getJSONElementOverrides } from "@inject/utils/FormUtils/formOverrideUtils";
@@ -88,7 +92,6 @@ export class EditSourceView extends PureComponent {
     updateFormDirtyState: PropTypes.func,
     showConfirmationDialog: PropTypes.func,
     dispatchPassDataBetweenTabs: PropTypes.func,
-    isSchedulerEnabled: PropTypes.bool,
     isLiveReflectionsEnabled: PropTypes.bool,
   };
 
@@ -154,17 +157,26 @@ export class EditSourceView extends PureComponent {
     );
   }
 
+  getCurrentSourceName = () => {
+    const pathName =
+      rmProjectBase(location.pathname, {
+        projectId: this.context.router.params?.projectId,
+      }) || "/";
+
+    return getSourceNameFromUrl(pathName);
+  };
+
   reallySubmitEdit = (form, sourceType) => {
-    if (!this.props.isSchedulerEnabled) {
-      delete form.accelerationActivePolicyType;
-      delete form.accelerationRefreshSchedule;
-    }
     if (!this.props.isLiveReflectionsEnabled) {
       delete form.accelerationRefreshOnDataChanges;
     }
     return ApiUtils.attachFormSubmitHandlers(
       getFinalSubmit(form, sourceType, this.props),
     ).then(() => {
+      if (this.getCurrentSourceName() === this.props.sourceName) {
+        store.dispatch(resetHomeContents());
+      }
+
       this.context.router.replace(window.location.pathname);
       return null;
     });

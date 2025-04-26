@@ -58,6 +58,17 @@
       select {
         background-color: var(--color--neutral--75) !important;
       }
+      .MuiSelect {
+        &-icon {
+          path {
+            fill: var(--icon--disabled);
+          }
+        }
+        &-select {
+          background-color: var(--fill--disabled) !important;
+          -webkit-text-fill-color: var(--text--disabled);
+        }
+      }
     }
   }
 

@@ -339,6 +339,17 @@ public class ChangeTrackingUserSession extends UserSession {
     updated = true;
   }
 
+  @Override
+  public CaseInsensitiveMap<SessionOptionValue> getSessionOptionsMap() {
+    return delegate.getSessionOptionsMap();
+  }
+
+  @Override
+  public void setSessionOption(String key, SessionOptionValue value) {
+    delegate.setSessionOption(key, value);
+    updated = true;
+  }
+
   public boolean isUpdated() {
     return updated;
   }

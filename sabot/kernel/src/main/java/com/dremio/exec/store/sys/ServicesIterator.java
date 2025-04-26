@@ -16,9 +16,9 @@
 package com.dremio.exec.store.sys;
 
 import com.dremio.config.DremioConfig;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.sys.ServicesIterator.ServiceSetInfo;
 import com.dremio.service.coordinator.ClusterCoordinator;
 import com.dremio.service.coordinator.ClusterCoordinator.Role;
@@ -61,7 +61,7 @@ public class ServicesIterator implements Iterator<ServiceSetInfo> {
     }
   }
 
-  public ServicesIterator(final SabotContext dbContext) {
+  public ServicesIterator(final PluginSabotContext dbContext) {
     ClusterCoordinator clusterCoordinator = dbContext.getClusterCoordinator();
     DremioConfig dremioConfig = dbContext.getDremioConfig();
     Iterator<ServiceSetInfo> srv;

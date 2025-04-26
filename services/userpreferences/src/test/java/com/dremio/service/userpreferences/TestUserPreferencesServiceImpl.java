@@ -129,7 +129,7 @@ public class TestUserPreferencesServiceImpl {
 
   private MockedStatic<RequestContext> mockCurrentUser() {
     RequestContext requestContext =
-        RequestContext.current().with(UserContext.CTX_KEY, new UserContext(USER_ID_1));
+        RequestContext.current().with(UserContext.CTX_KEY, UserContext.of(USER_ID_1));
     MockedStatic<RequestContext> mocked = Mockito.mockStatic(RequestContext.class);
     mocked.when(RequestContext::current).thenReturn(requestContext);
     return mocked;

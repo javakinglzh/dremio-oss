@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.cost;
 
 import com.dremio.exec.planner.logical.ProjectableSqlAggFunction;
+import com.dremio.reflection.rules.ReplacementPointer;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.logical.LogicalAggregate;
@@ -54,6 +55,14 @@ public class RelMdColumnUniqueness implements MetadataHandler<BuiltInMetadata.Co
 
     ImmutableBitSet groupKey = ImmutableBitSet.range(rel.getGroupCount());
     return columns.contains(groupKey);
+  }
+
+  public Boolean areColumnsUnique(
+      ReplacementPointer replacementPointer,
+      RelMetadataQuery mq,
+      ImmutableBitSet columns,
+      boolean ignoreNulls) {
+    return mq.areColumnsUnique(replacementPointer.getInput(), columns, ignoreNulls);
   }
 
   public boolean areColumnsUnique(

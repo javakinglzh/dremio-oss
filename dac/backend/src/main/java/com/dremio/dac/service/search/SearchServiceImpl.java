@@ -63,7 +63,7 @@ public class SearchServiceImpl implements SearchService {
 
   public static final String LOCAL_TASK_LEADER_NAME = "searchservice";
 
-  private final Provider<NamespaceService> namespaceServiceProvider;
+  private final Provider<NamespaceService> systemNamespaceServiceProvider;
   private final Provider<OptionManager> optionManagerProvider;
 
   private final Provider<LegacyKVStoreProvider> storeProvider;
@@ -76,12 +76,12 @@ public class SearchServiceImpl implements SearchService {
   private AuxiliaryIndex<String, NameSpaceContainer, SearchContainer> searchIndex;
 
   public SearchServiceImpl(
-      Provider<NamespaceService> namespaceServiceProvider,
+      Provider<NamespaceService> systemUserNamespaceServiceProvider,
       Provider<OptionManager> optionManagerProvider,
       Provider<LegacyKVStoreProvider> storeProvider,
       Provider<SchedulerService> schedulerService,
       ExecutorService executorService) {
-    this.namespaceServiceProvider = namespaceServiceProvider;
+    this.systemNamespaceServiceProvider = systemUserNamespaceServiceProvider;
     this.optionManagerProvider = optionManagerProvider;
     this.storeProvider = storeProvider;
     this.schedulerService = schedulerService;
@@ -106,7 +106,7 @@ public class SearchServiceImpl implements SearchService {
     configurationStore = new ConfigurationStore(storeProvider.get());
     manager =
         new SearchIndexManager(
-            namespaceServiceProvider, collaborationTagStore, configurationStore, searchIndex);
+            systemNamespaceServiceProvider, collaborationTagStore, configurationStore, searchIndex);
     wakeupHandler = new WakeupHandler(executorService, manager);
 
     // important to schedule once and schedule it back

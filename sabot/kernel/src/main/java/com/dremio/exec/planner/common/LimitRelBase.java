@@ -86,10 +86,18 @@ public abstract class LimitRelBase extends Sort {
     int off = offset != null ? RexLiteral.intValue(offset) : 0;
 
     if (fetch == null) {
-      return mq.getRowCount(getInput()) - off;
+      Double rowCount = mq.getRowCount(getInput());
+      if (rowCount == null) { // Guard against null
+        rowCount = 1.0;
+      }
+      rowCount = rowCount - off;
+      if (rowCount < 1.0) { // Guard against negative
+        rowCount = 1.0;
+      }
+      return rowCount;
     } else {
       int f = RexLiteral.intValue(fetch);
-      return off + f;
+      return (double) off + f; // To avoid overflow
     }
   }
 

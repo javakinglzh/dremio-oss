@@ -15,6 +15,10 @@
  */
 package com.dremio.plugins.elastic.execution;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.PathSegment.PathSegmentType;
@@ -23,16 +27,17 @@ import com.dremio.exec.store.easy.json.reader.BaseJsonProcessor;
 import com.dremio.exec.vector.complex.fn.FieldSelection;
 import com.dremio.exec.vector.complex.fn.WorkingBuffer;
 import com.dremio.plugins.elastic.ElasticsearchConstants;
+import com.dremio.sabot.exec.context.OperatorContext;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonToken;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.List;
-import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ComplexWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.StructWriter;
+import org.apache.arrow.vector.types.Types.MinorType;
 import org.apache.calcite.util.Pair;
 
 public class ElasticsearchJsonReader extends BaseJsonProcessor {
@@ -57,9 +62,10 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
   private FieldSelection selection;
   private String index;
   private String type;
+  private int fixedDataLenPerRow;
 
   public ElasticsearchJsonReader(
-      ArrowBuf managedBuf,
+      OperatorContext context,
       List<SchemaPath> columns,
       String resourceName,
       FieldReadDefinition rootDefinition,
@@ -67,9 +73,11 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
       boolean metaUIDSelected,
       boolean metaIDSelected,
       boolean metaTypeSelected,
-      boolean metaIndexSelected) {
-
-    this.workingBuffer = new WorkingBuffer(managedBuf);
+      boolean metaIndexSelected,
+      boolean rowSizeLimitEnabled,
+      int fixedDataLenPerRow) {
+    super(context);
+    this.workingBuffer = new WorkingBuffer(context.getManagedBuffer());
     this.resourceName = resourceName;
     this.columns = columns;
     this.rootDefinition = rootDefinition;
@@ -81,6 +89,8 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
     this.metaIDSelected = metaIDSelected;
     this.metaIndexSelected = metaIndexSelected;
     this.metaTypeSelected = metaTypeSelected;
+    this.rowSizeLimitEnabled = rowSizeLimitEnabled;
+    this.fixedDataLenPerRow = fixedDataLenPerRow;
   }
 
   @Override
@@ -91,11 +101,15 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
     String scrollId = parser.getValueAsString();
 
     seekForward(ElasticsearchConstants.HITS);
-    final JsonToken totalSizeToken = seekForward(ElasticsearchConstants.TOTAL_HITS);
+    seekForward(ElasticsearchConstants.TOTAL_HITS);
+    final JsonToken totalSizeToken = seekForward(ElasticsearchConstants.TOTAL_HITS_VALUE);
     Preconditions.checkState(totalSizeToken == JsonToken.VALUE_NUMBER_INT, "Invalid response");
     final long totalSize = parser.getValueAsLong();
-
-    final JsonToken hitsToken = seekForward(ElasticsearchConstants.HITS);
+    JsonToken hitsToken = seekForward(ElasticsearchConstants.HITS);
+    if (parser.getCurrentToken() == JsonToken.END_OBJECT) {
+      // We've reached the end of 'hits' object, skip out of it and read again
+      hitsToken = seekForward(ElasticsearchConstants.HITS);
+    }
     Preconditions.checkState(hitsToken == JsonToken.START_ARRAY, "Invalid response");
     return new Pair<>(scrollId, totalSize);
   }
@@ -188,6 +202,14 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
       } else {
         t = seekForward(ElasticsearchConstants.SOURCE);
         readState = writeToVector(structWriter, t);
+        if (rowSizeLimitEnabled) {
+          RowSizeLimitExceptionHelper.checkSizeLimit(
+              currentRowSize,
+              rowSizeLimit - fixedDataLenPerRow,
+              RowSizeLimitExceptionType.READ,
+              logger);
+          resetRowSize();
+        }
       }
 
       t = parser.nextToken();
@@ -339,6 +361,7 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
             writeDeclaredMap(list.struct(), childSelection, definition, true, path, false);
           } else {
             definition.writeList(list, t, parser);
+            currentRowSize += parser.getValueAsString().length();
           }
           list.endList();
 
@@ -349,6 +372,7 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
           return;
         } else {
           definition.writeMap(map, t, parser);
+          currentRowSize += parser.getValueAsString().length();
         }
       }
     } finally {
@@ -390,6 +414,7 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
           writeDeclaredMap(list.struct(), selection, readDef, true, path, false);
         } else {
           readDef.writeList(list, token, parser);
+          currentRowSize += parser.getValueAsString().length();
         }
       } catch (Exception e) {
         throw getExceptionWithContext(e, this.currentFieldName).build(logger);
@@ -409,8 +434,8 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
    * @throws IOException
    * @throws JsonParseException
    */
-  private JsonToken seekForward(String fieldName) throws IOException, JsonParseException {
-    JsonToken token = null;
+  private JsonToken seekForward(String fieldName) throws IOException {
+    JsonToken token;
 
     String currentName;
     token = parser.getCurrentToken();
@@ -508,11 +533,10 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
             map.bigInt(fieldName).writeBigInt(parser.getLongValue());
             break;
           case VALUE_STRING:
+            String value = parser.getText();
+            incrementCurrentRowSize(MinorType.VARCHAR, value.getBytes(UTF_8));
             map.varChar(fieldName)
-                .writeVarChar(
-                    0,
-                    workingBuffer.prepareVarCharHolder(parser.getText()),
-                    workingBuffer.getBuf());
+                .writeVarChar(0, workingBuffer.prepareVarCharHolder(value), workingBuffer.getBuf());
             break;
 
           default:
@@ -587,11 +611,10 @@ public class ElasticsearchJsonReader extends BaseJsonProcessor {
             list.bigInt().writeBigInt(parser.getLongValue());
             break;
           case VALUE_STRING:
+            String value = parser.getText();
+            incrementCurrentRowSize(MinorType.VARCHAR, value.getBytes(UTF_8));
             list.varChar()
-                .writeVarChar(
-                    0,
-                    workingBuffer.prepareVarCharHolder(parser.getText()),
-                    workingBuffer.getBuf());
+                .writeVarChar(0, workingBuffer.prepareVarCharHolder(value), workingBuffer.getBuf());
             break;
           default:
             throw UserException.dataReadError()

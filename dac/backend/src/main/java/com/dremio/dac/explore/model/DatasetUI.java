@@ -16,6 +16,7 @@
 package com.dremio.dac.explore.model;
 
 import static com.dremio.common.utils.PathUtils.encodeURIComponent;
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
 
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.common.utils.PathUtils;
@@ -24,7 +25,6 @@ import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.job.JobFilters;
 import com.dremio.dac.model.sources.PhysicalDatasetPath;
 import com.dremio.dac.model.sources.VirtualDatasetPath;
-import com.dremio.dac.model.spaces.HomeName;
 import com.dremio.dac.proto.model.dataset.Derivation;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.util.DatasetUIUtils;
@@ -309,7 +309,7 @@ public class DatasetUI {
 
     final boolean isVersionedDataset = VersionedDatasetId.tryParse(entityId) != null;
     if (isUnsavedDirectPhysicalDataset) {
-      if (displayFullPath.get(0).startsWith(HomeName.HOME_PREFIX)) {
+      if (isHomeSpace(displayFullPath.get(0))) {
         queryUrlPath = new DatasetPath(displayFullPath).getQueryUrlPath();
       } else {
         queryUrlPath = new PhysicalDatasetPath(displayFullPath).getQueryUrlPath();

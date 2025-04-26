@@ -30,7 +30,6 @@ import { IconButton } from "dremio-ui-lib";
 import { Popover } from "dremio-ui-lib/components";
 import DatasetOverlayContent from "./DatasetOverlayContent";
 import DatasetSummaryOverlay from "./DatasetSummaryOverlay";
-import WikiDrawerWrapper from "#oss/components/WikiDrawerWrapper";
 import { ARSFeatureSwitch } from "@inject/utils/arsUtils";
 import { getExploreState } from "#oss/selectors/explore";
 
@@ -66,6 +65,7 @@ export class DatasetItemLabel extends PureComponent {
     isMultiQueryRunning: PropTypes.bool,
     openDetailsPanel: PropTypes.func,
     hideOverlayActionButtons: PropTypes.bool,
+    hideAllActions: PropTypes.bool,
     portal: PropTypes.bool,
   };
 
@@ -80,7 +80,6 @@ export class DatasetItemLabel extends PureComponent {
     isIconHovered: false,
     isDragInProgress: false,
     isLoadingData: false,
-    drawerIsOpen: false,
     datasetDetails: Immutable.fromJS({}),
   };
 
@@ -154,22 +153,6 @@ export class DatasetItemLabel extends PureComponent {
     );
   }
 
-  openWikiDrawer = (dataset) => {
-    this.setState({
-      datasetDetails: dataset,
-      drawerIsOpen: true,
-    });
-  };
-
-  closeWikiDrawer = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-    this.setState({
-      datasetDetails: Immutable.fromJS({}),
-      drawerIsOpen: false,
-    });
-  };
-
   render() {
     const {
       fullPath,
@@ -192,9 +175,10 @@ export class DatasetItemLabel extends PureComponent {
       openDetailsPanel,
       hideOverlayActionButtons,
       portal = true,
+      hideAllActions,
     } = this.props;
 
-    const { isOpenOverlay, drawerIsOpen, datasetDetails } = this.state;
+    const { isOpenOverlay } = this.state;
 
     const node = customNode || this.renderDefaultNode();
     const arrowIconType = isOpenOverlay
@@ -263,21 +247,16 @@ export class DatasetItemLabel extends PureComponent {
                       datasetType={typeIcon} //Icon? Need to map this to a data type
                       inheritedTitle={fullPath.last()}
                       fullPath={fullPath}
-                      openWikiDrawer={openDetailsPanel || this.openWikiDrawer}
+                      openWikiDrawer={openDetailsPanel}
                       showColumns
                       versionContext={versionContext}
                       hideMainActionButtons={hideOverlayActionButtons}
+                      hideAllActions={hideAllActions}
                     />
                   }
                 >
                   {renderDataItemLabel()}
                 </Popover>
-                <WikiDrawerWrapper
-                  datasetDetails={datasetDetails}
-                  fullPath={fullPath}
-                  drawerIsOpen={drawerIsOpen}
-                  closeWikiDrawer={this.closeWikiDrawer}
-                />
               </>
             ) : (
               renderDataItemLabel()

@@ -19,5 +19,7 @@ import com.dremio.options.OptionManager;
 import com.dremio.sabot.op.common.ht2.HashTable.HashTableCreateArgs;
 
 public interface HashTableFactory {
-  HashTable getInstance(OptionManager optionsManager, HashTableCreateArgs createArgs);
+  HashTable getInstanceForHashAgg(OptionManager optionsManager, HashTableCreateArgs createArgs);
+
+  HashTable getInstanceForHashJoin(OptionManager optionsManager, HashTableCreateArgs createArgs);
 }

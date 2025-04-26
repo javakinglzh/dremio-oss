@@ -34,7 +34,9 @@ export const starredResourcesQuery = (_pid?: string) =>
     queryKey: getStarsQueryKey(),
     queryFn: ({ signal }) =>
       dremio
-        ._sonarV3Request("users/preferences/STARRED", { signal })
+        ._sonarV3Request("users/preferences/STARRED?showCatalogInfo=true", {
+          signal,
+        })
         .then((res) => res.json())
         .then(
           (starredResources: StarredResources) =>

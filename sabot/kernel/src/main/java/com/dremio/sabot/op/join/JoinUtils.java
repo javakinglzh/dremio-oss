@@ -158,8 +158,8 @@ public class JoinUtils {
     }
 
     // allow implicit cast if input types are date/ timestamp
-    if ((input1 == MinorType.DATE || input1 == MinorType.TIMESTAMP)
-        && (input2 == MinorType.DATE || input2 == MinorType.TIMESTAMP)) {
+    if ((input1 == MinorType.DATE || input1 == MinorType.TIMESTAMPMILLI)
+        && (input2 == MinorType.DATE || input2 == MinorType.TIMESTAMPMILLI)) {
       return true;
     }
 

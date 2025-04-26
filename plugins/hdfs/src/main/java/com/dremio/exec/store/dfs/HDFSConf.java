@@ -15,13 +15,13 @@
  */
 package com.dremio.exec.store.dfs;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -178,7 +178,7 @@ public class HDFSConf extends FileSystemConf<HDFSConf, HDFSStoragePlugin> {
 
   @Override
   public HDFSStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> idProvider) {
-    return new HDFSStoragePlugin(this, context, name, idProvider);
+      PluginSabotContext pluginSabotContext, String name, Provider<StoragePluginId> idProvider) {
+    return new HDFSStoragePlugin(this, pluginSabotContext, name, idProvider);
   }
 }

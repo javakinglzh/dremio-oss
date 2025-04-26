@@ -26,6 +26,7 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.dfs.AbstractTableFunction;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -97,7 +98,13 @@ public class DirListingTableFunction extends AbstractTableFunction {
 
     FileSystem fs;
     try {
-      fs = plugin.createFSWithAsyncOptions(pathWithScheme, props.getUserName(), context);
+      fs =
+          plugin.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(pathWithScheme)
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .withAsyncOptions(true));
     } catch (IOException e) {
       throw UserException.ioExceptionError(e).buildSilently();
     }

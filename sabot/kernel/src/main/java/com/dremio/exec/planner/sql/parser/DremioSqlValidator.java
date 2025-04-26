@@ -57,7 +57,11 @@ import org.apache.calcite.sql.validate.SqlValidatorScope;
 import org.apache.calcite.sql.validate.implicit.TypeCoercion;
 import org.jetbrains.annotations.Nullable;
 
-/** Dremio dummy implementation of {@link SqlValidator} to adapt to upstream api changes. */
+/**
+ * Dremio dummy {@link SqlValidator} which serves as a wrapper of RelDataTypeFactory to adapt to
+ * upstream Calcite api changes (CALCITE-3267). Note: Please only use this when it is hard to get
+ * the real validator.
+ */
 public class DremioSqlValidator implements SqlValidator {
 
   private final RelDataTypeFactory relDataTypeFactory;
@@ -545,6 +549,18 @@ public class DremioSqlValidator implements SqlValidator {
 
   @Override
   public SqlValidator transform(UnaryOperator<Config> unaryOperator) {
+    throw new RuntimeException(
+        "DremioSqlValidator is a dummy SqlValidator to adapt to upstream api changes.");
+  }
+
+  @Override
+  public SqlValidator setLenientOperatorLookup(boolean lenient) {
+    throw new RuntimeException(
+        "DremioSqlValidator is a dummy SqlValidator to adapt to upstream api changes.");
+  }
+
+  @Override
+  public boolean isLenientOperatorLookup() {
     throw new RuntimeException(
         "DremioSqlValidator is a dummy SqlValidator to adapt to upstream api changes.");
   }

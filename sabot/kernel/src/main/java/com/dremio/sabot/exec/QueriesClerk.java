@@ -15,24 +15,67 @@
  */
 package com.dremio.sabot.exec;
 
+import com.dremio.common.utils.protos.QueryIdHelper;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.fragment.EndpointsIndex;
 import com.dremio.exec.planner.fragment.PlanFragmentFull;
 import com.dremio.exec.proto.CoordExecRPC.SchedulingInfo;
 import com.dremio.exec.proto.UserBitShared.QueryId;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.rpc.TunnelProvider;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import javax.annotation.concurrent.ThreadSafe;
 
 /** Manages workload and query level allocators */
 @ThreadSafe
 public class QueriesClerk {
 
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(QueriesClerk.class);
   private final WorkloadTicketDepot workloadTicketDepot;
 
-  QueriesClerk(final WorkloadTicketDepot workloadTicketDepot) {
+  private final ReservedResourceDepot reservedResourceDepot;
+  private final Collection<DynamicReservedResource> resources = new ConcurrentLinkedQueue<>();
+  private boolean enforceDLRReservations;
+  private final OptionManager optionManager;
+
+  QueriesClerk(
+      final WorkloadTicketDepot workloadTicketDepot,
+      final ReservedResourceDepot reservedResourceDepot,
+      final boolean enforceDLRReservations) {
     this.workloadTicketDepot = workloadTicketDepot;
+    this.reservedResourceDepot = reservedResourceDepot;
+    this.enforceDLRReservations = enforceDLRReservations;
+    this.optionManager = null;
+  }
+
+  QueriesClerk(
+      final WorkloadTicketDepot workloadTicketDepot,
+      final ReservedResourceDepot reservedResourceDepot,
+      final OptionManager optionManager) {
+    this.workloadTicketDepot = workloadTicketDepot;
+    this.reservedResourceDepot = reservedResourceDepot;
+    this.enforceDLRReservations = false;
+    this.optionManager = optionManager;
+  }
+
+  public boolean getEnforceDLRReservations() {
+    if (this.optionManager != null) {
+      enforceDLRReservations =
+          this.optionManager.getOption(ExecConstants.DYNAMIC_LOAD_ROUTING_ENFORCE_RESERVATIONS);
+    }
+    return enforceDLRReservations;
+  }
+
+  public long getAmplifyFactor() {
+    if (this.optionManager == null) {
+      return 1;
+    }
+    return this.optionManager.getOption(
+        ExecConstants.DYNAMIC_LOAD_ROUTING_NON_SPILLABLE_MEMORY_AMPLIFY_FACTOR);
   }
 
   /**
@@ -45,10 +88,10 @@ public class QueriesClerk {
       final QueryStarter queryStarter) {
     final QueryId queryId = firstFragment.getHandle().getQueryId();
 
-    // Note: The temporary reference count (released in the finally clause, below) is necessary to
-    // guard against races
-    // between potential workload ticket modifications and this function (creation of fragments for
-    // queries on the workload)
+    // Note: We temporarily hold a reference count on the workload ticket (released in the
+    // `finally` clause, below), the call to reserve is in `getWorkloadTicket`. The reference
+    // is necessary to guard against races between potential workload ticket modifications
+    // and this function (creation of fragments for queries on the workload)
     WorkloadTicket workloadTicket = workloadTicketDepot.getWorkloadTicket(schedulingInfo);
     try {
       final long queryMaxAllocation =
@@ -60,7 +103,8 @@ public class QueriesClerk {
           queryMaxAllocation,
           firstFragment.getMajor().getForeman(),
           firstFragment.getMinor().getAssignment(),
-          queryStarter);
+          queryStarter,
+          this);
     } finally {
       workloadTicket.release();
     }
@@ -100,9 +144,9 @@ public class QueriesClerk {
   }
 
   /**
-   * Gets all of the fragment tickets associated with a query.
+   * Gets all the fragment tickets associated with a query.
    *
-   * @param queryId Query Id
+   * @param queryId Query ID
    * @return collection of fragment tickets
    */
   Collection<FragmentTicket> getFragmentTickets(QueryId queryId) {
@@ -122,6 +166,39 @@ public class QueriesClerk {
     return fragmentTickets;
   }
 
+  public void notifyFinishedQuery(QueryTicket queryTicket, WorkloadTicket workloadTicket)
+      throws Exception {
+    workloadTicket.removeQueryTicket(queryTicket);
+
+    reservedResourceDepot
+        .getReservedResources()
+        .forEach((resource) -> resource.release(queryTicket.getQueryId()));
+  }
+
+  public void reserveResources(QueryId queryId) throws Exception {
+    for (DynamicReservedResource resource : reservedResourceDepot.getReservedResources()) {
+      try {
+        resource.reserve(queryId);
+      } catch (Exception e) {
+        ExecutionMetrics.getDLRFailedReservations().withTags("resource", resource.toString());
+        if (getEnforceDLRReservations()) {
+          throw e;
+        }
+      }
+    }
+  }
+
+  public void releaseResources(QueryId queryId) {
+    reservedResourceDepot.getReservedResources().forEach((resource) -> resource.release(queryId));
+  }
+
+  public void recordResourceEstimates(
+      QueryTicket queryTicket, List<PlanFragmentFull> fullFragments) {
+    reservedResourceDepot
+        .getReservedResources()
+        .forEach((resource) -> resource.estimate(queryTicket, fullFragments));
+  }
+
   TunnelProvider getTunnelProvider(QueryId queryId) {
     for (WorkloadTicket workloadTicket : getWorkloadTickets()) {
       QueryTicket queryTicket = workloadTicket.getQueryTicket(queryId);
@@ -139,6 +216,7 @@ public class QueriesClerk {
         return queryTicket.getEndpointsIndex();
       }
     }
+    logger.error("queryTicket is null for queryId {}", QueryIdHelper.getQueryId(queryId));
     return null;
   }
 }

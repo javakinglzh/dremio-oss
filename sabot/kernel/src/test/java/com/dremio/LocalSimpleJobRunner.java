@@ -15,6 +15,8 @@
  */
 package com.dremio;
 
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
+
 import com.dremio.common.utils.PathUtils;
 import com.dremio.common.utils.protos.AttemptId;
 import com.dremio.common.utils.protos.ExternalIdHelper;
@@ -27,10 +29,10 @@ import com.dremio.exec.sql.TestStoreQueryResults;
 import com.dremio.exec.work.user.LocalExecutionConfig;
 import com.dremio.exec.work.user.LocalQueryExecutor;
 import com.dremio.exec.work.user.SubstitutionSettings;
+import com.google.common.base.Preconditions;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import org.junit.platform.commons.util.Preconditions;
 
 /**
  * SimpleJobRunner implementation with LocalQueryExecutor to allow querying tables through jobs.
@@ -84,6 +86,7 @@ public final class LocalSimpleJobRunner implements SimpleJobRunner {
               .setAllowPartitionPruning(true)
               .setExposeInternalSources(true)
               .setSubstitutionSettings(SubstitutionSettings.of())
+              .setReflectionMode(MANUAL_REFLECTION_MODE)
               .build();
       TestStoreQueryResults.TestQueryObserver queryObserver =
           new TestStoreQueryResults.TestQueryObserver(checkWriterDistributionTrait);
@@ -143,9 +146,11 @@ public final class LocalSimpleJobRunner implements SimpleJobRunner {
     }
 
     public LocalSimpleJobRunner build() {
-      Preconditions.notBlank(tempSchema, "tempSchema should not be blank!");
-      Preconditions.notBlank(tblName, "tblName should not be blank!");
-      Preconditions.notNull(localQueryExecutor, "LocalQueryExecutor should not be null!");
+      Preconditions.checkState(
+          tempSchema != null && !tempSchema.isBlank(), "tempSchema should not be blank!");
+      Preconditions.checkState(
+          tblName != null && !tblName.isBlank(), "tblName should not be blank!");
+      Preconditions.checkNotNull(localQueryExecutor, "LocalQueryExecutor should not be null!");
       return new LocalSimpleJobRunner(
           tempSchema, tblName, checkWriterDistributionTrait, localQueryExecutor);
     }

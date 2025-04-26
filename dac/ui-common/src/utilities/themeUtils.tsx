@@ -18,7 +18,7 @@ import React, { forwardRef } from "react";
 import { useColorScheme } from "../appTheme/appTheme";
 
 export const withColorScheme = <T,>(WrappedComponent: React.ComponentClass) =>
-  forwardRef((props: T, ref: any) => {
+  forwardRef<any, T>((props, ref) => {
     const colorScheme = useColorScheme();
     return <WrappedComponent colorScheme={colorScheme} {...props} ref={ref} />;
   });

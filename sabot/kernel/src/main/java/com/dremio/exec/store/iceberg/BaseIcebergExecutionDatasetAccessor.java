@@ -35,7 +35,6 @@ import com.dremio.connector.metadata.extensions.SupportsIcebergMetadata;
 import com.dremio.connector.metadata.options.MetadataVerifyRequest;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.FileConfigMetadata;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.planner.common.ImmutableDremioFileAttrs;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.record.BatchSchema;
@@ -58,7 +57,6 @@ import java.util.Optional;
 import java.util.function.Supplier;
 import javax.annotation.Nonnull;
 import org.apache.arrow.vector.types.pojo.Schema;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Snapshot;
@@ -71,25 +69,19 @@ public abstract class BaseIcebergExecutionDatasetAccessor
 
   private final EntityPath entityPath;
   private final Supplier<Table> tableSupplier;
-  private final Configuration configuration;
   private final TableSnapshotProvider tableSnapshotProvider;
-  private final MutablePlugin plugin;
   private final TableSchemaProvider tableSchemaProvider;
   private final OptionResolver optionResolver;
 
   protected BaseIcebergExecutionDatasetAccessor(
       EntityPath entityPath,
       Supplier<Table> tableSupplier,
-      Configuration configuration,
       TableSnapshotProvider tableSnapshotProvider,
-      MutablePlugin plugin,
       TableSchemaProvider tableSchemaProvider,
       OptionResolver optionResolver) {
     this.entityPath = entityPath;
     this.tableSupplier = tableSupplier;
-    this.configuration = configuration;
     this.tableSnapshotProvider = tableSnapshotProvider;
-    this.plugin = plugin;
     this.tableSchemaProvider = tableSchemaProvider;
     this.optionResolver = optionResolver;
   }
@@ -192,6 +184,18 @@ public abstract class BaseIcebergExecutionDatasetAccessor
     final String metadataFileLocation = getMetadataLocation();
     final long snapshotId = snapshot != null ? snapshot.snapshotId() : -1;
 
+    final Integer formatVersion;
+    /* It's likely that this condition will always be true.  However, if a
+     * future implementation makes this false, we can tolerate it by omitting
+     * the formatVersion.
+     */
+    if (table instanceof HasTableOperations) {
+      final HasTableOperations tableWithOps = (HasTableOperations) table;
+      formatVersion = tableWithOps.operations().current().formatVersion();
+    } else {
+      formatVersion = null;
+    }
+
     return new DatasetMetadataImpl(
         fileConfig,
         datasetStats,
@@ -209,20 +213,26 @@ public abstract class BaseIcebergExecutionDatasetAccessor
         icebergSchema,
         lastModTime,
         tableProperties,
+        formatVersion,
         table.spec().specId());
   }
 
   @Override
   public PartitionChunkListing listPartitionChunks(ListPartitionChunkOption... options) {
-    String splitPath = getMetadataLocation();
     List<PartitionValue> partition = Collections.emptyList();
-    IcebergProtobuf.IcebergDatasetSplitXAttr splitExtended =
-        IcebergProtobuf.IcebergDatasetSplitXAttr.newBuilder().setPath(splitPath).build();
+    IcebergProtobuf.IcebergDatasetSplitXAttr splitExtended = getIcebergDatasetSplitXAttr();
     List<DatasetSplitAffinity> splitAffinities = new ArrayList<>();
     DatasetSplit datasetSplit = DatasetSplit.of(splitAffinities, 0, 0, splitExtended::writeTo);
+
     PartitionChunkListingImpl partitionChunkListing = new PartitionChunkListingImpl();
     partitionChunkListing.put(partition, datasetSplit);
     return partitionChunkListing;
+  }
+
+  protected IcebergProtobuf.IcebergDatasetSplitXAttr getIcebergDatasetSplitXAttr() {
+    String splitPath = getMetadataLocation();
+
+    return IcebergProtobuf.IcebergDatasetSplitXAttr.newBuilder().setPath(splitPath).build();
   }
 
   @Nonnull
@@ -255,6 +265,7 @@ public abstract class BaseIcebergExecutionDatasetAccessor
     private final String icebergSchema;
     private final long modificationTime;
     private final Map<String, String> tableProperties;
+    private final Integer formatVersion;
     private final int defaultPartitionSpecId;
 
     private DatasetMetadataImpl(
@@ -274,6 +285,7 @@ public abstract class BaseIcebergExecutionDatasetAccessor
         String icebergSchema,
         long modificationTime,
         Map<String, String> tableProperties,
+        Integer formatVersion,
         int defaultPartitionSpecId) {
       this.fileConfig = fileConfig;
       this.datasetStats = datasetStats;
@@ -291,6 +303,7 @@ public abstract class BaseIcebergExecutionDatasetAccessor
       this.icebergSchema = icebergSchema;
       this.modificationTime = modificationTime;
       this.tableProperties = tableProperties;
+      this.formatVersion = formatVersion;
       this.defaultPartitionSpecId = defaultPartitionSpecId;
     }
 
@@ -372,6 +385,11 @@ public abstract class BaseIcebergExecutionDatasetAccessor
     @Override
     public Map<String, String> getTableProperties() {
       return tableProperties;
+    }
+
+    @Override
+    public Integer getFormatVersion() {
+      return formatVersion;
     }
 
     @Override

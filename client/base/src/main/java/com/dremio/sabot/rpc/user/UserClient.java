@@ -90,7 +90,7 @@ public class UserClient
         eventLoopGroup,
         RpcType.HANDSHAKE,
         BitToUserHandshake.class,
-        BitToUserHandshake.PARSER,
+        BitToUserHandshake.parser(),
         "user client",
         newSSLEngineFactory(sslConfig),
         proxyConfig);

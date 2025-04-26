@@ -28,6 +28,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeID;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,7 +77,16 @@ public class EasyCoercionReader extends FilteringFileCoercionReader
   @Override
   public void setup(OutputMutator output) throws ExecutionSetupException {
     this.outputMutator = output;
-    inner.setup(mutator); // this will modify filters in schema mismatch case
+    for (Field field : originalSchema.getFields()) {
+      if (field.getType().getTypeID().equals(ArrowTypeID.Decimal)) {
+        mutator.addDecimalField(field);
+      }
+    }
+    if (inner instanceof AbstractRecordReader) {
+      ((AbstractRecordReader) inner).setUpVectorsLenAndCount(output.getVectors());
+    }
+    inner.setup(mutator);
+    // this will modify filters in schema mismatch case
     incoming.buildSchema();
     // reset the schema change callback
     mutator.getAndResetSchemaChanged();

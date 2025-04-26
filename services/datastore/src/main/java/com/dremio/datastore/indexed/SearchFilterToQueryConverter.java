@@ -38,7 +38,7 @@ import java.util.stream.Collectors;
 /**
  * Transform RQL queries into indexed store queries. RQL Syntax: EQUALS => =, =eq= NOT_EQUALS => !=,
  * =ne= OR => | AND => & LESS_THAN => =lt= LESS_THAN_EQUALS => =le= GREATER_THAN => =gt=
- * GREATER_THAN_EQUALS => =ge= CONTAINS => =contains= IN => =in=
+ * GREATER_THAN_EQUALS => =ge= CONTAINS => =contains= IN => =in= NOT_IN => =out=
  *
  * <p>TODO: support analyzer using SearchQueryBuilder
  */
@@ -117,7 +117,7 @@ public final class SearchFilterToQueryConverter {
     } else if (node.getOperator().equals(RSQLOperators.IN)) {
       return createInQuery(clazz, name, processedArgs, indexKey.getReservedValues());
     } else if (node.getOperator().equals(RSQLOperators.NOT_IN)) {
-      throw new IllegalArgumentException("NOT_IN operator not yet supported");
+      return createNotInQuery(clazz, name, processedArgs, indexKey.getReservedValues());
     } else if (node.getOperator().equals(CONTAINS)) {
       return createMatchAllFieldsQuery((String) processedArgs.get(0), mapping);
     } else {
@@ -157,6 +157,17 @@ public final class SearchFilterToQueryConverter {
     return SearchQueryUtils.or(
         values.stream()
             .map(value -> createEqualsQuery(cls, name, value, reservedValues))
+            .collect(Collectors.toList()));
+  }
+
+  private SearchQuery createNotInQuery(
+      final Class<?> cls,
+      final String name,
+      final List<Object> values,
+      final Map<String, SearchQuery> reservedValues) {
+    return SearchQueryUtils.and(
+        values.stream()
+            .map(value -> SearchQueryUtils.not(createEqualsQuery(cls, name, value, reservedValues)))
             .collect(Collectors.toList()));
   }
 

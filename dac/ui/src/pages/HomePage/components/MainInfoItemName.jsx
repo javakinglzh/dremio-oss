@@ -15,7 +15,7 @@
  */
 import { Component } from "react";
 import { connect } from "react-redux";
-import { Link, location } from "react-router";
+import { Link, browserHistory } from "react-router";
 import PropTypes from "prop-types";
 import Immutable from "immutable";
 import DatasetItemLabel from "components/Dataset/DatasetItemLabel";
@@ -26,6 +26,7 @@ import {
   getIconDataTypeFromEntity,
   getIcebergIconTypeFromEntity,
 } from "utils/iconUtils";
+import { isVersionedSource } from "@inject/utils/sourceUtils";
 import {
   checkIfUserShouldGetDeadLink,
   getHref,
@@ -45,10 +46,6 @@ export class MainInfoItemName extends Component {
     versionContext: PropTypes.object,
     openDetailsPanel: PropTypes.func,
     tagsLength: PropTypes.number,
-  };
-
-  static contextTypes = {
-    location: PropTypes.object.isRequired,
   };
 
   constructor(props) {
@@ -72,9 +69,10 @@ export class MainInfoItemName extends Component {
   }
 
   renderDatasetItemLabel(shouldGetADeadLink) {
-    const { item, versionContext, openDetailsPanel } = this.props;
+    const { item, versionContext, openDetailsPanel, sourceType } = this.props;
+
     const type = item.get("entityType");
-    const typeIcon = versionContext
+    const typeIcon = isVersionedSource(sourceType)
       ? getIcebergIconTypeFromEntity(item)
       : getIconDataTypeFromEntity(item); //
     const defaultItem = (
@@ -140,12 +138,12 @@ export class MainInfoItemName extends Component {
 
   render() {
     const { item, versionContext, tagsLength } = this.props;
-
+    const location = browserHistory.getCurrentLocation();
     let tempHref;
     if (shouldUseNewDatasetNavigation()) {
-      tempHref = newGetHref(item, this.context);
+      tempHref = newGetHref(item);
     } else {
-      tempHref = getHref(item, this.context);
+      tempHref = getHref(item);
     }
 
     let href;

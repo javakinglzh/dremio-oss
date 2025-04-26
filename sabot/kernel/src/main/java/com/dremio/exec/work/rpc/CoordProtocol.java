@@ -104,7 +104,7 @@ public class CoordProtocol implements FabricProtocol {
       case RpcType.REQ_QUERY_CANCEL_VALUE:
         {
           final CoordRPC.JobCancelRequest jobCancelRequest =
-              get(pBody, CoordRPC.JobCancelRequest.PARSER);
+              get(pBody, CoordRPC.JobCancelRequest.parser());
           final ExternalId id = jobCancelRequest.getExternalId();
           final String cancelreason = jobCancelRequest.getCancelReason();
           boolean canceled = tool.cancel(id, cancelreason);
@@ -115,7 +115,7 @@ public class CoordProtocol implements FabricProtocol {
 
       case RpcType.REQ_QUERY_PROFILE_VALUE:
         {
-          ExternalId id = get(pBody, ExternalId.PARSER);
+          ExternalId id = get(pBody, ExternalId.parser());
           Optional<QueryProfile> profile = tool.getProfile(id);
           if (!profile.isPresent()) {
             throw new RpcException(

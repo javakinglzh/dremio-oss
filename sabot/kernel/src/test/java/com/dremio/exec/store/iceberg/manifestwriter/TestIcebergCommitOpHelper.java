@@ -135,8 +135,7 @@ public class TestIcebergCommitOpHelper extends BaseTestOperator {
     sourceTableFileSystem = mock(FileSystem.class);
     SupportsInternalIcebergTable supportsInternalIcebergTable =
         (SupportsInternalIcebergTable) sourceTablePlugin;
-    when(supportsInternalIcebergTable.createFS(any(), any(), any()))
-        .thenReturn(sourceTableFileSystem);
+    when(supportsInternalIcebergTable.createFS(any())).thenReturn(sourceTableFileSystem);
     when(supportsInternalIcebergTable.createReadSignatureProvider(
             any(), any(), anyLong(), any(), any(), anyBoolean(), anyBoolean()))
         .thenAnswer(
@@ -328,7 +327,7 @@ public class TestIcebergCommitOpHelper extends BaseTestOperator {
                 getTestAllocator().getInitReservation(),
                 getTestAllocator().getLimit());
     final OperatorContextImpl context =
-        testContext.getNewOperatorContext(allocator, pop, BATCH_SIZE, null);
+        (OperatorContextImpl) testContext.getNewOperatorContext(allocator, pop, BATCH_SIZE, null);
     testCloseables.add(context);
 
     return new IcebergCommitOpHelper(context, pop, metadataFileSystem);
@@ -402,7 +401,7 @@ public class TestIcebergCommitOpHelper extends BaseTestOperator {
         null);
   }
 
-  private IcebergTableProps getIcebergTableProps(
+  public static IcebergTableProps getIcebergTableProps(
       IcebergCommandType type, Schema schema, PartitionSpec spec, List<String> partitionPaths) {
     IcebergTableProps props =
         new IcebergTableProps(

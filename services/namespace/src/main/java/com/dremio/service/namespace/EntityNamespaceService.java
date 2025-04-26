@@ -18,15 +18,17 @@ package com.dremio.service.namespace;
 import com.dremio.datastore.SearchTypes;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.FindByCondition;
+import com.dremio.service.namespace.folder.FolderNamespaceService;
+import com.dremio.service.namespace.function.FunctionNamespaceService;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import java.util.List;
 import java.util.Optional;
 
 /**
- * Namespace operations for generic entities. If you are operating on a specific entity, use that
- * entity's NamespaceService.For example, if getting a function, use {@link
- * com.dremio.service.namespace.function.FunctionNamespaceService}.
+ * Namespace operations for generic entities. If you are operating on a specific type of entity, use
+ * that entity's NamespaceService. For example, if getting a function, use {@link
+ * FunctionNamespaceService}.
  */
 public interface EntityNamespaceService {
   //// READ
@@ -90,9 +92,28 @@ public interface EntityNamespaceService {
   Iterable<Document<NamespaceKey, NameSpaceContainer>> find(
       FindByCondition condition, EntityNamespaceFindOption... options);
 
+  /**
+   * Find entries by NamespaceKey range. This should be used instead of a FindByCondition when
+   * needing to iterate over the entire namespace while ensuring that no document that existed when
+   * the method is first called is skipped. New documents concurrently with iteration may not be
+   * returned.
+   *
+   * <p>Note: Implementations may return fewer than the given findByRange maxResults even when there
+   * are remaining results; this is best-effort. Therefore, when limiting the number of results you
+   * should avoid utilizing the count of documents returned to determine whether there are more
+   * results remaining.
+   */
+  Iterable<Document<NamespaceKey, NameSpaceContainer>> findByRange(
+      NamespaceFindByRange findByRange);
+
   //// DELETE
-  /** Do not use. Leverage an entity-specific deletion. */
-  @Deprecated
+  /**
+   * In general, do not use this method. It should only be used if you do not already know the
+   * entity's type. If you know the entity's type, leverage the entity-specific deletion. For
+   * example, to delete a folder, use {@link FolderNamespaceService#deleteFolder}. TODO: Note that
+   * it may be preferable to take a `version` parameter for OCC like the other entity-specific
+   * methods.
+   */
   void deleteEntity(NamespaceKey entityPath) throws NamespaceException;
 
   //// OTHER

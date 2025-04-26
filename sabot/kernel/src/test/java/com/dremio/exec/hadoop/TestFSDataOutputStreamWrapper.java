@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.hadoop;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.hadoop.FSErrorTestUtils.getDummyArguments;
 import static com.dremio.exec.hadoop.FSErrorTestUtils.newFSError;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,7 +60,6 @@ public class TestFSDataOutputStreamWrapper {
   @ParameterizedTest(name = "method: {0}")
   @MethodSource
   public void test(Method method) throws Exception {
-    assumeNonMaprProfile();
     final IOException ioException = new IOException("test io exception");
     final FSError fsError = newFSError(ioException);
     FSDataOutputStream fdos =

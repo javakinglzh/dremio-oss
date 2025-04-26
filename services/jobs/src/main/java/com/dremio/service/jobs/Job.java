@@ -45,6 +45,10 @@ public class Job {
       profileDetailsCapturedPostTermination; // indicates whether job profile details were fetched
   // after job completed/failed/cancelled
 
+  // Indicates that the results cleanup for the job has either already been performed,
+  // or it is not needed because the job does not save any results.
+  private boolean resultsCleaned;
+
   private JobData data;
 
   /**
@@ -58,6 +62,7 @@ public class Job {
     this.sessionId = sessionId;
     this.resultsStore = null;
     this.completed = false;
+    this.resultsCleaned = false;
     attempts.add(checkNotNull(jobAttempt, "jobAttempt is null"));
   }
 
@@ -69,6 +74,7 @@ public class Job {
     attempts.addAll(jobResult.getAttemptsList());
     this.profileDetailsCapturedPostTermination =
         jobResult.getProfileDetailsCapturedPostTermination();
+    this.resultsCleaned = jobResult.getResultsCleaned();
   }
 
   /**
@@ -87,6 +93,7 @@ public class Job {
     this.completed = jobResult.getCompleted();
     this.profileDetailsCapturedPostTermination =
         jobResult.getProfileDetailsCapturedPostTermination();
+    this.resultsCleaned = jobResult.getResultsCleaned();
   }
 
   void setRecordCount(long recordCount) {
@@ -196,7 +203,10 @@ public class Job {
 
   JobResult toJobResult(Job job) {
     JobResult jobResult =
-        new JobResult().setCompleted(completed).setAttemptsList(job.getAttempts());
+        new JobResult()
+            .setCompleted(completed)
+            .setAttemptsList(job.getAttempts())
+            .setResultsCleaned(resultsCleaned);
     if (sessionId != null) {
       jobResult.setSessionId(sessionId);
     }
@@ -218,5 +228,13 @@ public class Job {
 
   public boolean profileDetailsCapturedPostTermination() {
     return this.profileDetailsCapturedPostTermination;
+  }
+
+  public void setResultsCleaned(boolean value) {
+    this.resultsCleaned = value;
+  }
+
+  public boolean resultsCleaned() {
+    return this.resultsCleaned;
   }
 }

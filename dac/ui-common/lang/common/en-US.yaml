@@ -30,6 +30,7 @@ Common.Actions.RenameAnyway: "Rename Anyway"
 Common.Actions.CopyPath: "Copy Path"
 Common.Actions.Details: "Details"
 Common.Actions.Edit: "Edit"
+Common.Actions.Enable: Enable
 Common.Actions.Disable: "Disable"
 Common.Actions.Save: "Save"
 Common.Actions.Append: Append
@@ -43,6 +44,8 @@ Common.Actions.Confirm: Confirm
 Common.Actions.Close: Close
 Common.Actions.Discard: Discard
 Common.Actions.SaveContinue: Save and Continue
+Common.Actions.CreateJoin: Create Join
+Common.Actions.Done: Done
 
 # Common
 Common.Average: Average
@@ -54,6 +57,13 @@ Common.Transfer: Transfer
 Common.Or: or
 Common.Name: Name
 Common.Download: Download
+Common.Enabled: Enabled
+Common.Disabled: Disabled
+Common.Size: Size
+Common.Unknown: Unknown
+Common.NA: N/A
+Common.Custom: Custom
+Common.Error: Error
 
 # Route leave warning dialog messages
 Common.RouteLeaveDialog.Title: Unsaved Changes
@@ -66,6 +76,7 @@ Common.Columns.Count: "{numColumns, plural, =0 {No columns} =1 {1 column} other 
 # Common error messages
 Common.Errors.Persists: If the problem persists, please contact Dremio support.
 Common.Errors.Unexpected: An unexpected error occurred.
+Common.Errors.Unexpexted.Request: An unexpected error occurred while processing this request.
 Common.Errors.404: The page you are looking for doesn’t exist.
 Common.Errors.UnexpectedError.Root: An unexpected error occurred when we tried to load the page.
 
@@ -74,7 +85,9 @@ Common.History: History
 Common.Settings: Settings
 
 Common.LoadingMore: Loading more…
-
+Common.Created.Success: ‘{name}’ is created.
+Common.Updated.Success: ‘{name}’ is updated.
+Common.Deleted.Success: ‘{name}’ is deleted.
 NetworkConnectivity.Offline: Your internet connection appears to be offline.
 NetworkConnectivity.Unreachable: There was a problem communicating with Dremio. Please verify that you’re on a network that can reach {server_origin}.
 NetworkConnectivity.WebsocketFailure: There was a problem establishing a WebSocket connection with Dremio.
@@ -91,6 +104,7 @@ Dataset.MoveDataset: "Move Dataset"
 Dataset.Actions.RemoveFormat: "Remove Format"
 Dataset.RenameDataset: "Rename Dataset"
 Delete.Confirmation: 'Are you sure you want to delete "{name}"?'
+Delete.Confirmation.Enter: Enter ‘{name}’ to confirm
 RemoveFormat.Confirmation: 'Are you sure you want to remove format for "{name}"?'
 Dataset.Name: "Dataset name..."
 Dataset.Actions.ExploreGraph: "Explore Data Graph"
@@ -110,7 +124,7 @@ About.Tabs.Usage: Cluster Usage Data
 App.Dremio: Dremio
 App.DremioBeta: Dremio (beta)
 App.ProductionWarning: Not for production use
-App.Copyright: Copyright © 2017-2024 Dremio Corporation
+App.Copyright: Copyright © 2017-2025 Dremio Corporation
 App.Build: Build
 App.Edition: Edition
 App.BuildTime: Build Time
@@ -158,6 +172,10 @@ JobDetails.SQL.Graph: Dataset Graph
 
 #Forms
 FormControl.SecretPicker.Label: Secret Store
+FormControl.Tab.General: General
+FormControl.Label.Key: Key
+FormControl.Label.Value: Value
+FormControl.AdvancedOptions.Label: Advanced options
 
 Common.Range.LastHour: Last hour
 Common.Range.Last6Hours: Last 6 hours
@@ -165,6 +183,7 @@ Common.Range.Last24Hours: Last 24 hours
 Common.Range.Last3Days: Last 3 days
 Common.Range.Last7Days: Last 7 days
 Common.Range.Last30Days: Last 30 days
+Common.Range.ALL: All
 
 #Sources
 Sources.Settings.SecretStore.ProviderLabel.DREMIO: Dremio
@@ -186,3 +205,6 @@ Common.ModifierKey.CTRL.Short: Ctrl
 Common.ModifierKey.CTRL.Long: Control
 Common.ModifierKey.CTRL.Symbol: ^
 Common.ModifierKey.CTRL.Combo: Ctrl + {key}
+
+User.Unavailable.Title: Unavailable
+User.Unavailable.Description: Details for this user could not be found. They may have been deleted or removed from the system.

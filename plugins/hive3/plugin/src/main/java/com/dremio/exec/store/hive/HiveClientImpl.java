@@ -212,7 +212,7 @@ class HiveClientImpl implements HiveClient, AutoCloseable {
               List<String> databases = client.getAllDatabases();
 
               if (null == databases || databases.isEmpty()) {
-                return Collections.EMPTY_LIST;
+                return Collections.emptyList();
               }
               return databases.stream()
                   .filter(db -> !SYSTEM_DB.contains(db))
@@ -271,7 +271,7 @@ class HiveClientImpl implements HiveClient, AutoCloseable {
               }
 
               if (null == tableNames || tableNames.isEmpty()) {
-                return Collections.EMPTY_LIST;
+                return Collections.emptyList();
               }
               return tableNames;
             });

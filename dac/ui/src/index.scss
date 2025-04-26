@@ -72,6 +72,7 @@
     cursor: pointer;
     display: flex;
     flex-direction: row;
+    gap: var(--dremio--spacing--05);
     user-select: none;
 
     transition: background 100ms;
@@ -80,12 +81,21 @@
       display: none;
     }
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
       background: var(--bg--hovered, inherit);
       color: var(--text--hovered, inherit);
 
       .catalog-treeitem__actions {
         display: flex;
+        color: var(--icon--primary);
+      }
+    }
+
+    &:focus-within {
+      .catalog-treeitem__actions {
+        display: flex;
+        color: var(--icon--primary);
       }
     }
   }

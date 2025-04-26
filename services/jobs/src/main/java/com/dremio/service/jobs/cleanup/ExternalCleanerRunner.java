@@ -21,7 +21,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-class ExternalCleanerRunner {
+public class ExternalCleanerRunner {
   private static final Logger LOGGER = LoggerFactory.getLogger(ExternalCleanerRunner.class);
   private final List<ExternalCleaner> externalCleaners;
   private long jobAttemptsFailed = 0;
@@ -29,6 +29,13 @@ class ExternalCleanerRunner {
 
   public ExternalCleanerRunner(final List<ExternalCleaner> externalCleaners) {
     this.externalCleaners = externalCleaners;
+    resetCountersOfExternalCleaners();
+  }
+
+  private void resetCountersOfExternalCleaners() {
+    for (ExternalCleaner cleaner : externalCleaners) {
+      cleaner.resetCounters();
+    }
   }
 
   public void run(JobResult jobResult) {
@@ -50,11 +57,11 @@ class ExternalCleanerRunner {
     }
   }
 
-  boolean hasErrors() {
+  public boolean hasErrors() {
     return jobAttemptsFailed > 0;
   }
 
-  void printLastErrors() {
+  public void printLastErrors() {
     LOGGER.warn("Job Attempt failures: [{}].", jobAttemptsFailed);
     for (ExternalCleaner externalCleaner : externalCleaners) {
       final String cleanerName = externalCleaner.getName();

@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Problem } from "@dremio/dremio-js/community";
+import { Problem } from "@dremio/dremio-js/oss";
 import { getApiContext } from "dremio-ui-common/contexts/ApiContext.js";
 
 export type GetDownloadStatusParams = {

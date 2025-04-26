@@ -790,7 +790,8 @@ public class VectorSorter implements AutoCloseable {
     final List<ValueVector> vectors = Lists.newArrayList();
 
     for (VectorWrapper<?> v : incoming) {
-      TransferPair tp = v.getValueVector().getTransferPair(allocator);
+      ValueVector valueVector = v.getValueVector();
+      TransferPair tp = valueVector.getTransferPair(valueVector.getField(), allocator);
       tp.transfer();
       vectors.add(tp.getTo());
     }

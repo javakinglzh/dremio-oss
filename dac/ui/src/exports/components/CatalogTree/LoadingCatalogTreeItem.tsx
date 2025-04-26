@@ -15,11 +15,19 @@
  */
 
 import { type FC } from "react";
+import type { CatalogReference } from "@dremio/dremio-js/interfaces";
 import { CatalogObjectSkeleton } from "dremio-ui-common/catalog/CatalogObjectSkeleton.js";
 import { useTreeItemLevel } from "../Tree";
 
-export const LoadingCatalogTreeItem: FC = () => (
-  <div aria-level={useTreeItemLevel()} role="treeitem">
+export const LoadingCatalogTreeItem: FC<{
+  catalogReference: CatalogReference;
+}> = (props) => (
+  <div
+    id={props.catalogReference.id}
+    aria-level={useTreeItemLevel()}
+    role="treeitem"
+    tabIndex={-1}
+  >
     <CatalogObjectSkeleton />
   </div>
 );

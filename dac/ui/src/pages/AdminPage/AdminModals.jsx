@@ -18,7 +18,7 @@ import { PureComponent } from "react";
 import PropTypes from "prop-types";
 
 import ModalsContainer from "components/Modals/ModalsContainer";
-import * as modals from "dyn-load/pages/AdminPage/components/modals";
+import * as modals from "@inject/pages/AdminPage/components/modals";
 
 const BODY_CLASS = "body-modal-open";
 

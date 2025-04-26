@@ -22,18 +22,40 @@ public final class RowSizeLimitExceptionHelper {
 
   private RowSizeLimitExceptionHelper() {}
 
-  public static void checkSizeLimit(int size, int maxSize, org.slf4j.Logger logger) {
+  public static void checkSizeLimit(
+      int size, int maxSize, RowSizeLimitExceptionType type, org.slf4j.Logger logger) {
     if (size > maxSize) {
-      throw createRowSizeLimitException(size, maxSize, logger);
+      throw createRowSizeLimitException(maxSize, type, logger);
     }
   }
 
   public static UserException createRowSizeLimitException(
-      int size, int maxSize, org.slf4j.Logger logger) {
+      int maxSize, RowSizeLimitExceptionType type, org.slf4j.Logger logger) {
+    String whereExceptionHappened;
+    switch (type) {
+      case READ:
+        whereExceptionHappened = "reading";
+        break;
+      case WRITE:
+        whereExceptionHappened = "writing";
+        break;
+      case PROCESSING:
+        whereExceptionHappened = "processing";
+        break;
+      default:
+        throw new IllegalArgumentException("Unsupported RowSizeLimitExceptionType: " + type);
+    }
     return UserException.unsupportedError(new FieldSizeLimitException())
-        .message("Row exceeds the size limit of %d bytes, actual size is %d bytes.", maxSize, size)
-        .addContext("size", size)
+        .message(
+            "Exceeded maximum allowed row size of %d bytes %s data.",
+            maxSize, whereExceptionHappened)
         .addContext("limit", maxSize)
         .build(logger);
+  }
+
+  public enum RowSizeLimitExceptionType {
+    READ,
+    WRITE,
+    PROCESSING
   }
 }

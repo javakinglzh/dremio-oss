@@ -18,21 +18,19 @@ package com.dremio.exec.planner.sql.handlers;
 import static com.dremio.exec.planner.sql.handlers.BaseTestCreateFolderHandler.extractNamespaceKeyFromSqlNode;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.planner.sql.handlers.direct.SimpleCommandResult;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.ReferenceType;
 import com.dremio.exec.planner.sql.parser.SqlCreateFolder;
-import com.dremio.exec.store.NamespaceAlreadyExistsException;
-import com.dremio.plugins.dataplane.store.DataplanePlugin;
-import com.dremio.plugins.s3.store.S3StoragePlugin;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
@@ -46,7 +44,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.projectnessie.model.ContentKey;
 
 @ExtendWith(MockitoExtension.class)
 public class TestCreateFolderHandler {
@@ -68,8 +65,6 @@ public class TestCreateFolderHandler {
 
   @Mock private Catalog catalog;
   @Mock private UserSession userSession;
-  @Mock private DataplanePlugin dataplanePlugin;
-  @Mock private S3StoragePlugin s3StoragePlugin;
   @InjectMocks private CreateFolderHandler handler;
 
   private static final SqlCreateFolder NON_EXISTENT_SOURCE_INPUT =
@@ -150,9 +145,9 @@ public class TestCreateFolderHandler {
             .build();
     when(userSession.getSessionVersionForSource(NON_EXISTENT_SOURCE_NAME))
         .thenReturn(VersionContext.NOT_SPECIFIED);
-    when(catalog.getSource(NON_EXISTENT_SOURCE_NAME)).thenThrow(nonExistUserException);
-    when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(NON_EXISTENT_SOURCE_INPUT)))
-        .thenReturn(extractNamespaceKeyFromSqlNode(NON_EXISTENT_SOURCE_INPUT));
+    when(catalog.createFolder(any())).thenThrow(nonExistUserException);
+    NamespaceKey namespaceKey = extractNamespaceKeyFromSqlNode(NON_EXISTENT_SOURCE_INPUT);
+    when(catalog.resolveSingle(namespaceKey)).thenReturn(namespaceKey);
     assertThatThrownBy(() -> handler.toResult("", NON_EXISTENT_SOURCE_INPUT))
         .isInstanceOf(UserException.class)
         .hasMessageContaining("Tried to access non-existent source");
@@ -165,12 +160,8 @@ public class TestCreateFolderHandler {
   public void createFolderInExistentSource() throws Exception {
     when(userSession.getSessionVersionForSource(DEFAULT_SOURCE_NAME))
         .thenReturn(VersionContext.NOT_SPECIFIED);
-    when(catalog.getSource(DEFAULT_SOURCE_NAME)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
-    when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(DEFAULT_SOURCE_INPUT)))
-        .thenReturn(extractNamespaceKeyFromSqlNode(DEFAULT_SOURCE_INPUT));
-
+    NamespaceKey key = extractNamespaceKeyFromSqlNode(DEFAULT_SOURCE_INPUT);
+    when(catalog.resolveSingle(key)).thenReturn(key);
     List<SimpleCommandResult> result;
     result = handler.toResult("", DEFAULT_SOURCE_INPUT);
     assertThat(result).isNotEmpty();
@@ -191,7 +182,7 @@ public class TestCreateFolderHandler {
             .build();
     when(userSession.getSessionVersionForSource(DEFAULT_CONTEXT))
         .thenReturn(VersionContext.NOT_SPECIFIED);
-    when(catalog.getSource(DEFAULT_CONTEXT)).thenThrow(nonExistUserException);
+    when(catalog.createFolder(any())).thenThrow(nonExistUserException);
     when(catalog.resolveSingle(
             extractNamespaceKeyFromSqlNode(SINGLE_FOLDER_NAME_NO_USER_SESSION_INPUT)))
         .thenReturn(new NamespaceKey(Arrays.asList(DEFAULT_CONTEXT, DEFAULT_FOLDER_NAME)));
@@ -199,7 +190,6 @@ public class TestCreateFolderHandler {
     assertThatThrownBy(() -> handler.toResult("", SINGLE_FOLDER_NAME_NO_USER_SESSION_INPUT))
         .isInstanceOf(UserException.class)
         .hasMessageContaining("Tried to access non-existent source");
-    NamespaceKey path = new NamespaceKey(Arrays.asList(DEFAULT_CONTEXT, DEFAULT_FOLDER_NAME));
     verify(catalog)
         .resolveSingle(extractNamespaceKeyFromSqlNode(SINGLE_FOLDER_NAME_NO_USER_SESSION_INPUT));
   }
@@ -208,45 +198,23 @@ public class TestCreateFolderHandler {
   public void createFolderInExistentSourceWithSingleFolderNameWithUserSession() throws Exception {
     when(userSession.getSessionVersionForSource(DEFAULT_SOURCE_NAME))
         .thenReturn(VersionContext.NOT_SPECIFIED);
-    when(catalog.getSource(DEFAULT_SOURCE_NAME)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
-    when(catalog.resolveSingle(
-            extractNamespaceKeyFromSqlNode(SINGLE_FOLDER_NAME_WITH_USER_SESSION_INPUT)))
-        .thenReturn(new NamespaceKey(Arrays.asList(DEFAULT_SOURCE_NAME, DEFAULT_FOLDER_NAME)));
+    NamespaceKey unresolvedKey =
+        extractNamespaceKeyFromSqlNode(SINGLE_FOLDER_NAME_WITH_USER_SESSION_INPUT);
+    NamespaceKey resolvedKey =
+        new NamespaceKey(Arrays.asList(DEFAULT_SOURCE_NAME, DEFAULT_FOLDER_NAME));
+    when(catalog.resolveSingle(unresolvedKey)).thenReturn(resolvedKey);
 
     List<SimpleCommandResult> result;
     result = handler.toResult("", SINGLE_FOLDER_NAME_WITH_USER_SESSION_INPUT);
     assertThat(result).isNotEmpty();
     assertThat(result.get(0).ok).isTrue();
     assertThat(result.get(0).summary).contains("Folder").contains("has been created");
-    NamespaceKey path = new NamespaceKey(Arrays.asList(DEFAULT_SOURCE_NAME, DEFAULT_FOLDER_NAME));
-    verify(catalog)
-        .resolveSingle(extractNamespaceKeyFromSqlNode(SINGLE_FOLDER_NAME_WITH_USER_SESSION_INPUT));
-  }
-
-  @Test
-  public void createFolderInNonVersionedSource() throws Exception {
-    when(userSession.getSessionVersionForSource(NON_VERSIONED_SOURCE_NAME))
-        .thenReturn(VersionContext.NOT_SPECIFIED);
-    when(catalog.getSource(NON_VERSIONED_SOURCE_NAME)).thenReturn(s3StoragePlugin);
-    when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(NON_VERSIONED_SOURCE_INPUT)))
-        .thenReturn(extractNamespaceKeyFromSqlNode(NON_VERSIONED_SOURCE_INPUT));
-
-    assertThatThrownBy(() -> handler.toResult("", NON_VERSIONED_SOURCE_INPUT))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("does not support versioning");
-    NamespaceKey path =
-        SqlNodeUtil.unwrap(NON_VERSIONED_SOURCE_INPUT, SqlCreateFolder.class).getPath();
-    verify(catalog).resolveSingle(path);
+    verify(catalog).resolveSingle(unresolvedKey);
   }
 
   @Test
   public void createFolderWithReference() throws Exception {
     when(userSession.getSessionVersionForSource(DEFAULT_SOURCE_NAME)).thenReturn(DEV_VERSION);
-    when(catalog.getSource(DEFAULT_SOURCE_NAME)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
     when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(WITH_REFERENCE_INPUT)))
         .thenReturn(extractNamespaceKeyFromSqlNode(WITH_REFERENCE_INPUT));
 
@@ -264,19 +232,13 @@ public class TestCreateFolderHandler {
 
   @Test
   public void createFolderWithIfNotExists() throws Exception {
-    ContentKey contentKey = ContentKey.of(WITHOUT_IF_NOT_EXISTS.getPath().getPathComponents());
-    NamespaceAlreadyExistsException namespaceAlreadyExistsException =
-        new NamespaceAlreadyExistsException(
-            String.format("Folder %s already exists", contentKey.toPathString()));
+    String exceptionText = "Folder already exists";
+    CatalogEntityAlreadyExistsException alreadyExistsException =
+        new CatalogEntityAlreadyExistsException(exceptionText, new Throwable());
     when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(WITHOUT_IF_NOT_EXISTS)))
         .thenReturn(extractNamespaceKeyFromSqlNode(WITH_IF_NOT_EXISTS));
     when(userSession.getSessionVersionForSource(DEFAULT_SOURCE_NAME)).thenReturn(DEV_VERSION);
-    when(catalog.getSource(DEFAULT_SOURCE_NAME)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
-    doThrow(namespaceAlreadyExistsException)
-        .when(dataplanePlugin)
-        .createNamespace(new NamespaceKey(DEFAULT_FOLDER_PATH), DEV_VERSION);
+    doThrow(alreadyExistsException).when(catalog).createFolder(any());
 
     List<SimpleCommandResult> result;
     result = handler.toResult("", WITH_IF_NOT_EXISTS);
@@ -289,19 +251,13 @@ public class TestCreateFolderHandler {
 
   @Test
   public void createFolderWithoutIfNotExists() throws Exception {
-    ContentKey contentKey = ContentKey.of(WITHOUT_IF_NOT_EXISTS.getPath().getPathComponents());
-    NamespaceAlreadyExistsException namespaceAlreadyExistsException =
-        new NamespaceAlreadyExistsException(
-            String.format("Folder %s already exists", contentKey.toPathString()));
+    String exceptionText = "Folder already exists";
+    CatalogEntityAlreadyExistsException alreadyExistsException =
+        new CatalogEntityAlreadyExistsException(exceptionText, new Throwable());
     when(catalog.resolveSingle(extractNamespaceKeyFromSqlNode(WITHOUT_IF_NOT_EXISTS)))
         .thenReturn(extractNamespaceKeyFromSqlNode(WITHOUT_IF_NOT_EXISTS));
     when(userSession.getSessionVersionForSource(DEFAULT_SOURCE_NAME)).thenReturn(DEV_VERSION);
-    when(catalog.getSource(DEFAULT_SOURCE_NAME)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
-    doThrow(namespaceAlreadyExistsException)
-        .when(dataplanePlugin)
-        .createNamespace(new NamespaceKey(DEFAULT_FOLDER_PATH), DEV_VERSION);
+    doThrow(alreadyExistsException).when(catalog).createFolder(any());
 
     assertThatThrownBy(() -> handler.toResult("", WITHOUT_IF_NOT_EXISTS))
         .isInstanceOf(UserException.class)

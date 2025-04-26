@@ -16,7 +16,29 @@
 package com.dremio.exec.catalog.dataplane;
 
 import static com.dremio.exec.catalog.dataplane.test.DataplaneStorage.BucketSelection.PRIMARY_BUCKET;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.*;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME_FOR_REFLECTION_TEST;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtSpecifierQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueBranchName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTagName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableWithValuesQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.joinedTableKey;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.selectStarQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tablePathWithFolders;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.updateAtQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.updateAtQueryWithAtRef;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.updateByIdFromAnotherBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.updateByIdQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useContextQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useTagQuery;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

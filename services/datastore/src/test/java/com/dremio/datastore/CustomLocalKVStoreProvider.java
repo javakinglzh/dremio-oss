@@ -32,11 +32,11 @@ public class CustomLocalKVStoreProvider extends LocalKVStoreProvider {
   private final Set<Class<? extends StoreCreationFunction>> storeCreators;
   private static final ScanResult EMPTY_SCANRESULT =
       new ScanResult(
-          Collections.EMPTY_LIST,
-          Collections.EMPTY_LIST,
-          Collections.EMPTY_LIST,
-          Collections.EMPTY_LIST,
-          Collections.EMPTY_LIST);
+          Collections.emptyList(),
+          Collections.emptyList(),
+          Collections.emptyList(),
+          Collections.emptyList(),
+          Collections.emptyList());
 
   public CustomLocalKVStoreProvider(
       Set<Class<? extends StoreCreationFunction>> storeCreators,

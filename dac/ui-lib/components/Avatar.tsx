@@ -46,6 +46,9 @@ const useHashedColorClass = (
     return `dremio-avatar--color-${getHashOfString(initials) % 10}`;
   }, [initials]);
 
+/**
+ * @deprecated import from `@dremio/design-system/components` instead
+ */
 export const Avatar = forwardRef<HTMLDivElement, AvatarProps>((props, ref) => {
   const { initials, image, className, style, ...rest } = props;
   const colorClass = useHashedColorClass(initials);

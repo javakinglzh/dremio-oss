@@ -38,7 +38,7 @@ import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
 import { TutorialController } from "dremio-ui-common/walkthrough/TutorialController";
 import { TutorialOutlet } from "@inject/tutorials/components/TutorialOutlet";
 import socket from "@inject/utils/socket";
-import { SearchModalProvider } from "#oss/exports/searchModal/SearchModal";
+import { AdditionalAppProviders } from "@inject/AdditionalAppProviders";
 
 function Root({ store }) {
   const history = syncHistoryWithStore(browserHistory, store);
@@ -70,12 +70,12 @@ function Root({ store }) {
           {TutorialOutlet && <TutorialOutlet id={null} />}
           <RawIntlProvider value={intl}>
             <Provider store={store}>
-              <NetworkConnectivityBanner socket={socket} />
-              <SearchModalProvider>
+              <AdditionalAppProviders>
+                <NetworkConnectivityBanner socket={socket} />
                 <Router key={renderKey} history={history}>
                   {routes(store.dispatch, projectContext)}
                 </Router>
-              </SearchModalProvider>
+              </AdditionalAppProviders>
             </Provider>
           </RawIntlProvider>
         </TutorialController>

@@ -23,7 +23,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.startsWith;
 import static org.mockito.Mockito.doAnswer;
@@ -47,6 +46,7 @@ import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.conf.ConnectionConf;
+import com.dremio.exec.catalog.conf.ConnectionConfUtils;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SecretRefImpl;
@@ -62,6 +62,7 @@ import com.dremio.exec.store.StoragePlugin;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
 import com.dremio.options.OptionValue;
+import com.dremio.options.TypeValidators;
 import com.dremio.options.TypeValidators.PositiveLongValidator;
 import com.dremio.options.impl.DefaultOptionManager;
 import com.dremio.options.impl.OptionManagerWrapper;
@@ -89,6 +90,7 @@ import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.NoopSecretsCreator;
 import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.test.DremioTest;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import java.lang.reflect.Field;
@@ -129,15 +131,18 @@ public class TestPluginsManager {
   private SabotContext sabotContext;
   private SchedulerService schedulerService;
   private ModifiableSchedulerService modifiableSchedulerService;
+  private NamespaceService.Factory mockNamespaceServiceFactory;
   private NamespaceService mockNamespaceService;
   private Orphanage mockOrphanage;
-  private List<Cancellable> scheduledTasks = new ArrayList<>();
+  private final List<Cancellable> scheduledTasks = new ArrayList<>();
 
   @Before
   public void setup() throws Exception {
     storeProvider = LegacyKVStoreProviderAdapter.inMemory(DremioTest.CLASSPATH_SCAN_RESULT);
     storeProvider.start();
     mockNamespaceService = mock(NamespaceService.class);
+    mockNamespaceServiceFactory = mock(NamespaceService.Factory.class);
+    mockNamespaceServiceFactory = mock(NamespaceService.Factory.class);
     mockOrphanage = mock(Orphanage.class);
     when(mockNamespaceService.getAllDatasets(Mockito.any())).thenReturn(Collections.emptyList());
 
@@ -147,7 +152,7 @@ public class TestPluginsManager {
 
     // used in c'tor
     when(sabotContext.getClasspathScan()).thenReturn(CLASSPATH_SCAN_RESULT);
-    when(sabotContext.getNamespaceService(anyString())).thenReturn(mockNamespaceService);
+    when(mockNamespaceServiceFactory.get(anyString())).thenReturn(mockNamespaceService);
     when(sabotContext.getDatasetListing()).thenReturn(mockDatasetListingService);
 
     final LogicalPlanPersistence lpp = new LogicalPlanPersistence(CLASSPATH_SCAN_RESULT);
@@ -177,10 +182,10 @@ public class TestPluginsManager {
 
     secretsCreator = mock(SecretsCreator.class);
     when(secretsCreator.encrypt(any())).thenReturn(Optional.of(new URI(ENCRYPTED_SECRET)));
-    when(secretsCreator.encrypt(contains("encryptedSecret")))
+    when(secretsCreator.encrypt(eq(ENCRYPTED_SECRET)))
         .thenThrow(new RuntimeException("Double encryption should not occur."));
     when(secretsCreator.isEncrypted(anyString())).thenReturn(false);
-    when(secretsCreator.isEncrypted(eq("encryptedSecret"))).thenReturn(true);
+    when(secretsCreator.isEncrypted(eq(ENCRYPTED_SECRET))).thenReturn(true);
     when(secretsCreator.cleanup(any())).thenReturn(true);
     when(sabotContext.getSecretsCreator()).thenReturn(() -> secretsCreator);
     // Set up a CredentialsService to always return the secret.
@@ -212,6 +217,7 @@ public class TestPluginsManager {
     plugins =
         new PluginsManager(
             sabotContext,
+            sabotContext,
             mockNamespaceService,
             mockOrphanage,
             mockDatasetListingService,
@@ -226,7 +232,8 @@ public class TestPluginsManager {
             () -> broadcaster,
             null,
             modifiableSchedulerService,
-            () -> storeProvider);
+            () -> storeProvider,
+            mockNamespaceServiceFactory);
     plugins.start();
   }
 
@@ -262,7 +269,9 @@ public class TestPluginsManager {
         .schedule(any(Schedule.class), any(Runnable.class));
   }
 
+  private static final String INSPECTOR_BASE = "inspector_base";
   private static final String INSPECTOR = "inspector";
+  public static final String INSPECTOR_WITH_ALLOWED_DATABASES = "inspector_with_allowed_databases";
   private static final String INSPECTOR_WITH_MIGRATION = "inspector_with_migration";
 
   private static final EntityPath DELETED_PATH =
@@ -273,39 +282,41 @@ public class TestPluginsManager {
   private static final EntityPath ENTITY_PATH = new EntityPath(ImmutableList.of(INSPECTOR, "one"));
   private static final DatasetHandle DATASET_HANDLE = () -> ENTITY_PATH;
 
-  @SourceType(value = INSPECTOR, configurable = false)
-  public static class Inspector extends ConnectionConf<Inspector, StoragePlugin> {
+  @SourceType(value = INSPECTOR_BASE, configurable = false)
+  public static class InspectorBase extends ConnectionConf<Inspector, StoragePlugin> {
     private final boolean hasAccessPermission;
     @Secret public SecretRef secret1 = null;
     @Secret public SecretRef secret2 = null;
     @Secret public SecretRef secret3 = null;
 
-    Inspector() {
+    InspectorBase() {
       this(true);
     }
 
-    Inspector(boolean hasAccessPermission) {
+    InspectorBase(boolean hasAccessPermission) {
       this.hasAccessPermission = hasAccessPermission;
     }
 
-    public Inspector setSecret1(String secret1) {
+    public InspectorBase setSecret1(String secret1) {
       this.secret1 = new SecretRefImpl(secret1);
       return this;
     }
 
-    public Inspector setSecret2(String secret2) {
+    public InspectorBase setSecret2(String secret2) {
       this.secret2 = new SecretRefImpl(secret2);
       return this;
     }
 
-    public Inspector setSecret3(String secret3) {
+    public InspectorBase setSecret3(String secret3) {
       this.secret3 = new SecretRefImpl(secret3);
       return this;
     }
 
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       final ExtendedStoragePlugin mockStoragePlugin = mock(ExtendedStoragePlugin.class);
       try {
         when(mockStoragePlugin.listDatasetHandles()).thenReturn(Collections::emptyIterator);
@@ -325,6 +336,17 @@ public class TestPluginsManager {
 
       return mockStoragePlugin;
     }
+  }
+
+  @SourceType(value = INSPECTOR, configurable = false)
+  public static class Inspector extends InspectorBase {
+    Inspector() {
+      this(true);
+    }
+
+    Inspector(boolean hasAccessPermission) {
+      super(hasAccessPermission);
+    }
 
     @Override
     @SuppressWarnings(
@@ -332,6 +354,36 @@ public class TestPluginsManager {
     public boolean equals(Object other) {
       // this forces the replace call to always do so
       return false;
+    }
+  }
+
+  @SourceType(value = INSPECTOR_WITH_ALLOWED_DATABASES, configurable = false)
+  public static class InspectorWithAllowedDatabases extends InspectorBase {
+    public List<String> allowedDatabases = null;
+
+    InspectorWithAllowedDatabases() {
+      this(true);
+    }
+
+    InspectorWithAllowedDatabases(boolean hasAccessPermission) {
+      super(hasAccessPermission);
+    }
+
+    public InspectorWithAllowedDatabases setAllowedDatabases(List<String> allowedDatabases) {
+      this.allowedDatabases = allowedDatabases;
+      return this;
+    }
+
+    @Override
+    public List<SourceNameRefreshAction> getNameRefreshActionsForNewConf(
+        String source, ConnectionConf<?, ?> other) {
+      Preconditions.checkNotNull(other, "other ConnectionConf cannot be null");
+      Preconditions.checkArgument(
+          this.getClass().isInstance(other), "other ConnectionConf must be the same class");
+
+      InspectorWithAllowedDatabases otherConfig = (InspectorWithAllowedDatabases) other;
+      return ConnectionConfUtils.getNameRefreshActionsForFoldersChange(
+          source, allowedDatabases, otherConfig.allowedDatabases);
     }
   }
 
@@ -378,6 +430,7 @@ public class TestPluginsManager {
 
     return new PluginsManager(
         sabotContext,
+        sabotContext,
         mockNamespaceService,
         mockOrphanage,
         mockDatasetListingServiceInUnitTest,
@@ -392,7 +445,8 @@ public class TestPluginsManager {
         () -> broadcaster,
         null,
         modifiableSchedulerService,
-        () -> storeProvider);
+        () -> storeProvider,
+        mockNamespaceServiceFactory);
   }
 
   private void verifyNoPlainTextPasswordPresent(
@@ -439,7 +493,11 @@ public class TestPluginsManager {
 
     // create one; lock required
     final ManagedStoragePlugin plugin;
-    plugin = plugins.create(inspectorConfig, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        inspectorConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    plugin = plugins.get(inspectorConfig.getName());
     plugin.startAsync().get();
 
     final SchemaConfig schemaConfig = mock(SchemaConfig.class);
@@ -461,7 +519,7 @@ public class TestPluginsManager {
             .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
             .setConfig(new Inspector(false).toBytesString());
 
-    plugin.replacePluginWithLock(newConfig, 1000, false);
+    plugin.replacePluginWithLockDeprecated(newConfig, 1000, false);
 
     // will throw if the cache has been cleared
     boolean threw = false;
@@ -487,8 +545,11 @@ public class TestPluginsManager {
             .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
 
     // create one; lock required
-    final ManagedStoragePlugin plugin;
-    plugin = plugins.create(inspectorConfig, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        inspectorConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(inspectorConfig.getName());
     plugin.startAsync().get();
 
     // replace it with same config with different tag
@@ -519,8 +580,11 @@ public class TestPluginsManager {
             .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
 
     // create one; lock required
-    final ManagedStoragePlugin plugin;
-    plugin = plugins.create(inspectorConfig, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        inspectorConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(inspectorConfig.getName());
     plugin.startAsync().get();
 
     // replace it with same config with different value
@@ -552,8 +616,11 @@ public class TestPluginsManager {
             .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
 
     // create one; lock required
-    final ManagedStoragePlugin plugin;
-    plugin = plugins.create(inspectorConfig, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        inspectorConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(inspectorConfig.getName());
     plugin.startAsync().get();
 
     // replace it with same config with different value
@@ -563,7 +630,7 @@ public class TestPluginsManager {
             .setName(INSPECTOR)
             .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
             .setConfig(new Inspector(true).toBytesString())
-            .setCtime(1L)
+            .setCtime(0L)
             .setConfigOrdinal(1L)
             .setTag("21c31b70-f331-4833-9994-1531930f2dfc")
             .setAccelerationGracePeriod(999L);
@@ -949,7 +1016,7 @@ public class TestPluginsManager {
           .when(mockNamespaceService)
           .addOrUpdateSource(newConfig.getKey(), newConfig);
       scheduledTasks.clear();
-      ManagedStoragePlugin plugin = plugins.create(newConfig, "testuser");
+      plugins.create(newConfig, "testuser", SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException e) {
       userExceptionOccured = true;
     }
@@ -983,7 +1050,10 @@ public class TestPluginsManager {
         .addOrUpdateSource(newConfig.getKey(), newConfig);
     scheduledTasks.clear();
 
-    assertThrows(UserException.class, () -> plugins.create(newConfig, "testuser"));
+    assertThrows(
+        UserException.class,
+        () ->
+            plugins.create(newConfig, "testuser", SourceRefreshOption.WAIT_FOR_DATASETS_CREATION));
     assertEquals(scheduledTasks.size(), 1);
     assertTrue(scheduledTasks.get(0).isCancelled());
 
@@ -1010,9 +1080,12 @@ public class TestPluginsManager {
             .build();
 
     // create one; lock required
-    final ManagedStoragePlugin pluginWithValidityCheck;
-    pluginWithValidityCheck =
-        plugins.create(sourceConfigWithValidityCheck, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        sourceConfigWithValidityCheck,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin pluginWithValidityCheck =
+        plugins.get(sourceConfigWithValidityCheck.getName());
     pluginWithValidityCheck.startAsync().get();
 
     final SchemaConfig schemaConfig = mock(SchemaConfig.class);
@@ -1036,9 +1109,12 @@ public class TestPluginsManager {
             .setDisableMetadataValidityCheck(true)
             .setConfig(new Inspector(true).toBytesString());
 
-    final ManagedStoragePlugin pluginWithDisableValidity;
-    pluginWithDisableValidity =
-        plugins.create(sourceConfigDisableValidity, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        sourceConfigDisableValidity,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin pluginWithDisableValidity =
+        plugins.get(sourceConfigDisableValidity.getName());
     pluginWithDisableValidity.startAsync().get();
 
     // Ensure for an incomplete datasetConfig, validity is not checked even if SourceConfig to
@@ -1056,7 +1132,8 @@ public class TestPluginsManager {
     completeDatasetConfig.setType(DatasetType.PHYSICAL_DATASET);
     completeDatasetConfig.setId(new EntityId("test"));
     completeDatasetConfig.setFullPathList(ImmutableList.of("test", "file", "foobar"));
-    completeDatasetConfig.setRecordSchema((new BatchSchema(Collections.EMPTY_LIST)).toByteString());
+    completeDatasetConfig.setRecordSchema(
+        (new BatchSchema(Collections.emptyList())).toByteString());
     completeDatasetConfig.setReadDefinition(readDefinition);
     completeDatasetConfig.setTotalNumSplits(0);
     NamespaceKeyWithConfig completeDataset =
@@ -1092,13 +1169,8 @@ public class TestPluginsManager {
 
   @Test
   public void testCreateSourceAsync() throws Exception {
-    sabotContext
-        .getOptionManager()
-        .setOption(
-            OptionValue.createBoolean(
-                OptionValue.OptionType.SYSTEM,
-                ExecConstants.SOURCE_ASYNC_MODIFICATION_ENABLED.getOptionName(),
-                true));
+    withSystemOption(CatalogOptions.SOURCE_ASYNC_MODIFICATION_ENABLED, true);
+
     SourceConfig inspectorConfig =
         new SourceConfig()
             .setType(INSPECTOR)
@@ -1109,17 +1181,222 @@ public class TestPluginsManager {
             .setConfigOrdinal(0L)
             .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
 
-    // create one; lock required
-    final ManagedStoragePlugin plugin;
-    plugin = plugins.create(inspectorConfig, SystemUser.SYSTEM_USERNAME);
+    plugins.create(
+        inspectorConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(inspectorConfig.getName());
     SourceState state = plugin.startAsync().get();
     assertEquals(state.getStatus(), SourceState.SourceStatus.good);
+  }
+
+  @Test
+  public void testIsSourceConfigMetadataImpacting() throws Exception {
+    {
+      withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, true);
+
+      InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+      existingConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+      newConfig.setAllowedDatabases(List.of("x", "y", "z"));
+      assertEquals(
+          false, testIsSourceConfigMetadataImpactingInternal("source1", existingConfig, newConfig));
+    }
+
+    {
+      withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, false);
+
+      InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+      existingConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+      newConfig.setAllowedDatabases(List.of("x", "y", "z"));
+      assertEquals(
+          true, testIsSourceConfigMetadataImpactingInternal("source2", existingConfig, newConfig));
+    }
+
+    {
+      withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, true);
+
+      InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+      existingConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      existingConfig.setSecret1("secret1");
+      InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+      newConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      newConfig.setSecret1("secret1_changed");
+      assertEquals(
+          true, testIsSourceConfigMetadataImpactingInternal("source3", existingConfig, newConfig));
+    }
+
+    {
+      withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, false);
+
+      InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+      existingConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      existingConfig.setSecret1("secret1");
+      InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+      newConfig.setAllowedDatabases(List.of("a", "b", "c"));
+      newConfig.setSecret1("secret1_changed");
+      assertEquals(
+          true, testIsSourceConfigMetadataImpactingInternal("source4", existingConfig, newConfig));
+    }
+  }
+
+  private boolean testIsSourceConfigMetadataImpactingInternal(
+      String name,
+      InspectorWithAllowedDatabases existingConfig,
+      InspectorWithAllowedDatabases newConfig)
+      throws Exception {
+    SourceConfig existingSourceConfig =
+        new SourceConfig()
+            .setType(INSPECTOR_WITH_ALLOWED_DATABASES)
+            .setName(name)
+            .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
+            .setConfig(existingConfig.toBytesString())
+            .setCtime(0L)
+            .setConfigOrdinal(0L)
+            .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
+
+    plugins.create(
+        existingSourceConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(existingSourceConfig.getName());
+
+    SourceConfig newSourceConfig =
+        new SourceConfig()
+            .setType(INSPECTOR_WITH_ALLOWED_DATABASES)
+            .setName(name)
+            .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
+            .setConfig(newConfig.toBytesString())
+            .setCtime(0L)
+            .setConfigOrdinal(0L)
+            .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
+
+    return plugin.isSourceConfigMetadataImpacting(newSourceConfig);
+  }
+
+  @Test
+  public void testReplacePluginNoMetadataImpactingChange() throws Exception {
+    withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, true);
+    String sourceName = "source1";
+
+    InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+    existingConfig.setAllowedDatabases(List.of("a", "b", "c"));
+    InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+    newConfig.setAllowedDatabases(List.of("a", "b", "c"));
+
+    List<SourceNameRefreshAction> actions =
+        testReplacePluginWithLockInternal(sourceName, existingConfig, newConfig, false);
+
+    assertEquals(0, actions.size());
+  }
+
+  @Test
+  public void testReplacePluginMetadataImpactingChange() throws Exception {
+    withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, true);
+    String sourceName = "source1";
+
+    InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+    existingConfig.setAllowedDatabases(List.of("a", "b", "c", "d"));
+    existingConfig.setSecret1("secret1");
+    InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+    newConfig.setAllowedDatabases(List.of("a", "b", "e", "f"));
+    newConfig.setSecret1("secret1_changed");
+
+    List<SourceNameRefreshAction> actions =
+        testReplacePluginWithLockInternal(sourceName, existingConfig, newConfig, false);
+
+    List<SourceNameRefreshAction> expected =
+        List.of(
+            SourceNameRefreshAction.newDeleteAllAction(),
+            SourceNameRefreshAction.newRefreshAllAction());
+    assertEquals(expected, actions);
+  }
+
+  @Test
+  public void testReplacePluginAllowedDatabasesChange_Update_AddAndDelete() throws Exception {
+    withSystemOption(CatalogOptions.SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES, true);
+    String sourceName = "source1";
+
+    InspectorWithAllowedDatabases existingConfig = new InspectorWithAllowedDatabases(true);
+    existingConfig.setAllowedDatabases(List.of("a", "b", "c", "d"));
+    InspectorWithAllowedDatabases newConfig = new InspectorWithAllowedDatabases(true);
+    newConfig.setAllowedDatabases(List.of("a", "b", "e", "f"));
+
+    List<SourceNameRefreshAction> actions =
+        testReplacePluginWithLockInternal(sourceName, existingConfig, newConfig, false);
+
+    List<List<String>> deleted = List.of(List.of(sourceName, "c"), List.of(sourceName, "d"));
+    List<List<String>> added = List.of(List.of(sourceName, "e"), List.of(sourceName, "f"));
+    List<SourceNameRefreshAction> expected =
+        List.of(
+            SourceNameRefreshAction.newDeleteFoldersAction(deleted),
+            SourceNameRefreshAction.newRefreshFoldersAction(added));
+    assertEquals(expected, actions);
+  }
+
+  private List<SourceNameRefreshAction> testReplacePluginWithLockInternal(
+      String name,
+      InspectorWithAllowedDatabases existingConfig,
+      InspectorWithAllowedDatabases newConfig,
+      boolean skipEqualityCheck)
+      throws Exception {
+    SourceConfig existingSourceConfig =
+        new SourceConfig()
+            .setType(INSPECTOR_WITH_ALLOWED_DATABASES)
+            .setName(name)
+            .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
+            .setConfig(existingConfig.toBytesString())
+            .setCtime(0L)
+            .setConfigOrdinal(0L)
+            .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
+
+    plugins.create(
+        existingSourceConfig,
+        SystemUser.SYSTEM_USERNAME,
+        SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    final ManagedStoragePlugin plugin = plugins.get(existingSourceConfig.getName());
+
+    SourceConfig newSourceConfig =
+        new SourceConfig()
+            .setType(INSPECTOR_WITH_ALLOWED_DATABASES)
+            .setName(name)
+            .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
+            .setConfig(newConfig.toBytesString())
+            .setCtime(0L)
+            .setConfigOrdinal(0L)
+            .setTag("fcf85527-1f76-4276-8b93-6d76f82d3f4b");
+
+    return plugin.replacePluginWithLock(newSourceConfig, 100, skipEqualityCheck);
+  }
+
+  private AutoCloseable withSystemOption(TypeValidators.BooleanValidator option, boolean value) {
+    setSystemOption(sabotContext, option, value);
+    return () -> resetSystemOption(sabotContext, option);
+  }
+
+  static AutoCloseable withSystemOption(
+      SabotContext sabotContext, TypeValidators.BooleanValidator option, boolean value) {
+    setSystemOption(sabotContext, option, value);
+    return () -> resetSystemOption(sabotContext, option);
+  }
+
+  static void setSystemOption(
+      SabotContext sabotContext, TypeValidators.BooleanValidator option, boolean value) {
+    sabotContext
+        .getOptionManager()
+        .setOption(
+            OptionValue.createBoolean(
+                OptionValue.OptionType.SYSTEM, option.getOptionName(), value));
+  }
+
+  static void resetSystemOption(SabotContext sabotContext, TypeValidators.BooleanValidator option) {
     sabotContext
         .getOptionManager()
         .setOption(
             OptionValue.createBoolean(
                 OptionValue.OptionType.SYSTEM,
-                ExecConstants.SOURCE_ASYNC_MODIFICATION_ENABLED.getOptionName(),
-                false));
+                option.getOptionName(),
+                option.getDefault().getBoolVal()));
   }
 }

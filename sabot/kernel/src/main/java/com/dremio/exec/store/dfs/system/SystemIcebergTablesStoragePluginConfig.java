@@ -17,10 +17,11 @@ package com.dremio.exec.store.dfs.system;
 
 import static com.google.common.base.Strings.isNullOrEmpty;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.dfs.MayBeDistFileSystemConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
 import com.dremio.io.file.Path;
@@ -40,8 +41,8 @@ import javax.inject.Provider;
  * DataCredentials)} to create a new SystemIcebergTablesStoragePlugin instance. This constructor
  * sets the connection parameter for the returning SourceConfig instance.
  *
- * <p>2. Call {@link SystemIcebergTablesStoragePluginConfig#newPlugin(SabotContext, String,
- * Provider)} to create a SystemIcebergTablesStoragePlugin instance by invoking its constructor.
+ * <p>2. Call {@link ConnectionConf#newPlugin(PluginSabotContext, String, Provider)} to create a
+ * SystemIcebergTablesStoragePlugin instance by invoking its constructor.
  */
 @SourceType(value = "SYSTEMICEBERGTABLES", configurable = false)
 public class SystemIcebergTablesStoragePluginConfig
@@ -134,8 +135,10 @@ public class SystemIcebergTablesStoragePluginConfig
 
   @Override
   public SystemIcebergTablesStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new SystemIcebergTablesStoragePlugin(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new SystemIcebergTablesStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   @Override

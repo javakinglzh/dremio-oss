@@ -15,11 +15,13 @@
  */
 package com.dremio.dac.homefiles;
 
+import static com.dremio.exec.store.dfs.CloudFsConstants.S3_REGION_OVERRIDE;
+
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.hadoop.HadoopFileSystem;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.dfs.MayBeDistFileSystemConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
 import com.dremio.io.file.FileSystem;
@@ -30,7 +32,6 @@ import com.dremio.service.namespace.source.proto.MetadataPolicy;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.google.common.base.Supplier;
 import com.google.common.base.Throwables;
-import com.google.common.collect.ImmutableList;
 import io.protostuff.Tag;
 import java.io.IOException;
 import java.net.URI;
@@ -38,6 +39,7 @@ import java.net.URISyntaxException;
 import java.util.List;
 import javax.inject.Provider;
 import javax.validation.constraints.NotBlank;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 
 /** Source type used for Home Files purposes. */
@@ -102,9 +104,10 @@ public class HomeFileConf
   public String accountKind = null;
 
   @Tag(12)
-  public String sharedAccessKey = null;
+  public String sharedAccessKey = null; // This tag has been deprecated. Please do not use.
 
-  // Tag has been deprecated please do not use.
+  @Tag(13)
+  public String awsRegion = null;
 
   public HomeFileConf() {}
 
@@ -119,6 +122,7 @@ public class HomeFileConf
       } else if (dataCredentials.hasDataRole()) {
         this.iamRole = dataCredentials.getDataRole().getIamRole();
         this.externalId = dataCredentials.getDataRole().getExternalId();
+        this.awsRegion = dataCredentials.getDataRole().getRegion();
       } else if (dataCredentials.hasClientAccess()) {
         this.tokenEndpoint = dataCredentials.getClientAccess().getTokenEndpoint();
         this.clientId = dataCredentials.getClientAccess().getClientId();
@@ -171,7 +175,9 @@ public class HomeFileConf
 
   @Override
   public List<Property> getProperties() {
-    return ImmutableList.of();
+    return StringUtils.isNotEmpty(awsRegion)
+        ? List.of(new Property(S3_REGION_OVERRIDE, awsRegion))
+        : List.of();
   }
 
   @Override
@@ -241,8 +247,10 @@ public class HomeFileConf
 
   @Override
   public HomeFileSystemStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
-    return new HomeFileSystemStoragePlugin(this, context, name, pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
+    return new HomeFileSystemStoragePlugin(this, pluginSabotContext, name, pluginIdProvider);
   }
 
   public Path getBaseUploadsPath() {

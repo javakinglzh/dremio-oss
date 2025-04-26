@@ -55,8 +55,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections4.ListUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,6 +74,7 @@ import org.projectnessie.client.api.DeleteBranchBuilder;
 import org.projectnessie.client.api.GetAllReferencesBuilder;
 import org.projectnessie.client.api.GetCommitLogBuilder;
 import org.projectnessie.client.api.GetContentBuilder;
+import org.projectnessie.client.api.GetDiffBuilder;
 import org.projectnessie.client.api.GetEntriesBuilder;
 import org.projectnessie.client.api.GetReferenceBuilder;
 import org.projectnessie.client.api.MergeReferenceBuilder;
@@ -90,6 +93,7 @@ import org.projectnessie.model.Content;
 import org.projectnessie.model.ContentKey;
 import org.projectnessie.model.EntriesResponse;
 import org.projectnessie.model.IcebergTable;
+import org.projectnessie.model.ImmutableDiffEntry;
 import org.projectnessie.model.LogResponse;
 import org.projectnessie.model.MergeResponse;
 import org.projectnessie.model.Reference;
@@ -104,19 +108,20 @@ public class TestNessieClientImpl {
   private static final List<String> CATALOG_KEY_2 = Arrays.asList("test3", "test4");
   private static final ContentKey CONTENT_KEY = ContentKey.of(CATALOG_KEY);
   private static final Content CONTENT = IcebergTable.of("test", 0L, 0, 0, 0);
+  private static final String DEFAULT_BRANCH_NAME = "main";
   private static final ResolvedVersionContext VERSION =
-      ResolvedVersionContext.ofBranch("main", "0123456789abcdeff");
+      ResolvedVersionContext.ofBranch(DEFAULT_BRANCH_NAME, "0123456789abcdeff");
   private static final ResolvedVersionContext VERSION_2 =
       ResolvedVersionContext.ofBranch("dev", "0123456789bbcdeff");
   private static final Map<ContentKey, Content> CONTENT_MAP =
-      new HashMap<ContentKey, Content>() {
+      new HashMap<>() {
         {
           put(CONTENT_KEY, CONTENT);
         }
       };
   private static final List<Branch> BRANCHES =
       Arrays.asList(
-          Branch.of("main", "a0f4f33a14fa610c75ff8cd89b6a54f5df61fcb7"),
+          Branch.of(DEFAULT_BRANCH_NAME, "a0f4f33a14fa610c75ff8cd89b6a54f5df61fcb7"),
           Branch.of("dev", "07b92b065b57ec8d69c5249daa33c329259f7284"));
   private static final List<Tag> TAGS =
       Arrays.asList(
@@ -199,12 +204,12 @@ public class TestNessieClientImpl {
     when(builder.get()).thenReturn(CONTENT_MAP);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
   }
@@ -215,12 +220,12 @@ public class TestNessieClientImpl {
     when(builder.get()).thenReturn(generateRandomMap());
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION_2, null));
     verify(builder, times(2)).get();
   }
@@ -231,12 +236,12 @@ public class TestNessieClientImpl {
     when(builder.get()).thenReturn(CONTENT_MAP);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY_2, VERSION, null));
     verify(builder, times(2)).get();
   }
@@ -247,22 +252,22 @@ public class TestNessieClientImpl {
     when(builder.get()).thenReturn(CONTENT_MAP);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(1)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User2"))
+        .with(UserContext.CTX_KEY, UserContext.of("User2"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(2)).get();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     verify(builder, times(2)).get();
   }
@@ -295,7 +300,7 @@ public class TestNessieClientImpl {
   public void testDropBranch() throws NessieConflictException, NessieNotFoundException {
     DeleteBranchBuilder deleteBranchBuilder = mock(DeleteBranchBuilder.class);
     when(nessieApi.deleteBranch()).thenReturn(deleteBranchBuilder);
-    when(deleteBranchBuilder.branchName("main")).thenReturn(deleteBranchBuilder);
+    when(deleteBranchBuilder.branchName(DEFAULT_BRANCH_NAME)).thenReturn(deleteBranchBuilder);
     when(deleteBranchBuilder.hash("d0628f078890fec234b98b873f9e1f3cd140988a"))
         .thenReturn(deleteBranchBuilder);
     NessieError nessieError =
@@ -306,7 +311,9 @@ public class TestNessieClientImpl {
             .build();
     doThrow(new NessieBadRequestException(nessieError)).when(deleteBranchBuilder).delete();
     assertThatThrownBy(
-            () -> nessieClient.dropBranch("main", "d0628f078890fec234b98b873f9e1f3cd140988a"))
+            () ->
+                nessieClient.dropBranch(
+                    DEFAULT_BRANCH_NAME, "d0628f078890fec234b98b873f9e1f3cd140988a"))
         .hasMessageContaining("Cannot drop the branch 'main'");
 
     when(deleteBranchBuilder.branchName("not_main")).thenReturn(deleteBranchBuilder);
@@ -480,11 +487,31 @@ public class TestNessieClientImpl {
   }
 
   @Test
+  public void testListEntriesChangedBetweenWithBothCommitHashes() throws NessieNotFoundException {
+    String fromHashCommit = DigestUtils.sha256Hex(UUID.randomUUID().toString());
+    String toHashCommit = DigestUtils.sha256Hex(UUID.randomUUID().toString());
+
+    GetDiffBuilder requestBuilder = mock(GetDiffBuilder.class);
+    when(nessieApi.getDiff()).thenReturn(requestBuilder);
+    when(requestBuilder.fromHashOnRef(eq(fromHashCommit))).thenReturn(requestBuilder);
+    when(requestBuilder.toHashOnRef(eq(toHashCommit))).thenReturn(requestBuilder);
+    when(requestBuilder.stream())
+        .thenReturn(Stream.of(ImmutableDiffEntry.builder().key(CONTENT_KEY).build()));
+
+    assertThat(
+            nessieClient
+                .listEntriesChangedBetween(fromHashCommit, toHashCommit)
+                .collect(Collectors.toList()))
+        .isEqualTo(List.of(CATALOG_KEY));
+  }
+
+  @Test
   public void testResolveVersionContextAtTimestamp() throws NessieNotFoundException {
     // Arrange
     String expectedHash = "abcdef";
     Instant someTimestamp = Instant.now();
-    VersionContext ofRefAsOfTimestamp = VersionContext.ofRefAsOfTimestamp("main", someTimestamp);
+    VersionContext ofRefAsOfTimestamp =
+        VersionContext.ofRefAsOfTimestamp(DEFAULT_BRANCH_NAME, someTimestamp);
 
     GetCommitLogBuilder requestBuilder = mock(GetCommitLogBuilder.class, RETURNS_SELF);
     when(requestBuilder.get())
@@ -514,7 +541,8 @@ public class TestNessieClientImpl {
   public void testResolveVersionContextAtTimestampThrowsException() throws NessieNotFoundException {
     // Arrange
     Instant someTimestamp = Instant.now();
-    VersionContext ofRefAsOfTimestamp = VersionContext.ofRefAsOfTimestamp("main", someTimestamp);
+    VersionContext ofRefAsOfTimestamp =
+        VersionContext.ofRefAsOfTimestamp(DEFAULT_BRANCH_NAME, someTimestamp);
 
     GetCommitLogBuilder requestBuilder = mock(GetCommitLogBuilder.class, RETURNS_SELF);
     when(requestBuilder.get()).thenReturn(LogResponse.builder().build());
@@ -545,10 +573,10 @@ public class TestNessieClientImpl {
 
     // act
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
 
     // assert
@@ -577,10 +605,10 @@ public class TestNessieClientImpl {
 
     // act
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext("User1"))
+        .with(UserContext.CTX_KEY, UserContext.of("User1"))
         .run(() -> nessieClient.getContent(CATALOG_KEY, VERSION, null));
 
     // assert

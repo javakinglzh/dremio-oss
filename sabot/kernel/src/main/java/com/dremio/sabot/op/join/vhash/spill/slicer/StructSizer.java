@@ -19,6 +19,7 @@ import com.dremio.exec.util.RoundUtil;
 import com.dremio.sabot.op.copier.FieldBufferPreAllocedCopier;
 import com.dremio.sabot.op.join.vhash.spill.SV2UnsignedUtil;
 import com.google.common.collect.ImmutableList;
+import java.util.ArrayList;
 import java.util.List;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
@@ -39,9 +40,15 @@ import org.apache.arrow.vector.ipc.message.ArrowFieldNode;
 public class StructSizer implements Sizer {
 
   private final StructVector incoming;
+  private final int nFields;
+  private final List<Sizer> childSizers = new ArrayList<>();
 
   public StructSizer(final StructVector incoming) {
     this.incoming = incoming;
+    this.nFields = this.incoming.getField().getChildren().size();
+    for (int i = 0; i < nFields; i++) {
+      childSizers.add(Sizer.get(this.incoming.getChildByOrdinal(i)));
+    }
   }
 
   @Override
@@ -60,7 +67,6 @@ public class StructSizer implements Sizer {
 
   @Override
   public int getDataLengthFromIndex(int startIndex, int numberOfEntries) {
-    final int nFields = this.incoming.getField().getChildren().size();
     int totalDataLength = 0;
     int endIndex = startIndex + numberOfEntries;
     for (; startIndex < endIndex; startIndex++) {
@@ -68,11 +74,26 @@ public class StructSizer implements Sizer {
         continue;
       }
       for (int i = 0; i < nFields; i++) {
-        final Sizer childVectorSizer = Sizer.get(this.incoming.getChildByOrdinal(i));
-        totalDataLength += childVectorSizer.getDataLengthFromIndex(startIndex, 1);
+        totalDataLength += childSizers.get(i).getDataLengthFromIndex(startIndex, 1);
       }
     }
     return totalDataLength;
+  }
+
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    int totalDataLength;
+    for (int index = 0; index < recordCount; index++) {
+      if (incoming.isNull(index)) {
+        continue;
+      }
+      totalDataLength = 0;
+      for (int i = 0; i < nFields; i++) {
+        totalDataLength += childSizers.get(i).getDataLengthFromIndex(index, 1);
+      }
+      rowLengthAccumulator.setInt(
+          index * 4L, rowLengthAccumulator.getInt(index * 4L) + totalDataLength);
+    }
   }
 
   /**

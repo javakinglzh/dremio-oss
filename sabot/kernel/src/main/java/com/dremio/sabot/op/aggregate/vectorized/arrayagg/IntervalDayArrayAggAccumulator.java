@@ -32,14 +32,14 @@ public final class IntervalDayArrayAggAccumulator
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -55,7 +55,7 @@ public final class IntervalDayArrayAggAccumulator
 
   @Override
   protected ArrayAggAccumulatorHolder<NullableIntervalDayHolder> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new IntervalDayArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

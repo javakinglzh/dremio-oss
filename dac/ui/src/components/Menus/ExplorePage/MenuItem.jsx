@@ -44,6 +44,11 @@ export default class MenuItem extends PureComponent {
         })}
         title={!showTooltip && title}
         onClick={disabled ? undefined : onClick}
+        onKeyDown={(e) => {
+          if (!disabled && (e.code === "Enter" || e.code === "Space")) {
+            onClick(e);
+          } else return;
+        }}
       >
         <DefaultMenuItem disabled={disabled} style={style}>
           {children}

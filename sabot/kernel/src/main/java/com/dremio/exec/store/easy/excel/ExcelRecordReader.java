@@ -19,6 +19,8 @@ import static java.util.stream.Collectors.toCollection;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecConstants;
@@ -55,6 +57,7 @@ public class ExcelRecordReader extends AbstractRecordReader
   private InputStream inputStream;
   private long runningRecordCount;
   private ExcelParser parser;
+  private boolean rowSizeLimitEnabledForReader;
 
   public ExcelRecordReader(
       final OperatorContext executionContext,
@@ -67,6 +70,7 @@ public class ExcelRecordReader extends AbstractRecordReader
     this.dfs = dfs;
     this.path = path;
     this.pluginConfig = pluginConfig;
+    this.rowSizeLimitEnabledForReader = rowSizeLimitEnabled;
 
     // Get the list of columns to project, build a lookup table and pass it to respective parsers
     // for filtering the columns
@@ -120,6 +124,16 @@ public class ExcelRecordReader extends AbstractRecordReader
                 isSkipQuery(),
                 maxCellSize);
       }
+      if (rowSizeLimitEnabled) {
+        if (fixedDataLenPerRow <= rowSizeLimit && variableVectorCount == 0) {
+          rowSizeLimitEnabledForReader = false;
+        }
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+        }
+        rowSizeLimit -= fixedDataLenPerRow;
+      }
     } catch (final SheetNotFoundException e) {
       // This check will move to schema validation in planning after DX-2271
       throw UserException.validationError(e)
@@ -161,6 +175,10 @@ public class ExcelRecordReader extends AbstractRecordReader
         writer.setPosition(recordCount);
 
         final ExcelParser.State state = parser.parseNextRecord();
+        if (rowSizeLimitEnabledForReader) {
+          RowSizeLimitExceptionHelper.checkSizeLimit(
+              parser.getAndResetRowSize(), rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+        }
 
         if (state == State.READ_SUCCESSFUL) {
           recordCount++;

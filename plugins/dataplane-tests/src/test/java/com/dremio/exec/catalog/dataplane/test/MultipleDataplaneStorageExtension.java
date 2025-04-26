@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.catalog.dataplane.test;
 
+import static com.dremio.test.AnnotatedFields.populateAnnotatedFields;
 import static org.junit.platform.commons.support.AnnotationSupport.findRepeatableAnnotations;
-import static org.projectnessie.tools.compatibility.internal.NessieTestApiBridge.populateAnnotatedFields;
 
 import com.dremio.exec.catalog.dataplane.test.DataplaneStorage.StorageType;
 import java.util.Arrays;

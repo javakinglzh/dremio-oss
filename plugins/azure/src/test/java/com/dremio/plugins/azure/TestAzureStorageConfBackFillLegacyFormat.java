@@ -21,6 +21,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.services.credentials.CredentialsService;
 import org.junit.Before;

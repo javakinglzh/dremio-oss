@@ -54,6 +54,7 @@ import {
   getRemoveConfirmationMsgId,
 } from "@inject/pages/AdminPage/subpages/Provisioning/ProvisioningPageUtils";
 import { withExtraEngineRevision } from "@inject/utils/provisioningUtils";
+import { Button } from "dremio-ui-lib/components";
 
 const VIEW_ID = "ProvisioningPage";
 const PROVISION_POLL_INTERVAL = 3000;
@@ -287,14 +288,14 @@ export class ProvisioningPage extends Component {
   };
 
   renderAddEngineButton = () => (
-    <div
+    <Button
+      variant="tertiary"
       data-qa="add-engine-button"
-      className="settingHeader__action"
       onClick={this.openAddProvisionModal}
     >
       <dremio-icon name="interface/add" alt="+" class="settingPage__icon" />
       <FormattedMessage id="Admin.Engines.ElasticEngines.Add" />
-    </div>
+    </Button>
   );
 
   renderHeader() {

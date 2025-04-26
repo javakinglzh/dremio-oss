@@ -32,6 +32,7 @@ import com.dremio.options.OptionValue.OptionType;
 import com.dremio.sabot.exec.context.CompilationOptions;
 import com.dremio.sabot.exec.context.FunctionContext;
 import com.dremio.sabot.rpc.user.UserSession;
+import com.sun.codemodel.JBlock;
 import java.io.IOException;
 import org.codehaus.commons.compiler.CompileException;
 import org.junit.Assert;
@@ -166,9 +167,24 @@ public class TestClassTransformation extends BaseTestQuery {
     t.doInsideOutside();
   }
 
+  @Test
+  public void testClassGeneratorEmptyBlock() throws Exception {
+    CodeGenerator<ExampleInner> cg =
+        newCodeGenerator(ExampleInner.class, ExampleTemplateWithInner.class);
+    ClassGenerator<ExampleInner> root = cg.getRoot();
+    JBlock block = new JBlock();
+    root.nestSetupBlock(block);
+    Assert.assertNotNull(root.getSetupBlock());
+    root.unNestSetupBlock();
+    Assert.assertNotNull(root.getSetupBlock());
+    root.unNestSetupBlock();
+    Assert.assertNotNull(root.getSetupBlock());
+  }
+
   private <T, X extends T> CodeGenerator<T> newCodeGenerator(Class<T> iface, Class<X> impl) {
     CompilationOptions compilationOptions = mock(CompilationOptions.class);
     when(compilationOptions.getNewMethodThreshold()).thenReturn(100);
+    when(compilationOptions.getAllowEmptyBlock()).thenReturn(true);
     FunctionContext mockFunctionContext = mock(FunctionContext.class);
     when(mockFunctionContext.getCompilationOptions()).thenReturn(compilationOptions);
 

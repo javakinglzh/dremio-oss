@@ -53,7 +53,12 @@ export default class LayoutInfo extends Component {
     return (
       <div className={`LayoutInfo__main ${this.props.className}`}>
         <div className={"LayoutInfo__status"}>
-          <Link to={jobsURL} style={{ height: 24 }}>
+          <Link
+            to={jobsURL}
+            style={{ height: 24 }}
+            className="focus-visible-outline"
+            aria-label="Reflection job history"
+          >
             <Status reflection={this.props.layout} />
           </Link>
         </div>

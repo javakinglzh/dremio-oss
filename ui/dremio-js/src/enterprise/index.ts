@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-import { createRequest } from "../_internal/createRequest.js";
+import { createRequest } from "../_internal/createRequest.ts";
 import type {
   Config,
   ResourceConfig,
   SonarV2Config,
   SonarV3Config,
-} from "../_internal/types/Config.js";
-import { Resources } from "./resources.js";
+  V3Config,
+} from "../_internal/types/Config.ts";
+import { Resources } from "./resources.ts";
+import { HttpError } from "../common/HttpError.ts";
 
 const getSonarResourceConfig = (config: Config) => {
   const request = createRequest(config);
@@ -30,7 +32,8 @@ const getSonarResourceConfig = (config: Config) => {
     request,
     sonarV2Request: (path, init) => request(`/apiv2/${path}`, init),
     sonarV3Request: (path, init) => request(`/api/v3/${path}`, init),
-  } satisfies ResourceConfig & SonarV2Config & SonarV3Config;
+    v3Request: (path, init) => request(`/api/v3/${path}`, init),
+  } satisfies ResourceConfig & SonarV2Config & SonarV3Config & V3Config;
 };
 
 export const Dremio = (config: Config) => {
@@ -44,6 +47,10 @@ export const Dremio = (config: Config) => {
   };
 };
 
-export * from "../common/Query.js";
-
-export { Resources as _Resources };
+export * from "../common/Problem.ts";
+export * from "../common/Query.ts";
+export * from "./interfaces.ts";
+export * from "../common/credentials/fromEnv.ts";
+export * from "../common/credentials/fromPat.ts";
+export * from "../oss/credentials/index.ts";
+export { HttpError, Resources as _Resources };

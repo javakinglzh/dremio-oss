@@ -15,18 +15,19 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
 
 import com.dremio.BaseTestQuery;
-import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.Property;
 import java.util.ArrayList;
 import java.util.Map;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CatalogUtil;
+import org.apache.iceberg.rest.RESTCatalog;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
@@ -34,33 +35,32 @@ import org.mockito.MockedStatic;
 
 public class TestRestIcebergCatalogPluginConfig extends BaseTestQuery {
 
-  private RestIcebergCatalogPluginConfig pluginConfig = new RestIcebergCatalogPluginConfig();
+  private RestIcebergCatalogPlugin restIcebergCatalogPlugin;
+  private StoragePluginId storagePluginId;
 
   @Before
   public void setup() {
-    pluginConfig = new RestIcebergCatalogPluginConfig();
-  }
-
-  @Test
-  public void testCreateCatalogShouldThrowException() {
-    assertThatThrownBy(() -> pluginConfig.createCatalog(null, null))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("Can't connect to RESTCatalog catalog.");
-  }
-
-  @Test
-  public void testCreateRestCatalog() throws Exception {
+    RestIcebergCatalogPluginConfig pluginConfig = new RestIcebergCatalogPluginConfig();
     pluginConfig.propertyList = new ArrayList<>();
     pluginConfig.propertyList.add(new Property("testPropertyName", "testPropertyValue"));
     pluginConfig.secretPropertyList = new ArrayList<>();
     pluginConfig.secretPropertyList.add(
         new Property("testSecretPropertyName", "testSecretPropertyValue"));
+
+    storagePluginId = mock(StoragePluginId.class);
+    restIcebergCatalogPlugin =
+        new RestIcebergCatalogPlugin(
+            pluginConfig, getSabotContext(), "test", () -> storagePluginId);
+  }
+
+  @Test
+  public void testCreateRestCatalog() throws Exception {
     Configuration conf = new Configuration();
     try (MockedStatic<CatalogUtil> mockCatalogUtil = mockStatic(CatalogUtil.class)) {
       mockCatalogUtil
           .when(() -> CatalogUtil.loadCatalog(any(), any(), any(), any()))
-          .thenReturn(null);
-      CatalogAccessor catalogAccessor = pluginConfig.createCatalog(conf, getSabotContext());
+          .thenReturn(mock(RESTCatalog.class));
+      CatalogAccessor catalogAccessor = restIcebergCatalogPlugin.createCatalog(conf);
       try {
         catalogAccessor.checkState();
       } catch (Exception e) {

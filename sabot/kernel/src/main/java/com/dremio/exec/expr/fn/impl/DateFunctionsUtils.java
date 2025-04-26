@@ -149,7 +149,7 @@ public class DateFunctionsUtils {
     } catch (IllegalArgumentException ex) {
       throw errCtx
           .error()
-          .message("Input text cannot be formatted to date")
+          .message("Input text cannot be formatted to timestamp")
           .addContext("Details", ex.getMessage())
           .addContext("Input text", input)
           .build();
@@ -177,7 +177,7 @@ public class DateFunctionsUtils {
     } catch (IllegalArgumentException ex) {
       throw errCtx
           .error()
-          .message("Input text cannot be formatted to date")
+          .message("Input text cannot be formatted to time")
           .addContext("Details", ex.getMessage())
           .addContext("Input text", input)
           .build();

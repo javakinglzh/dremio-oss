@@ -206,6 +206,33 @@ public class TestSysTableFilterPushDown extends PlanTestBase {
     testHelper(query, scan);
   }
 
+  @Test
+  public void testJobsRecentTableFilterPushDown_GreaterThanOrEqual() throws Exception {
+    final String query =
+        "SELECT job_id from sys.jobs_recent WHERE submitted_epoch_millis >= 1696436831074";
+    final String scan =
+        "query=[greater_than_or_equal {   field: \"submitted_epoch_millis\"   value: 1696436831074 } ]";
+    testHelper(query, scan);
+  }
+
+  @Test
+  public void testJobsRecentTableFilterPushDown_LessThan() throws Exception {
+    final String query =
+        "SELECT job_id from sys.jobs_recent WHERE submitted_epoch_millis < 1696436831074";
+    final String scan =
+        "query=[less_than {   field: \"submitted_epoch_millis\"   value: 1696436831074 } ]";
+    testHelper(query, scan);
+  }
+
+  @Test
+  public void testJobsRecentTableFilterPushDown_LessThanOrEqual() throws Exception {
+    final String query =
+        "SELECT job_id from sys.jobs_recent WHERE submitted_epoch_millis <= 1696436831074";
+    final String scan =
+        "query=[less_than_or_equal {   field: \"submitted_epoch_millis\"   value: 1696436831074 } ]";
+    testHelper(query, scan);
+  }
+
   private void testHelper(final String query, String filterInScan) throws Exception {
     final String plan = getPlanInString("EXPLAIN PLAN FOR " + query, OPTIQ_FORMAT);
 

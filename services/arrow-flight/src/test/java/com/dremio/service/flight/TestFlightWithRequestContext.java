@@ -16,10 +16,23 @@
 package com.dremio.service.flight;
 
 import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
+import com.dremio.exec.proto.UserBitShared.UserCredentials;
+import com.dremio.sabot.rpc.user.UserSession;
+import com.dremio.service.users.User;
+import com.dremio.service.users.UserService;
+import com.dremio.service.users.proto.UID;
+import com.dremio.service.usersessions.UserSessionService;
 import com.google.inject.util.Providers;
+import java.util.UUID;
 import java.util.concurrent.Callable;
+import org.apache.arrow.flight.FlightCallHeaders;
 import org.apache.arrow.flight.FlightProducer;
 import org.junit.Before;
 import org.junit.Test;
@@ -34,7 +47,9 @@ public class TestFlightWithRequestContext {
 
     @Override
     public RequestContext apply(
-        RequestContext requestContext, FlightProducer.CallContext flightContext) {
+        RequestContext requestContext,
+        FlightProducer.CallContext flightContext,
+        UserSessionService.UserSessionData userSessionData) {
       ++callCount;
       return requestContext;
     }
@@ -44,20 +59,44 @@ public class TestFlightWithRequestContext {
 
   // Note: FlightProducer interface is used to intentional limit testing to Flight (not FlightSql)
   // RPC calls.
-  private FlightProducer producer;
+  private DremioFlightProducer producer;
+  private final FlightCallHeaders emptyCallHeaders = new FlightCallHeaders();
+  ;
+  private final ServerCookieMiddleware serverCookieMiddleware = mock(ServerCookieMiddleware.class);
+  private final FlightProducer.CallContext mockCallContext = mock(FlightProducer.CallContext.class);
+  private final DremioFlightSessionsManager mockDremioFlightSessionsManager =
+      mock(DremioFlightSessionsManager.class);
+  private final UserSessionService.UserSessionData mockUserSessionData =
+      mock(UserSessionService.UserSessionData.class);
+  private final UserService mockUserService = mock(UserService.class);
 
   @Before
   public void setup() {
+    doReturn(serverCookieMiddleware)
+        .when(mockCallContext)
+        .getMiddleware(DremioFlightService.FLIGHT_CLIENT_PROPERTIES_MIDDLEWARE_KEY);
+    doReturn(emptyCallHeaders).when(serverCookieMiddleware).headers();
+    doReturn(mockUserSessionData)
+        .when(mockDremioFlightSessionsManager)
+        .getUserSession(any(), any());
     decorator = new DummyFlightRequestContextDecorator();
     producer =
-        new DremioFlightProducer(null, null, null, null, null, Providers.of(decorator), null);
+        new DremioFlightProducer(
+            null,
+            mockDremioFlightSessionsManager,
+            null,
+            null,
+            null,
+            Providers.of(decorator),
+            null,
+            Providers.of(mockUserService));
   }
 
   @Test
   public void testGetStream() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.getStream(null, null, null);
+          producer.getStream(mockCallContext, null, null);
           return null;
         });
   }
@@ -66,7 +105,7 @@ public class TestFlightWithRequestContext {
   public void testListFlights() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.listFlights(null, null, null);
+          producer.listFlights(mockCallContext, null, null);
           return null;
         });
   }
@@ -75,7 +114,7 @@ public class TestFlightWithRequestContext {
   public void testGetFlightInfo() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.getFlightInfo(null, null);
+          producer.getFlightInfo(mockCallContext, null);
           return null;
         });
   }
@@ -84,7 +123,7 @@ public class TestFlightWithRequestContext {
   public void testGetSchema() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.getSchema(null, null);
+          producer.getSchema(mockCallContext, null);
           return null;
         });
   }
@@ -93,7 +132,7 @@ public class TestFlightWithRequestContext {
   public void testAcceptPut() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.acceptPut(null, null, null);
+          producer.acceptPut(mockCallContext, null, null);
           return null;
         });
   }
@@ -102,7 +141,7 @@ public class TestFlightWithRequestContext {
   public void testDoExchange() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.doExchange(null, null, null);
+          producer.doExchange(mockCallContext, null, null);
           return null;
         });
   }
@@ -111,7 +150,7 @@ public class TestFlightWithRequestContext {
   public void testDoAction() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.doAction(null, null, null);
+          producer.doAction(mockCallContext, null, null);
           return null;
         });
   }
@@ -120,9 +159,26 @@ public class TestFlightWithRequestContext {
   public void testListActions() {
     ignoreExceptionsAndValidateCallCount(
         () -> {
-          producer.listActions(null, null);
+          producer.listActions(mockCallContext, null);
           return null;
         });
+  }
+
+  @Test
+  public void testPopulateUserContextInCurrentRequestContext() throws Exception {
+    UserSession userSession = mock(UserSession.class);
+    User user = mock(User.class);
+    String userId = UUID.randomUUID().toString();
+    String userName = "test";
+    UserCredentials userCredentials = mock(UserCredentials.class);
+    when(mockUserSessionData.getSession()).thenReturn(userSession);
+    when(userSession.getCredentials()).thenReturn(userCredentials);
+    when(userCredentials.getUserName()).thenReturn(userName);
+    when(mockUserService.getUser(userName)).thenReturn(user);
+    when(user.getUID()).thenReturn(new UID(userId));
+    RequestContext actual =
+        producer.populateUserContextInCurrentRequestContext(mockUserSessionData);
+    assertEquals(userId, actual.get(UserContext.CTX_KEY).getUserId());
   }
 
   private <V> void ignoreExceptionsAndValidateCallCount(Callable<V> rpcHandlerBody) {
@@ -132,6 +188,6 @@ public class TestFlightWithRequestContext {
       // Suppress exceptions thrown from the RPC handler, since the point of this test
       // is to just verify the RequestContext was invoked correctly.
     }
-    assertEquals(decorator.callCount, 1);
+    assertEquals(1, decorator.callCount);
   }
 }

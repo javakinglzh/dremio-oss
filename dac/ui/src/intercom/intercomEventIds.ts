@@ -14,10 +14,14 @@
  * limitations under the License.
  */
 import { SonarEventIds } from "dremio-ui-common/sonar/sonarEvents.js";
+import { StatsEventIds } from "dremio-ui-common/appEvents/stats/statsEvents";
 
 export const intercomEventIds = {
   [SonarEventIds.job_run]: "Job: Run",
   [SonarEventIds.job_preview]: "Job: Preview",
   [SonarEventIds.source_add_dialog_opened]: "Source: Add",
   [SonarEventIds.source_add_complete]: "Source: Add Complete",
+  [StatsEventIds.cluster_stats]: "Cluster Stats",
+  [StatsEventIds.source_totals]: "Source Totals",
+  [StatsEventIds.support_keys]: "Support Keys",
 } as const;

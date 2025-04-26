@@ -553,9 +553,31 @@ public class TestStringFunctions extends BaseTestFunction {
           {"parse_url('http://dremio.com/path/p1.php?query=1', 'QUERY')", "query=1"},
           {"parse_url('http://dremio.com/path/p1.php?query=1', 'QUERY', 'query')", "1"},
           {"parse_url('http://dremio.com/path/p1.php', 'QUERY', 'query')", NULL_VARCHAR},
+          {
+            "parse_url('https://dremio.com/p1.php?qaoyvzurlufhtjbmdmjaygsxjrvlczxvuomavsotn"
+                + "zsjthaycduavjkkoblmtxqqeignqivacizvgqoxkovlecyjrtkmghrrrgqrtcypwnuplaxzfgz"
+                + "eshawgswktsbbvtuleaxcpfddntebxlrqhhdkomhlgzpmtuutfggirmlikpovgygoeutcpgbqg"
+                + "fvthtuzdpjzuveuqfuteblzlpbzhflztbanctswwykbgkuvyqiudrlufoytpkgodgarljwdhxe"
+                + "iexlhbnlmjxhilxjjzqklf=', 'QUERY')",
+            "qaoyvzurlufhtjbmdmjaygsxjrvlczxvuomavsotnzsjthaycduavjkkoblmtxqqeignqivacizvgqox"
+                + "kovlecyjrtkmghrrrgqrtcypwnuplaxzfgzeshawgswktsbbvtuleaxcpfddntebxlrqhhdkom"
+                + "hlgzpmtuutfggirmlikpovgygoeutcpgbqgfvthtuzdpjzuveuqfuteblzlpbzhflztbanctsw"
+                + "wykbgkuvyqiudrlufoytpkgodgarljwdhxeiexlhbnlmjxhilxjjzqklf="
+          },
           {"parse_url('http://dremio.com/path/p1.php?query=1&k1=v1', 'QUERY', 'query')", "1"},
           {"parse_url('http://dremio.com/path/p1.php?query=1&k1=v1', 'QUERY', 'k1')", "v1"},
           {"parse_url('http://dremio.com/path/p1.php?query=1&k1=v1', 'QUERY', 'k3')", NULL_VARCHAR},
+          {
+            "parse_url('https://dremio.com/p1.php?query=1&k1=qaoyvzurlufhtjbmdmjaygsxjrvlczxvuomavsotn"
+                + "zsjthaycduavjkkoblmtxqqeignqivacizvgqoxkovlecyjrtkmghrrrgqrtcypwnuplaxzfgz"
+                + "eshawgswktsbbvtuleaxcpfddntebxlrqhhdkomhlgzpmtuutfggirmlikpovgygoeutcpgbqg"
+                + "fvthtuzdpjzuveuqfuteblzlpbzhflztbanctswwykbgkuvyqiudrlufoytpkgodgarljwdhxe"
+                + "iexlhbnlmjxhilxjjzqklf', 'QUERY','k1')",
+            "qaoyvzurlufhtjbmdmjaygsxjrvlczxvuomavsotnzsjthaycduavjkkoblmtxqqeignqivacizvgqox"
+                + "kovlecyjrtkmghrrrgqrtcypwnuplaxzfgzeshawgswktsbbvtuleaxcpfddntebxlrqhhdkom"
+                + "hlgzpmtuutfggirmlikpovgygoeutcpgbqgfvthtuzdpjzuveuqfuteblzlpbzhflztbanctsw"
+                + "wykbgkuvyqiudrlufoytpkgodgarljwdhxeiexlhbnlmjxhilxjjzqklf"
+          },
           {"parse_url('http://dremio.com/path/p1.php?query=1', 'FILE')", "/path/p1.php?query=1"},
           {"parse_url('http://dremio.com', 'FILE')", ""},
           {"parse_url('http://dremio.com/path/p1.php?query=1', 'PATH')", "/path/p1.php"},

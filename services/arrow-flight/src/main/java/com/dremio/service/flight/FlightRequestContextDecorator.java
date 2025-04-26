@@ -17,16 +17,18 @@
 package com.dremio.service.flight;
 
 import com.dremio.context.RequestContext;
-import java.util.function.BiFunction;
+import com.dremio.service.usersessions.UserSessionService;
 import org.apache.arrow.flight.FlightProducer;
 
 /** Interface to decorate a RequestContext based on input from a Flight CallContext. */
 @FunctionalInterface
-public interface FlightRequestContextDecorator
-    extends BiFunction<RequestContext, FlightProducer.CallContext, RequestContext> {
+public interface FlightRequestContextDecorator {
 
-  FlightRequestContextDecorator DEFAULT = (requestContext, flightContext) -> requestContext;
+  FlightRequestContextDecorator DEFAULT =
+      (requestContext, flightContext, userSessionData) -> requestContext;
 
-  @Override
-  RequestContext apply(RequestContext requestContext, FlightProducer.CallContext flightContext);
+  RequestContext apply(
+      RequestContext requestContext,
+      FlightProducer.CallContext flightContext,
+      UserSessionService.UserSessionData userSessionData);
 }

@@ -38,7 +38,7 @@ message LayoutDescriptor {
 
 message LayoutDetailsDescriptor {
   // partition fields
-  repeated LayoutFieldDescriptor partitionField = 1;
+  repeated LayoutPartitionFieldDescriptor partitionField = 1;
   // order sensitive list of sort fields
   repeated LayoutFieldDescriptor sortField = 2;
   // dimension fields
@@ -72,3 +72,27 @@ message LayoutDimensionFieldDescriptor {
   optional DimensionGranularity granularity = 2 [default = DATE];
 }
 
+message BucketTransform{
+  optional int32 bucketCount = 1;
+}
+message TruncateTransform{
+  optional int32 truncateLength = 1;
+}
+message Transform{
+  enum Type {
+    IDENTITY = 0;
+    YEAR = 1;
+    MONTH = 2;
+    DAY = 3;
+    HOUR = 4;
+    BUCKET = 5;
+    TRUNCATE = 6;
+  }
+  optional Type type = 1;
+  optional BucketTransform bucketTransform = 2;
+  optional TruncateTransform truncateTransform = 3;
+}
+message LayoutPartitionFieldDescriptor {
+  required string name = 1;
+  optional Transform transform = 2;
+}

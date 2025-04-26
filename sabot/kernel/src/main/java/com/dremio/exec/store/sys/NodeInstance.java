@@ -41,6 +41,8 @@ public class NodeInstance {
   public final Integer actual_max_width;
   public final Boolean current;
   public final DateTime start;
+  public final String engineId;
+  public final String subEngineId;
 
   @JsonCreator
   public NodeInstance(
@@ -61,7 +63,9 @@ public class NodeInstance {
       Double load,
       Integer configured_max_width,
       Integer actual_max_width,
-      Boolean current) {
+      Boolean current,
+      String engineId,
+      String subEngineId) {
     this.name = name;
     this.hostname = hostname;
     this.ip = ip;
@@ -80,6 +84,8 @@ public class NodeInstance {
     this.configured_max_width = configured_max_width;
     this.actual_max_width = actual_max_width;
     this.current = current;
+    this.engineId = engineId;
+    this.subEngineId = subEngineId;
   }
 
   public static NodeInstance fromStats(
@@ -87,6 +93,8 @@ public class NodeInstance {
     final boolean master = ep.getRoles().getMaster();
     final boolean coord = ep.getRoles().getSqlQuery();
     final boolean exec = ep.getRoles().getJavaExecutor();
+    var engineId = ep.hasEngineId() ? ep.getEngineId().getId() : "";
+    var subEngineId = ep.hasSubEngineId() ? ep.getSubEngineId().getId() : "";
 
     return new NodeInstance(
         nodeStats.getName(),
@@ -106,6 +114,8 @@ public class NodeInstance {
         nodeStats.getLoad(),
         nodeStats.getConfiguredMaxWidth(),
         nodeStats.getActualMaxWith(),
-        nodeStats.getCurrent());
+        nodeStats.getCurrent(),
+        engineId,
+        subEngineId);
   }
 }

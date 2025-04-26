@@ -19,6 +19,7 @@ import com.dremio.services.nessie.proxy.ProxyV2TreeResource;
 import com.fasterxml.jackson.annotation.JsonView;
 import javax.inject.Inject;
 import javax.ws.rs.WebApplicationException;
+import javax.ws.rs.core.HttpHeaders;
 import javax.ws.rs.core.Response;
 import org.projectnessie.api.v2.params.Transplant;
 import org.projectnessie.client.api.NessieApiV2;
@@ -38,8 +39,8 @@ import org.projectnessie.model.ser.Views;
 public class V2TreeResource extends ProxyV2TreeResource {
 
   @Inject
-  public V2TreeResource(NessieApiV2 api) {
-    super(api);
+  public V2TreeResource(NessieApiV2 api, HttpHeaders headers) {
+    super(api, headers);
   }
 
   @Override

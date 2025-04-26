@@ -15,7 +15,7 @@
  */
 package com.dremio.common.server;
 
-import java.net.URL;
+import java.net.URI;
 
 /** This provides information about Dremio's web server. */
 public interface WebServerInfoProvider {
@@ -25,7 +25,7 @@ public interface WebServerInfoProvider {
   String getClusterId();
 
   /**
-   * @return The base URL of Dremio's web server that users access Dremio at.
+   * @return The value Dremio uses as the issuer when creating and validating access tokens.
    */
-  URL getBaseURL();
+  URI getIssuer();
 }

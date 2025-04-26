@@ -45,7 +45,7 @@ public class TestIcebergSnapshotFunction extends IcebergMetadataTestTable {
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("committed_at"),
-            Types.required(TypeProtos.MinorType.TIMESTAMP)));
+            Types.required(TypeProtos.MinorType.TIMESTAMPMILLI)));
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("snapshot_id"), Types.required(TypeProtos.MinorType.BIGINT)));
@@ -74,7 +74,7 @@ public class TestIcebergSnapshotFunction extends IcebergMetadataTestTable {
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("committed_at"),
-            Types.required(TypeProtos.MinorType.TIMESTAMP)));
+            Types.required(TypeProtos.MinorType.TIMESTAMPMILLI)));
     expectedSchema.add(
         Pair.of(
             SchemaPath.getSimplePath("snapshot_id"), Types.required(TypeProtos.MinorType.BIGINT)));

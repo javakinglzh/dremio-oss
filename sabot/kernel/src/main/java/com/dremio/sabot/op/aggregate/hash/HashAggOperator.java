@@ -17,6 +17,8 @@ package com.dremio.sabot.op.aggregate.hash;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.IfExpression;
@@ -48,10 +50,10 @@ import com.dremio.options.TypeValidators;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.aggregate.vectorized.VectorizedHashAggOperator;
-import com.dremio.sabot.op.aggregate.vectorized.nospill.VectorizedHashAggOperatorNoSpill;
 import com.dremio.sabot.op.common.hashtable.Comparator;
 import com.dremio.sabot.op.common.hashtable.HashTable;
 import com.dremio.sabot.op.common.hashtable.HashTableConfig;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Lists;
@@ -59,8 +61,11 @@ import com.sun.codemodel.JExpr;
 import com.sun.codemodel.JVar;
 import java.io.IOException;
 import java.util.List;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 
 /**
@@ -112,6 +117,14 @@ public class HashAggOperator implements SingleInputOperator {
   private int outputBatchIndex;
   private boolean isCardinalityLimited;
   private long cardinalityLimit;
+  private ArrowBuf rowSizeAccumulator;
+  private static final int INT_SIZE = 4;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  private final int rowSizeLimit;
+  private boolean isFixedAccumulatorOnly;
 
   public HashAggOperator(HashAggregate popConfig, OperatorContext context)
       throws ExecutionSetupException {
@@ -130,6 +143,11 @@ public class HashAggOperator implements SingleInputOperator {
     this.isCardinalityLimited = false;
     final OptionManager options = context.getOptions();
     this.cardinalityLimit = options.getOption(HASHAGG_MINMAX_CARDINALITY_LIMIT);
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
@@ -142,7 +160,24 @@ public class HashAggOperator implements SingleInputOperator {
       state = State.DONE;
     }
     outgoing.setRecordCount(recordCount);
+    checkForRowSizeOverLimit(recordCount);
     return recordCount;
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   @Override
@@ -176,7 +211,33 @@ public class HashAggOperator implements SingleInputOperator {
     this.incoming = accessible;
     this.aggregator = createAggregatorInternal();
     state = State.CAN_CONSUME;
+
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (isFixedAccumulatorOnly) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      }
+    }
     return outgoing;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
   }
 
   @Override
@@ -216,6 +277,7 @@ public class HashAggOperator implements SingleInputOperator {
       groupByOutFieldIds[i] = outgoing.add(vv);
     }
 
+    isFixedAccumulatorOnly = true;
     for (i = 0; i < numAggrExprs; i++) {
       NamedExpression ne = popConfig.getAggrExprs().get(i);
       final LogicalExpression expr = context.getClassProducer().materialize(ne.getExpr(), incoming);
@@ -233,6 +295,9 @@ public class HashAggOperator implements SingleInputOperator {
 
       final Field outputField = expr.getCompleteType().toField(ne.getRef());
       ValueVector vv = TypeHelper.getNewVector(outputField, context.getAllocator());
+      if (!(vv instanceof BaseFixedWidthVector)) {
+        isFixedAccumulatorOnly = false;
+      }
       aggrOutFieldIds[i] = outgoing.add(vv);
 
       aggrExprs[i] = new ValueVectorWriteExpression(aggrOutFieldIds[i], expr, true);
@@ -352,10 +417,11 @@ public class HashAggOperator implements SingleInputOperator {
 
   @Override
   public void close() throws Exception {
-    //    System.out.println("HA1######################## Nano Processing is " +
-    // stats.getProcessingNanos());
-    //    System.out.println("\tPeak Mem: " + context.getAllocator().getPeakMemoryAllocation());
     AutoCloseables.close(aggregator, outgoing);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   public static class HashAggCreator implements SingleInputOperator.Creator<HashAggregate> {
@@ -364,15 +430,7 @@ public class HashAggOperator implements SingleInputOperator {
     public SingleInputOperator create(OperatorContext context, HashAggregate operator)
         throws ExecutionSetupException {
       if (operator.isVectorize()) {
-        boolean useSpill = operator.isUseSpill();
-        if (context
-                .getOptions()
-                .getOption(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR)
-            && useSpill) {
-          return new VectorizedHashAggOperator(operator, context);
-        } else {
-          return new VectorizedHashAggOperatorNoSpill(operator, context);
-        }
+        return new VectorizedHashAggOperator(operator, context);
       } else {
         return new HashAggOperator(operator, context);
       }

@@ -39,6 +39,7 @@ import com.dremio.service.job.proto.JobInfo;
 import com.dremio.service.job.proto.JobResult;
 import com.dremio.service.job.proto.JobState;
 import com.dremio.service.job.proto.QueryType;
+import com.dremio.service.jobtelemetry.JobTelemetryClient;
 import com.dremio.service.jobtelemetry.JobTelemetryServiceGrpc;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -74,7 +75,8 @@ public class TestLocalJobsServiceStartup {
   private static final NodeEndpoint currentEndpoint;
   private static final NodeEndpoint issuingEndpoint;
   private static final NodeEndpoint restartedIssuerEndpoint;
-  private JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub jobTelemetryServiceStub =
+  private JobTelemetryClient jobTelemetryClient = mock(JobTelemetryClient.class);
+  private JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub stub =
       mock(JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub.class);
 
   static {
@@ -112,6 +114,8 @@ public class TestLocalJobsServiceStartup {
             })
         .when(jobStore)
         .put(any(JobId.class), any(JobResult.class));
+
+    when(jobTelemetryClient.getBlockingStub()).thenReturn(stub);
   }
 
   @SuppressWarnings("unchecked")
@@ -122,7 +126,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(99).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -145,7 +149,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(0).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -168,7 +172,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(99).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -193,7 +197,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(0).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -215,7 +219,7 @@ public class TestLocalJobsServiceStartup {
         .thenThrow(new RuntimeException());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -240,7 +244,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(0).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -263,7 +267,7 @@ public class TestLocalJobsServiceStartup {
         .thenReturn(NodeStatusResponse.newBuilder().setStartTime(99).build());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -287,7 +291,7 @@ public class TestLocalJobsServiceStartup {
         .thenThrow(new RuntimeException());
 
     setAbandonedJobsToFailedState(
-        jobTelemetryServiceStub,
+        () -> jobTelemetryClient,
         jobStore,
         availableCoords,
         jobResultLogger,
@@ -342,12 +346,13 @@ public class TestLocalJobsServiceStartup {
               .getInfo()
               .getFailureInfo()
               .contains("Query failed as Dremio was restarted"));
+      assertTrue(result.getAttemptsList().get(0).getIsProfileIncomplete());
     }
   }
 
   /** Verify profile deletion */
   private void verifyProfileDeletion(int numOfInvocation) {
-    verify(jobTelemetryServiceStub, times(numOfInvocation)).deleteProfile(any());
+    verify(stub, times(numOfInvocation)).deleteProfile(any());
   }
 
   private static Entry<JobId, JobResult> newJobResult(final JobState jobState) {

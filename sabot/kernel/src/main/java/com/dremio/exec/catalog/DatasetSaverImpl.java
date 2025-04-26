@@ -16,6 +16,7 @@
 package com.dremio.exec.catalog;
 
 import static com.dremio.common.util.DremioStringUtils.firstLine;
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.connector.metadata.BytesOutput;
@@ -23,6 +24,7 @@ import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.SourceMetadata;
+import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.store.DatasetRetrievalOptions;
@@ -239,7 +241,7 @@ public class DatasetSaverImpl implements DatasetSaver {
             logger.error("REFRESH DATASET query failed. Using old refresh mechanism", uex);
             return false;
           }
-          // fall through and throw error
+        // fall through and throw error
         default:
           throw UserException.refreshDatasetError(uex)
               .message(firstLine(uex.getMessage()))
@@ -311,35 +313,45 @@ public class DatasetSaverImpl implements DatasetSaver {
             splitCompression,
             optionManager.getOption(CatalogOptions.SINGLE_SPLIT_PARTITION_MAX),
             optionManager.getOption(NamespaceOptions.DATASET_METADATA_CONSISTENCY_VALIDATE))) {
-      final PartitionChunkListing chunkListing =
-          sourceMetadata.listPartitionChunks(
-              handle, options.asListPartitionChunkOptions(datasetConfig));
+      if (handle instanceof ViewDatasetHandle
+          && optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)) {
+        DatasetViewMetadata datasetViewMetadata =
+            sourceMetadata
+                .getDatasetMetadata(handle, null, options.asGetMetadataOptions(datasetConfig))
+                .unwrap(DatasetViewMetadata.class);
+        Preconditions.checkNotNull(datasetViewMetadata, "View metadata is null");
+        datasetConfig = datasetViewMetadata.newDeepConfig(datasetConfig);
+      } else {
+        final PartitionChunkListing chunkListing =
+            sourceMetadata.listPartitionChunks(
+                handle, options.asListPartitionChunkOptions(datasetConfig));
 
-      final long recordCountFromSplits =
-          saver == null || chunkListing == null
-              ? 0
-              : CatalogUtil.savePartitionChunksInSplitsStores(saver, chunkListing);
-      final DatasetMetadata datasetMetadata =
-          sourceMetadata.getDatasetMetadata(
-              handle, chunkListing, options.asGetMetadataOptions(datasetConfig));
+        final long recordCountFromSplits =
+            saver == null || chunkListing == null
+                ? 0
+                : CatalogUtil.savePartitionChunksInSplitsStores(saver, chunkListing);
+        final DatasetMetadata datasetMetadata =
+            sourceMetadata.getDatasetMetadata(
+                handle, chunkListing, options.asGetMetadataOptions(datasetConfig));
 
-      Optional<ByteString> readSignature = Optional.empty();
-      if (sourceMetadata instanceof SupportsReadSignature) {
-        final BytesOutput output =
-            ((SupportsReadSignature) sourceMetadata).provideSignature(handle, datasetMetadata);
-        //noinspection ObjectEquality
-        if (output != BytesOutput.NONE) {
-          readSignature = Optional.of(MetadataObjectsUtils.toProtostuff(output));
+        Optional<ByteString> readSignature = Optional.empty();
+        if (sourceMetadata instanceof SupportsReadSignature) {
+          final BytesOutput output =
+              ((SupportsReadSignature) sourceMetadata).provideSignature(handle, datasetMetadata);
+          //noinspection ObjectEquality
+          if (output != BytesOutput.NONE) {
+            readSignature = Optional.of(MetadataObjectsUtils.toProtostuff(output));
+          }
         }
-      }
 
-      MetadataObjectsUtils.overrideExtended(
-          datasetConfig,
-          datasetMetadata,
-          readSignature,
-          recordCountFromSplits,
-          options.maxMetadataLeafColumns());
-      datasetConfig = datasetMutator.apply(datasetConfig);
+        MetadataObjectsUtils.overrideExtended(
+            datasetConfig,
+            datasetMetadata,
+            readSignature,
+            recordCountFromSplits,
+            options.maxMetadataLeafColumns());
+        datasetConfig = datasetMutator.apply(datasetConfig);
+      }
 
       saver.saveDataset(datasetConfig, opportunisticSave, attributes);
       updateListener.metadataUpdated(canonicalKey);
@@ -356,7 +368,8 @@ public class DatasetSaverImpl implements DatasetSaver {
     } catch (Exception e) {
       logger.error(
           "Failed to save dataset [{}] into namespace",
-          new NamespaceKey(datasetConfig.getFullPathList()));
+          new NamespaceKey(datasetConfig.getFullPathList()),
+          e);
       throw e;
     }
   }

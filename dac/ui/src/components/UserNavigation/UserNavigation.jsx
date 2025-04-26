@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { useState } from "react";
 import classNames from "clsx";
 import PropTypes from "prop-types";
 import { Link, withRouter } from "react-router";
@@ -21,6 +22,7 @@ import { FormattedMessage } from "react-intl";
 import { Tooltip } from "dremio-ui-lib";
 import { rmProjectBase } from "dremio-ui-common/utilities/projectBase.js";
 import { getSessionContext } from "dremio-ui-common/contexts/SessionContext.js";
+import { useKeyboardListener } from "dremio-ui-lib/components";
 import "./userNavigation.less";
 
 const UserNavigation = (props) => {
@@ -29,6 +31,26 @@ const UserNavigation = (props) => {
   const loc = rmProjectBase(location.pathname) || "/";
   const organizationLanding =
     typeof getSessionContext().getOrganizationId === "function";
+  const [tabsEl, setTabsEl] = useState();
+
+  useKeyboardListener((e) => {
+    const actionElements = Array.from(tabsEl?.querySelectorAll?.("a") || []);
+    const activeElIdx = actionElements.findIndex(
+      (el) => el === document.activeElement,
+    );
+    if (e.code === "ArrowUp") {
+      e.preventDefault();
+      if (activeElIdx === 0) {
+        actionElements[actionElements.length - 1]?.focus();
+      } else actionElements[activeElIdx - 1]?.focus();
+    } else if (e.code === "ArrowDown") {
+      e.preventDefault();
+      if (activeElIdx === actionElements.length - 1) {
+        actionElements[0]?.focus();
+      } else actionElements[activeElIdx + 1]?.focus();
+    }
+  }, tabsEl);
+
   const renderMenuItems = (menuItems) => {
     return menuItems.map((item, i) => {
       const selected = loc === item.url || loc.startsWith(`${item.url}/`);
@@ -39,7 +61,11 @@ const UserNavigation = (props) => {
       );
       return (
         <li key={i}>
-          <Link className={className} to={item.url}>
+          <Link
+            className={className}
+            to={item.url}
+            tabIndex={selected ? 0 : -1}
+          >
             <FormattedMessage id={item.name} defaultMessage={item.name} />
           </Link>
         </li>
@@ -84,6 +110,7 @@ const UserNavigation = (props) => {
         className="userNavigation__link"
         to={section.url}
         key={`nav-header-${index}`}
+        tabIndex={selected ? 0 : -1}
       >
         <div className={itemClassName}>
           {section.icon && (
@@ -148,7 +175,7 @@ const UserNavigation = (props) => {
           <span className="text-ellipsis">{title}</span>
         </div>
       )}
-      <ul className="userNavigation__itemList">
+      <ul ref={(r) => setTabsEl(r)} className="userNavigation__itemList">
         {sections.map((section, sectionIndex) => (
           <li
             key={`left-nav-section-${sectionIndex}`}

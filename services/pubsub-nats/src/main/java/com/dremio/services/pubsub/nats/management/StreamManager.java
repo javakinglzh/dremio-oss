@@ -22,6 +22,15 @@ import java.util.List;
 
 public interface StreamManager extends Closeable {
 
-  <M extends Message> void upsertStream(
+  /**
+   * Create a stream with the given options and subjects. If the stream exists this action won't
+   * take any effect. IMPORTANT: when called for existing stream, this will be effectively NO-OP,
+   * and the stream options will be ignored.
+   *
+   * @param streamOptions
+   * @param subjects
+   * @param <M>
+   */
+  <M extends Message> void createStreamIfNotExists(
       StreamOptions streamOptions, List<Class<? extends Topic<M>>> subjects);
 }

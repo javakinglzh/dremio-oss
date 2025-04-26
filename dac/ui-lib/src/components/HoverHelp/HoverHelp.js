@@ -15,17 +15,22 @@
  */
 import React from "react";
 import PropTypes from "prop-types";
-
+import { clsx } from "clsx";
 import { default as Tooltip } from "../Tooltip/Tooltip.tsx";
 
 import "./HoverHelp.scss";
 
 const HoverHelp = (props) => {
-  const { arrow, content, placement } = props;
+  const { arrow, content, placement, className, container } = props;
 
   return (
-    <div className="margin-left--half flex">
-      <Tooltip arrow={arrow} placement={placement} title={content}>
+    <div className={clsx("margin-left--half flex", className)}>
+      <Tooltip
+        arrow={arrow}
+        placement={placement}
+        title={content}
+        PopperProps={{ container: container || document.body }}
+      >
         <div className="iconContainer">
           <dremio-icon
             name="interface/information"
@@ -46,6 +51,8 @@ HoverHelp.propTypes = {
   content: PropTypes.string.isRequired,
   placement: PropTypes.string,
   arrow: PropTypes.bool,
+  className: PropTypes.string,
+  container: PropTypes.node,
 };
 
 export default HoverHelp;

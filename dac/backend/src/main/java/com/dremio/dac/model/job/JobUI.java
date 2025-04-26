@@ -159,7 +159,6 @@ public class JobUI {
                 info.getRequestType(), info.getSql(), info.getDescription()))
         .setMaterializationFor(info.getMaterializationFor())
         .setOriginalCost(info.getOriginalCost())
-        .setPartitionsList(info.getPartitionsList())
         .setScanPathsList(info.getScanPathsList())
         .setJoinAnalysis(info.getJoinAnalysis())
         .setContextList(info.getContextList())

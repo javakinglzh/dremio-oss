@@ -54,7 +54,7 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
-      <artifactId>dremio-services-script</artifactId>
+      <artifactId>dremio-services-scripts</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
@@ -519,6 +519,27 @@
       <artifactId>azure-storage-blob</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>com.azure</groupId>
+      <artifactId>azure-storage-file-datalake</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.common</groupId>
+      <artifactId>dremio-common-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-dataplane-plugin</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>uk.org.webcompere</groupId>
+      <artifactId>system-stubs-jupiter</artifactId>
+      <version>2.1.7</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -549,6 +570,13 @@
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>exec-maven-plugin</artifactId>
+        <dependencies>
+          <dependency>
+            <groupId>com.dremio.build-tools</groupId>
+            <artifactId>dremio-openapi-generator</artifactId>
+            <version>${project.version}</version>
+          </dependency>
+        </dependencies>
         <executions>
           <execution>
             <goals>
@@ -560,6 +588,54 @@
               <arguments>
                 <argument>${project.build.outputDirectory}</argument>
               </arguments>
+            </configuration>
+          </execution>
+          <execution>
+            <!-- Generate Java sources from openapi specs-->
+            <!-- TODO: splitting test sources requires customizing how yamls from main are used. -->
+            <id>java-from-open-api-spec</id>
+            <goals>
+              <goal>java</goal>
+            </goals>
+            <phase>generate-sources</phase>
+            <configuration>
+              <includePluginDependencies>true</includePluginDependencies>
+              <includeProjectDependencies>false</includeProjectDependencies>
+              <mainClass>com.dremio.tools.openapigenerator.Main</mainClass>
+              <arguments>
+                <!-- Directory with spec yamls -->
+                <argument>--base_dir</argument>
+                <argument>${project.basedir}/src/main/openapi</argument>
+                <!-- Spec yaml relative paths -->
+                <argument>--input_files</argument>
+                <argument>example_v4.yaml</argument>
+                <argument>--input_files</argument>
+                <argument>shared_v4.yaml</argument>
+                <!-- Proto output directory -->
+                <argument>--output_proto_dir</argument>
+                <argument>${project.build.directory}/generated-sources/openapi/proto</argument>
+                <!-- Java output directory includes both resource interface and generated java protos. -->
+                <argument>--output_java_dir</argument>
+                <argument>${project.build.directory}/generated-sources/openapi</argument>
+              </arguments>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>build-helper-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>add-generated-sources</id>
+            <goals>
+              <goal>add-source</goal>
+            </goals>
+            <phase>generate-sources</phase>
+            <configuration>
+              <sources>
+                <source>${project.build.directory}/generated-sources/openapi</source>
+              </sources>
             </configuration>
           </execution>
         </executions>
@@ -723,68 +799,6 @@
   </build>
 
   <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-compiler-plugin</artifactId>
-            <configuration>
-              <testExcludes>
-                <testExclude>com/dremio/dac/service/admin/TestKVStoreReportService.java</testExclude>
-                <!-- Excluded as these test depend on DataplanePlugin -->
-                <testExclude>com/dremio/dac/api/TestCatalogResource.java</testExclude>
-                <testExclude>com/dremio/dac/api/TestPromotion.java</testExclude>
-                <testExclude>com/dremio/dac/api/TestTableLocationWithUnlimitedSplits.java</testExclude>
-                <testExclude>com/dremio/dac/api/TestViewSchemaLearning.java</testExclude>
-                <testExclude>com/dremio/dac/explore/TestAccelerationSettingsFromAPI.java</testExclude>
-                <testExclude>com/dremio/dac/resource/TestNessieSourceResource.java</testExclude>
-                <testExclude>com/dremio/dac/service/admin/TestKVStoreReportService.java</testExclude>
-                <testExclude>com/dremio/dac/service/datasets/TestDatasetVersionMutator.java</testExclude>
-                <testExclude>com/dremio/dac/service/source/TestSourceService.java</testExclude>
-                <testExclude>com/dremio/dac/service/TestCatalogServiceHelperForVersioned.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestAssignBranchHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestAssignTagHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestCreateBranchHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestCreateFolderHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestCreateTagHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestDropBranchHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestDropTagHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestMergeBranchHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestShowBranchesHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestShowLogsHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestShowTablesHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestShowTagsHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestShowViewsHandler.java</testExclude>
-                <testExclude>com/dremio/exec/planner/sql/handlers/TestUseVersionHandler.java</testExclude>
-              </testExcludes>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-dataplane-plugin</artifactId>
-          <version>${project.version}</version>
-          <scope>test</scope>
-        </dependency>
-      </dependencies>
-    </profile>
     <profile>
       <id>multinode-tests</id>
       <activation>

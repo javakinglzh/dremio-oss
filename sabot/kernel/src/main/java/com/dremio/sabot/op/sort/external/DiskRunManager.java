@@ -38,7 +38,7 @@ import com.dremio.exec.record.VectorWrapper;
 import com.dremio.exec.record.WritableBatch;
 import com.dremio.exec.record.selection.SelectionVector4;
 import com.dremio.exec.store.LocalSyncableFileSystem;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.dfs.FileSystemConfigurationUtils;
 import com.dremio.exec.testing.ControlsInjector;
 import com.dremio.exec.testing.ControlsInjectorFactory;
 import com.dremio.exec.testing.ExecutionControls;
@@ -189,7 +189,7 @@ public class DiskRunManager implements AutoCloseable {
         rollback.add(compressSpilledBatchAllocator);
       }
 
-      final Configuration conf = FileSystemPlugin.getNewFsConf();
+      final Configuration conf = FileSystemConfigurationUtils.getNewFsConf(optionManager);
       conf.set(SpillManager.DREMIO_LOCAL_IMPL_STRING, LocalSyncableFileSystem.class.getName());
       // If the location URI doesn't contain any schema, fall back to local.
       conf.set(FileSystem.FS_DEFAULT_NAME_KEY, FileSystem.DEFAULT_FS);

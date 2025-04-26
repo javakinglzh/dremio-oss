@@ -31,6 +31,7 @@
   <name>Common - Parent</name>
 
   <modules>
+    <module>aws</module>
     <module>core</module>
     <module>legacy</module>
     <module>zookeeper</module>

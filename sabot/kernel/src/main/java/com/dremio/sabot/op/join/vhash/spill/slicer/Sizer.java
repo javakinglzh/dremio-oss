@@ -17,15 +17,18 @@ package com.dremio.sabot.op.join.vhash.spill.slicer;
 
 import com.dremio.common.expression.CompleteType;
 import com.dremio.exec.record.VectorAccessible;
+import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.exec.record.selection.SelectionVector2;
 import com.dremio.exec.util.RoundUtil;
+import java.util.Collection;
 import java.util.List;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.BaseVariableWidthVector;
 import org.apache.arrow.vector.FieldVector;
+import org.apache.arrow.vector.NullVector;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.ZeroVector;
 import org.apache.arrow.vector.complex.DenseUnionVector;
@@ -114,6 +117,8 @@ public interface Sizer {
     return getSizeInBitsStartingFromOrdinal(ordinal, len) / BYTE_SIZE_BITS;
   }
 
+  void accumulateFieldSizesInABuffer(ArrowBuf arrowBuf, int recordCount);
+
   /**
    * Bits required to store offset values for given number of records
    *
@@ -162,6 +167,8 @@ public interface Sizer {
       return new SparseUnionSizer((UnionVector) vector);
     } else if (vector instanceof ZeroVector) {
       return new ZeroSizer((ZeroVector) vector);
+    } else if (vector instanceof NullVector) {
+      return new NullSizer((NullVector) vector);
     } else {
       throw new UnsupportedOperationException(
           String.format(
@@ -179,5 +186,21 @@ public interface Sizer {
       totalVectorSize += (vectorWrapper.getValueVector().getBufferSize());
     }
     return totalVectorSize / recordCount;
+  }
+
+  static int getBatchSizeInBytes(VectorContainer vectorContainer) {
+    int totalVectorSize = 0;
+    for (VectorWrapper<?> vectorWrapper : vectorContainer) {
+      totalVectorSize += (vectorWrapper.getValueVector().getBufferSize());
+    }
+    return totalVectorSize;
+  }
+
+  static int getBatchSizeInBytes(Collection<ValueVector> valueVectors) {
+    int totalVectorSize = 0;
+    for (ValueVector vector : valueVectors) {
+      totalVectorSize += (vector.getBufferSize());
+    }
+    return totalVectorSize;
   }
 }

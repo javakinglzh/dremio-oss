@@ -47,24 +47,4 @@
       <artifactId>dremio-services-scheduler</artifactId>
     </dependency>
   </dependencies>
-  <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <!--
-            MapR shimloader requires servlet api to be present
-        -->
-        <dependency>
-          <groupId>javax.servlet</groupId>
-          <artifactId>javax.servlet-api</artifactId>
-          <scope>test</scope>
-        </dependency>
-      </dependencies>
-    </profile>
-  </profiles>
 </project>

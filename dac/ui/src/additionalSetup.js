@@ -21,6 +21,7 @@ import { setupLang } from "./setupLang";
 import "./contexts/ApiContext";
 import "./contexts/SessionContext";
 import "./contexts/PrivilegeContext";
+import "./contexts/DremioContext";
 import { initIntercom } from "./intercom/initIntercom";
 import { getIntercomAppId } from "./intercom/getIntercomAppId";
 

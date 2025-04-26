@@ -17,6 +17,7 @@ package com.dremio.plugins;
 
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.exec.catalog.PluginFolder;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.store.ChangeInfo;
 import com.dremio.exec.store.NamespaceAlreadyExistsException;
@@ -44,6 +45,13 @@ import org.projectnessie.model.UpdateRepositoryConfigResponse;
 
 /** Client interface to communicate with Nessie. */
 public interface NessieClient extends AutoCloseable {
+
+  public final class Properties {
+    private Properties() {}
+    ;
+
+    public static final String NAMESPACE_URI_LOCATION = "uri_location";
+  }
 
   /**
    * Get the default branch.
@@ -159,16 +167,38 @@ public interface NessieClient extends AutoCloseable {
       NessieListOptions options);
 
   /**
+   * Gets the path of changed entities between two commits. The chronological order of the commits
+   * does not matter.
+   *
+   * @param fromCommitHash The commit hash to start from.
+   * @param toCommitHash The commit hash to end at.
+   */
+  Stream<List<String>> listEntriesChangedBetween(String fromCommitHash, String toCommitHash);
+
+  /**
    * Create a namespace by the given path for the given version.
    *
    * @param namespacePathList the namespace we are going to create.
    * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
+   * @param storageUri
    * @throws NamespaceAlreadyExistsException If the namespace already exists.
    * @throws ReferenceNotFoundException If the given source reference cannot be found
    * @throws NoDefaultBranchException If the Nessie server does not have a default branch set
    * @throws ReferenceTypeConflictException If the requested version type does not match the server
    */
-  void createNamespace(List<String> namespacePathList, VersionContext version);
+  Optional<PluginFolder> createNamespace(
+      List<String> namespacePathList, VersionContext version, @Nullable String storageUri);
+
+  /**
+   * Updates the namespace by the given path for the given version.
+   *
+   * @param strings the namespace we are going to update.
+   * @param version If the version is NOT_SPECIFIED, the default branch is used (if it exists).
+   * @param storageUri - the new storage URI
+   * @return
+   */
+  Optional<PluginFolder> updateNamespace(
+      List<String> strings, VersionContext version, String storageUri);
 
   /**
    * Deletes an empty namespace by the given path for the given version.

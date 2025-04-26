@@ -186,6 +186,8 @@ public final class CopyIntoFileLoadInfo implements FileLoadInfo {
     private String fieldDelimiter;
     private String quoteChar;
     private String escapeChar;
+    private boolean extractHeader;
+    private int skipLines;
     private long snapshotId;
     private Map<FormatOption, Object> formatOptionsMap;
     private final String fileFormat;
@@ -284,6 +286,8 @@ public final class CopyIntoFileLoadInfo implements FileLoadInfo {
       formatOptionsMap.put(FormatOption.FIELD_DELIMITER, fieldDelimiter);
       formatOptionsMap.put(FormatOption.QUOTE_CHAR, quoteChar);
       formatOptionsMap.put(FormatOption.ESCAPE_CHAR, escapeChar);
+      formatOptionsMap.put(FormatOption.EXTRACT_HEADER, extractHeader);
+      formatOptionsMap.put(FormatOption.SKIP_LINES, skipLines);
       return formatOptionsMap;
     }
 
@@ -316,6 +320,16 @@ public final class CopyIntoFileLoadInfo implements FileLoadInfo {
 
     public Builder setEscapeChar(String escapeChar) {
       this.escapeChar = escapeChar;
+      return this;
+    }
+
+    public Builder setExtractHeader(boolean extractHeader) {
+      this.extractHeader = extractHeader;
+      return this;
+    }
+
+    public Builder setSkipLines(int skipLines) {
+      this.skipLines = skipLines;
       return this;
     }
 

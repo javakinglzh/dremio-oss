@@ -62,6 +62,7 @@ import {
 } from "dremio-ui-common/components/DremioUser.js";
 import { useQuery } from "@tanstack/react-query";
 import { userByUsername } from "@inject/queries/users";
+import { SonarNavChildren } from "@inject/components/SideNav/SonarNavChildren";
 
 import "./SideNav.less";
 
@@ -109,11 +110,19 @@ const SideNav = (props) => {
 
   const skipToContent = (e) => {
     if (e.code === "Enter" || e.code === "Space") {
-      const parent = document.body.querySelector(".sideNav")?.parentElement;
-      parent?.children?.[1]?.setAttribute("tabindex", "0");
-      parent?.children?.[1]?.setAttribute("aria-label", "Main");
-      parent?.children?.[1]?.focus();
-      parent?.children?.[1]?.setAttribute("tabindex", "-1");
+      const main = document.getElementById("main");
+      if (main) {
+        main.setAttribute("tabindex", "0");
+        main.focus();
+        main.setAttribute("tabindex", "-1");
+      } else {
+        const parent = document.body.querySelector(".sideNav")?.parentElement;
+        if (parent?.children?.[1])
+          parent.children[1].setAttribute("tabindex", "0");
+        parent.children[1].setAttribute("aria-label", "Main");
+        parent.children[1].focus();
+        parent.children[1].setAttribute("tabindex", "-1");
+      }
     }
   };
 
@@ -157,6 +166,26 @@ const SideNav = (props) => {
           forceTooltipOnHover
         />
       );
+    } else {
+      return (
+        <LeftNavPopover
+          tooltip={" "}
+          mode="hover"
+          role="menu"
+          icon={
+            <Avatar
+              initials=""
+              style={{
+                background: "var(--fill--disabled)",
+                color: "var(--text--disabled)",
+              }}
+            />
+          }
+          content={(ctx) => <AccountMenu {...ctx} />}
+          portal={false}
+          forceTooltipOnHover
+        />
+      );
     }
   };
 
@@ -170,103 +199,109 @@ const SideNav = (props) => {
   }
 
   return (
-    <nav className={clsx("sideNav", className)}>
-      <button
-        tabIndex={0}
-        aria-label={intl.formatMessage({ id: "SideNav.SkipToContent" })}
-        onKeyPress={(e) => skipToContent(e)}
-        className="skipToContent drop-shadow-lg"
-      >
-        {intl.formatMessage({ id: "SideNav.SkipToContent" })}
-      </button>
-      <ul className="sideNav__topSection">
-        {LogoAction}
-        {actions}
-        {actions === null && !isProjectInactive && (
-          <TopAction
-            tooltipProps={{ placement: "right" }}
-            active={isActive({ name: "/", dataset: true, loc })}
-            url={commonPaths.projectBase.link({ projectId })}
-            icon="navigation-bar/dataset"
-            alt="SideNav.Datasets"
-          />
-        )}
-        {actions === null && !isProjectInactive && (
-          <>
+    <>
+      <nav className={clsx("sideNav", className)}>
+        <button
+          tabIndex={0}
+          aria-label={intl.formatMessage({ id: "SideNav.SkipToContent" })}
+          onKeyPress={(e) => skipToContent(e)}
+          className="skipToContent drop-shadow-lg"
+        >
+          {intl.formatMessage({ id: "SideNav.SkipToContent" })}
+        </button>
+        <ul className="sideNav__topSection">
+          {LogoAction}
+          {actions}
+          {actions === null && !isProjectInactive && (
             <TopAction
               tooltipProps={{ placement: "right" }}
-              active={isActive({ name: PATHS.newQuery(), loc, sql: true })}
-              url={getNewQueryHref()}
-              icon="navigation-bar/sql-runner"
-              alt="SideNav.NewQuery"
-              data-qa="new-query-button"
+              active={isActive({ name: "/", dataset: true, loc })}
+              url={commonPaths.projectBase.link({ projectId })}
+              icon="navigation-bar/dataset"
+              alt="SideNav.Datasets"
             />
-            <TopAction
-              tooltipProps={{ placement: "right" }}
-              active={isActive({ loc, jobs: true })}
-              url={jobPaths.jobs.link({ projectId })}
-              icon="navigation-bar/jobs"
-              alt="SideNav.Jobs"
-              data-qa="select-jobs"
-            />
-            {organizationLanding && (
-              <>
-                <TopAction
-                  tooltipProps={{ placement: "right" }}
-                  active={isActive({ loc, admin: true })}
-                  url={adminPaths.general.link({ projectId })}
-                  icon="interface/settings"
-                  alt="SideNav.AdminMenuProjectSetting"
-                  data-qa="select-admin-settings"
-                />
-                <WalkthroughMenu />
-              </>
-            )}
-          </>
-        )}
-      </ul>
+          )}
+          {actions === null && !isProjectInactive && (
+            <>
+              <TopAction
+                tooltipProps={{ placement: "right" }}
+                active={isActive({ name: PATHS.newQuery(), loc, sql: true })}
+                url={getNewQueryHref()}
+                icon="navigation-bar/sql-runner"
+                alt="SideNav.NewQuery"
+                data-qa="new-query-button"
+              />
+              <TopAction
+                tooltipProps={{ placement: "right" }}
+                active={isActive({ loc, jobs: true })}
+                url={jobPaths.jobs.link({ projectId })}
+                icon="navigation-bar/jobs"
+                alt="SideNav.Jobs"
+                data-qa="select-jobs"
+              />
+              {organizationLanding && (
+                <>
+                  <TopAction
+                    tooltipProps={{ placement: "right" }}
+                    active={isActive({ loc, admin: true })}
+                    url={adminPaths.general.link({ projectId })}
+                    icon="interface/settings"
+                    alt="SideNav.AdminMenuProjectSetting"
+                    data-qa="select-admin-settings"
+                  />
+                  <WalkthroughMenu />
+                </>
+              )}
+            </>
+          )}
+        </ul>
 
-      <ul className="sideNav__bottomSection">
-        {!organizationLanding && <SideNavExtra />}
-        {organizationLanding && (
+        <ul className="sideNav__bottomSection">
+          {!organizationLanding && <SideNavExtra />}
+          {organizationLanding && (
+            <LeftNavPopover
+              tooltip={intl.formatMessage({ id: "SideNav.DremioServices" })}
+              mode="hover"
+              role="menu"
+              icon={
+                <dremio-icon
+                  name="navigation-bar/go-to-catalogs"
+                  alt=""
+                ></dremio-icon>
+              }
+              content={(ctx) => <CatalogsMenu {...ctx} />}
+              portal={false}
+            />
+          )}
+          {organizationLanding &&
+            (showOrganization ? (
+              <TopAction
+                tooltipProps={{ placement: "right" }}
+                url={orgPaths.organization.link()}
+                icon="navigation-bar/organization"
+                alt="SideNav.Organization"
+                data-qa="go-to-landing-page"
+              />
+            ) : null)}
+
+          {!organizationLanding && <SideNavAdmin user={user} />}
+
           <LeftNavPopover
-            tooltip={intl.formatMessage({ id: "SideNav.DremioServices" })}
+            tooltip={intl.formatMessage({ id: "SideNav.Help" })}
             mode="hover"
             role="menu"
-            icon={
-              <dremio-icon
-                name="navigation-bar/go-to-catalogs"
-                alt=""
-              ></dremio-icon>
-            }
-            content={(ctx) => <CatalogsMenu {...ctx} />}
+            icon={<dremio-icon name="interface/help" alt=""></dremio-icon>}
+            content={(ctx) => <HelpMenu {...ctx} />}
             portal={false}
           />
-        )}
-        {organizationLanding &&
-          (showOrganization ? (
-            <TopAction
-              tooltipProps={{ placement: "right" }}
-              url={orgPaths.organization.link()}
-              icon="navigation-bar/organization"
-              alt={intl.formatMessage({ id: "SideNav.Organization" })}
-              data-qa="go-to-landing-page"
-            />
-          ) : null)}
-
-        {!organizationLanding && <SideNavAdmin user={user} />}
-
-        <LeftNavPopover
-          tooltip={intl.formatMessage({ id: "SideNav.Help" })}
-          mode="hover"
-          role="menu"
-          icon={<dremio-icon name="interface/help" alt=""></dremio-icon>}
-          content={(ctx) => <HelpMenu {...ctx} />}
-          portal={false}
-        />
-        {renderUserAccount()}
-      </ul>
-    </nav>
+          {renderUserAccount()}
+        </ul>
+      </nav>
+      {
+        // Useful for rendering Modals that need to exist on every page once the user is logged in, for example
+      }
+      {SonarNavChildren && <SonarNavChildren />}
+    </>
   );
 };
 

@@ -18,11 +18,13 @@ package com.dremio.service.scheduler;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import org.assertj.core.api.Assertions;
 import org.junit.Test;
 
@@ -79,6 +81,34 @@ public class TestSimpleLocalSchedulerService {
       secondLatch.countDown();
       thirdLatch.await();
       Assertions.assertThat(counter.get()).isGreaterThanOrEqualTo(20);
+    }
+  }
+
+  @Test
+  public void testScheduleModification() throws Exception {
+    try (SimpleLocalSchedulerService service = new SimpleLocalSchedulerService(1)) {
+      service.start();
+      final CountDownLatch firstLatch = new CountDownLatch(10);
+      final AtomicInteger counter = new AtomicInteger(0);
+      final Function<Schedule, Schedule> scheduleModifierFn =
+          (old) ->
+              counter.get() >= 10
+                  ? Schedule.ClusteredSingletonBuilder.fromSchedule(old, Duration.ofHours(1000))
+                      .build()
+                  : null;
+      service.schedule(
+          Schedule.Builder.everyMillis(50)
+              .asClusteredSingleton("XX")
+              .scheduleModifier(scheduleModifierFn)
+              .build(),
+          () -> {
+            counter.incrementAndGet();
+            firstLatch.countDown();
+          });
+      firstLatch.await();
+      // sleep before assertion to ensure schedule interval is modified.
+      Thread.sleep(1000);
+      Assertions.assertThat(counter.get()).isEqualTo(10);
     }
   }
 

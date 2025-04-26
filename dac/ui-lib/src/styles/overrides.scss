@@ -22,6 +22,12 @@
 .MuiMenuItem-root {
   background-color: var(--fill--popover) !important;
   color: var(--text--primary) !important;
+  &.Mui-selected {
+    background-color: var(--fill--primary--selected) !important;
+    &:hover {
+      background-color: var(--fill--primary--selected--hover) !important;
+    }
+  }
 }
 
 .MuiMenuItem-root:hover,

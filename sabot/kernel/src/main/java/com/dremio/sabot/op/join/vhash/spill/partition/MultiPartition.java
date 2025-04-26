@@ -20,6 +20,8 @@ import static com.dremio.sabot.op.join.vhash.spill.JoinSetupParams.TABLE_HASH_SI
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.AutoCloseables.RollbackCloseable;
 import com.dremio.common.VM;
+import com.dremio.common.memory.MemoryDebugInfo;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.record.selection.SelectionVector2;
 import com.dremio.sabot.op.copier.CopierFactory;
 import com.dremio.sabot.op.join.hash.HashJoinOperator;
@@ -45,7 +47,7 @@ import org.apache.arrow.memory.OutOfMemoryException;
 public final class MultiPartition implements Partition, CanSwitchToSpilling {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(MultiPartition.class);
-  private static final int FULL_HASH_SIZE = 8;
+  public static final int FULL_HASH_SIZE = 8;
 
   private final int numPartitions;
   private final int partitionMask;
@@ -131,7 +133,36 @@ public final class MultiPartition implements Partition, CanSwitchToSpilling {
       try {
         recordsInsertedInIteration =
             child.getPartition().buildPivoted(startIdx, recordsRequestedInIteration);
-      } catch (OutOfMemoryException ignore) {
+        if (recordsRequestedInIteration != recordsInsertedInIteration || logger.isDebugEnabled()) {
+          logger.info(
+              "Inserted into hash table {} of {} requested records starting from {} of {} total records for partition {} ",
+              recordsInsertedInIteration,
+              recordsRequestedInIteration,
+              recordsDone,
+              total,
+              child.getPartitionIndex());
+        }
+      } catch (OutOfMemoryException oom) {
+        // It is possible to get this exception during bookkeeping using the ordinals returned after
+        // inserting into the
+        // hash table. This bookkeeping needs to be in sync with the inserted entries in the hash
+        // table because it is not
+        // feasible to revert the insertion into the hash table. For now, we will return the
+        // exception till the OOM condition
+        // can be handled in a graceful manner within the bookkeeping routines.
+        // Ignoring this exception could cause unpredictable behavior with HashJoin. Hence, aborting
+        // the query with OOM to
+        // reduce further complications.
+        String errorMessage =
+            String.format(
+                "Non retryable OutOfMemoryException hit or "
+                    + "no memory available, All partitions in this %s are at minimum required "
+                    + "memory, with no records to spill, %s",
+                QueryIdHelper.getFragmentId(setupParams.getContext().getFragmentHandle())
+                    + ":"
+                    + setupParams.getOperatorId(),
+                MemoryDebugInfo.getSummaryFromRoot(setupParams.getOpAllocator(), 2));
+        throw new OutOfMemoryException(errorMessage, oom);
       } catch (HeapLowMemoryReachedException e) {
         logger.debug(
             "major fragment id {} minor fragment id {} switching partition total usage {} limit {}",
@@ -601,7 +632,6 @@ public final class MultiPartition implements Partition, CanSwitchToSpilling {
   private final class PartitionWrapper implements AutoCloseable {
     private final int partitionIndex;
     private ArrowBuf sv2;
-    private final long sv2Addr;
     private final int maxRecords;
 
     private Partition partition;
@@ -612,7 +642,6 @@ public final class MultiPartition implements Partition, CanSwitchToSpilling {
         this.partitionIndex = partitionIndex;
         this.sv2 =
             rc.add(setupParams.getOpAllocator().buffer(maxRecords * SelectionVector2.RECORD_SIZE));
-        this.sv2Addr = sv2.memoryAddress();
         this.maxRecords = maxRecords;
         rc.add(createPartition());
         rc.commit();
@@ -659,7 +688,7 @@ public final class MultiPartition implements Partition, CanSwitchToSpilling {
     }
 
     void addToSV2(int ordinal) {
-      SV2UnsignedUtil.writeAtIndexUnsafe(sv2Addr, numRecords, ordinal);
+      SV2UnsignedUtil.writeAtIndexUnsafe(sv2.memoryAddress(), numRecords, ordinal);
       ++numRecords;
     }
 

@@ -330,7 +330,6 @@ public class ITDataplanePluginView extends ITDataplanePluginTestSetup {
 
   @Test
   public void createViewClashWithUdf() throws Exception {
-    enableVersionedSourceUdf();
     String functionName = generateUniqueFunctionName();
     List<String> functionKey = tablePathWithFolders(functionName);
 

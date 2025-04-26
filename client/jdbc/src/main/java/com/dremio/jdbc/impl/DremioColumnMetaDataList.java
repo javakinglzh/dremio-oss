@@ -136,7 +136,7 @@ public class DremioColumnMetaDataList extends BasicList<ColumnMetaData> {
         case REQUIRED:
           nullability = ResultSetMetaData.columnNoNulls;
           break;
-          // Should REPEATED still map to columnNoNulls? or to columnNullable?
+        // Should REPEATED still map to columnNoNulls? or to columnNullable?
         case REPEATED:
           nullability = ResultSetMetaData.columnNoNulls;
           break;

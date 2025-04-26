@@ -17,10 +17,10 @@ import { Ok } from "ts-results-es";
 import type {
   ResourceConfig,
   SonarV3Config,
-} from "../../_internal/types/Config.js";
-import { Engine } from "./Engine.js";
-import { engineEntityToProperties } from "./utils.js";
-import type { SignalParam } from "../../_internal/types/Params.js";
+} from "../../_internal/types/Config.ts";
+import { Engine } from "./Engine.ts";
+import { engineEntityToProperties } from "./utils.ts";
+import type { SignalParam } from "../../_internal/types/Params.ts";
 
 export const EnginesResource = (config: ResourceConfig & SonarV3Config) => {
   return {

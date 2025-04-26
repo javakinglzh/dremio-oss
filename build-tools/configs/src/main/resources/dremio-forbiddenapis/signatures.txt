@@ -32,9 +32,10 @@ org.junit.rules.ExpectedException @ Use org.assertj.core.api.Assertions.assertTh
 
 # Guava copies
 org.apache.iceberg.relocated.com.google.common.** @ Use com.google.common directly instead
-org.testcontainers.shaded.** @ Use com.google.common directly instead
+org.testcontainers.shaded.** @ Use guava/jackson/... directly instead
 org.apache.arrow.util.Preconditions @ Use com.google.common.base.Preconditions instead
 org.apache.arrow.util.VisibleForTesting @ Use com.google.common.annotations.VisibleForTesting instead
+org.apache.flink.util.Preconditions @ Use com.google.common.base.Preconditions instead
 org.apache.parquet.Preconditions @ Use com.google.common.base.Preconditions instead
 org.apache.parquet.Strings @ Use com.google.common.base.Strings instead
 org.apache.hadoop.util.Preconditions @ Use com.google.common.base.Preconditions instead
@@ -45,6 +46,8 @@ org.glassfish.jersey.internal.guava.** @ Use com.google.common directly instead
 org.mockito.MockitoAnnotations#initMocks(**) @ For JUnit5 use ExtendWith(MockitoExtension.class). For JUnit4 use RunWith(MockitoJUnitRunner.class), MockitoJUnit.rule() or MockitoAnnotations.openMocks
 
 # Internal helpers from other libraries
+io.netty.util.internal.ObjectUtil @ Use java.util.Objects instead
+io.netty.util.internal.StringUtil @ Use com.google.common.base.Strings instead
 com.amazonaws.util.CollectionUtils @ Use plain java or com.google.common.collect instead
 com.amazonaws.util.IOUtils @ Use com.google.common.io instead
 com.amazonaws.util.StringUtils @ Use com.google.common.base.Strings instead
@@ -61,7 +64,6 @@ org.apache.logging.log4j.util.** @ Use Guava (com.google.common) instead
 org.modelmapper.internal.** @ Use org.junit.Assert or Guava (com.google.common) instead
 io.micrometer.core.instrument.util.** @ Use Guava (com.google.common) instead
 org.eclipse.jetty.util.StringUtil @ Use com.google.common.base.Strings instead
-org.apache.commons.math.exception.NullArgumentException @ Use com.google.common.base.Preconditions.checkNotNull instead
 org.apache.commons.math3.exception.NullArgumentException @ Use com.google.common.base.Preconditions.checkNotNull instead
 com.mongodb.internal.** @ Use Standard-Library or Guava (com.google.common) instead
 org.apache.arrow.util.AutoCloseables @ Use com.dremio.common.AutoCloseables instead
@@ -69,9 +71,16 @@ de.flapdoodle.embed.mongo.util.** @ Use Guava (com.google.common) or org.apache.
 autovalue.shaded.** @ Use original library instead (i.e. use com.google.common instead)
 org.apache.curator.utils.CloseableExecutorService @ Use com.dremio.common.concurrent.CloseableThreadPool instead
 org.assertj.core.util.** @ Use Guava (com.google.common) instead
+com.launchdarkly.shaded.** @ Use Guava (com.google.common) instead
+javax.xml.bind.DatatypeConverter @ Use other libraries instead (i.e. java.util.Base64)
+org.junit.platform.commons.util.CollectionUtils @ Use org.apache.commons.collections4.CollectionUtils instead
+org.junit.platform.commons.util.StringUtils @ Use org.apache.commons.lang3.StringUtils instead
+org.junit.platform.commons.util.Preconditions @ Use com.google.common.base.Preconditions instead
 
 # Deprecated
-org.apache.commons.collections.map.HashedMap @ Use java.util.HashMap instead
+org.apache.commons.lang.** @ Use org.apache.commons.lang3 instead
+org.apache.commons.math.** @ Use org.apache.commons.math3 instead
+org.apache.commons.collections.** @ Use org.apache.commons.collections4 instead
 org.apache.commons.collections4.map.HashedMap @ Use java.util.HashMap instead
 org.apache.commons.io.Charsets @ Use java.nio.charset.StandardCharsets instead
 com.google.common.base.Charsets @ Use java.nio.charset.StandardCharsets instead
@@ -106,3 +115,8 @@ io.micrometer.core.instrument.Timer$Builder#register(**) @ Use builders and Mete
 io.micrometer.core.instrument.Metrics#summary(**) @ Use builders and MeterProvider<DistributionSummary>
 io.micrometer.core.instrument.MeterRegistry#summary(**) @ Use builders and MeterProvider<DistributionSummary>
 io.micrometer.core.instrument.DistributionSummary$Builder#register(**) @ Use builders and MeterProvider<DistributionSummary>
+
+# Java Collections
+java.util.Collections#EMPTY_LIST @ Use java.util.Collections.emptyList() instead
+java.util.Collections#EMPTY_MAP @ Use java.util.Collections.emptyMap() instead
+java.util.Collections#EMPTY_SET @ Use java.util.Collections.emptySet() instead

@@ -196,6 +196,10 @@ const theme = {
               color: "var(--fill--toggle--checked--hover)",
             },
           },
+          "&:focus-within:has(>input[type=radio]:focus-visible)": {
+            outline: "1.5px solid var(--border--focused)",
+            outlineOffset: "-2px",
+          },
           "&:hover": {
             backgroundColor: "transparent",
             color: "var(--border--hover)",

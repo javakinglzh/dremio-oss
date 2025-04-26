@@ -17,6 +17,7 @@ package com.dremio.exec.store.dfs;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.common.logical.FormatPluginConfig;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.parquet.ParquetFormatConfig;
@@ -42,8 +43,7 @@ public class TestPseudoDistributedFileSystemPluginE2E extends BaseTestQuery {
   private static PDFSService service;
 
   @BeforeClass
-  public static final void setupDefaultTestCluster() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
+  public static void setupClass() throws Exception {
     Map<String, FormatPluginConfig> formats =
         ImmutableMap.of("parquet", (FormatPluginConfig) new ParquetFormatConfig());
     WorkspaceConfig workspace =
@@ -66,13 +66,14 @@ public class TestPseudoDistributedFileSystemPluginE2E extends BaseTestQuery {
     c.setName("pdfs");
     c.setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY);
     c.setConfig(conf.toBytesString());
-    getCatalogService().getSystemUserCatalog().createSource(c);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .createSource(c, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @AfterClass
-  public static void closeClient() throws Exception {
+  public static void teardownClass() throws Exception {
     service.close();
-    BaseTestQuery.closeClient();
   }
 
   @Test

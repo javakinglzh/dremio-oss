@@ -13,7 +13,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { proxy } from "./proxy";
+import * as env from "env-var";
+
+const DEV_PROXY_CONFIG_PATH = env.get("DEV_PROXY_CONFIG_PATH").asString();
 
 export const devServer = {
   client: {
@@ -32,10 +34,14 @@ export const devServer = {
       "script-src 'self' 'unsafe-inline' 'unsafe-eval' www.googletagmanager.com cdn.segment.com app.intercom.io widget.intercom.io js.intercomcdn.com;" +
       "style-src 'self' 'unsafe-inline';",
   },
-  historyApiFallback: true,
+  historyApiFallback: {
+    disableDotRule: true,
+  },
   hot: true,
   port: 3005,
-  proxy: proxy,
+  proxy: DEV_PROXY_CONFIG_PATH
+    ? require(DEV_PROXY_CONFIG_PATH).proxy
+    : undefined,
   static: {
     directory: "./public",
   },

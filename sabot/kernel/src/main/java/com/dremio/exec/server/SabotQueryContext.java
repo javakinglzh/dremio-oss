@@ -22,6 +22,7 @@ import com.dremio.config.DremioConfig;
 import com.dremio.exec.expr.ExpressionSplitCache;
 import com.dremio.exec.expr.fn.FunctionImplementationRegistry;
 import com.dremio.exec.ops.QueryContextCreator;
+import com.dremio.exec.planner.PhysicalPlanReader;
 import com.dremio.exec.planner.RulesFactory;
 import com.dremio.exec.planner.cost.RelMetadataQuerySupplier;
 import com.dremio.exec.proto.CoordinationProtos;
@@ -38,7 +39,6 @@ import com.dremio.service.coordinator.ClusterCoordinator;
 import com.dremio.service.coordinator.CoordinatorModeInfo;
 import com.dremio.service.namespace.NamespaceService;
 import java.util.Collection;
-import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
 
@@ -94,8 +94,6 @@ public interface SabotQueryContext {
 
   ExpressionSplitCache getExpressionSplitCache();
 
-  ExecutorService getExecutorService();
-
   NamespaceService getNamespaceService(String userName);
 
   Provider<CoordinatorModeInfo> getCoordinatorModeInfoProvider();
@@ -103,4 +101,6 @@ public interface SabotQueryContext {
   GroupResourceInformation getClusterResourceInformation();
 
   QueryContextCreator getQueryContextCreator();
+
+  PhysicalPlanReader getPlanReader();
 }

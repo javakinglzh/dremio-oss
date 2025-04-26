@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql.handlers.direct;
 
 import static com.dremio.exec.planner.sql.handlers.direct.SimpleCommandResult.successful;
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
 import static java.util.Collections.singletonList;
 
 import com.dremio.common.exceptions.UserException;
@@ -70,7 +71,7 @@ public class RefreshSourceStatusHandler extends SimpleDirectHandler {
 
   protected void validateSource(NamespaceKey path) {
     String root = path.getRoot();
-    if (root.startsWith("@")
+    if (isHomeSpace(root)
         || "sys".equalsIgnoreCase(root)
         || "INFORMATION_SCHEMA".equalsIgnoreCase(root)) {
       throw UserException.parseError().message("Unable to find source %s.", path).build(logger);

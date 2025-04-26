@@ -31,7 +31,6 @@ import static org.mockito.Mockito.when;
 import com.dremio.common.AutoCloseables;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
 import com.dremio.options.OptionValue;
@@ -39,6 +38,7 @@ import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.flight.client.properties.DremioFlightClientProperties;
 import com.dremio.service.tokens.TokenDetails;
 import com.dremio.service.tokens.TokenManager;
+import java.util.Optional;
 import javax.inject.Provider;
 import org.apache.arrow.flight.CallHeaders;
 import org.apache.arrow.flight.ErrorFlightMetadata;
@@ -80,26 +80,17 @@ public class TestTokenCacheFlightSessionManager {
 
   @Before
   public void setup() {
-    final Provider<SabotContext> mockSabotContextProvider = mock(Provider.class);
-    final SabotContext mockSabotContext = mock(SabotContext.class);
-
     final Provider<TokenManager> mockTokenManagerProvider = mock(Provider.class);
 
-    when(mockSabotContextProvider.get()).thenReturn(mockSabotContext);
-    when(mockSabotContextProvider.get().getOptionManager()).thenReturn(mockOptionManager);
-    when(mockSabotContextProvider
-            .get()
-            .getOptionManager()
-            .getOption(SESSION_EXPIRATION_TIME_MINUTES))
+    when(mockOptionManager.getOption(SESSION_EXPIRATION_TIME_MINUTES))
         .thenReturn(TOKEN_EXPIRATION_MINS);
     when(mockTokenManagerProvider.get()).thenReturn(mockTokenManager);
-    when(mockSabotContextProvider.get().getOptionValidatorListing())
-        .thenReturn(mock(OptionValidatorListing.class));
     when(mockOptionManager.getOption("client.max_metadata_count"))
         .thenReturn(OptionValue.createLong(OptionValue.OptionType.SESSION, "dummy", 0L));
     when(mockOptionManager.getOption(MAX_SESSIONS)).thenReturn(MAX_NUMBER_OF_SESSIONS);
     dremioFlightSessionsManager =
-        new TokenCacheFlightSessionManager(mockSabotContextProvider, mockTokenManagerProvider);
+        new TokenCacheFlightSessionManager(
+            mockTokenManagerProvider, mockOptionManager, mock(OptionValidatorListing.class));
     when(mockTokenManager.validateToken(TOKEN1))
         .thenReturn(TokenDetails.of(TOKEN1, USERNAME1, System.currentTimeMillis() + 1000L));
     when(mockTokenManager.validateToken(TOKEN2))
@@ -124,8 +115,8 @@ public class TestTokenCacheFlightSessionManager {
     final long expectedSize = 2L;
 
     // Act
-    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null);
-    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null);
+    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null, Optional.empty());
+    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null, Optional.empty());
     final long actualSize = spyDremioFlightSessionsManager.getNumberOfUserSessions();
 
     // Assert
@@ -148,7 +139,7 @@ public class TestTokenCacheFlightSessionManager {
   @Test
   public void reachedMaxNumberOfSessionsReturnsFalseWhenMaxSessionsNotReached() {
     // Arrange
-    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null);
+    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null, Optional.empty());
 
     // Act
     final boolean actual = spyDremioFlightSessionsManager.reachedMaxNumberOfSessions();
@@ -160,8 +151,8 @@ public class TestTokenCacheFlightSessionManager {
   @Test
   public void reachedMaxNumberOfSessionsReturnsTrueWhenMaxSessionsAreReached() {
     // Arrange
-    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null);
-    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null);
+    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null, Optional.empty());
+    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null, Optional.empty());
 
     // Act
     final boolean actual = spyDremioFlightSessionsManager.reachedMaxNumberOfSessions();
@@ -173,8 +164,8 @@ public class TestTokenCacheFlightSessionManager {
   @Test
   public void resolveDistinctSessions() {
     // Arrange
-    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null);
-    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null);
+    spyDremioFlightSessionsManager.createUserSession(TOKEN1, null, Optional.empty());
+    spyDremioFlightSessionsManager.createUserSession(TOKEN2, null, Optional.empty());
 
     // Act
     final UserSession actualUser1 =
@@ -282,7 +273,8 @@ public class TestTokenCacheFlightSessionManager {
             TokenDetails.of(testPeerIdentity, testUser, System.currentTimeMillis() + 1000L));
 
     // Act
-    spyDremioFlightSessionsManager.createUserSession(testPeerIdentity, callHeaders);
+    spyDremioFlightSessionsManager.createUserSession(
+        testPeerIdentity, callHeaders, Optional.empty());
     final UserSession actual =
         spyDremioFlightSessionsManager.getUserSession(testPeerIdentity, callHeaders).getSession();
 
@@ -324,7 +316,7 @@ public class TestTokenCacheFlightSessionManager {
             TokenDetails.of(testPeerIdentity, testUser, System.currentTimeMillis() + 1000L));
 
     // Act
-    spyDremioFlightSessionsManager.createUserSession(testPeerIdentity, null);
+    spyDremioFlightSessionsManager.createUserSession(testPeerIdentity, null, Optional.empty());
     final UserSession actual =
         spyDremioFlightSessionsManager.getUserSession(testPeerIdentity, null).getSession();
 

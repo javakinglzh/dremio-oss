@@ -25,6 +25,7 @@ import com.dremio.exec.planner.logical.ValuesRewriteShuttle;
 import com.dremio.exec.planner.normalizer.NormalizerException;
 import com.dremio.exec.planner.normalizer.RelNormalizerTransformer;
 import com.dremio.exec.planner.observer.AttemptObserver;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.ReflectionHints;
 import com.dremio.exec.planner.sql.ReflectionHintsExtractor;
 import com.dremio.exec.planner.sql.SqlValidatorAndToRelContext;
@@ -36,6 +37,7 @@ import com.dremio.exec.planner.sql.parser.UnsupportedOperatorsVisitor;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.work.foreman.ForemanSetupException;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
+import com.dremio.options.OptionResolver;
 import com.dremio.options.OptionValue;
 import com.dremio.service.Pointer;
 import com.dremio.service.namespace.NamespaceKey;
@@ -58,7 +60,8 @@ import org.slf4j.LoggerFactory;
 public class SqlToRelTransformer {
   public static final Logger LOGGER = LoggerFactory.getLogger(SqlToRelTransformer.class);
 
-  public static RelNode preprocessNode(RelNode rel) throws SqlUnsupportedException {
+  public static RelNode preprocessNode(RelNode rel, OptionResolver optionManager)
+      throws SqlUnsupportedException {
     /*
      * Traverse the tree to do the following pre-processing tasks:
      *
@@ -81,8 +84,9 @@ public class SqlToRelTransformer {
       visitor.convertException();
       throw ex;
     }
-
-    rel = ValuesRewriteShuttle.rewrite(rel);
+    if (optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED)) {
+      rel = ValuesRewriteShuttle.rewrite(rel);
+    }
 
     return rel;
   }

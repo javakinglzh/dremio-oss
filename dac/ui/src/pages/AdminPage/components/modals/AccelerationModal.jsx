@@ -39,7 +39,8 @@ export class AccelerationModal extends Component {
 
   render() {
     const { canSubmit, isOpen, hide, location } = this.props;
-    const { datasetId } = location.state || {};
+    const { datasetId, containerSelector, preventSaveChanges } =
+      location.state || {};
 
     return (
       <Modal
@@ -47,14 +48,18 @@ export class AccelerationModal extends Component {
         title={laDeprecated("Acceleration")}
         isOpen={isOpen}
         hide={hide}
+        containerSelector={containerSelector}
       >
         <AccelerationController
-          updateFormDirtyState={this.props.updateFormDirtyState}
+          updateFormDirtyState={
+            preventSaveChanges ? () => {} : this.props.updateFormDirtyState
+          }
           onCancel={hide}
           onDone={this.onDone}
           datasetId={datasetId}
           canSubmit={canSubmit}
           location={location}
+          preventSaveChanges={preventSaveChanges}
         />
       </Modal>
     );

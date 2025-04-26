@@ -150,7 +150,17 @@ function PartitionTransformationMenu({
   return (
     menuOptions.length > 1 && (
       <>
-        <div onClick={handleOpen} className="AccelerationGridSubCell__menuDiv">
+        <div
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.code === "Enter") {
+              handleOpen(e);
+            }
+          }}
+          onClick={handleOpen}
+          className="AccelerationGridSubCell__menuDiv"
+          aria-label="Transformation options"
+        >
           <dremio-icon name="interface/caret-down" />
         </div>
         <Menu

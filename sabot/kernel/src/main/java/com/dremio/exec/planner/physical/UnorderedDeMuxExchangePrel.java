@@ -101,4 +101,8 @@ public class UnorderedDeMuxExchangePrel extends ExchangePrel {
     // DeMuxExchangePrel accepts vectors with all types SelectionVectors as input.
     return SelectionVectorMode.ALL;
   }
+
+  public List<DistributionField> getFields() {
+    return fields;
+  }
 }

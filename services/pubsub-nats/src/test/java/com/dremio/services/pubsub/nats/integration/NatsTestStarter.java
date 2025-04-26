@@ -15,24 +15,21 @@
  */
 package com.dremio.services.pubsub.nats.integration;
 
+import com.dremio.testcontainers.nats.NatsContainer;
 import io.nats.client.Connection;
 import io.nats.client.Nats;
 import java.io.IOException;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.utility.DockerImageName;
 
 public class NatsTestStarter {
-  private GenericContainer<?> natsContainer;
+  private NatsContainer natsContainer;
   private Connection natsConnection;
   private String natsUrl;
 
   public NatsTestStarter() {}
 
   public void setUp() throws IOException, InterruptedException {
-    natsContainer =
-        new GenericContainer<>(DockerImageName.parse("nats:latest"))
-            .withExposedPorts(4222)
-            .withCommand("-js");
+    natsContainer = new NatsContainer();
     natsContainer.start();
 
     natsUrl =

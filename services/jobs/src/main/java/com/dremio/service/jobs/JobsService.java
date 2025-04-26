@@ -26,6 +26,7 @@ import com.dremio.service.job.JobAndUserStats;
 import com.dremio.service.job.JobAndUserStatsRequest;
 import com.dremio.service.job.JobCounts;
 import com.dremio.service.job.JobCountsRequest;
+import com.dremio.service.job.JobCountsRequestDaily;
 import com.dremio.service.job.JobDetails;
 import com.dremio.service.job.JobDetailsRequest;
 import com.dremio.service.job.JobStats;
@@ -40,8 +41,6 @@ import com.dremio.service.job.ReflectionJobSummaryRequest;
 import com.dremio.service.job.SearchJobsRequest;
 import com.dremio.service.job.SearchReflectionJobsRequest;
 import com.dremio.service.job.SubmitJobRequest;
-import com.dremio.service.job.UniqueUserStats;
-import com.dremio.service.job.UniqueUserStatsRequest;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobSubmission;
 
@@ -84,6 +83,14 @@ public interface JobsService extends Service {
   JobCounts getJobCounts(JobCountsRequest request);
 
   /**
+   * Get a list of the number of jobs run for the given request over the last n days
+   *
+   * @param request job counts request for day
+   * @return number of jobs run
+   */
+  JobCounts getJobCountsDaily(JobCountsRequestDaily request);
+
+  /**
    * Delete the number of jobs run for the given request.
    *
    * @param request job counts request
@@ -97,14 +104,6 @@ public interface JobsService extends Service {
    * @return job stats
    */
   JobStats getJobStats(JobStatsRequest request);
-
-  /**
-   * Get the number of unique users for given date range in request
-   *
-   * @param request
-   * @return user stats
-   */
-  UniqueUserStats getUniqueUserStats(UniqueUserStatsRequest request);
 
   JobAndUserStats getJobAndUserStats(JobAndUserStatsRequest request);
 

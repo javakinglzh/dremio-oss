@@ -25,7 +25,7 @@ import { formDefault } from "uiTheme/radium/typography";
 import { SCHEDULE_POLICIES } from "#oss/components/Forms/DataFreshnessSection";
 import { withFormContext } from "#oss/pages/HomePage/components/modals/formContext";
 import { isIcebergSource } from "@inject/utils/sourceUtils";
-import Immutable from "immutable";
+import { HoverHelp } from "dremio-ui-lib";
 
 type ReflectionRefreshProps = {
   fields: {
@@ -150,13 +150,21 @@ const ReflectionRefresh = ({
           />
           {isLiveReflectionEnabledForSource &&
             accelerationActivePolicyType.value === SCHEDULE_POLICIES.PERIOD && (
-              <Checkbox
-                {...accelerationRefreshOnDataChanges}
-                label={intl.formatMessage({
-                  id: "Reflection.Refresh.AutoRefresh",
-                })}
-                className="pb-1 pl-3"
-              />
+              <div className="flex flew-row items-center">
+                <Checkbox
+                  {...accelerationRefreshOnDataChanges}
+                  label={intl.formatMessage({
+                    id: "Reflection.Refresh.EnableLiveRefresh",
+                  })}
+                  className="pb-1 pl-3"
+                />
+                <HoverHelp
+                  content={intl.formatMessage({
+                    id: "Reflection.Refresh.AutoRefresh",
+                  })}
+                  placement="top"
+                />
+              </div>
             )}
         </div>
         <div className="flex flex-col">
@@ -201,24 +209,38 @@ const ReflectionRefresh = ({
           {isLiveReflectionEnabledForSource &&
             accelerationActivePolicyType.value ===
               SCHEDULE_POLICIES.SCHEDULE && (
-              <Checkbox
-                {...accelerationRefreshOnDataChanges}
-                label={intl.formatMessage({
-                  id: "Reflection.Refresh.AutoRefresh",
-                })}
-                className="pt-05 pl-3"
-              />
+              <div className="flex flew-row items-end">
+                <Checkbox
+                  {...accelerationRefreshOnDataChanges}
+                  label={intl.formatMessage({
+                    id: "Reflection.Refresh.EnableLiveRefresh",
+                  })}
+                  className="pt-05 pl-3"
+                />
+                <HoverHelp
+                  content={intl.formatMessage({
+                    id: "Reflection.Refresh.AutoRefresh",
+                  })}
+                  placement="top"
+                />
+              </div>
             )}
         </div>
         {isLiveReflectionEnabledForTable && (
-          <div>
+          <div className="flex flex-row items-end">
             <Radio
               {...accelerationActivePolicyType}
               radioValue={SCHEDULE_POLICIES.REFRESH_ON_DATA_CHANGES}
               label={intl.formatMessage({
-                id: "Reflection.Refresh.AutoRefresh",
+                id: "Reflection.Refresh.LiveRefresh",
               })}
               style={{ marginTop: 14 }}
+            />
+            <HoverHelp
+              content={intl.formatMessage({
+                id: "Reflection.Refresh.AutoRefresh",
+              })}
+              placement="top"
             />
           </div>
         )}

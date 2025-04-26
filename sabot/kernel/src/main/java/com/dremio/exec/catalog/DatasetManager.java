@@ -17,6 +17,7 @@ package com.dremio.exec.catalog;
 
 import static com.dremio.exec.catalog.CatalogUtil.permittedNessieKey;
 
+import com.dremio.catalog.exception.SourceMalfunctionException;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.concurrent.ContextAwareCompletableFuture;
@@ -85,6 +86,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.StreamSupport;
+import javax.annotation.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -154,8 +156,6 @@ class DatasetManager {
         return userNamespaceService.getDataset(key);
       } catch (NamespaceNotFoundException ex) {
         return null;
-      } catch (NamespaceException ex) {
-        throw Throwables.propagate(ex);
       }
     }
 
@@ -248,13 +248,16 @@ class DatasetManager {
       logger.debug("Got config id {}", config.getId());
     }
 
-    if (plugin != null) {
+    // If we have a plugin, and the config is null, we need to rtreieve the entity from hte plugin.
+    // There are 2 cases where this can happen:
+    // 1. If the entity is a table, we attempt to retrieve the table from the plugin.
+    // 2. If the entity is  NOT a Space or Dremio Legacy View, we attempt to retrieve the view from
+    // the plugin.
 
-      // if we have a plugin and the info isn't a vds (this happens in home, where VDS are
-      // intermingled with plugin datasets).
-      if (config == null || config.getType() != DatasetType.VIRTUAL_DATASET) {
-        return getTableFromPlugin(namespaceKeyWithConfig, plugin, options, ignoreColumnCount);
-      }
+    if ((plugin != null && plugin.getPlugin().isPresent())
+        && (config == null || (!isSpacesOrDremioLegacyView(namespaceKeyWithConfig)))) {
+      return getTableFromPlugin(
+          namespaceKeyWithConfig, plugin, plugin.getPlugin().get(), options, ignoreColumnCount);
     }
 
     if (config == null) {
@@ -267,8 +270,8 @@ class DatasetManager {
       // the source has been removed but the dataset was retrieved just before.
       return null;
     }
-
-    return createTableFromVirtualDataset(config, options);
+    // At this point, we are looking at a virtual dataset from a Space or Dremio Legacy View.
+    return createTableFromVirtualDataset(config, plugin);
   }
 
   @WithSpan
@@ -312,8 +315,7 @@ class DatasetManager {
     // - put all other keys into a separate partition
     Function<NamespaceKeyWithConfig, Optional<ManagedStoragePlugin>> partitionByPlugin =
         keyWithConfig -> {
-          if (keyWithConfig.datasetConfig() == null
-              || keyWithConfig.datasetConfig().getType() != DatasetType.VIRTUAL_DATASET) {
+          if (keyWithConfig.datasetConfig() == null || !isSpacesOrDremioLegacyView(keyWithConfig)) {
             return Optional.ofNullable(plugins.getPlugin(keyWithConfig.key().getRoot(), false));
           } else {
             return Optional.empty();
@@ -345,7 +347,7 @@ class DatasetManager {
                                         ? Optional.empty()
                                         : Optional.of(
                                             createTableFromVirtualDataset(
-                                                keyWithConfig.datasetConfig(), options))));
+                                                keyWithConfig.datasetConfig(), null))));
 
     return keysWithConfig.bulkPartitionAndHandleRequests(
         partitionByPlugin, bulkFunctions, Function.identity(), ValueTransformer.identity());
@@ -381,10 +383,16 @@ class DatasetManager {
     if (plugin == null) {
       return null;
     }
+    Optional<StoragePlugin> storagePlugin = plugin.getPlugin();
+    if (storagePlugin.isEmpty()) {
+      return null;
+    }
+
     MetadataRequestOptions optionsWithVersion =
         options.cloneWith(tableKey.get(0), versionContext.asVersionContext());
     DremioTable table =
-        getTableFromNessieCatalog(new NamespaceKey(tableKey), plugin, optionsWithVersion);
+        getTableFromNessieCatalog(
+            new NamespaceKey(tableKey), plugin, storagePlugin.get(), optionsWithVersion);
     if (table != null) {
       // check for ContentId . If someone has dropped and recreated the table with the same key
       // in the same VersionContext , the ContentId will be different
@@ -411,14 +419,17 @@ class DatasetManager {
       NamespaceKey key,
       DatasetConfig datasetConfig,
       ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
       MetadataRequestOptions options,
-      boolean savePrimaryKeyInKvStore) {
-    final String accessUserName = getAccessUserName(plugin, options.getSchemaConfig());
+      boolean savePrimaryKeyInKvStore)
+      throws SourceMalfunctionException {
+    final String accessUserName =
+        getAccessUserName(plugin, storagePlugin, options.getSchemaConfig());
 
     Span.current().setAttribute("dremio.namespace.key.schemapath", key.getSchemaPath());
     plugin.checkAccess(key, datasetConfig, accessUserName, options);
 
-    if (plugin.getPlugin() instanceof FileSystemPlugin) {
+    if (storagePlugin instanceof FileSystemPlugin) {
       // DX-84516: Need to verify here and not just when accessing the path from FS plugin because
       // the user may have
       // already created/promoted a table they should not have access to - so we need to block the
@@ -440,7 +451,7 @@ class DatasetManager {
             accessUserName,
             DatasetSplitsPointer.of(userNamespaceService, datasetConfig),
             getPrimaryKey(
-                plugin.getPlugin(),
+                storagePlugin,
                 datasetConfig,
                 options.getSchemaConfig(),
                 key,
@@ -470,25 +481,23 @@ class DatasetManager {
   private DremioTable getTableFromPlugin(
       NamespaceKeyWithConfig namespaceKeyWithConfig,
       ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
       MetadataRequestOptions options,
       boolean ignoreColumnCount) {
-
     NamespaceKey key = namespaceKeyWithConfig.key();
     DatasetConfig datasetConfig = namespaceKeyWithConfig.datasetConfig();
 
     // Special case 1: versioned plug-in.
-    final StoragePlugin underlyingPlugin = plugin.getPlugin();
-    if (underlyingPlugin != null && underlyingPlugin.isWrapperFor(VersionedPlugin.class)) {
-      return getTableFromNessieCatalog(key, plugin, options);
+    if (storagePlugin.isWrapperFor(VersionedPlugin.class)) {
+      return getTableFromNessieCatalog(key, plugin, storagePlugin, options);
     }
 
     // Special case 2: key is for a view.
-    // TODO: move views to namespace and out of filesystem.
     if (datasetConfig == null) {
       try {
-        ViewTable view = plugin.getView(key, options);
-        if (view != null) {
-          return view;
+        Optional<ViewTable> view = plugin.getView(key, options);
+        if (view.isPresent()) {
+          return view.get();
         }
       } catch (UserException ex) {
         throw ex;
@@ -501,20 +510,25 @@ class DatasetManager {
     // Check completeness and validity of table metadata and get it.
     final Stopwatch stopwatch = Stopwatch.createStarted();
     if (plugin.checkValidity(namespaceKeyWithConfig, options)) {
-      return getExistingTableFromNamespace(namespaceKeyWithConfig, plugin, options, stopwatch);
+      try {
+        return getExistingTableFromNamespace(
+            namespaceKeyWithConfig, plugin, storagePlugin, options, stopwatch);
+      } catch (SourceMalfunctionException exception) {
+        return null;
+      }
     }
 
     return getInvalidTableFromPlugin(
-        namespaceKeyWithConfig, plugin, options, stopwatch, ignoreColumnCount);
+        namespaceKeyWithConfig, plugin, storagePlugin, options, stopwatch, ignoreColumnCount);
   }
 
   private DremioTable getInvalidTableFromPlugin(
       NamespaceKeyWithConfig namespaceKeyWithConfig,
       ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
       MetadataRequestOptions options,
       Stopwatch stopwatch,
       boolean ignoreColumnCount) {
-
     NamespaceKey key = namespaceKeyWithConfig.key();
     DatasetConfig datasetConfig = namespaceKeyWithConfig.datasetConfig();
 
@@ -557,7 +571,12 @@ class DatasetManager {
                 .setDatasetConfig(datasetConfig)
                 .build();
         if (plugin.checkValidity(canonicalKeyWithConfig, options)) {
-          return getExistingTableFromNamespace(canonicalKeyWithConfig, plugin, options, stopwatch);
+          try {
+            return getExistingTableFromNamespace(
+                canonicalKeyWithConfig, plugin, storagePlugin, options, stopwatch);
+          } catch (SourceMalfunctionException exception) {
+            return null;
+          }
         }
       } catch (NamespaceException e) {
         // ignore, we'll fall through.
@@ -567,17 +586,30 @@ class DatasetManager {
     // arriving here means that the metadata for the table is either incomplete, missing or out of
     // date. We need to save it and return the updated data.
     return refreshMetadataAndGetTable(
-        stopwatch, canonicalKey, datasetConfig, handle.get(), plugin, options, ignoreColumnCount);
+        stopwatch,
+        canonicalKey,
+        datasetConfig,
+        handle.get(),
+        plugin,
+        storagePlugin,
+        options,
+        ignoreColumnCount);
   }
 
   private DremioTable getExistingTableFromNamespace(
       NamespaceKeyWithConfig namespaceKeyWithConfig,
       ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
       MetadataRequestOptions options,
-      Stopwatch stopwatch) {
+      Stopwatch stopwatch)
+      throws SourceMalfunctionException {
     NamespaceKey key = namespaceKeyWithConfig.key();
     DatasetConfig datasetConfig = namespaceKeyWithConfig.datasetConfig();
-    NamespaceTable table = getTableFromNamespace(key, datasetConfig, plugin, options, true);
+    if (datasetConfig.getType() == DatasetType.VIRTUAL_DATASET) {
+      return createTableFromVirtualDataset(datasetConfig, plugin);
+    }
+    NamespaceTable table =
+        getTableFromNamespace(key, datasetConfig, plugin, storagePlugin, options, true);
     options
         .getStatsCollector()
         .addDatasetStat(
@@ -594,25 +626,24 @@ class DatasetManager {
       boolean ignoreColumnCount) {
 
     // handle the VersionedPlugin case - this bypasses any interaction with NamespaceService
-    final StoragePlugin underlyingPlugin = plugin.getPlugin();
-    if (underlyingPlugin != null && underlyingPlugin.isWrapperFor(VersionedPlugin.class)) {
-      return bulkGetTablesFromVersionedPlugin(keys, plugin, options);
+    Optional<StoragePlugin> storagePlugin = plugin.getPlugin();
+    if (storagePlugin.isPresent() && storagePlugin.get().isWrapperFor(VersionedPlugin.class)) {
+      return bulkGetTablesFromVersionedPlugin(keys, plugin, storagePlugin.get(), options);
     }
 
     BulkResponse.Builder<NamespaceKeyWithConfig, Optional<DremioTable>> responseBuilder =
         BulkResponse.builder();
 
     // filter out filesystem views
-    // TODO: move views to namespace and out of filesystem.
     BulkRequest<NamespaceKeyWithConfig> filteredKeys;
     filteredKeys =
         keys.partition(
                 key -> {
                   if (key.datasetConfig() == null) {
                     try {
-                      ViewTable view = plugin.getView(key.key(), options);
-                      if (view != null) {
-                        responseBuilder.add(key, Optional.of(view));
+                      Optional<ViewTable> view = plugin.getView(key.key(), options);
+                      if (view.isPresent()) {
+                        responseBuilder.add(key, Optional.of(view.get()));
                         return false;
                       }
                     } catch (Exception ex) {
@@ -636,12 +667,20 @@ class DatasetManager {
             datasets -> plugin.bulkCheckValidity(datasets, options),
             Function.identity(),
             (originalKey, transformedKey, isValid) -> {
+              if (storagePlugin.isEmpty()) {
+                return ContextAwareCompletableFuture.completedFuture(Optional.empty());
+              }
               if (isValid) {
                 // If metadata is valid, get the metadata from Namespace on current thread.
                 // This reduces load on the metadataIOPool when validityCheck=false.
-                return ContextAwareCompletableFuture.of(
-                    Optional.of(
-                        getExistingTableFromNamespace(originalKey, plugin, options, stopwatch)));
+                try {
+                  return ContextAwareCompletableFuture.of(
+                      Optional.of(
+                          getExistingTableFromNamespace(
+                              originalKey, plugin, storagePlugin.get(), options, stopwatch)));
+                } catch (SourceMalfunctionException e) {
+                  return ContextAwareCompletableFuture.completedFuture(Optional.empty());
+                }
               }
               // If we have to get metadata from source plugin,
               // then make sure we execute async using dedicated pool.
@@ -655,6 +694,7 @@ class DatasetManager {
                                   getInvalidTableFromPlugin(
                                       originalKey,
                                       plugin,
+                                      storagePlugin.get(),
                                       options,
                                       stopwatch,
                                       ignoreColumnCount)))));
@@ -676,6 +716,7 @@ class DatasetManager {
       DatasetConfig datasetConfig,
       DatasetHandle handle,
       ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
       MetadataRequestOptions options,
       boolean ignoreColumnCount) {
 
@@ -766,9 +807,22 @@ class DatasetManager {
     Storing in namespace can cause issues if the metadata is missing. Don't save here.
     */
     boolean savePrimaryKeyInKvStore = cachedMetadata;
-    NamespaceTable namespaceTable =
-        getTableFromNamespace(
-            canonicalKey, datasetConfig, plugin, options, savePrimaryKeyInKvStore);
+    DremioTable dremioTable = null;
+    try {
+      if (datasetConfig.getType() == DatasetType.VIRTUAL_DATASET) {
+        return createTableFromVirtualDataset(datasetConfig, plugin);
+      } else {
+        dremioTable =
+            getTableFromNamespace(
+                canonicalKey,
+                datasetConfig,
+                plugin,
+                storagePlugin,
+                options,
+                savePrimaryKeyInKvStore);
+      }
+    } catch (SourceMalfunctionException ignore) {
+    }
     options
         .getStatsCollector()
         .addDatasetStat(
@@ -777,7 +831,7 @@ class DatasetManager {
                 ? MetadataAccessType.CACHED_METADATA.name()
                 : MetadataAccessType.PARTIAL_METADATA.name(),
             stopwatch.elapsed(TimeUnit.MILLISECONDS));
-    return namespaceTable;
+    return dremioTable;
   }
 
   private static DatasetRetrievalOptions getDatasetRetrievalOptions(
@@ -800,14 +854,15 @@ class DatasetManager {
   // Figure out the user we want to access the source with.  If the source supports impersonation we
   // allow it to
   // override the delegated username.
-  private String getAccessUserName(ManagedStoragePlugin plugin, SchemaConfig schemaConfig) {
+  private String getAccessUserName(
+      ManagedStoragePlugin plugin, StoragePlugin storagePlugin, SchemaConfig schemaConfig) {
     final String accessUserName;
 
     ConnectionConf<?, ?> conf = plugin.getConnectionConf();
     if (conf instanceof ImpersonationConf) {
-      if (plugin.getPlugin() instanceof SupportsImpersonation
+      if (storagePlugin instanceof SupportsImpersonation
           && !(schemaConfig.getAuthContext().getSubject() instanceof CatalogUser)) {
-        if (((SupportsImpersonation) plugin.getPlugin()).isImpersonationEnabled()) {
+        if (((SupportsImpersonation) storagePlugin).isImpersonationEnabled()) {
           throw UserException.unsupportedError(
                   new InvalidImpersonationTargetException(
                       "Only users can be used to connect to impersonation enabled sources."))
@@ -830,7 +885,7 @@ class DatasetManager {
 
   @WithSpan("create-table-from-view")
   private ViewTable createTableFromVirtualDataset(
-      DatasetConfig datasetConfig, MetadataRequestOptions options) {
+      DatasetConfig datasetConfig, @Nullable ManagedStoragePlugin managedStoragePlugin) {
     try {
       // 1.4.0 and earlier didn't correctly save virtual dataset schema information.
       BatchSchema schema =
@@ -844,14 +899,17 @@ class DatasetManager {
               datasetConfig.getVirtualDataset().getSql(),
               ViewFieldsHelper.getViewFields(datasetConfig),
               datasetConfig.getVirtualDataset().getContextList(),
-              options.getSchemaConfig().getOptions() != null ? schema : null);
+              schema);
 
       return new ViewTable(
           new NamespaceKey(datasetConfig.getFullPathList()),
           view,
           identityProvider.getOwner(datasetConfig.getFullPathList()),
           datasetConfig,
-          schema);
+          schema,
+          managedStoragePlugin == null
+              ? null
+              : managedStoragePlugin.getDatasetMetadataState(datasetConfig));
     } catch (Exception e) {
       throw new RuntimeException(
           String.format(
@@ -863,9 +921,11 @@ class DatasetManager {
 
   @WithSpan
   private DremioTable getTableFromNessieCatalog(
-      NamespaceKey key, ManagedStoragePlugin plugin, MetadataRequestOptions options) {
+      NamespaceKey key,
+      ManagedStoragePlugin plugin,
+      StoragePlugin storagePlugin,
+      MetadataRequestOptions options) {
     final String accessUserName = options.getSchemaConfig().getUserName();
-    final StoragePlugin underlyingPlugin = plugin.getPlugin();
     VersionedDatasetAdapter versionedDatasetAdapter;
     if (!permittedNessieKey(key)) {
       return null;
@@ -882,7 +942,7 @@ class DatasetManager {
               versionContextResolver.resolveVersionContext(
                   plugin.getName().getRoot(),
                   options.getVersionForSource(plugin.getName().getRoot(), key)),
-              underlyingPlugin,
+              storagePlugin,
               plugin.getId(),
               optionManager);
     } catch (VersionNotFoundInNessieException e) {
@@ -902,6 +962,7 @@ class DatasetManager {
       bulkGetTablesFromVersionedPlugin(
           BulkRequest<NamespaceKeyWithConfig> keys,
           ManagedStoragePlugin plugin,
+          StoragePlugin storagePlugin,
           MetadataRequestOptions options) {
 
     // partition the requests into two subsets - permitted keys and invalid keys
@@ -916,7 +977,7 @@ class DatasetManager {
                     // versionedDatasetAdapterFactory
                     ? requests ->
                         versionedDatasetAdapterFactory.bulkCreateInstances(
-                            requests, plugin.getPlugin(), plugin.getId(), optionManager, options)
+                            requests, storagePlugin, plugin.getId(), optionManager, options)
                     // otherwise, return an empty value
                     : requests -> requests.handleRequests(Optional.empty());
 
@@ -1149,5 +1210,21 @@ class DatasetManager {
     } catch (Exception e) {
       logger.warn("Failure while retrieving and saving dataset {}.", key, e);
     }
+  }
+
+  private boolean isSpacesOrDremioLegacyView(NamespaceKeyWithConfig namespaceKeyWithConfig) {
+    // There are views in Spaces and Legacy views in Sources(deprecated  except for usages in tests)
+    // Views in Spaces and legacy views are handled differently from views in sources backed by
+    // external catalogs like IcebergCatalogs. This helper is used to distinguish and preserve the
+    // legacy code path and handling of these views.
+    boolean isViewConfig =
+        namespaceKeyWithConfig.datasetConfig().getType() == DatasetType.VIRTUAL_DATASET;
+    ManagedStoragePlugin msp = plugins.getPlugin(namespaceKeyWithConfig.key().getRoot(), false);
+    return isViewConfig
+        && (msp != null
+            && (msp.getPlugin().isEmpty()
+                || (msp.getPlugin().isPresent()
+                    && !msp.getPlugin().get().isWrapperFor((SupportsRefreshViews.class))
+                    && !msp.getPlugin().get().isWrapperFor(VersionedPlugin.class))));
   }
 }

@@ -18,6 +18,7 @@ package com.dremio.exec.store.dfs;
 import com.dremio.BaseTestQuery;
 import com.dremio.config.DremioConfig;
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.NamespaceKey;
@@ -121,7 +122,9 @@ public class TestSubPathFileSystemPlugin extends BaseTestQuery {
     config.setConfigOrdinal(null);
     config.setName("subPathDfs");
     config.setConfig(nasConf.toBytesString());
-    catalogService.getSystemUserCatalog().createSource(config);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @Test
@@ -204,6 +207,8 @@ public class TestSubPathFileSystemPlugin extends BaseTestQuery {
         getSabotContext()
             .getNamespaceService(SystemUser.SYSTEM_USERNAME)
             .getSource(new NamespaceKey("subPathDfs"));
-    getCatalogService().getSystemUserCatalog().deleteSource(config);
+    getCatalogService()
+        .getSystemUserCatalog()
+        .deleteSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 }

@@ -17,7 +17,7 @@ import { PureComponent } from "react";
 import PropTypes from "prop-types";
 import clsx from "clsx";
 
-import { Tooltip } from "@mui/material";
+import { Tooltip } from "@dremio/design-system/components";
 
 export default class CopyButtonIcon extends PureComponent {
   static propTypes = {
@@ -50,13 +50,7 @@ export default class CopyButtonIcon extends PureComponent {
         style={{ ...styles.wrap, ...(disabled && styles.disabled), ...style }}
         className={className}
       >
-        <Tooltip
-          title={title}
-          placement="bottom-start"
-          arrow
-          enterDelay={500}
-          enterNextDelay={500}
-        >
+        <Tooltip content={title} placement="bottom-start">
           <button
             onClick={clickHandler}
             disabled={disabled}

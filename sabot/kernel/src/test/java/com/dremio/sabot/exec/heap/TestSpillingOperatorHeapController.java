@@ -30,7 +30,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import javax.management.ObjectName;
+import org.awaitility.Awaitility;
 import org.junit.Test;
 
 public class TestSpillingOperatorHeapController {
@@ -329,18 +331,20 @@ public class TestSpillingOperatorHeapController {
       participants3.forEach((x) -> x.lowMemParticipant.addBatches(100));
       myPool.setUsage(new MemoryUsage(MB, 5 * GB + 2 * MB, 8 * GB, 8 * GB));
       sut.getLowMemListener().handleUsageCrossedNotification();
-      Thread.sleep(2000);
-      myPool.setUsage(new MemoryUsage(MB, GB, 8 * GB, 8 * GB));
       List<GeneratedParticipant> allParticipants = new ArrayList<>(participants);
       allParticipants.addAll(participants2);
       allParticipants.addAll(participants3);
-      int numVictims = 0;
-      for (GeneratedParticipant p : allParticipants) {
-        if (p.lowMemParticipant.isVictim()) {
-          numVictims++;
-        }
-      }
-      assertEquals(30, numVictims);
+      // wait for the source to be updated
+      Awaitility.await()
+          .pollInterval(100, TimeUnit.MILLISECONDS)
+          .atMost(20, TimeUnit.SECONDS)
+          .until(
+              () ->
+                  allParticipants.stream().filter((p) -> p.lowMemParticipant.isVictim()).count()
+                      == 30);
+      myPool.setUsage(new MemoryUsage(MB, GB, 8 * GB, 8 * GB));
+      assertEquals(
+          30, allParticipants.stream().filter((p) -> p.lowMemParticipant.isVictim()).count());
       allParticipants.forEach(GeneratedParticipant::remove);
       assertEquals(0, sut.maxParticipantsPerSlot());
       assertEquals(0, sut.numParticipants());

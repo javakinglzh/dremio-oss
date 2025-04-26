@@ -15,15 +15,23 @@
  */
 
 import clsx from "clsx";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Color from "colorjs.io";
 
 export default {
   title: "Tokens/Colors",
 };
 
-const families = [
+const semanticTokens = [
+  "info",
+  "success",
+  "warning",
+  "danger",
   "brand",
   "neutral",
+];
+
+const hues = [
   "red",
   "red-cool",
   "orange-warm",
@@ -90,10 +98,14 @@ const ColorChip = ({
   grade?: number | string;
 }) => {
   const chipRef = useRef<HTMLElement | null>(null);
-  const [, setChipProperties] = useState({});
-  useEffect(() => {
+  const [chipProperties, setChipProperties] =
+    useState<ReturnType<typeof getColorProperties>>();
+  useLayoutEffect(() => {
     setChipProperties(getColorProperties(chipRef.current!));
   }, []);
+  if (chipProperties?.backgroundColor === "rgba(0, 0, 0, 0)") {
+    return null;
+  }
   return (
     <div style={{ textAlign: "center" }}>
       <div
@@ -110,19 +122,41 @@ const ColorChip = ({
       >
         {grade}
       </div>
-      {/* <code style={{ color: "var(--color--gray--500)" }}>
-        {chipProperties.backgroundColor}
-      </code> */}
+      <code
+        className="font-mono dremio-typography-less-important text-sm"
+        style={{ userSelect: "all" }}
+      >
+        {chipProperties?.backgroundColor &&
+          new Color(chipProperties.backgroundColor).toString({
+            format: "hex",
+          })}
+      </code>
     </div>
   );
 };
 
-export const Bg = (props: { className: string }) => (
+const Bg = (props: { className: string }) => (
   <div
     className={clsx(props.className, "hover border-thin p-05")}
     style={{ borderRadius: "2px" }}
   >
     {props.className}
+  </div>
+);
+
+const renderFamily = (family) => (
+  <div key={family} className="mb-4">
+    <h3
+      className="dremio-typography-bold mb-2"
+      style={{ textTransform: "capitalize", fontSize: "14px" }}
+    >
+      {family}
+    </h3>
+    <div className="flex flex-row">
+      {grades.map((grade) => (
+        <ColorChip grade={grade} family={family} />
+      ))}
+    </div>
   </div>
 );
 
@@ -132,99 +166,57 @@ export const Colors = () => (
       <h2></h2>
       <Bg className="bg-primary" />
       <Bg className="bg-secondary" />
+      <Bg className="bg-popover" />
       <Bg className="bg-brand-solid" />
-      <Bg className="bg-disabled" />
       <Bg className="bg-danger-solid" />
-      <ColorCard token="bg--primary" />
-      <ColorCard token="bg--primary--hover" />
-      <ColorCard token="bg--primary--hover--alt" />
-      <ColorCard token="bg--secondary" />
-      <ColorCard token="bg--secondary--hover" />
-      <ColorCard token="bg--secondary--hover--alt" />
-      <ColorCard token="bg--brand--solid" />
-      <ColorCard token="bg--disabled" />
-      {/* --fill--primary: #101214;
-  --fill--primary--hover: var(--color--gray--800);
-  --fill--primary--hover--alt: var(--color--gray--800);
-  --border--primary: var(--color--gray--500);
-  --text--primary: #f5f5f6;
+      <Bg className="bg-disabled" />
 
-  --fill--secondary: #1b2025;
-  --fill--secondary--hover: var(--color--gray--800);
-  --fill--secondary--hover--alt: var(--color--gray--800);
-  --border--secondary: var(--color--gray--500);
-  --text--secondary: #cecfd2;
-
-  --fill--brand--solid: var(--color--brand--700);
-
-  --text--brand--secondary: #26c8d1;
-
-  --fill--disabled: var(--color--gray--800);
-  --text--disabled: var(--color--gray--200); */}
+      <Bg className="bg-categorical-0" />
+      <Bg className="bg-categorical-1" />
+      <Bg className="bg-categorical-2" />
+      <Bg className="bg-categorical-3" />
+      <Bg className="bg-categorical-4" />
+      <Bg className="bg-categorical-5" />
+      <Bg className="bg-categorical-6" />
+      <Bg className="bg-categorical-7" />
     </div>
-    <div>
-      <h2
-        className="dremio-typography-extra-large dremio-typography-bold mb-6"
-        style={{ textTransform: "capitalize", fontSize: "24px" }}
-      >
-        Danger
+
+    <div className="dremio-prose">
+      <h2 className="dremio-typography-bold" style={{ fontSize: "24px" }}>
+        Semantic Color Tokens
       </h2>
+      <p>
+        Semantic color tokens are aliases to a palette's primitive color tokens.
+        For example, <code>color-danger-500</code> would likely map to{" "}
+        <code>color-red-500</code>.
+      </p>
+    </div>
 
-      <div className="flex flex-row">
-        <ColorChip family="danger" grade={50} />
-        <ColorChip family="danger" grade={500} />
-      </div>
-    </div>
-    <div>
-      <h2
-        className="dremio-typography-extra-large dremio-typography-bold mb-6"
-        style={{ textTransform: "capitalize", fontSize: "24px" }}
-      >
-        Warning
+    {semanticTokens.map(renderFamily)}
+
+    <div className="dremio-prose">
+      <h2 className="dremio-typography-bold" style={{ fontSize: "24px" }}>
+        Primitive Color Tokens
       </h2>
-      <div className="flex flex-row">
-        <ColorChip family="warning" grade={50} />
-        <ColorChip family="warning" grade={500} />
-      </div>
+      <p>
+        Primitive color tokens have no semantic meaning within the design
+        system. They are named by rounding to the nearest hue name and to the
+        nearest 50/100 for perceptual lightness (1000 - perceptual lightness
+        percent * 10). For example, the color <code>#43b8c9</code> has a hue of
+        212 and is closest to the hue family of "cyan", and its perceptual
+        lightness of 72% is closest to the grade of 300 (1000 - 70 * 10).
+        Therefore, according to this scheme <code>#43b8c9</code> would be named{" "}
+        <code>color-cyan-300</code>.
+      </p>
+      <p>
+        Perceptual lightness is based on the{" "}
+        <a href="https://oklch.com/" target="_blank" rel="noreferrer">
+          OKLCH color space
+        </a>
+        .
+      </p>
     </div>
-    <div>
-      <h2
-        className="dremio-typography-extra-large dremio-typography-bold mb-6"
-        style={{ textTransform: "capitalize", fontSize: "24px" }}
-      >
-        Success
-      </h2>
-      <div className="flex flex-row">
-        <ColorChip family="success" grade={50} />
-        <ColorChip family="success" grade={300} />
-      </div>
-    </div>
-    <div>
-      <h2
-        className="dremio-typography-extra-large dremio-typography-bold mb-6"
-        style={{ textTransform: "capitalize", fontSize: "24px" }}
-      >
-        Info
-      </h2>
-      <div className="flex flex-row">
-        <ColorChip family="info" grade={50} />
-        <ColorChip family="info" grade={400} />
-      </div>
-    </div>
-    {families.map((family) => (
-      <div key={family}>
-        <h2
-          className="dremio-typography-bold mb-6"
-          style={{ textTransform: "capitalize", fontSize: "24px" }}
-        >
-          {family}
-        </h2>
-        <div className="flex flex-row">
-          {grades.map((grade) => (
-            <ColorChip grade={grade} family={family} />
-          ))}
-        </div>
-      </div>
-    ))}
+
+    {hues.map(renderFamily)}
   </div>
 );

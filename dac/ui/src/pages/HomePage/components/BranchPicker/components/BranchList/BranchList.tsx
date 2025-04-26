@@ -23,6 +23,7 @@ import { useNessieContext } from "#oss/pages/NessieHomePage/utils/context";
 import { Reference } from "#oss/types/nessie";
 import { SearchField } from "components/Fields";
 import RefIcon from "../RefIcon/RefIcon";
+import { SelectSingleList } from "dremio-ui-lib/components";
 
 import "./BranchList.less";
 
@@ -94,11 +95,19 @@ function BranchList({
           </MenuItem>
         ) : (
           <MenuItem
-            {...(onClick && { onClick: () => onClick(cur as Reference) })}
+            {...(onClick && {
+              onClick: () => onClick(cur as Reference),
+              onKeyDown: (e) => {
+                if (e.code === "Enter") {
+                  onClick(cur as Reference);
+                }
+              },
+            })}
             data-testid={`branch-${cur.name}`}
             className="branchList-item"
             selected={cur.name === currentReference.name}
             title={cur.name}
+            tabIndex={cur.name === currentReference.name ? 0 : -1}
           >
             <span className="branchList-item-icon">
               <RefIcon reference={cur} style={{ width: 20, height: 20 }} />
@@ -122,18 +131,42 @@ function BranchList({
         />
       </div>
       <div className="branchList-listContainer">
-        <AutoSizer>
-          {({ height, width }) => (
-            <List
-              ref={ref}
-              rowRenderer={renderRow}
-              rowCount={filteredList.length}
-              rowHeight={LIST_ITEM_HEIGHT}
-              height={height || 600}
-              width={width || 150}
-            />
-          )}
-        </AutoSizer>
+        <SelectSingleList
+          listItems={filteredList}
+          currentItemId={currentReference.name}
+          aria-label="Branch list"
+          itemRenderer={(item: any) =>
+            isHeader(item) ? (
+              <li
+                className="branchList-header-item"
+                style={{ height: LIST_ITEM_HEIGHT }}
+              >
+                <span className="text-ellipsis">{item.name}</span>
+              </li>
+            ) : (
+              <li
+                {...(onClick && {
+                  onClick: () => onClick(item as Reference),
+                })}
+                id={item.name}
+                data-testid={`branch-${item.name}`}
+                className="branchList-item listbox-item"
+                title={item.name}
+                style={{ height: LIST_ITEM_HEIGHT }}
+                role="option"
+                aria-selected={item.name === currentReference.name}
+              >
+                <span className="branchList-item-icon">
+                  <RefIcon
+                    reference={item as Reference}
+                    style={{ width: 20, height: 20 }}
+                  />
+                </span>
+                <span className="text-ellipsis">{item.name}</span>
+              </li>
+            )
+          }
+        />
       </div>
     </div>
   );

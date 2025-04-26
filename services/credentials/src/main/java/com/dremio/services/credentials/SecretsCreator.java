@@ -21,7 +21,11 @@ import java.util.Optional;
 /** Primary interface for in-line encryption of source secrets. */
 public interface SecretsCreator {
 
-  /** Validate and return true if the secret has already been encrypted. */
+  /**
+   * Validate and return true if the secret has already been encrypted by the system.
+   *
+   * @param secret string to check, can be a raw password OR a secret URI including its scheme
+   */
   boolean isEncrypted(String secret);
 
   /**
@@ -30,6 +34,7 @@ public interface SecretsCreator {
    * secrets encoded as data credentials; callers should encode plaintext secrets where possible to
    * ensure secrets are encrypted.
    *
+   * @param secret a raw password OR a secret URI including its scheme
    * @throws CredentialsException if error occurs during encryption.
    * @return URI representation of encrypted secret, empty if encryption was refused.
    */

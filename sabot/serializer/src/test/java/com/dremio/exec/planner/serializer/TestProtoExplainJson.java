@@ -18,11 +18,7 @@ package com.dremio.exec.planner.serializer;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.dremio.BaseTestQuery;
-import com.dremio.common.config.SabotConfig;
-import com.dremio.exec.ExecConstants;
-import com.dremio.exec.hadoop.HadoopFileSystem;
 import java.util.Properties;
-import org.apache.hadoop.conf.Configuration;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -30,17 +26,12 @@ import org.junit.Test;
 public class TestProtoExplainJson extends BaseTestQuery {
 
   @BeforeClass
-  public static void setupDefaultTestCluster() throws Exception {
-    BaseTestQuery.setupDefaultTestCluster();
-
+  public static void setupClass() throws Exception {
     final Properties properties = cloneDefaultTestConfigProperties();
     properties.setProperty(
         "dremio.planning.serializer",
         "com.dremio.exec.planner.serializer.ProtoRelSerializerFactory");
-    config = SabotConfig.create(properties);
-    openClient();
-    localFs = HadoopFileSystem.getLocal(new Configuration());
-    setSessionOption(ExecConstants.ENABLE_VERBOSE_ERRORS, true);
+    updateClient(properties);
   }
 
   @Test

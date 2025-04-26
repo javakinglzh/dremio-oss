@@ -943,6 +943,20 @@ public class TestIcebergSortOrder extends BaseTestQuery {
     resetSystemOption(ExecConstants.ENABLE_ICEBERG_SORT_ORDER);
   }
 
+  @Test
+  public void testSortOrderColumnNotFound() {
+    String tableName = "testSortOrderColumnNotFound";
+    String query =
+        String.format(
+            "CREATE TABLE %s.%s (col1 int) LOCALSORT BY (col1, col2)", TEMP_SCHEMA, tableName);
+    Assertions.assertThatThrownBy(
+            () -> {
+              runSQL(query);
+            })
+        .isInstanceOf(UserException.class) // Replace with your actual exception class
+        .hasMessageContaining("SortOrder column col2 cannot be found in table");
+  }
+
   protected static File createTempLocation() {
     Random random = new Random(System.currentTimeMillis());
     RandomStringGenerator randomStringGenerator =

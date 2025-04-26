@@ -196,7 +196,7 @@ public class TestExportProfiles extends BaseTestServer {
       "-l", "--output", tmpPath, "--format", "JSON", "--write-mode", "FAIL_IF_EXISTS"
     };
     final ExportProfilesOptions options = getExportOptions(args);
-    String vmid = VM.getProcessId();
+    String vmid = Long.toString(VM.getProcessId());
     DremioAttach.main(
         vmid,
         new String[] {

@@ -22,12 +22,14 @@ import com.dremio.common.util.MajorTypeHelper;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
 import com.dremio.exec.record.VectorAccessible;
+import com.dremio.exec.store.SystemSchemas.SystemColumnStatistics;
 import com.dremio.exec.store.iceberg.IcebergPartitionData;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.List;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 
@@ -189,5 +191,16 @@ public interface RecordWriter extends AutoCloseable {
   interface WriteStatsListener {
     /** Record the act of writing 'byteCount' bytes to an output file */
     void bytesWritten(long byteCount);
+
+    default void updateSystemColumnLowerBounds() {}
+
+    default void updateSystemColumnUpperBounds() {}
+
+    default List<SystemColumnStatistics> getSystemColumnStatistics() {
+      return Collections.emptyList();
+    }
+
+    // the offset in current incoming batch
+    default void setBatchOffset(int offset) {}
   }
 }

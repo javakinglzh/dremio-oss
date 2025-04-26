@@ -37,7 +37,7 @@ public class TestHashJoin extends BaseTestJoin {
         new HashJoinPOP(PROPS, null, null, conditions, null, type, false, null));
   }
 
-  protected JoinInfo getSpillingJoinInfo(
+  public JoinInfo getSpillingJoinInfo(
       List<JoinCondition> conditions,
       LogicalExpression extraCondition,
       JoinRelType type,

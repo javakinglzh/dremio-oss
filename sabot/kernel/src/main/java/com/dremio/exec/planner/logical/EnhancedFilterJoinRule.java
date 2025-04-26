@@ -21,6 +21,7 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptPredicateList;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
+import org.apache.calcite.plan.RelRule.Config;
 import org.apache.calcite.rel.RelHomogeneousShuttle;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttleImpl;
@@ -29,7 +30,6 @@ import org.apache.calcite.rel.core.Join;
 import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
-import org.apache.calcite.rel.rules.TransformationRule;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
 import org.apache.calcite.rex.RexCall;
@@ -43,24 +43,40 @@ import org.apache.calcite.rex.RexVisitorImpl;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.sql.type.ReturnTypes;
 import org.apache.calcite.tools.RelBuilder;
-import org.apache.calcite.util.ImmutableBeans;
 import org.apache.calcite.util.Util;
 
 /**
  * Rule that pushes predicates from a Filter and a Join into the Join below, and pushes the join
  * condition into the Join.
  */
-public final class EnhancedFilterJoinRule extends RelRule<EnhancedFilterJoinRule.Config>
-    implements TransformationRule {
+public class EnhancedFilterJoinRule extends RelRule<Config> {
+
+  public static final EnhancedFilterJoinRule WITH_FILTER =
+      new EnhancedFilterJoinRule(
+          RelRule.Config.EMPTY
+              .withDescription("EnhancedFilterJoinRule:withFilter")
+              .withOperandSupplier(
+                  op ->
+                      op.operand(Filter.class)
+                          .oneInput(join -> join.operand(Join.class).anyInputs()))
+              .as(Config.class));
+
+  public static final EnhancedFilterJoinRule NO_FILTER =
+      new EnhancedFilterJoinRule(
+          RelRule.Config.EMPTY
+              .withDescription("EnhancedFilterJoinRule:withoutFilter")
+              .withOperandSupplier(op -> op.operand(Join.class).anyInputs())
+              .as(Config.class));
+
   // This is a special operator we introduce to let this rule know that we shouldn't fire anymore to
   // avoid infinite loops
-  private static final SqlOperator DO_NOT_PUSH_DOWN_OPERATOR =
+  protected static final SqlOperator DO_NOT_PUSH_DOWN_OPERATOR =
       SqlOperatorBuilder.name("DO_NOT_PUSH_DOWN")
           .returnType(ReturnTypes.ARG0)
           .anyOperands()
           .build();
 
-  private EnhancedFilterJoinRule(EnhancedFilterJoinRule.Config config) {
+  protected EnhancedFilterJoinRule(Config config) {
     super(config);
   }
 
@@ -78,36 +94,22 @@ public final class EnhancedFilterJoinRule extends RelRule<EnhancedFilterJoinRule
       join = call.rel(0);
     }
 
-    RelNode rewrite = doMatch(filter, join, call.builder(), config.useGuardRail());
+    RelNode rewrite = doMatch(filter, join, call.builder());
     if (rewrite != null) {
       call.transformTo(
           rewrite.accept(
               new RelShuttleImpl() {
                 @Override
                 public RelNode visit(LogicalJoin join) {
-                  DremioJoinPushTransitivePredicatesRule instance =
-                      new DremioJoinPushTransitivePredicatesRule();
-                  MoreRelOptUtil.TransformCollectingCall c =
-                      new MoreRelOptUtil.TransformCollectingCall(
-                          call.getPlanner(), instance.getOperand(), new RelNode[] {join}, null);
-                  instance.onMatch(c);
-                  if (!c.isTransformed()) {
-                    return join;
-                  } else {
-                    return c.getTransformedRel();
-                  }
+                  LogicalJoin newJoin =
+                      DremioJoinPushTransitivePredicatesRule.findAndApplyTransitivePredicates(join);
+                  return newJoin == null ? join : newJoin;
                 }
               }));
     }
   }
 
-  protected RelNode doMatch(
-      Filter filterRel, Join joinRel, RelBuilder relBuilder, boolean useGuardRail) {
-    if (useGuardRail
-        && (filterRel) != null
-        && containsDoNotPushdownOperator(filterRel.getCondition())) {
-      return null;
-    }
+  RelNode doMatch(Filter filterRel, Join joinRel, RelBuilder relBuilder) {
 
     // Extract the join condition and pushdown predicates, also simplify the remaining filter
     EnhancedFilterJoinExtraction extraction =
@@ -152,80 +154,47 @@ public final class EnhancedFilterJoinRule extends RelRule<EnhancedFilterJoinRule
     RelMetadataQuery mq = joinRel.getCluster().getMetadataQuery();
     RelOptPredicateList leftPulledUpPredicates = mq.getPulledUpPredicates(joinRel.getLeft());
     RelOptPredicateList rightPulledUpPredicates = mq.getPulledUpPredicates(joinRel.getRight());
-    final RelOptPredicateList predicates =
-        leftPulledUpPredicates.union(
-            rexBuilder, rightPulledUpPredicates.shift(rexBuilder, leftFields.size()));
 
     final RexExecutor executor =
         Util.first(joinRel.getCluster().getPlanner().getExecutor(), RexUtil.EXECUTOR);
-    final RexSimplify simplify = new RexSimplify(rexBuilder, predicates, executor);
+    final RexSimplify simplify = new RexSimplify(rexBuilder, RelOptPredicateList.EMPTY, executor);
 
-    RexNode leftPushdownPredicatePruned =
+    leftPushdownPredicateShifted =
         MoreRelOptUtil.prunePushdown(
-            simplify.simplifyPreservingType(
-                leftPushdownPredicateShifted, RexUnknownAs.falseIf(true), true),
+            simplify
+                .withPredicates(leftPulledUpPredicates)
+                .simplifyPreservingType(
+                    leftPushdownPredicateShifted, RexUnknownAs.falseIf(true), true),
             leftPulledUpPredicates,
             rexBuilder);
-    RexNode rightPushdownPredicatePruned =
+    rightPushdownPredicateShifted =
         MoreRelOptUtil.prunePushdown(
-            simplify.simplifyPreservingType(
-                rightPushdownPredicateShifted, RexUnknownAs.falseIf(true), true),
+            simplify
+                .withPredicates(rightPulledUpPredicates)
+                .simplifyPreservingType(
+                    rightPushdownPredicateShifted, RexUnknownAs.falseIf(true), true),
             rightPulledUpPredicates,
             rexBuilder);
 
     // If nothing is changed, then no pushdown happens
-    if (leftPushdownPredicatePruned.isAlwaysTrue()
-        && rightPushdownPredicatePruned.isAlwaysTrue()
+    if (leftPushdownPredicateShifted.isAlwaysTrue()
+        && rightPushdownPredicateShifted.isAlwaysTrue()
         && (newJoinCondition.isAlwaysTrue()
             || (newJoinCondition.equals(inputJoinConditionPruned)
                 && remainingFilterCondition.equals(inputFilterConditionPruned)))) {
       return null;
     }
 
-    // Wrap the top filter in a special node that tells the rule not to push it down further
-    if (useGuardRail && !remainingFilterCondition.isAlwaysTrue()) {
-      remainingFilterCondition =
-          rexBuilder.makeCall(DO_NOT_PUSH_DOWN_OPERATOR, remainingFilterCondition);
-    }
-
     // Construct the rewritten result
     return relBuilder
         .push(joinRel.getLeft())
-        .filter(leftPushdownPredicatePruned) // left child of join
+        .filter(leftPushdownPredicateShifted) // left child of join
         .push(joinRel.getRight())
-        .filter(rightPushdownPredicatePruned) // right child of join
+        .filter(rightPushdownPredicateShifted) // right child of join
         .join(simplifiedJoinType, newJoinCondition) // join
         .convert(joinRel.getRowType(), false) // project if needed
         .filter(remainingFilterCondition) // remaining filter
         .build();
-  }
-
-  public interface Config extends RelRule.Config {
-    Config WITH_FILTER =
-        RelRule.Config.EMPTY
-            .withDescription("EnhancedFilterJoinRule:withFilter")
-            .withOperandSupplier(
-                op ->
-                    op.operand(Filter.class).oneInput(join -> join.operand(Join.class).anyInputs()))
-            .as(Config.class);
-
-    Config WITHOUT_FILTER =
-        RelRule.Config.EMPTY
-            .withDescription("EnhancedFilterJoinRule:withoutFilter")
-            .withOperandSupplier(op -> op.operand(Join.class).anyInputs())
-            .as(Config.class);
-
-    @Override
-    default EnhancedFilterJoinRule toRule() {
-      return new EnhancedFilterJoinRule(this);
-    }
-
-    @ImmutableBeans.Property
-    @ImmutableBeans.BooleanDefault(false)
-    boolean useGuardRail();
-
-    /** Sets {@link #useGuardRail()}. */
-    Config withUseGuardRail(boolean withUseGuardRail);
   }
 
   public static RelNode removeArtifacts(RelNode relNode) {
@@ -233,35 +202,26 @@ public final class EnhancedFilterJoinRule extends RelRule<EnhancedFilterJoinRule
         new RelHomogeneousShuttle() {
           @Override
           public RelNode visit(RelNode other) {
-            if (!(other instanceof Filter)) {
-              return super.visit(other);
-            }
-
-            Filter filter = (Filter) other;
-            RelNode input = filter.getInput().accept(this);
-            RexNode condition =
-                filter
-                    .getCondition()
-                    .accept(
-                        new RexShuttle() {
-                          @Override
-                          public RexNode visitCall(final RexCall call) {
-                            if (!call.getOperator().equals(DO_NOT_PUSH_DOWN_OPERATOR)) {
-                              return super.visitCall(call);
-                            }
-
-                            return call.getOperands().get(0);
-                          }
-                        });
-            return filter.copy(filter.getTraitSet(), input, condition);
+            return super.visit(other)
+                .accept(
+                    new RexShuttle() {
+                      @Override
+                      public RexNode visitCall(final RexCall call) {
+                        if (!call.getOperator().equals(DO_NOT_PUSH_DOWN_OPERATOR)) {
+                          return super.visitCall(call);
+                        }
+                        return call.getOperands().get(0);
+                      }
+                    });
           }
         });
   }
 
-  private static boolean containsDoNotPushdownOperator(RexNode node) {
+  protected boolean containsDoNotPushdownOperator(RexNode node) {
+
     Boolean containsOperator =
         node.accept(
-            new RexVisitorImpl<Boolean>(true) {
+            new RexVisitorImpl<>(true) {
               @Override
               public Boolean visitCall(RexCall call) {
                 if (call.getOperator().equals(DO_NOT_PUSH_DOWN_OPERATOR)) {

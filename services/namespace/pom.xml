@@ -60,11 +60,6 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
-      <artifactId>dremio-services-search</artifactId>
-      <version>${project.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-scheduler</artifactId>
     </dependency>
     <dependency>

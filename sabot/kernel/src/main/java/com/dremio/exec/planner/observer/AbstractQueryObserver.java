@@ -21,4 +21,13 @@ public abstract class AbstractQueryObserver implements QueryObserver {
 
   @Override
   public void execCompletion(UserResult result) {}
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void queryClosed() {}
 }

@@ -15,7 +15,8 @@
  */
 package com.dremio.exec.planner.sql;
 
-import static com.dremio.exec.planner.physical.PlannerSettings.EXPERIMENTAL_FUNCTIONS;
+import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_EXPERIMENTAL_FUNCTIONS;
+import static com.dremio.exec.planner.physical.PlannerSettings.ENABLE_TEST_ONLY_FUNCTIONS;
 
 import com.dremio.exec.expr.fn.FunctionImplementationRegistry;
 import com.dremio.options.OptionResolver;
@@ -34,13 +35,12 @@ import org.apache.calcite.sql.fun.SqlLibraryOperatorTableFactory;
 import org.apache.calcite.sql.fun.SqlLibraryOperators;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.util.ChainedSqlOperatorTable;
-import org.apache.calcite.sql.util.ListSqlOperatorTable;
 import org.apache.calcite.sql.validate.SqlNameMatcher;
 
 /** Composes all the SqlOperatorTables needed for Dremio. */
 public final class DremioCompositeSqlOperatorTable {
-  public static final SqlOperatorTable DREMIO_OT = DremioSqlOperatorTable.instance();
-  public static final SqlOperatorTable STD_OT =
+  private static final SqlOperatorTable DREMIO_OT = DremioSqlOperatorTable.instance();
+  private static final SqlOperatorTable STD_OT =
       FilteredSqlOperatorTable.create(
           SqlStdOperatorTable.instance(),
           SqlStdOperatorTable.ROUND,
@@ -50,7 +50,8 @@ public final class DremioCompositeSqlOperatorTable {
           SqlStdOperatorTable.REPLACE,
           // CARDINALITY in Calcite accepts MAP, LIST and STRUCT. In Dremio, we plan to support only
           // MAP and LIST.
-          SqlStdOperatorTable.CARDINALITY);
+          SqlStdOperatorTable.CARDINALITY,
+          SqlStdOperatorTable.BIT_XOR);
   private static final SqlOperatorTable ORACLE_OT =
       FilteredSqlOperatorTable.create(
           SqlLibraryOperatorTableFactory.INSTANCE.getOperatorTable(SqlLibrary.ORACLE),
@@ -62,6 +63,10 @@ public final class DremioCompositeSqlOperatorTable {
           SqlLibraryOperators.TO_DATE, // Dremio already has implementation
           SqlLibraryOperators.TO_TIMESTAMP); // Dremio already has implementation
 
+  private static final SqlOperatorTable TEST_ONLY_FUNCTIONS = TestOnlySqlOperatorTable.instance();
+  private static final SqlOperatorTable EXPERIMENTAL_FUNCTIONS =
+      ExperimentalSqlOperatorTable.instance();
+
   /**
    * These are the SqlOperators that are known at compile time. They will later get mixed in with
    * SqlOperators generated at runtime (like hive functions and UDFs).
@@ -72,16 +77,35 @@ public final class DremioCompositeSqlOperatorTable {
   private DremioCompositeSqlOperatorTable() {}
 
   public static SqlOperatorTable create() {
-    return COMPILE_TIME_OPERATOR_TABLE;
+    return create((OptionResolver) null);
   }
 
-  public static SqlOperatorTable create(List<SqlOperator> sqlOperators) {
-    SqlOperatorTable sqlOperatorTable = new ListSqlOperatorTable(sqlOperators);
-    return create(sqlOperatorTable);
+  public static SqlOperatorTable create(OptionResolver optionResolver) {
+    SqlOperatorTable chainedOperatorTable = COMPILE_TIME_OPERATOR_TABLE;
+
+    if (optionResolver != null) {
+      if (optionResolver.getOption(ENABLE_EXPERIMENTAL_FUNCTIONS)) {
+        chainedOperatorTable =
+            ChainedSqlOperatorTable.of(chainedOperatorTable, EXPERIMENTAL_FUNCTIONS);
+      }
+
+      if (optionResolver.getOption(ENABLE_TEST_ONLY_FUNCTIONS)) {
+        chainedOperatorTable =
+            ChainedSqlOperatorTable.of(chainedOperatorTable, TEST_ONLY_FUNCTIONS);
+      }
+    }
+
+    return chainedOperatorTable;
   }
 
   public static SqlOperatorTable create(
       FunctionImplementationRegistry functionImplementationRegistry) {
+    return create(functionImplementationRegistry, null);
+  }
+
+  public static SqlOperatorTable create(
+      FunctionImplementationRegistry functionImplementationRegistry,
+      OptionResolver optionResolver) {
     SqlOperatorTable functionRegistryOperatorTable =
         FilteredSqlOperatorTable.create(
             RuntimeSqlOperatorTable.create(functionImplementationRegistry.listOperators()),
@@ -104,23 +128,13 @@ public final class DremioCompositeSqlOperatorTable {
             "ARRAY_SUM",
             "ARRAY_CONTAINS",
             "ARRAY_REMOVE");
-    return create(functionRegistryOperatorTable);
+    return create(functionRegistryOperatorTable, optionResolver);
   }
 
   public static SqlOperatorTable create(
-      FunctionImplementationRegistry functionImplementationRegistry,
-      OptionResolver optionResolver) {
-    SqlOperatorTable operatorTable = create(functionImplementationRegistry);
-    if (optionResolver != null && !optionResolver.getOption(EXPERIMENTAL_FUNCTIONS)) {
-      operatorTable =
-          FilteredSqlOperatorTable.create(operatorTable, DremioSqlOperatorTable.ARRAY_SORT);
-    }
-    return new IgnoreNullOpNameSqlOperatorTable(operatorTable);
-  }
-
-  public static SqlOperatorTable create(SqlOperatorTable sqlOperatorTable) {
+      SqlOperatorTable sqlOperatorTable, OptionResolver optionResolver) {
     SqlOperatorTable compositeOperatorTable =
-        ChainedSqlOperatorTable.of(COMPILE_TIME_OPERATOR_TABLE, sqlOperatorTable);
+        ChainedSqlOperatorTable.of(create(optionResolver), sqlOperatorTable);
     return new IgnoreNullOpNameSqlOperatorTable(compositeOperatorTable);
   }
 

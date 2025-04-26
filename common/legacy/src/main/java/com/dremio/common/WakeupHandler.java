@@ -24,11 +24,21 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.inject.Provider;
 
 /**
- * Handles wakeup events for the various managers.
+ * Handles wakeup events for the various managers. Ensures only a single instance of the manager is
+ * running and that no wakeup event is lost.
  *
- * <p>Ensures only a single instance of the manager is running and that no wakeup event is lost.
+ * <p>Only use WakeupHandler if you need to trigger a wakeup event while the manager is already
+ * running ,and you need the manager to run again because of the wakeup event. Otherwise, if you
+ * need to run some code once or on a schedule, create a Schedule for the SchedulerService. Be
+ * careful with using the SchedulerService and WakeupHandler together because two threads will be
+ * needed to run the manager code.
+ *
+ * <p>An example use case for the WakeupHandler is reflection management where the manager needs to
+ * run every 10 seconds. If a user manually creates or edits a reflection, we need the manager to
+ * run immediately or again after the current run to not miss the user's action.
  */
 public class WakeupHandler {
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(WakeupHandler.class);
 
@@ -78,6 +88,8 @@ public class WakeupHandler {
                 } else {
                   manager.run();
                 }
+              } catch (Exception e) {
+                logger.error("manager failed to run, reason: {}", reason, e);
               } finally {
                 running.set(false);
               }

@@ -81,6 +81,12 @@ public abstract class ExternalCleaner {
     return failedCounter;
   }
 
+  /** Resets the successCounter and failedCounter of the cleaner to 0. */
+  final void resetCounters() {
+    successCounter = 0;
+    failedCounter = 0;
+  }
+
   final List<String> getLastErrors() {
     return failedAttempts.entrySet().stream()
         .map(

@@ -31,7 +31,7 @@ import org.apache.calcite.rel.type.RelDataType;
  * table_history,table_snapshot,table_manifesTs are metadata functions. Any new table format should
  * extend this to support these metadata functions
  */
-abstract class MFunctionQueryRelBase extends AbstractRelNode {
+public abstract class MFunctionQueryRelBase extends AbstractRelNode {
 
   final MFunctionCatalogMetadata tableMetadata;
   final RelDataType rowType;

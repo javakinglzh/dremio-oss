@@ -70,6 +70,11 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
+      <artifactId>dremio-services-pubsub-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-scheduler</artifactId>
     </dependency>
     <dependency>
@@ -188,6 +193,34 @@
                   </options>
                 </protoModule>
               </protoModules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.xolstice.maven.plugins</groupId>
+        <artifactId>protobuf-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>generate-protobuf</id>
+            <goals>
+              <goal>compile</goal>
+            </goals>
+            <configuration>
+              <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+            </configuration>
+          </execution>
+          <execution>
+            <id>generate-proto</id>
+            <goals>
+              <goal>compile</goal>
+            </goals>
+            <configuration>
+              <includes>
+                <include>dataset-common.proto</include>
+                <include>namespace-common.proto</include>
+                <include>namespace-file-common.proto</include>
+              </includes>
             </configuration>
           </execution>
         </executions>

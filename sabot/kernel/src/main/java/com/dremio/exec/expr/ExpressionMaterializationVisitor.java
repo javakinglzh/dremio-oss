@@ -379,7 +379,13 @@ class ExpressionMaterializationVisitor
           String.format("Unable to convert given types. Operation unsupported for %s types", type));
     }
     // TODO(DX-13724): not all "assert_..." functions are available
-    String castFuncName = String.format("assert_%s", type.toString());
+    String typeName;
+    if (type == MinorType.TIMESTAMPMILLI) {
+      typeName = "TIMESTAMP";
+    } else {
+      typeName = type.toString();
+    }
+    String castFuncName = String.format("assert_%s", typeName);
     Collections.singletonList(arg);
     return new FunctionCall(castFuncName, Collections.singletonList(arg));
   }
@@ -393,7 +399,13 @@ class ExpressionMaterializationVisitor
    */
   private LogicalExpression getIsTypeExpressionForType(MinorType type, LogicalExpression arg) {
     // TODO(DX-13724): not all "is_..." functions are available
-    String isFuncName = String.format("is_%s", type.toString());
+    String typeName;
+    if (type == MinorType.TIMESTAMPMILLI) {
+      typeName = "TIMESTAMP";
+    } else {
+      typeName = type.toString();
+    }
+    String isFuncName = String.format("is_%s", typeName);
     List<LogicalExpression> args = Lists.newArrayList();
     args.add(arg);
     return new FunctionCall(isFuncName, args);
@@ -859,7 +871,7 @@ class ExpressionMaterializationVisitor
       case UINT4:
       case UINT8:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case TIMESTAMPTZ:
       case DATE:
       case INTERVAL:

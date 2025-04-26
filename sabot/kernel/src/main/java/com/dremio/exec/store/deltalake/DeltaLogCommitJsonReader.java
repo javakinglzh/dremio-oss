@@ -45,7 +45,7 @@ import static com.dremio.exec.store.deltalake.DeltaConstants.SCHEMA_STATS;
 import static com.dremio.exec.store.deltalake.DeltaLogReaderUtils.parseStatsFromJson;
 
 import com.dremio.connector.metadata.DatasetSplit;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.file.proto.FileProtobuf;
 import com.dremio.io.FSInputStream;
 import com.dremio.io.file.FileAttributes;
@@ -89,13 +89,13 @@ public class DeltaLogCommitJsonReader implements DeltaLogReader {
   @Override
   public DeltaLogSnapshot parseMetadata(
       Path rootFolder,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       FileSystem fs,
       List<FileAttributes> fileAttributes,
       long version)
       throws IOException {
     final boolean fullRowCountEnabled =
-        DeltaLogReaderUtils.isFullRowCountEnabled(context.getOptionManager());
+        DeltaLogReaderUtils.isFullRowCountEnabled(pluginSabotContext.getOptionManager());
     final int minReaderVersionSupported = 2;
 
     final Path commitFilePath = fileAttributes.get(0).getPath();

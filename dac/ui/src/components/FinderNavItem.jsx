@@ -46,6 +46,11 @@ import { getHref } from "@inject/utils/mainInfoUtils/mainInfoNameUtil";
 import { newGetHref } from "@inject/utils/mainInfoUtils/newMainInfoNameUtil";
 import { ARSFeatureSwitch } from "@inject/utils/arsUtils";
 import { Spinner } from "dremio-ui-lib/components";
+import {
+  DisabledSourceNavItem,
+  isSourceDisabled,
+} from "./DisabledSourceNavItem";
+import { isVersionedSource } from "@inject/utils/sourceUtils";
 
 import "./FinderNavItem.less";
 
@@ -180,20 +185,36 @@ class FinderNavItem extends Component {
       linkClass,
     } = this.props;
 
-    const { id, name, numberOfDatasets, disabled, datasetCountBounded } =
-      this.props.item;
-
+    const {
+      id,
+      name,
+      numberOfDatasets,
+      disabled,
+      datasetCountBounded,
+      sourceChangeState,
+      type,
+    } = this.props.item;
+    const isSourceVersioned = isVersionedSource(type);
     const itemClass = classNames("finder-nav-item", {
-      withExtra: !!renderExtra,
+      withExtra: isSourceVersioned && !!renderExtra,
     });
     const isActiceArcticSource = name === params?.sourceId; // sourceId is param for when in Arctic Source history URL
 
     const entityType = item.entityType || ENTITY_TYPES.home; //Defaults to home
+    const sourceDisabled = isSourceDisabled(sourceChangeState, entityType);
 
-    return (
+    return sourceDisabled ? (
+      <DisabledSourceNavItem
+        name={name}
+        sourceChangeState={sourceChangeState}
+      />
+    ) : (
       <li
         className={itemClass}
-        style={{ ...(disabled && styles.disabled), ...(style || {}) }}
+        style={{
+          ...(disabled && styles.disabled),
+          ...(style || {}),
+        }}
         ref={this.itemRef}
       >
         {item.entityType === ENTITY_TYPES.space ? (
@@ -219,14 +240,14 @@ class FinderNavItem extends Component {
               )}
               {...(item.entityType === ENTITY_TYPES.folder && {
                 linkTo: shouldUseNewDatasetNavigation()
-                  ? newGetHref(Immutable.fromJS(item), null)
-                  : getHref(Immutable.fromJS(item), null),
+                  ? newGetHref(Immutable.fromJS(item))
+                  : getHref(Immutable.fromJS(item)),
               })}
               onlyActiveOnIndex={onlyActiveOnIndex}
               ariaLabel={name}
             >
               {this.props.isLoading ? (
-                <Spinner />
+                <Spinner className="dremio-icon-label" />
               ) : (
                 <PureEntityIcon
                   entityType={entityType}
@@ -241,12 +262,11 @@ class FinderNavItem extends Component {
                   <span>{name}</span>
                 </EllipsedText>
               </Tooltip>
-              {renderExtra && (
+              {renderExtra && isSourceVersioned ? (
                 <span className="extra-content">
                   {renderExtra(this.props.item, this.itemRef)}
                 </span>
-              )}
-              {!renderExtra && (
+              ) : (
                 <>
                   <ContainerDatasetCount
                     count={numberOfDatasets}
@@ -281,9 +301,7 @@ export default withRouter(FinderNavItem);
 
 const styles = {
   disabled: {
-    opacity: 0.7,
     background: "var(--fill--primary)",
     pointerEvents: "none",
-    color: "#999",
   },
 };

@@ -34,9 +34,11 @@ import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEventsImpl;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.dataset.proto.IcebergViewAttributes;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.DatasetSplit;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
+import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.services.pubsub.MessagePublisher;
 import com.dremio.test.DremioTest;
@@ -511,5 +513,73 @@ public class TestDatasetMetadataSaver {
       }
     }
     assertEquals(numDirectSplit, 5);
+  }
+
+  @Test
+  public void testDatasetMetadataSaverWithViews() throws NamespaceException {
+    DatasetMetadataSaver datasetMetadataSaver =
+        namespaceService.newDatasetMetadataSaver(
+            new NamespaceKey("testPath"),
+            new EntityId().setId("testId"),
+            NamespaceService.SplitCompression.UNCOMPRESSED,
+            Long.MAX_VALUE,
+            false);
+    assertThat(datasetMetadataSaver).isNotNull();
+
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setId(new EntityId().setId(UUID.randomUUID().toString()));
+    datasetConfig.setCreatedAt(System.currentTimeMillis());
+    datasetConfig.setName("viewdataset");
+    datasetConfig.setFullPathList(asList("viewPath"));
+    datasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+
+    VirtualDataset virtualDataset = new VirtualDataset();
+    virtualDataset.setSql("SELECT * FROM test_table");
+    virtualDataset.setContextList(asList("folder", "view"));
+    virtualDataset.setIcebergViewAttributes(IcebergViewAttributes.getDefaultInstance());
+    datasetConfig.setVirtualDataset(virtualDataset);
+    datasetMetadataSaver.saveDataset(datasetConfig, true);
+
+    assertThat(namespaceService.getDataset(new NamespaceKey("testPath"))).isNotNull();
+  }
+
+  @Test
+  public void testSaveWithIcebergViewAttributes() throws NamespaceException {
+    DatasetMetadataSaver datasetMetadataSaver =
+        namespaceService.newDatasetMetadataSaver(
+            new NamespaceKey("testPath"),
+            new EntityId().setId("testId"),
+            NamespaceService.SplitCompression.UNCOMPRESSED,
+            Long.MAX_VALUE,
+            false);
+    assertThat(datasetMetadataSaver).isNotNull();
+    IcebergViewAttributes icebergViewAttributes =
+        new IcebergViewAttributes()
+            .setViewSpecVersion("1.0")
+            .setViewDialect("SQL")
+            .setMetadataLocation("s3://path/to/metadata");
+
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setId(new EntityId().setId(UUID.randomUUID().toString()));
+    datasetConfig.setCreatedAt(System.currentTimeMillis());
+    datasetConfig.setName("viewdataset");
+    datasetConfig.setFullPathList(asList("viewPath"));
+    datasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+
+    VirtualDataset virtualDataset = new VirtualDataset();
+    virtualDataset.setSql("SELECT * FROM test_table");
+    virtualDataset.setContextList(asList("folder", "view"));
+    virtualDataset.setIcebergViewAttributes(icebergViewAttributes);
+    datasetConfig.setVirtualDataset(virtualDataset);
+    datasetMetadataSaver.saveDataset(datasetConfig, true);
+
+    assertThat(namespaceService.getDataset(new NamespaceKey("testPath"))).isNotNull();
+    assertThat(
+            namespaceService
+                .getDataset(new NamespaceKey("testPath"))
+                .getVirtualDataset()
+                .getIcebergViewAttributes()
+                .getMetadataLocation())
+        .isEqualTo(icebergViewAttributes.getMetadataLocation());
   }
 }

@@ -27,6 +27,7 @@ import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -53,7 +54,8 @@ public abstract class AbstractAttemptObserver implements AttemptObserver {
   public void beginState(AttemptEvent event) {}
 
   @Override
-  public void planText(String text, long millisTaken) {}
+  public void planFinalPhysical(
+      String text, long millisTaken, List<PlannerPhaseRulesStats> stats) {}
 
   @Override
   public void finalPrelPlanGenerated(Prel prel) {}
@@ -104,6 +106,9 @@ public abstract class AbstractAttemptObserver implements AttemptObserver {
   public void planRefreshDecision(String text, long millisTaken) {}
 
   @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {}
+
+  @Override
   public void planSubstituted(
       DremioMaterialization materialization,
       List<RelWithInfo> substitutions,
@@ -131,6 +136,9 @@ public abstract class AbstractAttemptObserver implements AttemptObserver {
       boolean isMaterializationCacheInitialized) {}
 
   @Override
+  public void planStepLogging(String phaseName, String text, long millisTaken) {}
+
+  @Override
   public void planSerializable(RelNode serializable) {}
 
   @Override
@@ -145,6 +153,15 @@ public abstract class AbstractAttemptObserver implements AttemptObserver {
 
   @Override
   public void attemptCompletion(UserResult result) {}
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void queryClosed() {}
 
   @Override
   public void queryStarted(UserRequest query, String user) {}
@@ -205,4 +222,7 @@ public abstract class AbstractAttemptObserver implements AttemptObserver {
 
   @Override
   public void putProfileFailed() {}
+
+  @Override
+  public void putProfileUpdateComplete() {}
 }

@@ -114,6 +114,7 @@ export class RecommendedJoinItem extends Component {
             placement="right"
             showFullPath
             typeIcon="VirtualDataset" // TODO get dataset type from server. DX-5884
+            showSummaryOverlay={false}
           />
         </div>
         <div style={styles.type}>{this.renderJoinType()}</div>

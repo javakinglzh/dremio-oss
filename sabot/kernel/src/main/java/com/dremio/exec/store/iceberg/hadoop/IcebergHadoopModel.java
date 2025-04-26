@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.store.iceberg.hadoop;
 
-import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergBaseCommand;
 import com.dremio.exec.store.iceberg.model.IcebergBaseModel;
 import com.dremio.exec.store.iceberg.model.IcebergCommand;
@@ -31,27 +30,13 @@ import org.apache.iceberg.io.FileIO;
 
 /** Entry point for Hadoop based Iceberg tables */
 public class IcebergHadoopModel extends IcebergBaseModel {
-  private final SupportsIcebergMutablePlugin plugin;
-
-  public IcebergHadoopModel(SupportsIcebergMutablePlugin plugin) {
-    this(
-        EMPTY_NAMESPACE,
-        plugin.getFsConfCopy(),
-        plugin.createIcebergFileIO(plugin.getSystemUserFS(), null, null, null, null),
-        null,
-        null,
-        plugin);
-  }
-
   public IcebergHadoopModel(
       String namespace,
       Configuration configuration,
       FileIO fileIO,
       OperatorContext operatorContext,
-      DatasetCatalogGrpcClient datasetCatalogGrpcClient,
-      SupportsIcebergMutablePlugin plugin) {
-    super(namespace, configuration, fileIO, operatorContext, datasetCatalogGrpcClient, plugin);
-    this.plugin = plugin;
+      DatasetCatalogGrpcClient datasetCatalogGrpcClient) {
+    super(namespace, configuration, fileIO, operatorContext, datasetCatalogGrpcClient);
   }
 
   @Override

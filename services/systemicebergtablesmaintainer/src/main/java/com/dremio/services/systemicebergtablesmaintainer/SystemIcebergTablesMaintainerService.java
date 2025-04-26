@@ -16,8 +16,8 @@
 package com.dremio.services.systemicebergtablesmaintainer;
 
 import com.dremio.exec.ExecConstants;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.SimpleJobRunner;
+import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.copyinto.CopyFileHistoryTableSchemaProvider;
 import com.dremio.exec.store.dfs.copyinto.CopyJobHistoryTableSchemaProvider;
 import com.dremio.exec.store.dfs.system.SystemIcebergTableMetadata;
@@ -59,27 +59,25 @@ public class SystemIcebergTablesMaintainerService implements Service, Runnable {
       DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
   private final Provider<SchedulerService> schedulerService;
   private final Provider<OptionManager> optionManager;
-  private final Provider<SabotContext> sabotContext;
   private final List<SystemIcebergTableMetadata> tableMetadataList = new ArrayList<>();
   private final CopyJobHistoryTableSchemaProvider copyJobHistoryTableSchemaProvider;
   private final CopyFileHistoryTableSchemaProvider copyFileHistoryTableSchemaProvider;
-  private SimpleJobRunner jobRunner;
+  private final Provider<SimpleJobRunner> jobRunnerProvider;
+  private final Provider<CatalogService> catalogServiceProvider;
 
   public SystemIcebergTablesMaintainerService(
-      final Provider<SchedulerService> schedulerService,
-      final Provider<OptionManager> optionManagerProvider,
-      final Provider<SabotContext> sabotContextProvider) {
+      Provider<SchedulerService> schedulerService,
+      Provider<OptionManager> optionManagerProvider,
+      Provider<SimpleJobRunner> jobRunnerProvider,
+      Provider<CatalogService> catalogServiceProvider) {
     this.schedulerService = schedulerService;
     this.optionManager = optionManagerProvider;
-    this.sabotContext = sabotContextProvider;
     long schemaVersion =
         optionManager.get().getOption(ExecConstants.SYSTEM_ICEBERG_TABLES_SCHEMA_VERSION);
     this.copyJobHistoryTableSchemaProvider = new CopyJobHistoryTableSchemaProvider(schemaVersion);
     this.copyFileHistoryTableSchemaProvider = new CopyFileHistoryTableSchemaProvider(schemaVersion);
-  }
-
-  protected void setJobRunner(SimpleJobRunner jobRunner) {
-    this.jobRunner = jobRunner;
+    this.jobRunnerProvider = jobRunnerProvider;
+    this.catalogServiceProvider = catalogServiceProvider;
   }
 
   @Override
@@ -108,8 +106,7 @@ public class SystemIcebergTablesMaintainerService implements Service, Runnable {
   public void run() {
     try {
       LOGGER.info("Running system iceberg tables maintainer service task");
-      SimpleJobRunner simpleJobRunner =
-          jobRunner != null ? jobRunner : sabotContext.get().getJobsRunner().get();
+      SimpleJobRunner simpleJobRunner = jobRunnerProvider.get();
       long currentTimeMillis = System.currentTimeMillis();
       performDeletes(simpleJobRunner, getTimestamp(currentTimeMillis, getRecordLifespan()));
       performOptimize(simpleJobRunner);
@@ -258,9 +255,8 @@ public class SystemIcebergTablesMaintainerService implements Service, Runnable {
   }
 
   private SystemIcebergTablesStoragePlugin getStoragePlugin() {
-    return sabotContext
+    return catalogServiceProvider
         .get()
-        .getCatalogService()
         .getSource(SystemIcebergTablesStoragePluginConfig.SYSTEM_ICEBERG_TABLES_PLUGIN_NAME);
   }
 

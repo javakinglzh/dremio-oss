@@ -40,7 +40,14 @@ public class TestIcebergHadoopCommand {
     String tableName = "icebergtable";
     BatchSchema schema = BatchSchema.newBuilder().addField(CompleteType.INT.toField("int")).build();
     FileSystemPlugin fileSystemPlugin = BaseTestQuery.getMockedFileSystemPlugin();
-    IcebergHadoopModel icebergHadoopModel = new IcebergHadoopModel(fileSystemPlugin);
+    IcebergHadoopModel icebergHadoopModel =
+        new IcebergHadoopModel(
+            "",
+            fileSystemPlugin.getFsConfCopy(),
+            fileSystemPlugin.createIcebergFileIO(
+                fileSystemPlugin.getSystemUserFS(), null, null, null, null),
+            null,
+            null);
     when(fileSystemPlugin.getIcebergModel()).thenReturn(icebergHadoopModel);
     IcebergOpCommitter createTableCommitter =
         icebergHadoopModel.getCreateTableCommitter(

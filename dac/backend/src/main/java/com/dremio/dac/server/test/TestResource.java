@@ -36,6 +36,7 @@ import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogServiceImpl;
 import com.dremio.exec.catalog.ConnectionReader;
+import com.dremio.exec.catalog.SourceUpdateType;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.serialization.InstanceSerializer;
 import com.dremio.exec.serialization.ProtoSerializer;
@@ -47,7 +48,6 @@ import com.dremio.service.job.QueryProfileRequest;
 import com.dremio.service.job.proto.JobProtobuf;
 import com.dremio.service.jobs.JobNotFoundException;
 import com.dremio.service.jobs.JobsService;
-import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.NamespaceServiceImpl;
@@ -173,13 +173,13 @@ public class TestResource {
     sdp.populateInitialData();
   }
 
-  public void refreshNow(String... sources) throws NamespaceException {
+  public void refreshNow(String... sources) {
     for (String source : sources) {
       ((CatalogServiceImpl) catalogService)
           .refreshSource(
               new NamespaceKey(source),
               CatalogService.REFRESH_EVERYTHING_NOW,
-              CatalogServiceImpl.UpdateType.FULL);
+              SourceUpdateType.FULL);
     }
   }
 

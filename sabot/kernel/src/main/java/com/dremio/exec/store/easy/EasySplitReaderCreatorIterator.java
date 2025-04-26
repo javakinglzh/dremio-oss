@@ -18,6 +18,7 @@ package com.dremio.exec.store.easy;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.EasyScanTableFunctionContext;
 import com.dremio.exec.physical.config.ExtendedFormatOptions;
@@ -26,10 +27,10 @@ import com.dremio.exec.store.RuntimeFilter;
 import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.EasyRecordReaderIterator;
 import com.dremio.exec.store.dfs.EmptySplitReaderCreator;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.FormatPlugin;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
 import com.dremio.exec.store.dfs.SplitReaderCreator;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.parquet.InputStreamProvider;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
@@ -57,7 +58,6 @@ public class EasySplitReaderCreatorIterator implements SplitReaderCreatorIterato
   protected final FileSystem fs;
   private final boolean prefetchReader;
   protected final OperatorContext context;
-  private final FragmentExecutionContext fragmentExecutionContext;
   protected final List<List<String>> tablePath;
   protected List<SchemaPath> columns;
   private List<SplitAndPartitionInfo> inputSplits;
@@ -94,13 +94,14 @@ public class EasySplitReaderCreatorIterator implements SplitReaderCreatorIterato
     try {
       this.fs =
           plugin.createFS(
-              config.getFunctionContext().getFormatSettings().getLocation(),
-              props.getUserName(),
-              context);
+              SupportsFsCreation.builder()
+                  .filePath(config.getFunctionContext().getFormatSettings().getLocation())
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .datasetFromTablePaths(tablePath));
     } catch (IOException e) {
       throw new ExecutionSetupException("Cannot access plugin filesystem", e);
     }
-    this.fragmentExecutionContext = fragmentExecContext;
     FileConfig formatSettings = config.getFunctionContext().getFormatSettings();
     this.formatPlugin =
         plugin.getFormatPlugin(
@@ -178,7 +179,7 @@ public class EasySplitReaderCreatorIterator implements SplitReaderCreatorIterato
             tablePath,
             columns,
             formatPlugin,
-            ((FileSystemPlugin<?>) this.plugin).getCompressionCodecFactory(),
+            HadoopCompressionCodecFactory.DEFAULT,
             extendedFormatOptions,
             extendedProperty);
     if (splitAndPartitionInfoIterator.hasNext()) {

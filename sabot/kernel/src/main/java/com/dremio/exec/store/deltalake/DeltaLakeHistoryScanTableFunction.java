@@ -22,6 +22,7 @@ import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.dfs.AbstractTableFunction;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants;
 import com.dremio.exec.util.VectorUtil;
@@ -71,7 +72,13 @@ public class DeltaLakeHistoryScanTableFunction extends AbstractTableFunction {
     }
 
     try {
-      fs = storagePlugin.createFS(path, props.getUserName(), context);
+      fs =
+          storagePlugin.createFS(
+              SupportsFsCreation.builder()
+                  .filePath(path)
+                  .userName(props.getUserName())
+                  .operatorContext(context)
+                  .datasetFromTableFunctionConfig(functionConfig));
       return fs;
     } catch (IOException e) {
       throw UserException.ioExceptionError(e).buildSilently();

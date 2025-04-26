@@ -16,10 +16,12 @@
 package com.dremio.exec.catalog.dataplane.test;
 
 import static com.dremio.exec.catalog.dataplane.test.DataplaneStorage.BucketSelection.PRIMARY_BUCKET;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.METADATA_FOLDER;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.USER_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.utils.PathUtils;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -35,6 +37,7 @@ import org.projectnessie.model.FetchOption;
 import org.projectnessie.model.IcebergTable;
 import org.projectnessie.model.IcebergView;
 import org.projectnessie.model.LogResponse;
+import org.projectnessie.model.LogResponse.LogEntry;
 import org.projectnessie.model.Namespace;
 import org.projectnessie.model.Operation;
 import org.projectnessie.model.Reference;
@@ -49,15 +52,9 @@ public final class TestDataplaneAssertions {
       List<String> tableSchemaComponents,
       Class<? extends Operation> operationType,
       String branchName,
-      DataplaneTestHelper base)
+      DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
-    final List<LogResponse.LogEntry> logEntries =
-        base.getNessieApi()
-            .getCommitLog()
-            .refName(branchName)
-            .fetch(FetchOption.ALL) // Get extended data, including operations
-            .get()
-            .getLogEntries();
+    final List<LogEntry> logEntries = getLogEntries(branchName, base);
     assertThat(logEntries).hasSizeGreaterThanOrEqualTo(1);
     final LogResponse.LogEntry mostRecentLogEntry =
         logEntries.get(0); // Commits are ordered most recent to earliest
@@ -74,8 +71,42 @@ public final class TestDataplaneAssertions {
     assertThat(actualContentKey).isEqualTo(expectedContentKey);
   }
 
+  public static void assertCommitLogTail(
+      DataplaneTestHelperInterface base, String branchName, String... expectedCommitMessages)
+      throws Exception {
+    VersionContext versionContext = VersionContext.ofBranch(branchName);
+    StringBuilder query = new StringBuilder("SHOW LOGS");
+    query.append(" AT ");
+    switch (versionContext.getType()) {
+      case COMMIT:
+        query.append("COMMIT ");
+        break;
+      case TAG:
+        query.append("TAG ");
+        break;
+      case REF:
+        query.append("REF ");
+        break;
+      case BRANCH:
+        query.append("BRANCH ");
+        break;
+      default:
+        throw new IllegalArgumentException("Unsupported version type: " + versionContext.getType());
+    }
+    query.append(versionContext.getValue());
+    query.append(" IN ");
+    query.append(DATAPLANE_PLUGIN_NAME);
+    List<LogEntry> commitLogRows = getLogEntries(versionContext.getValue(), base);
+    List<String> commitLogMessages =
+        commitLogRows.stream()
+            .map(row -> row.getCommitMeta().getMessage())
+            .collect(Collectors.toList());
+    Collections.reverse(commitLogMessages);
+    assertThat(commitLogMessages).endsWith(expectedCommitMessages);
+  }
+
   public static void assertNessieHasTable(
-      List<String> tableSchemaComponents, String branchName, DataplaneTestHelper base)
+      List<String> tableSchemaComponents, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
     Map<ContentKey, Content> contentsMap =
         base.getNessieApi()
@@ -96,8 +127,53 @@ public final class TestDataplaneAssertions {
         .isTrue();
   }
 
+  public static void assertNessieHasTableAtStorageUri(
+      List<String> tableSchemaComponents,
+      String branchName,
+      String storageUri,
+      DataplaneTestHelperInterface base)
+      throws NessieNotFoundException {
+    Map<ContentKey, Content> contentsMap =
+        base.getNessieApi()
+            .getContent()
+            .refName(branchName)
+            .key(ContentKey.of(tableSchemaComponents))
+            .get();
+
+    ContentKey expectedContentsKey = ContentKey.of(tableSchemaComponents);
+    assertThat(contentsMap).containsKey(expectedContentsKey);
+
+    Optional<IcebergTable> maybeIcebergTable =
+        contentsMap.get(expectedContentsKey).unwrap(IcebergTable.class);
+    assertThat(maybeIcebergTable).isPresent();
+    assertThat(maybeIcebergTable.get().getMetadataLocation()).contains(storageUri);
+  }
+
+  public static void assertNessieHasViewAtStorageUri(
+      List<String> viewSchemaComponents,
+      String branchName,
+      String storageUri,
+      DataplaneTestHelperInterface base)
+      throws NessieNotFoundException {
+    Reference branch = base.getNessieApi().getReference().refName(branchName).get();
+    Map<ContentKey, Content> contentsMap =
+        base.getNessieApi()
+            .getContent()
+            .reference(branch)
+            .key(ContentKey.of(viewSchemaComponents))
+            .get();
+
+    ContentKey expectedContentsKey = ContentKey.of(viewSchemaComponents);
+    assertThat(contentsMap).containsKey(expectedContentsKey);
+
+    Optional<IcebergView> maybeIcebergView =
+        contentsMap.get(expectedContentsKey).unwrap(IcebergView.class);
+    assertThat(maybeIcebergView).isPresent();
+    assertThat(maybeIcebergView.get().getMetadataLocation()).contains(storageUri);
+  }
+
   public static void assertNessieHasView(
-      List<String> viewSchemaComponents, String branchName, DataplaneTestHelper base)
+      List<String> viewSchemaComponents, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
     Reference branch = base.getNessieApi().getReference().refName(branchName).get();
     Map<ContentKey, Content> contentsMap =
@@ -120,7 +196,7 @@ public final class TestDataplaneAssertions {
   }
 
   public static void assertNessieHasFunction(
-      List<String> schemaComponents, String branchName, DataplaneTestHelper base)
+      List<String> schemaComponents, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
     Reference branch = base.getNessieApi().getReference().refName(branchName).get();
     Map<ContentKey, Content> contentsMap =
@@ -142,7 +218,7 @@ public final class TestDataplaneAssertions {
   }
 
   public static void assertNessieHasNamespace(
-      List<String> namespaceComponents, String branchName, DataplaneTestHelper base)
+      List<String> namespaceComponents, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
 
     Reference branch = base.getNessieApi().getReference().refName(branchName).get();
@@ -161,7 +237,7 @@ public final class TestDataplaneAssertions {
   }
 
   public static void assertNessieDoesNotHaveNamespace(
-      List<String> namespaceComponents, String branchName, DataplaneTestHelper base)
+      List<String> namespaceComponents, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
 
     Reference branch = base.getNessieApi().getReference().refName(branchName).get();
@@ -177,25 +253,25 @@ public final class TestDataplaneAssertions {
   }
 
   public static void assertLastCommitMadeBySpecifiedAuthor(
-      String branchName, DataplaneTestHelper base) throws NessieNotFoundException {
-    final List<LogResponse.LogEntry> logEntries =
-        base.getNessieApi()
-            .getCommitLog()
-            .refName(branchName)
-            .fetch(FetchOption.ALL) // Get extended data, including operations
-            .get()
-            .getLogEntries();
+      String branchName, DataplaneTestHelperInterface base) throws NessieNotFoundException {
+    assertLastCommitMadeBySpecifiedAuthor(branchName, base, USER_NAME);
+  }
+
+  public static void assertLastCommitMadeBySpecifiedAuthor(
+      String branchName, DataplaneTestHelperInterface base, String userName)
+      throws NessieNotFoundException {
+    final List<LogEntry> logEntries = getLogEntries(branchName, base);
     assertThat(logEntries).hasSizeGreaterThanOrEqualTo(1);
     final LogResponse.LogEntry mostRecentLogEntry =
         logEntries.get(0); // Commits are ordered most recent to earliest
 
     final List<Operation> operations = mostRecentLogEntry.getOperations();
     assertThat(operations).hasSizeGreaterThanOrEqualTo(1);
-    assertThat(mostRecentLogEntry.getCommitMeta().getAuthor()).isEqualTo(USER_NAME);
+    assertThat(mostRecentLogEntry.getCommitMeta().getAuthor()).isEqualTo(userName);
   }
 
   public static void assertNessieDoesNotHaveEntity(
-      List<String> key, String branchName, DataplaneTestHelper base)
+      List<String> key, String branchName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
     Map<ContentKey, Content> contentsMap =
         base.getNessieApi().getContent().refName(branchName).key(ContentKey.of(key)).get();
@@ -203,7 +279,7 @@ public final class TestDataplaneAssertions {
   }
 
   public static List<String> getSubPathFromNessieTableContent(
-      List<String> tablePath, String refName, DataplaneTestHelper base)
+      List<String> tablePath, String refName, DataplaneTestHelperInterface base)
       throws NessieNotFoundException {
     Map<ContentKey, Content> contentsMap =
         base.getNessieApi().getContent().refName(refName).key(ContentKey.of(tablePath)).get();
@@ -227,7 +303,7 @@ public final class TestDataplaneAssertions {
   }
 
   public static void assertIcebergTableExistsAtSubPath(
-      List<String> subPath, DataplaneTestHelper base) {
+      List<String> subPath, DataplaneTestHelperInterface base) {
     // Iceberg tables on disk have a "metadata" folder in their root, check for "metadata" folder
     // too
     List<String> pathToMetadataFolder = new ArrayList<>(subPath);
@@ -299,5 +375,15 @@ public final class TestDataplaneAssertions {
     } catch (NessieNotFoundException e) {
       // Intentionally left blank.
     }
+  }
+
+  private static List<LogEntry> getLogEntries(String branchName, DataplaneTestHelperInterface base)
+      throws NessieNotFoundException {
+    return base.getNessieApi()
+        .getCommitLog()
+        .refName(branchName)
+        .fetch(FetchOption.ALL) // Get extended data, including operations
+        .get()
+        .getLogEntries();
   }
 }

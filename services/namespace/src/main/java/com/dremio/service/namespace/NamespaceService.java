@@ -22,6 +22,7 @@ import com.dremio.service.namespace.home.HomeNamespaceService;
 import com.dremio.service.namespace.source.SourceNamespaceService;
 import com.dremio.service.namespace.space.SpaceNamespaceService;
 import com.dremio.service.namespace.split.SplitNamespaceService;
+import com.dremio.service.users.SystemUser;
 
 /**
  * Namespace operations from DAC. For generic entity operations, use EntityNamespaceService. For
@@ -50,5 +51,9 @@ public interface NamespaceService
     NamespaceService get(String userName);
 
     NamespaceService get(NamespaceIdentity identity);
+
+    default NamespaceService getForSystemUser() {
+      return get(SystemUser.SYSTEM_USERNAME);
+    }
   }
 }

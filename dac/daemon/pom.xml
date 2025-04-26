@@ -171,17 +171,34 @@
       <type>test-jar</type>
       <scope>test</scope>
     </dependency>
-
-    <!--
-      Stub for com.sun.tools.attach as the symbols are not provided for Java 8
-      See https://bugs.openjdk.java.net/browse/JDK-8214165
-
-      Also good to have this so that IntelliJ can build.
-     -->
     <dependency>
-      <groupId>io.earcam.wrapped</groupId>
-      <artifactId>com.sun.tools.attach</artifactId>
-      <scope>provided</scope>
+      <groupId>com.dremio.contrib</groupId>
+      <artifactId>dremio-hive3-exec-shaded</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-s3-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-azure-storage-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-gcs-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-dataplane-plugin</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-icebergcatalog-plugin</artifactId>
+      <version>${project.version}</version>
     </dependency>
   </dependencies>
 
@@ -316,80 +333,6 @@
           <groupId>com.oracle.database.jdbc</groupId>
           <artifactId>ojdbc10</artifactId>
           <version>19.22.0.0</version>
-        </dependency>
-      </dependencies>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-maprfs-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-      </dependencies>
-      <build>
-        <plugins>
-          <plugin>
-            <artifactId>maven-compiler-plugin</artifactId>
-            <configuration>
-              <testExcludes>
-                <testExclude>com/dremio/dac/cmd/upgrade/TestUpdateS3CredentialType.java</testExclude>
-              </testExcludes>
-              <excludes>
-                <exclude>com/dremio/dac/cmd/upgrade/UpdateS3CredentialType.java</exclude>
-              </excludes>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>com.dremio.contrib</groupId>
-          <artifactId>dremio-hive3-exec-shaded</artifactId>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-s3-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-azure-storage-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-adls-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-gcs-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-dataplane-plugin</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-icebergcatalog-plugin</artifactId>
-          <version>${project.version}</version>
         </dependency>
       </dependencies>
     </profile>

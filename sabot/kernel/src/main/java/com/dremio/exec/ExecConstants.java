@@ -19,6 +19,7 @@ import com.dremio.common.expression.SupportedEngines;
 import com.dremio.exec.planner.sql.parser.PartitionDistributionStrategy;
 import com.dremio.exec.proto.CoordExecRPC.FragmentCodec;
 import com.dremio.exec.testing.ExecutionControls;
+import com.dremio.optimization.api.OptimizeConstants;
 import com.dremio.options.OptionValidator;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators;
@@ -60,6 +61,10 @@ public interface ExecConstants {
   /* incoming buffer size (number of batches) */
   RangeLongValidator INCOMING_BUFFER_SIZE =
       new RangeLongValidator("exec.buffer.size", 0, Integer.MAX_VALUE, 6);
+  RangeLongValidator INCOMING_BUFFER_BATCH_LIMIT =
+      new RangeLongValidator("exec.buffer.batch.limit", 0, Integer.MAX_VALUE, 100);
+  RangeLongValidator INCOMING_BUFFER_BATCH_BYTE_LIMIT =
+      new RangeLongValidator("exec.buffer.byte.limit", 0, Integer.MAX_VALUE, Integer.MAX_VALUE);
 
   String SPOOLING_BUFFER_DELETE = "dremio.exec.buffer.spooling.delete";
   String SPOOLING_BUFFER_SIZE = "dremio.exec.buffer.spooling.size";
@@ -129,6 +134,14 @@ public interface ExecConstants {
   DoubleValidator WORK_THRESHOLD_FOR_SPLIT =
       new RangeDoubleValidator(WORK_THRESHOLD_FOR_SPLIT_KEY, 0.0, Long.MAX_VALUE, 3.0);
 
+  String SPLIT_OR_TO_IF_BRANCH_SIZE = "exec.expression.or.if.branch.size";
+  PositiveLongValidator SPLIT_OR_TO_IF_BRANCH_SIZE_OPTION =
+      new PositiveLongValidator(SPLIT_OR_TO_IF_BRANCH_SIZE, Integer.MAX_VALUE, 500);
+
+  String COMPARATOR_MAX_BLOCK_SIZE = "exec.comparator.block,max.size";
+  PositiveLongValidator COMPARATOR_MAX_BLOCK_SIZE_OPTION =
+      new PositiveLongValidator(COMPARATOR_MAX_BLOCK_SIZE, Integer.MAX_VALUE, 150);
+
   PositiveLongValidator MAX_FOREMEN_PER_COORDINATOR =
       new PositiveLongValidator("coordinator.alive_queries.limit", Long.MAX_VALUE, 1000);
 
@@ -180,6 +193,9 @@ public interface ExecConstants {
   PositiveLongValidator CODE_GEN_FUNCTION_EXPRESSION_COUNT_THRESHOLD =
       new PositiveLongValidator(
           "exec.operator.codegen.function_expression_count.threshold", Integer.MAX_VALUE, 35);
+
+  BooleanValidator CODE_GEN_ALLOW_EMPTY_BLOCK =
+      new BooleanValidator("exec.operator.codegen.allow_empty_block", true);
 
   /**
    * Number of constants in expression above which constants are defined inside JAVA arrays in
@@ -405,12 +421,6 @@ public interface ExecConstants {
 
   BooleanValidator ENABLE_UNION_TYPE = new BooleanValidator("exec.enable_union_type", true);
 
-  BooleanValidator ACCELERATION_VERBOSE_LOGGING =
-      new BooleanValidator("accelerator.system.verbose.logging", true);
-  LongValidator ACCELERATION_LIMIT = new LongValidator("accelerator.system.limit", 10);
-  LongValidator ACCELERATION_ORPHAN_CLEANUP_MILLISECONDS =
-      new LongValidator("acceleration.orphan.cleanup_in_milliseconds", 14400000); // 4 hours
-
   String SLICE_TARGET = "planner.slice_target";
   long SLICE_TARGET_DEFAULT = 100000L;
   PositiveLongValidator SLICE_TARGET_OPTION =
@@ -528,10 +538,6 @@ public interface ExecConstants {
   BooleanValidator SCAN_COMPUTE_LOCALITY =
       new BooleanValidator("exec.operator.scan.compute_locality", false);
 
-  /** Set to 24 so that retry policy covers ~72hrs (71.8) */
-  PositiveLongValidator LAYOUT_REFRESH_MAX_ATTEMPTS =
-      new PositiveLongValidator("layout.refresh.max.attempts", Integer.MAX_VALUE, 24);
-
   BooleanValidator OLD_ASSIGNMENT_CREATOR = new BooleanValidator("exec.work.assignment.old", false);
 
   BooleanValidator DATA_SCAN_PARALLELISM =
@@ -563,6 +569,12 @@ public interface ExecConstants {
 
   BooleanValidator ENABLE_DYNAMIC_LOAD_ROUTING =
       new BooleanValidator("exec.dynamic.load.routing.enabled", false);
+  BooleanValidator DYNAMIC_LOAD_ROUTING_ENFORCE_RESERVATIONS =
+      new BooleanValidator("exec.dynamic.load.routing.enforce.reservations", false);
+
+  PositiveLongValidator DYNAMIC_LOAD_ROUTING_NON_SPILLABLE_MEMORY_AMPLIFY_FACTOR =
+      new PositiveLongValidator(
+          "exec.dynamic.load.routing.non.spillable.memory.amplify.factor", Integer.MAX_VALUE, 1);
 
   /**
    * This factor determines how much larger the load for a given slice can be than the expected size
@@ -602,15 +614,31 @@ public interface ExecConstants {
   RangeLongValidator JOB_RESULTS_CLEANUP_START_HOUR =
       new RangeLongValidator("job.results.cleanup.start_at_hour", 0, 23, 0);
 
+  TypeValidators.PositiveLongValidator JOB_RESULT_CLEANER_RELEASE_LEADERSHIP_MS_PROPERTY =
+      new TypeValidators.PositiveLongValidator(
+          "jobs.release.leadership.ms", Long.MAX_VALUE, TimeUnit.HOURS.toMillis(30));
+
+  TypeValidators.BooleanValidator JOB_RESULTS_CLEANED_QUERY_ENABLED =
+      new TypeValidators.BooleanValidator("job.results.cleaned.query.enabled", true);
+
   // Time after which the jobs are expired and deleted from the job collection. 0 by default. Used
   // for testing and debugging TTL based expiry.
   LongValidator DEBUG_TTL_JOB_MAX_AGE_IN_MILLISECONDS =
       new LongValidator("debug.ttl.jobs.max.age_in_milliseconds", 0);
 
   LongValidator JOB_MAX_AGE_IN_DAYS = new LongValidator("jobs.max.age_in_days", 30);
-  // At what hour of the day to do job cleanup - 0-23
+  // At what hour of the day to do job cleanup - 0-23 (unused if JOBS_CLEANUP_MORE_OFTEN is enabled)
   RangeLongValidator JOB_CLEANUP_START_HOUR =
       new RangeLongValidator("job.cleanup.start_at_hour", 0, 23, 1);
+
+  BooleanValidator JOBS_CLEANUP_MORE_OFTEN = new BooleanValidator("jobs.cleanup.more_often", true);
+
+  PositiveLongValidator JOB_CLEANUP_START_AFTER_MINS =
+      new PositiveLongValidator(
+          "job.cleanup.start_after_mins", TimeUnit.DAYS.toMinutes(1), TimeUnit.HOURS.toMinutes(1));
+
+  PositiveLongValidator JOB_CLEANUP_INTERVAL_HRS =
+      new PositiveLongValidator("job.cleanup.interval_in_hrs", 24, 12);
 
   PositiveLongValidator JOB_PROFILE_PLANNING_UPDATE_INTERVAL_SECONDS =
       new PositiveLongValidator(
@@ -620,6 +648,13 @@ public interface ExecConstants {
       new PositiveLongValidator(
           "job.profile.executor.update.interval_in_sec", Integer.MAX_VALUE, 10);
 
+  PositiveLongValidator JOB_PROFILE_ASYNC_UPDATE_WAIT_IN_MILLISECONDS =
+      new PositiveLongValidator(
+          "job.profile.async.update.wait.interval_in_milliseconds", Integer.MAX_VALUE, 30000);
+
+  BooleanValidator JOB_PROFILE_ASYNC_UPDATE =
+      new BooleanValidator("job.profile.async.update", false);
+
   // Configuration used for testing or debugging
   LongValidator DEBUG_RESULTS_MAX_AGE_IN_MILLISECONDS =
       new LongValidator("debug.results.max.age_in_milliseconds", 0);
@@ -627,7 +662,11 @@ public interface ExecConstants {
   BooleanValidator SORT_FILE_BLOCKS = new BooleanValidator("store.file.sort_blocks", false);
 
   PositiveLongValidator LIMIT_FIELD_SIZE_BYTES =
-      new PositiveLongValidator("limits.single_field_size_bytes", Integer.MAX_VALUE, 32000);
+      new PositiveLongValidator(
+          "limits.single_field_size_bytes", Integer.MAX_VALUE, 16 * 1024 * 1024);
+
+  PositiveLongValidator LIMIT_MAX_ARRAYAGG_SIZE_BYTES =
+      new PositiveLongValidator("limits.max_arrayagg_size_bytes", Integer.MAX_VALUE, 32 * 1024);
 
   PositiveLongValidator DELTALAKE_METADATA_FIELD_SIZE_BYTES =
       new PositiveLongValidator(
@@ -645,6 +684,9 @@ public interface ExecConstants {
       new BooleanValidator("exec.operator.sort.external.enable_splay_sort", false);
   BooleanValidator EXTERNAL_SORT_ENABLE_MICRO_SPILL =
       new BooleanValidator("exec.operator.sort.external.enable_micro_spill", true);
+
+  BooleanValidator EXTERNAL_SORT_ENABLE_SEGMENT_SORT =
+      new BooleanValidator("exec.operator.sort.external.enable_segment_sort", true);
   PositiveLongValidator SORT_MAX_WRITE_BATCH =
       new PositiveLongValidator(
           "exec.operator.sort.external.spill_batch_records",
@@ -692,10 +734,6 @@ public interface ExecConstants {
       new TypeValidators.PositiveLongValidator(
           "vote.release.leadership.ms", Long.MAX_VALUE, TimeUnit.HOURS.toMillis(35));
 
-  TypeValidators.PositiveLongValidator JOBS_RELEASE_LEADERSHIP_MS =
-      new TypeValidators.PositiveLongValidator(
-          "jobs.release.leadership.ms", Long.MAX_VALUE, TimeUnit.HOURS.toMillis(30));
-
   TypeValidators.PositiveLongValidator SEARCH_SERVICE_RELEASE_LEADERSHIP_MS =
       new TypeValidators.PositiveLongValidator(
           "searchservice.release.leadership.ms", Long.MAX_VALUE, TimeUnit.HOURS.toMillis(12));
@@ -706,6 +744,8 @@ public interface ExecConstants {
       new BooleanValidator("exec.operator.ndv_reduce_heap", true);
   BooleanValidator ENABLE_VECTORIZED_SPILL_NDV_ACCUMULATOR =
       new BooleanValidator("exec.operator.vectorized_spill.ndv", true);
+  BooleanValidator ENABLE_SINGLE_VALUE_VECTORIZED =
+      new BooleanValidator("planner.op.hashagg.single_value.vectorized", true);
 
   BooleanValidator ENABLE_VECTORIZED_SPILL_VARCHAR_ACCUMULATOR =
       new BooleanValidator("exec.operator.vectorized_spill.varchar", true);
@@ -741,9 +781,6 @@ public interface ExecConstants {
       new AdminBooleanValidator("coordinator.reconcile.queries.enable", true);
   RangeLongValidator RECONCILE_QUERIES_FREQUENCY_SECS =
       new RangeLongValidator("coordinator.reconcile.queries.frequency.secs", 1, 1800, 300);
-
-  BooleanValidator ENABLE_DEPRECATED_JOBS_USER_STATS_API =
-      new BooleanValidator("dremio.deprecated_jobs_user_stats_api.enabled", true);
   BooleanValidator ENABLE_JOBS_USER_STATS_API =
       new BooleanValidator("dremio.jobs_user_stats_api.enabled", true);
   PositiveLongValidator JOBS_USER_STATS_CACHE_REFRESH_HRS =
@@ -795,9 +832,6 @@ public interface ExecConstants {
   BooleanValidator ENABLE_ICEBERG_VACUUM_CATALOG =
       new BooleanValidator("dremio.iceberg.vacuum.catalog.enabled", true);
 
-  BooleanValidator ENABLE_ICEBERG_AUTO_CLUSTERING =
-      new BooleanValidator("dremio.iceberg.auto.clustering.enabled", false);
-
   BooleanValidator ENABLE_ICEBERG_SINGLE_MANIFEST_WRITER =
       new BooleanValidator("dremio.iceberg.single_manifest_writer.enabled", true);
   BooleanValidator ENABLE_ICEBERG_VACUUM_REMOVE_ORPHAN_FILES =
@@ -827,13 +861,20 @@ public interface ExecConstants {
 
   LongValidator OPTIMIZE_TARGET_FILE_SIZE_MB =
       new PositiveLongValidator(
-          "dremio.iceberg.optimize.target_file_size_mb", Long.MAX_VALUE, 256L);
+          "dremio.iceberg.optimize.target_file_size_mb",
+          Long.MAX_VALUE,
+          OptimizeConstants.TARGET_FILE_SIZE_MB);
   DoubleValidator OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO =
-      new DoubleValidator("dremio.iceberg.optimize.min_file_size_ratio", 0.75);
+      new DoubleValidator(
+          "dremio.iceberg.optimize.min_file_size_ratio",
+          OptimizeConstants.MINIMUM_FILE_SIZE_DEFAULT_RATIO);
   DoubleValidator OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO =
-      new DoubleValidator("dremio.iceberg.optimize.max_file_size_ratio", 1.8);
+      new DoubleValidator(
+          "dremio.iceberg.optimize.max_file_size_ratio",
+          OptimizeConstants.MAXIMUM_FILE_SIZE_DEFAULT_RATIO);
   LongValidator OPTIMIZE_MINIMUM_INPUT_FILES =
-      new LongValidator("dremio.iceberg.optimize.min_input_files", 5);
+      new LongValidator(
+          "dremio.iceberg.optimize.min_input_files", OptimizeConstants.MINIMUM_INPUT_FILES);
 
   BooleanValidator ENABLE_USE_VERSION_SYNTAX =
       new TypeValidators.BooleanValidator("dremio.sql.use_version.enabled", true);
@@ -841,17 +882,11 @@ public interface ExecConstants {
   BooleanValidator ENABLE_MERGE_BRANCH_BEHAVIOR =
       new TypeValidators.BooleanValidator("dremio.sql.use_merge_branch_behavior.enabled", true);
 
-  BooleanValidator VERSIONED_VIEW_ENABLED =
-      new TypeValidators.BooleanValidator("plugins.dataplane.view", true);
-
   // When calling KV store find, these many documents are kept in-memory while iterating. For views
   // it could be a sizable amount of memory, in one instance 300KB per view were stored.
   LongValidator INFO_SCHEMA_FIND_PAGE_SIZE =
       new TypeValidators.LongValidator("dremio.catalog.info_schema.find_page_size", 500);
 
-  // Enable info schema query in any versioned sources
-  BooleanValidator VERSIONED_INFOSCHEMA_ENABLED =
-      new TypeValidators.BooleanValidator("arctic.infoschema.enabled", true);
   AdminBooleanValidator ENABLE_AZURE_SOURCE =
       new AdminBooleanValidator("dremio.enable_azure_source", false);
 
@@ -1141,7 +1176,7 @@ public interface ExecConstants {
       new PositiveLongValidator("dremio.copy.into.errors_max_input_files", 1000, 100);
 
   BooleanValidator COPY_INTO_ENABLE_TRANSFORMATIONS =
-      new BooleanValidator("dremio.copy.into.enable.transformations", false);
+      new BooleanValidator("dremio.copy.into.enable.transformations", true);
 
   BooleanValidator COPY_ERRORS_FIRST_ERROR_OF_RECORD_ONLY =
       new BooleanValidator("dremio.copy.into.errors_first_error_of_record_only", true);
@@ -1234,6 +1269,15 @@ public interface ExecConstants {
   RangeLongValidator FILE_SPLITS_PER_PARTITION_CHUNK =
       new RangeLongValidator("store.file.splits_per_partition_chunk", 0, Integer.MAX_VALUE, 1000);
 
+  /**
+   * When set to true, FileSystemPlugin will use a default hadoop configuration that has all the
+   * default values loaded from core-site-default, hdfs-site-default, etc.. ending up with 1400+ in
+   * size. When set to false, we only keep the defaults that start with "fs." prefix. Loading
+   * non-defaults from core-site, hdfs-site, etc... are unaffected (i.e. they are considered)
+   */
+  BooleanValidator FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS =
+      new BooleanValidator("store.filesystem.hadoop.configuration.preload_all_defaults", false);
+
   /** Enables SHOW CREATE VIEW/TABLE syntax */
   BooleanValidator SHOW_CREATE_ENABLED =
       new BooleanValidator("dremio.sql.show.create.enabled", true);
@@ -1263,15 +1307,15 @@ public interface ExecConstants {
   BooleanValidator GANDIVA_THREAD_NAME_ENABLED =
       new BooleanValidator("exec.operator.gandiva_thread_name.enable", true);
 
-  BooleanValidator SOURCE_ASYNC_MODIFICATION_ENABLED =
-      new BooleanValidator("source.async.modification.enable", false);
-
-  PositiveLongValidator WARN_MAX_BATCH_SIZE_THRESHOLD =
-      new PositiveLongValidator(
-          "max.batch_size.warn.threshold", Integer.MAX_VALUE, 10 * 1024 * 1024);
-
   BooleanValidator ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT =
-      new BooleanValidator("exec.operator.row_size_limit_enforcement.enable", false);
+      new BooleanValidator("exec.operator.row_size_limit_enforcement.enable", true);
   PositiveLongValidator LIMIT_ROW_SIZE_BYTES =
       new PositiveLongValidator("limits.row_size_bytes", Integer.MAX_VALUE, 16 * 1024 * 1024);
+  PositiveLongValidator LIMIT_BATCH_ROW_SIZE_BYTES =
+      new PositiveLongValidator("limits.batch_row_size_bytes", Integer.MAX_VALUE, 10 * 1024 * 1024);
+
+  /**
+   * Default value for table property WRITE_TARGET_FILE_SIZE_BYTES when table is created by Dremio
+   */
+  long WRITE_TARGET_FILE_SIZE_BYTES_DREMIO_DEFAULT = 128 * 1024 * 1024;
 }

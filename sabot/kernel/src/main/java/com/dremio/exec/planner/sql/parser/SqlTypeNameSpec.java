@@ -16,7 +16,6 @@
 package com.dremio.exec.planner.sql.parser;
 
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.parser.SqlParserPos;
@@ -32,8 +31,6 @@ public abstract class SqlTypeNameSpec extends SqlIdentifier {
   public SqlTypeNameSpec(String name, SqlParserPos pos) {
     super(name, pos);
   }
-
-  public abstract RelDataType deriveType(RelDataTypeFactory typeFactory);
 
   public abstract RelDataType deriveType(SqlValidator sqlValidator);
 }

@@ -17,6 +17,7 @@ package com.dremio.exec.catalog;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
+import com.dremio.catalog.exception.SourceMalfunctionException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.service.namespace.NamespaceKey;
@@ -28,6 +29,7 @@ import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 import com.google.common.util.concurrent.UncheckedExecutionException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -45,12 +47,12 @@ class PermissionCheckCache {
   }
 
   private final Cache<Key, Value> permissionsCache;
-  protected final Provider<StoragePlugin> plugin;
+  protected final Provider<Optional<StoragePlugin>> plugin;
   private final Provider<Long> authTtlMs;
 
   @SuppressWarnings("NoGuavaCacheUsage") // TODO: fix as part of DX-51884
   public PermissionCheckCache(
-      Provider<StoragePlugin> plugin, Provider<Long> authTtlMs, final long maximumSize) {
+      Provider<Optional<StoragePlugin>> plugin, Provider<Long> authTtlMs, final long maximumSize) {
     this.plugin = plugin;
     this.authTtlMs = authTtlMs;
     permissionsCache = CacheBuilder.newBuilder().maximumSize(maximumSize).build();
@@ -61,12 +63,16 @@ class PermissionCheckCache {
     return permissionsCache;
   }
 
-  protected boolean checkPlugin(
+  protected boolean checkAccessOnPlugin(
       final String username,
       final NamespaceKey namespaceKey,
       final DatasetConfig config,
-      final SourceConfig sourceConfig) {
-    return plugin.get().hasAccessPermission(username, namespaceKey, config);
+      final SourceConfig sourceConfig)
+      throws SourceMalfunctionException {
+    if (plugin.get().isPresent()) {
+      return plugin.get().get().hasAccessPermission(username, namespaceKey, config);
+    }
+    throw new SourceMalfunctionException(sourceConfig.getName());
   }
 
   /**
@@ -82,18 +88,20 @@ class PermissionCheckCache {
    * @param sourceConfig source config
    * @return true iff user has access
    * @throws UserException if the underlying calls throws any exception
+   * @throws SourceMalfunctionException if source is malfunctioning
    */
   public boolean hasAccess(
       final String username,
       final NamespaceKey namespaceKey,
       final DatasetConfig config,
       final MetadataStatsCollector metadataStatsCollector,
-      final SourceConfig sourceConfig) {
+      final SourceConfig sourceConfig)
+      throws SourceMalfunctionException {
     final Stopwatch permissionCheck = Stopwatch.createStarted();
 
     // if we are unable to cache, go direct.  Also don't cache system sources checks.
     if (authTtlMs.get() == 0 || "ESYS".equals(sourceConfig.getType())) {
-      boolean hasAccess = checkPlugin(username, namespaceKey, config, sourceConfig);
+      boolean hasAccess = checkAccessOnPlugin(username, namespaceKey, config, sourceConfig);
       permissionCheck.stop();
       metadataStatsCollector.addDatasetStat(
           namespaceKey.getSchemaPath(),
@@ -107,7 +115,8 @@ class PermissionCheckCache {
 
     final Callable<Value> loader =
         () -> {
-          final boolean hasAccess = checkPlugin(username, namespaceKey, config, sourceConfig);
+          final boolean hasAccess =
+              checkAccessOnPlugin(username, namespaceKey, config, sourceConfig);
           if (!hasAccess) {
             throw NoAccessException.INSTANCE;
           }

@@ -20,7 +20,6 @@ import static com.dremio.service.reflection.ReflectionUtils.getId;
 
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.UserException;
-import com.dremio.common.util.DremioVersionInfo;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.common.utils.protos.AttemptId;
 import com.dremio.common.utils.protos.AttemptIdUtils;
@@ -52,9 +51,9 @@ import com.dremio.service.reflection.DependencyManager;
 import com.dremio.service.reflection.DependencyResolutionContext;
 import com.dremio.service.reflection.DependencyUtils;
 import com.dremio.service.reflection.ExtractedDependencies;
-import com.dremio.service.reflection.ReflectionServiceImpl.ExpansionHelper;
 import com.dremio.service.reflection.ReflectionUtils;
-import com.dremio.service.reflection.proto.DataPartition;
+import com.dremio.service.reflection.descriptor.DescriptorHelper;
+import com.dremio.service.reflection.descriptor.DescriptorHelper.ExpansionHelper;
 import com.dremio.service.reflection.proto.JobDetails;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
@@ -66,11 +65,8 @@ import com.dremio.service.reflection.proto.Refresh;
 import com.dremio.service.reflection.proto.RefreshDecision;
 import com.dremio.service.reflection.store.MaterializationPlanStore;
 import com.dremio.service.reflection.store.MaterializationStore;
-import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
-import io.protostuff.ByteString;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -84,7 +80,7 @@ public class RefreshDoneHandler {
   private final DependencyManager dependencyManager;
   private final MaterializationStore materializationStore;
   private final MaterializationPlanStore materializationPlanStore;
-  private final Function<Catalog, ExpansionHelper> expansionHelper;
+  private final DescriptorHelper descriptorHelper;
   private final Path accelerationBasePath;
 
   private final ReflectionEntry reflection;
@@ -104,7 +100,7 @@ public class RefreshDoneHandler {
       MaterializationStore materializationStore,
       MaterializationPlanStore materializationPlanStore,
       DependencyManager dependencyManager,
-      Function<Catalog, ExpansionHelper> expansionHelper,
+      DescriptorHelper descriptorHelper,
       Path accelerationBasePath,
       BufferAllocator allocator,
       CatalogService catalogService,
@@ -117,7 +113,8 @@ public class RefreshDoneHandler {
     this.dependencyManager = Preconditions.checkNotNull(dependencyManager, "dependencies required");
     this.materializationStore = materializationStore;
     this.materializationPlanStore = materializationPlanStore;
-    this.expansionHelper = Preconditions.checkNotNull(expansionHelper, "expansion helper required");
+    this.descriptorHelper =
+        Preconditions.checkNotNull(descriptorHelper, "expansion helper required");
     this.accelerationBasePath =
         Preconditions.checkNotNull(accelerationBasePath, "acceleration base path required");
     this.allocator = allocator;
@@ -134,7 +131,7 @@ public class RefreshDoneHandler {
     this.dependencyManager = other.dependencyManager;
     this.materializationStore = other.materializationStore;
     this.materializationPlanStore = other.materializationPlanStore;
-    this.expansionHelper = other.expansionHelper;
+    this.descriptorHelper = other.descriptorHelper;
     this.accelerationBasePath = other.accelerationBasePath;
     this.allocator = other.allocator;
     this.catalogService = other.catalogService;
@@ -160,9 +157,9 @@ public class RefreshDoneHandler {
 
     final RefreshDecision decision = getRefreshDecision(lastAttempt);
 
-    final ByteString planBytes =
-        Preconditions.checkNotNull(
-            decision.getLogicalPlan(), "refresh jobInfo has no logical plan");
+    Catalog catalog = CatalogUtil.getSystemCatalogForMaterializationCache(catalogService);
+    // Grab descriptor which will save the materialization plan to the KV store
+    descriptorHelper.getDescriptor(materialization, catalog);
 
     updateDependencies(reflection, lastAttempt.getInfo(), decision, dependencyManager);
 
@@ -173,8 +170,7 @@ public class RefreshDoneHandler {
         Optional.ofNullable(details.getOutputRecords()).orElse(0L) > 0
             || lastAttempt.getStats().getRemovedFiles() > 0;
     boolean isEmptyReflection =
-        getIsEmptyReflection(
-            decision.getInitialRefresh().booleanValue(), dataWritten, materialization);
+        getIsEmptyReflection(decision.getInitialRefresh().booleanValue(), dataWritten);
     final Refresh previousRefresh =
         materializationStore.getMostRecentRefresh(materialization.getReflectionId());
     boolean updateIdNeedsOverwrite = updateIdNeedsOverwrite(decision, previousRefresh);
@@ -191,36 +187,24 @@ public class RefreshDoneHandler {
     final long lastRefreshFromTable =
         oldestDependentMaterialization.orElse(materialization.getInitRefreshSubmit());
     if (!dataWritten && !decision.getInitialRefresh()) {
-      populateMaterializationForNoopRefresh(decision, details, lastRefreshFromTable);
+      populateMaterializationForNoopRefresh(decision, details, lastRefreshFromTable, catalog);
     } else {
-      long currentTime = System.currentTimeMillis();
-      final JoinAnalysis joinAnalysis = computeJoinAnalysis(decision);
+      final JoinAnalysis joinAnalysis = computeJoinAnalysis(decision, catalog);
       materialization
           .setDisableDefaultReflection(decision.getDisableDefaultReflection() == Boolean.TRUE)
           .setExpiration(computeExpiration())
           .setInitRefreshExecution(details.getJobStart())
           .setLastRefreshFromPds(lastRefreshFromTable)
-          .setLastRefreshFinished(currentTime)
-          .setLastRefreshDurationMillis(currentTime - materialization.getInitRefreshSubmit())
           .setStripVersion(StrippingFactory.LATEST_STRIP_VERSION)
           .setSeriesId(decision.getSeriesId())
           .setSeriesOrdinal(
               dataWritten
                   ? decision.getSeriesOrdinal()
                   : Math.max(decision.getSeriesOrdinal() - 1, 0))
-          .setJoinAnalysis(joinAnalysis)
-          .setPartitionList(getDataPartitions());
+          .setJoinAnalysis(joinAnalysis);
     }
 
     materializationStore.save(materialization);
-    MaterializationPlan plan = new MaterializationPlan();
-    plan.setId(MaterializationPlanStore.createMaterializationPlanId(materialization.getId()));
-    plan.setMaterializationId(materialization.getId());
-    plan.setReflectionId(materialization.getReflectionId());
-    plan.setVersion(DremioVersionInfo.getVersion());
-    plan.setLogicalPlan(planBytes);
-    materializationPlanStore.save(plan);
-
     return decision;
   }
 
@@ -229,26 +213,22 @@ public class RefreshDoneHandler {
    * only
    */
   protected void populateMaterializationForNoopRefresh(
-      RefreshDecision decision, JobDetails details, long lastRefreshFromTable) {
+      RefreshDecision decision, JobDetails details, long lastRefreshFromTable, Catalog catalog) {
     // if we don't create a refresh entry we still need to copy the materialization fields
     // from the previous materialization as it will be owning the same refreshes
     final Materialization lastDone =
         Preconditions.checkNotNull(
             materializationStore.getLastMaterializationDone(materialization.getReflectionId()),
             "incremental refresh didn't write any data and previous materializations expired");
-    long currentTime = System.currentTimeMillis();
     materialization
         .setDisableDefaultReflection(decision.getDisableDefaultReflection() == Boolean.TRUE)
         .setExpiration(computeExpiration())
         .setInitRefreshExecution(details.getJobStart())
         .setLastRefreshFromPds(lastRefreshFromTable)
-        .setLastRefreshFinished(currentTime)
-        .setLastRefreshDurationMillis(currentTime - materialization.getInitRefreshSubmit())
         .setStripVersion(StrippingFactory.LATEST_STRIP_VERSION)
         .setSeriesId(decision.getSeriesId())
         .setSeriesOrdinal(lastDone.getSeriesOrdinal())
         .setJoinAnalysis(lastDone.getJoinAnalysis())
-        .setPartitionList(lastDone.getPartitionList())
         .setIsNoopRefresh(true);
   }
 
@@ -267,21 +247,14 @@ public class RefreshDoneHandler {
   /**
    * Determines if the current reflection has 0 rows and is an Iceberg Reflection We will only allow
    * the initial refresh for Iceberg Materialization to be empty We don't need to handle incremental
-   * refreshes, as we can still use the previous refresh in the series We don't want to handle
-   * non-Iceberg materialization due to possible path discrepancy
+   * refreshes, as we can still use the previous refresh in the series
    *
    * @param initialRefresh is it Initial Refresh or later refresh
    * @param dataWritten Was any data written while saving the reflection
-   * @param materialization current materialization
    * @return true if it is based on an Empty Iceberg Reflection
    */
-  public static boolean getIsEmptyReflection(
-      boolean initialRefresh, boolean dataWritten, Materialization materialization) {
-
-    boolean allowEmptyRefresh =
-        initialRefresh
-            && materialization.getIsIcebergDataset() != null
-            && materialization.getIsIcebergDataset();
+  public static boolean getIsEmptyReflection(boolean initialRefresh, boolean dataWritten) {
+    boolean allowEmptyRefresh = initialRefresh;
     return !dataWritten && allowEmptyRefresh;
   }
 
@@ -377,20 +350,13 @@ public class RefreshDoneHandler {
     }
     final MaterializationMetrics metrics =
         ReflectionUtils.computeMetrics(job, jobsService, allocator, jobId);
-    final List<DataPartition> dataPartitions =
-        ReflectionUtils.computeDataPartitions(JobsProtoUtil.getLastAttempt(job).getInfo());
     final AttemptId attemptId = AttemptIdUtils.fromString(lastAttempt.getAttemptId());
     final List<String> refreshPath =
         RefreshHandler.getRefreshPath(
             materialization.getReflectionId(), materialization, decision, attemptId);
-    final boolean isIcebergRefresh =
-        materialization.getIsIcebergDataset() != null && materialization.getIsIcebergDataset();
-    final String icebergBasePath =
-        ReflectionUtils.getIcebergReflectionBasePath(refreshPath, isIcebergRefresh);
+    final String icebergBasePath = ReflectionUtils.getIcebergReflectionBasePath(refreshPath);
     Preconditions.checkArgument(
-        !isIcebergRefresh
-            || decision.getInitialRefresh()
-            || icebergBasePath.equals(materialization.getBasePath()));
+        decision.getInitialRefresh() || icebergBasePath.equals(materialization.getBasePath()));
     final Refresh refresh =
         ReflectionUtils.createRefresh(
             reflection.getId(),
@@ -400,8 +366,6 @@ public class RefreshDoneHandler {
             updateId,
             details,
             metrics,
-            dataPartitions,
-            isIcebergRefresh,
             icebergBasePath);
 
     logger.trace("Refresh created: {}", refresh);
@@ -413,23 +377,7 @@ public class RefreshDoneHandler {
         ReflectionUtils.getId(materialization));
   }
 
-  private List<DataPartition> getDataPartitions() {
-    return ImmutableList.copyOf(
-        materializationStore
-            .getRefreshes(materialization)
-            .transformAndConcat(
-                new Function<Refresh, Iterable<DataPartition>>() {
-                  @Override
-                  public Iterable<DataPartition> apply(Refresh input) {
-                    return input.getPartitionList() != null
-                        ? input.getPartitionList()
-                        : ImmutableList.of();
-                  }
-                })
-            .toSet());
-  }
-
-  protected JoinAnalysis computeJoinAnalysis(RefreshDecision decision) {
+  protected JoinAnalysis computeJoinAnalysis(RefreshDecision decision, Catalog catalog) {
     final JobInfo info = JobsProtoUtil.getLastAttempt(job).getInfo();
     JoinAnalysis joinAnalysis = getJoinAnalysis(info, decision);
     if (joinAnalysis == null) {
@@ -446,8 +394,7 @@ public class RefreshDoneHandler {
           continue;
         }
 
-        try (ExpansionHelper helper =
-            expansionHelper.apply(CatalogUtil.getSystemCatalogForReflections(catalogService))) {
+        try (ExpansionHelper helper = descriptorHelper.getExpansionHelper().apply(catalog)) {
           RelNode usedMaterializationLogicalPlan =
               MaterializationExpander.deserializePlan(
                   usedMaterializationPlan.getLogicalPlan().toByteArray(),

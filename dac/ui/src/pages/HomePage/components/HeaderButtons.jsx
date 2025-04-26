@@ -32,10 +32,6 @@ import * as classes from "./HeaderButtonAddActions.module.less";
 
 @HeaderButtonsMixin
 export class HeaderButtons extends Component {
-  static contextTypes = {
-    location: PropTypes.object.isRequired,
-  };
-
   static propTypes = {
     entity: PropTypes.instanceOf(Immutable.Map),
     toggleVisibility: PropTypes.func.isRequired,
@@ -65,6 +61,7 @@ export class HeaderButtons extends Component {
 
   getSourceButtons() {
     const { entity, isVersionedSource } = this.props;
+    const location = browserHistory.getCurrentLocation();
     const buttons = [];
 
     if (entity.get("isPhysicalDataset")) {
@@ -83,7 +80,7 @@ export class HeaderButtons extends Component {
         qa: "convert-folder",
         iconType: "interface/format-folder",
         to: {
-          ...this.context.location,
+          ...location,
           state: {
             modal: "DatasetSettingsModal",
             tab: "format",
@@ -166,6 +163,7 @@ export class HeaderButtons extends Component {
 
   render() {
     const { rootEntityType, entity } = this.props;
+    const location = browserHistory.getCurrentLocation();
 
     const buttonsForCurrentPage = this.getButtonsForEntityType(
       rootEntityType,
@@ -216,8 +214,8 @@ export class HeaderButtons extends Component {
                 tooltipPlacement="top"
                 onClick={() =>
                   browserHistory.push({
-                    ...this.context.location,
-                    state: { modal: "AddFolderModal" },
+                    ...location,
+                    state: { modal: "AddFolderModal", entity, rootEntityType },
                   })
                 }
               >

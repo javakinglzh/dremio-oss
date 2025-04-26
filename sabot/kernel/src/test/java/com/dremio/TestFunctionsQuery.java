@@ -1275,7 +1275,7 @@ public class TestFunctionsQuery extends BaseTestQuery {
             .put(TSI.YEAR, formatTimeStampMilli.parseLocalDateTime("2017-03-30 20:49:59.000"))
             .build();
 
-    final MajorType timeStampType = Types.optional(MinorType.TIMESTAMP);
+    final MajorType timeStampType = Types.optional(MinorType.TIMESTAMPMILLI);
     final List<Pair<SchemaPath, MajorType>> expectedSchema =
         Collections.singletonList(Pair.of(SchemaPath.getSimplePath("ts"), timeStampType));
 
@@ -1304,7 +1304,7 @@ public class TestFunctionsQuery extends BaseTestQuery {
     final String queryTemplate =
         "select timestampadd(%s, 2, date '2015-03-30') as dt from (values(1))";
 
-    final MajorType timeStampType = Types.required(MinorType.TIMESTAMP);
+    final MajorType timeStampType = Types.required(MinorType.TIMESTAMPMILLI);
 
     final MajorType dateType = Types.required(MinorType.DATE);
 

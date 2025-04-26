@@ -21,8 +21,8 @@ import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetSplit;
 import com.dremio.connector.metadata.DatasetSplitAffinity;
 import com.dremio.connector.metadata.options.TimeTravelOption;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.proto.CoordinationProtos;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.common.HostAffinityComputer;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.parquet.ParquetGroupScanUtils;
@@ -65,11 +65,11 @@ public class DeltaLakeTable {
   private long closestLocalSnapshot = -1L;
   private final DeltaMetadataFetchJobManager manager;
   private final DeltaSnapshotListProcessor postProcessing = new DeltaSnapshotListProcessor();
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private List<DeltaLogSnapshot> snapshots;
 
   public DeltaLakeTable(
-      SabotContext context,
+      PluginSabotContext context,
       FileSystem fs,
       FileSelection fileSelection,
       TimeTravelOption.TimeTravelRequest travelRequest) {
@@ -77,7 +77,7 @@ public class DeltaLakeTable {
   }
 
   public DeltaLakeTable(
-      SabotContext context,
+      PluginSabotContext context,
       FileSystem fs,
       String selectionRoot,
       TimeTravelOption.TimeTravelRequest travelRequest) {

@@ -81,6 +81,18 @@ class AccelerationGridSubCell extends Component {
               : formatMessage({ id: "Read.Only" })
           }
           onClick={hasPermission && !isRecommendation ? onClick : null}
+          tabIndex={0}
+          onKeyDown={
+            hasPermission && !isRecommendation
+              ? (e) => {
+                  if (e.code === "Enter" || e.code === "Space") {
+                    if (hasPermission && !isRecommendation) onClick(e);
+                  }
+                }
+              : null
+          }
+          role="checkbox"
+          aria-checked={isChecked ? "true" : "false"}
         >
           <dremio-icon
             name={`${

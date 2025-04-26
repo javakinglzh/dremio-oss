@@ -15,6 +15,8 @@
  */
 package com.dremio.test;
 
+import static com.dremio.common.util.TestToolUtils.readTestResourceAsString;
+
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.scanner.ClassPathScanner;
 import com.dremio.common.scanner.persistence.ScanResult;
@@ -40,6 +42,7 @@ import org.junit.rules.TestWatcher;
 import org.junit.runner.Description;
 import org.slf4j.Logger;
 
+/** Basic instrumentation for Dremio's Tests. */
 public class DremioTest {
 
   protected static final ObjectMapper objectMapper;
@@ -77,6 +80,9 @@ public class DremioTest {
 
   @ClassRule
   public static final TestRule CLASS_TIMEOUT = TestTools.getTimeoutRule(1000, TimeUnit.SECONDS);
+
+  @ClassRule
+  public static final ClearInlineMocksRule CLEAR_INLINE_MOCKS = new ClearInlineMocksRule();
 
   @Rule public final TestRule timeoutRule = TestTools.getTimeoutRule(50, TimeUnit.SECONDS);
 
@@ -185,7 +191,7 @@ public class DremioTest {
   }
 
   protected static String readResourceAsString(String fileName) {
-    return TestTools.readTestResourceAsString(fileName);
+    return readTestResourceAsString(fileName);
   }
 
   private static class SystemManager {

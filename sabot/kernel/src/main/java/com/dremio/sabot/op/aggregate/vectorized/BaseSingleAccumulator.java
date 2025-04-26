@@ -191,7 +191,10 @@ abstract class BaseSingleAccumulator implements Accumulator {
   @Override
   public void verifyBatchCount(final int batches) {
     Preconditions.checkArgument(
-        this.batches == batches, "Error: Detected incorrect batch count in accumulator");
+        this.batches == batches,
+        "Error: Detected incorrect batch count - Accumulator batch count %s in accumulator, Input batches %s",
+        this.batches,
+        batches);
   }
 
   /**
@@ -515,6 +518,61 @@ abstract class BaseSingleAccumulator implements Accumulator {
             recordsInBatches[i] * typeWidth);
         numRecords += recordsInBatches[i];
         releaseBatch(startBatchIndex + i);
+      }
+    }
+  }
+
+  @Override
+  public void output(
+      final int startBatchIndex, int startRow, int recordsToOutput, int numRecordsInBatch) {
+    final FieldVector accumulationVector = accumulators[startBatchIndex];
+    if (startRow == 0 && recordsToOutput == numRecordsInBatch) {
+      final TransferPair transferPair = accumulationVector.makeTransferPair(transferVector);
+      transferPair.transfer();
+      if (startBatchIndex == 0) {
+        // This seems to be a kludge (copied from the other output method) to ensure that the
+        // accumulator for
+        // source index 0 is available when the spilled partition is read from disk to accumulate
+        // and output.
+        ((FixedWidthVector) accumulationVector).allocateNew(maxValuesPerBatch);
+        accumulationVector.setValueCount(0);
+        initialize(accumulationVector);
+        bitAddresses[startBatchIndex] = accumulationVector.getValidityBufferAddress();
+        valueAddresses[startBatchIndex] = accumulationVector.getDataBufferAddress();
+      }
+    } else {
+      ((FixedWidthVector) transferVector).allocateNew(recordsToOutput);
+      transferVector.setValueCount(0);
+      initialize(transferVector);
+      ArrowBuf validityBuf = transferVector.getValidityBuffer();
+      ArrowBuf dataBuf = transferVector.getDataBuffer();
+      int typeWidth = ((BaseFixedWidthVector) transferVector).getTypeWidth();
+      ArrowBuf accValidityBuffer = accumulators[startBatchIndex].getValidityBuffer();
+      int beginOffset = BitVectorHelper.getValidityBufferSize(startRow);
+      int endOffset = BitVectorHelper.getValidityBufferSize(startRow + recordsToOutput);
+      BitVectorHelper.concatBits(
+          validityBuf,
+          0,
+          accValidityBuffer.slice(beginOffset, endOffset - beginOffset),
+          recordsToOutput,
+          validityBuf);
+      validityBuf.writerIndex(endOffset - beginOffset);
+      // concat data
+      dataBuf.setBytes(
+          0,
+          accumulators[startBatchIndex].getDataBuffer(),
+          startRow * typeWidth,
+          recordsToOutput * typeWidth);
+      dataBuf.writerIndex(recordsToOutput * typeWidth);
+      transferVector.setValueCount(recordsToOutput);
+      if (numRecordsInBatch == (startRow + recordsToOutput)) {
+        logger.debug(
+            "BaseSingleAccumulator::releaseBatch of batchIndex {} RecordsInBatch {} StartRow {} RecordToOutput {} ",
+            startBatchIndex,
+            numRecordsInBatch,
+            startRow,
+            recordsToOutput);
+        releaseBatch(startBatchIndex);
       }
     }
   }

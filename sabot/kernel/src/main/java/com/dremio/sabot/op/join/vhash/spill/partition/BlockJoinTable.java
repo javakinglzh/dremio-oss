@@ -67,7 +67,9 @@ public class BlockJoinTable implements JoinTable {
                 false,
                 MAX_VALUES_PER_BATCH,
                 nullMask,
-                runtimeFilterEnabled));
+                runtimeFilterEnabled,
+                false,
+                false));
     this.tableTracing = false;
   }
 

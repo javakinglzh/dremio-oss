@@ -16,11 +16,9 @@
 package com.dremio.service.flight;
 
 import static com.dremio.service.flight.client.properties.DremioFlightClientProperties.applyClientPropertiesToUserSessionBuilder;
-import static com.dremio.service.flight.client.properties.DremioFlightClientProperties.applyMutableClientProperties;
 
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.SessionOptionManager;
 import com.dremio.exec.server.options.SessionOptionManagerFactory;
 import com.dremio.exec.server.options.SessionOptionManagerFactoryImpl;
@@ -28,130 +26,73 @@ import com.dremio.exec.server.options.SessionOptionManagerImpl;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
 import com.dremio.sabot.rpc.user.UserSession;
+import com.dremio.service.flightcommon.CallContextUtil;
 import com.dremio.service.tokens.TokenDetails;
 import com.dremio.service.tokens.TokenManager;
 import com.dremio.service.usersessions.UserSessionService;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
 import javax.inject.Provider;
 import org.apache.arrow.flight.CallHeaders;
-import org.apache.arrow.flight.CallStatus;
-import org.apache.arrow.flight.FlightProducer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /** Manages UserSession creation and UserSession cache. */
-public class SessionServiceFlightSessionsManager implements DremioFlightSessionsManager {
+public class SessionServiceFlightSessionsManager extends AbstractSessionServiceFlightManager {
   private static final Logger logger =
       LoggerFactory.getLogger(SessionServiceFlightSessionsManager.class);
 
-  public static final String COOKIE_HEADER = "Cookie";
-  public static final String SESSION_ID_KEY = "SESSION_ID";
-
-  private final UserSessionService userSessionService;
-  private final Provider<SabotContext> sabotContextProvider;
   private final Provider<TokenManager> tokenManagerProvider;
   private final SessionOptionManagerFactory sessionOptionManagerFactory;
   private final OptionManager optionManager;
+  private final OptionValidatorListing optionValidatorListing;
 
   public SessionServiceFlightSessionsManager(
-      Provider<SabotContext> sabotContextProvider,
+      OptionValidatorListing optionValidatorListing,
+      OptionManager optionManager,
       Provider<TokenManager> tokenManagerProvider,
       Provider<UserSessionService> userSessionServiceProvider)
       throws Exception {
-    this.sabotContextProvider = sabotContextProvider;
+    super(userSessionServiceProvider);
+    Preconditions.checkArgument(optionManager != null, "optionManager cannot be null");
+    Preconditions.checkArgument(
+        optionValidatorListing != null, "optionValidatorListing cannot be null");
+    Preconditions.checkArgument(
+        tokenManagerProvider != null, "tokenManagerProvider cannot be null");
+    Preconditions.checkArgument(
+        tokenManagerProvider.get() != null, "tokenManagerProvider cannot be null");
+
     this.tokenManagerProvider = tokenManagerProvider;
-    this.optionManager = sabotContextProvider.get().getOptionManager();
-    final OptionValidatorListing optionValidatorListing =
-        sabotContextProvider.get().getOptionValidatorListing();
+    this.optionManager = optionManager;
+    this.optionValidatorListing = optionValidatorListing;
     this.sessionOptionManagerFactory = new SessionOptionManagerFactoryImpl(optionValidatorListing);
-    this.userSessionService = userSessionServiceProvider.get();
-    this.userSessionService.start();
   }
 
   @Override
-  public UserSessionService.UserSessionData createUserSession(
-      String peerIdentity, CallHeaders incomingHeaders) {
-    final String[] peerIdentityParts = peerIdentity.split("\n");
-    final String username;
-    if (peerIdentityParts.length == 3) {
-      username = peerIdentityParts[1];
+  protected UserSessionService.SessionIdAndVersion putUserSession(
+      UserSession userSession, String peerIdentity) throws Exception {
+    return getUserSessionService().putSession(userSession);
+  }
+
+  @Override
+  protected String getUserCredentials(String peerIdentity) {
+    final CallContextUtil callContext = CallContextUtil.newCallContextUtil(peerIdentity);
+    if (callContext.isCompositePeerIdentity()) {
+      return callContext.getUserId().get();
     } else {
       final TokenDetails tokenDetails = tokenManagerProvider.get().validateToken(peerIdentity);
-      username = tokenDetails.username;
+      return tokenDetails.username;
     }
-    final UserSession userSession = buildUserSession(username, incomingHeaders);
-    applyMutableClientProperties(userSession, incomingHeaders);
-    final UserSessionService.SessionIdAndVersion idAndVersion =
-        userSessionService.putSession(userSession);
-
-    return new UserSessionService.UserSessionData(
-        userSession, idAndVersion.getVersion(), idAndVersion.getId());
   }
 
-  @Override
-  public UserSessionService.UserSessionData getUserSession(
-      String peerIdentity, CallHeaders incomingHeaders) {
-    final String sessionId = CookieUtils.getCookieValue(incomingHeaders, SESSION_ID_KEY);
-    if (sessionId == null) {
-      logger.debug("No sessionId is available in Headers.");
-      return null;
-    }
-
-    UserSessionService.UserSessionAndVersion userSessionAndVersion;
-    try {
-      userSessionAndVersion = userSessionService.getSession(sessionId);
-    } catch (Exception e) {
-      final String errorDescription = "Unable to retrieve user session.";
-      logger.error(errorDescription, e);
-      throw CallStatus.INTERNAL.withCause(e).withDescription(errorDescription).toRuntimeException();
-    }
-
-    if (null == userSessionAndVersion) {
-      logger.error("UserSession is not available in SessionManager.");
-      throw CallStatus.UNAUTHENTICATED
-          .withDescription("UserSession is not available in the cache")
-          .toRuntimeException();
-    }
-
-    UserSession userSession = userSessionAndVersion.getSession();
-    final SessionOptionManager sessionOptionManager =
-        this.sessionOptionManagerFactory.getOrCreate(sessionId);
-
-    userSession =
-        UserSession.Builder.newBuilder(userSession)
-            .withSessionOptionManager(sessionOptionManager, this.optionManager)
-            .build();
-    return new UserSessionService.UserSessionData(
-        userSession, userSessionAndVersion.getVersion(), sessionId);
-  }
-
-  @Override
-  public void decorateResponse(
-      FlightProducer.CallContext callContext, UserSessionService.UserSessionData sessionData) {
-    addCookie(callContext, SESSION_ID_KEY, sessionData.getSessionId());
-  }
-
-  @Override
-  public void updateSession(UserSessionService.UserSessionData updatedSession) {
-    userSessionService.updateSession(
-        updatedSession.getSessionId(), updatedSession.getVersion(), updatedSession.getSession());
-  }
-
-  /**
-   * Build the UserSession object using the UserSession Builder.
-   *
-   * @param username The username to build UserSession for.
-   * @param incomingHeaders The CallHeaders to parse client properties from.
-   * @return An instance of UserSession.
-   */
   @VisibleForTesting
-  UserSession buildUserSession(String username, CallHeaders incomingHeaders) {
+  @Override
+  protected UserSession buildUserSession(String username, CallHeaders incomingHeaders) {
     final UserSession.Builder builder =
         UserSession.Builder.newBuilder()
             .withSessionOptionManager(
-                new SessionOptionManagerImpl(
-                    sabotContextProvider.get().getOptionValidatorListing()),
-                optionManager)
+                new SessionOptionManagerImpl(optionValidatorListing), optionManager)
             .withCredentials(
                 UserBitShared.UserCredentials.newBuilder().setUserName(username).build())
             .withUserProperties(UserProtos.UserProperties.getDefaultInstance())
@@ -167,18 +108,47 @@ public class SessionServiceFlightSessionsManager implements DremioFlightSessions
   }
 
   @Override
-  public void close() throws Exception {}
+  protected UserSessionService.UserSessionAndVersion getUserSessionAndVersion(
+      String sessionId, String peerIdentity) throws Exception {
+    final UserSessionService.UserSessionAndVersion userSessionAndVersion =
+        getUserSessionService().getSession(sessionId);
+    if (userSessionAndVersion == null) {
+      return null;
+    }
 
-  /**
-   * Helper method to set the outgoing cookies
-   *
-   * @param callContext the CallContext to get the middleware from
-   * @param key the key of the cookie
-   * @param value the value of the cookie
-   */
-  private void addCookie(FlightProducer.CallContext callContext, String key, String value) {
-    callContext
-        .getMiddleware(DremioFlightService.FLIGHT_CLIENT_PROPERTIES_MIDDLEWARE_KEY)
-        .addCookie(key, value);
+    final UserSession userSession =
+        buildRetrievedUserSession(userSessionAndVersion.getSession(), sessionId, peerIdentity);
+    return new UserSessionService.UserSessionAndVersion(
+        userSession, userSessionAndVersion.getVersion());
+  }
+
+  @Override
+  protected UserSession buildRetrievedUserSession(
+      UserSession userSession, String sessionId, String peerIdentity) {
+    assert this.sessionOptionManagerFactory != null;
+    final SessionOptionManager sessionOptionManager =
+        this.sessionOptionManagerFactory.getOrCreate(sessionId);
+
+    final UserSession.Builder builder =
+        UserSession.Builder.newBuilder(userSession)
+            .withSessionOptionManager(sessionOptionManager, this.optionManager);
+
+    final UserBitShared.UserCredentials userCredentials = userSession.getCredentials();
+    if (userCredentials != null
+        && Strings.isNullOrEmpty(userCredentials.getUserName())
+        && !Strings.isNullOrEmpty(userCredentials.getUserId())) {
+      final String credential = getUserCredentials(peerIdentity);
+      builder.withCredentials(
+          UserBitShared.UserCredentials.newBuilder()
+              .setUserName(credential)
+              .setUserId(userCredentials.getUserId())
+              .build());
+      logger.debug(
+          "Rebuilding UserSession {} credentials from UserId {}",
+          sessionId,
+          userCredentials.getUserId());
+    }
+
+    return builder.build();
   }
 }

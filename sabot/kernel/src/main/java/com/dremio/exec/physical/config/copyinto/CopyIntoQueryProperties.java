@@ -56,6 +56,7 @@ public class CopyIntoQueryProperties implements ExtendedProperty {
 
   public void setOnErrorOption(OnErrorOption onErrorOption) {
     this.onErrorOption = onErrorOption;
+    setStateRecordEvents();
   }
 
   public void setStorageLocation(String storageLocation) {

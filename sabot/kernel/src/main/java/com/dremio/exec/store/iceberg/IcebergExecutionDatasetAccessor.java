@@ -19,7 +19,6 @@ import com.dremio.connector.ConnectorException;
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.EntityPath;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.store.dfs.FormatPlugin;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
 import com.dremio.exec.store.file.proto.FileProtobuf;
@@ -30,7 +29,6 @@ import com.dremio.service.namespace.file.proto.FileConfig;
 import com.google.common.base.Throwables;
 import java.io.IOException;
 import java.util.function.Supplier;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 
 /** Dataset handle for Iceberg format that supports Iceberg execution model */
@@ -43,18 +41,14 @@ public class IcebergExecutionDatasetAccessor extends BaseIcebergExecutionDataset
   public IcebergExecutionDatasetAccessor(
       EntityPath datasetPath,
       Supplier<Table> tableSupplier,
-      Configuration configuration,
       FormatPlugin formatPlugin,
       FileSystem fs,
       TableSnapshotProvider tableSnapshotProvider,
-      MutablePlugin plugin,
       TableSchemaProvider tableSchemaProvider) {
     super(
         datasetPath,
         tableSupplier,
-        configuration,
         tableSnapshotProvider,
-        plugin,
         tableSchemaProvider,
         formatPlugin.getContext().getOptionManager());
     this.tableSupplier = tableSupplier;

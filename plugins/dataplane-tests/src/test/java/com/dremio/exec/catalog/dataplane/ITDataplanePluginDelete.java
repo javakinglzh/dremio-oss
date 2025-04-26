@@ -15,7 +15,27 @@
  */
 package com.dremio.exec.catalog.dataplane;
 
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.*;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME_FOR_REFLECTION_TEST;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtSpecifierQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQueryWithAt;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.deleteAllQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.deleteAllQueryWithoutContext;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.deleteQueryWithSpecifier;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueBranchName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTagName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.joinedTableKey;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tablePathWithFolders;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useContextQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useTagQuery;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 

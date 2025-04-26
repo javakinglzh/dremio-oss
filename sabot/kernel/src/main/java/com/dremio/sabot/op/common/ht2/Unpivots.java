@@ -117,7 +117,7 @@ public class Unpivots {
       final int start,
       final int count,
       final int seekInOutput) {
-    final int dataWidth = blockWidth - LBlockHashTable.VAR_OFFSET_SIZE;
+    final int dataWidth = blockWidth - HashTable.VAR_OFFSET_SIZE;
     final long startVarOffset = srcFixedAddr + (blockWidth * start) + dataWidth;
     final long maxAddr = startVarOffset + (count * blockWidth);
     final long srcVarAddrBase = srcVarAddr;
@@ -143,42 +143,44 @@ public class Unpivots {
       maxTargetAddrs[i] = realloc.max();
     }
 
-    // loop per record.
-    for (long varOffsetAddr = startVarOffset;
-        varOffsetAddr < maxAddr;
-        varOffsetAddr += blockWidth) {
-      int varOffset = PlatformDependent.getInt(varOffsetAddr);
-      long varPos =
-          srcVarAddrBase
-              + varOffset
-              + LBlockHashTable
-                  .VAR_LENGTH_SIZE; // skip the complete varlength since not needed for unpivoting
-      // (this shifts the offsets outside the loop).;
+    if (srcVarAddrBase != 0) {
+      // loop per record.
+      for (long varOffsetAddr = startVarOffset;
+          varOffsetAddr < maxAddr;
+          varOffsetAddr += blockWidth) {
+        int varOffset = PlatformDependent.getInt(varOffsetAddr);
+        long varPos =
+            srcVarAddrBase
+                + varOffset
+                + HashTable
+                    .VAR_LENGTH_SIZE; // skip the complete varlength since not needed for unpivoting
+        // (this shifts the offsets outside the loop).;
 
-      // loop per field
-      for (int i = 0; i < fieldCount; i++) {
-        int len = PlatformDependent.getInt(varPos);
-        varPos += 4;
+        // loop per field
+        for (int i = 0; i < fieldCount; i++) {
+          int len = PlatformDependent.getInt(varPos);
+          varPos += 4;
 
-        long target = targetAddrs[i];
-        // resize as necessary.
-        if (maxTargetAddrs[i] < target + len) {
-          Reallocator realloc = reallocs[i];
-          final int shift = (int) (target - realloc.addr());
-          target = realloc.ensure(shift + len) + shift;
-          targetAddrs[i] = target;
-          maxTargetAddrs[i] = realloc.max();
+          long target = targetAddrs[i];
+          // resize as necessary.
+          if (maxTargetAddrs[i] < target + len) {
+            Reallocator realloc = reallocs[i];
+            final int shift = (int) (target - realloc.addr());
+            target = realloc.ensure(shift + len) + shift;
+            targetAddrs[i] = target;
+            maxTargetAddrs[i] = realloc.max();
+          }
+
+          // copy variable data.
+          long offsetAddr = offsetAddrs[i];
+          int startIdx = PlatformDependent.getInt(offsetAddr);
+          offsetAddr += 4;
+          PlatformDependent.putInt(offsetAddr, startIdx + len);
+          PlatformDependent.copyMemory(varPos, target, len);
+          offsetAddrs[i] = offsetAddr;
+          targetAddrs[i] += len;
+          varPos += len;
         }
-
-        // copy variable data.
-        long offsetAddr = offsetAddrs[i];
-        int startIdx = PlatformDependent.getInt(offsetAddr);
-        offsetAddr += 4;
-        PlatformDependent.putInt(offsetAddr, startIdx + len);
-        PlatformDependent.copyMemory(varPos, target, len);
-        offsetAddrs[i] = offsetAddr;
-        targetAddrs[i] += len;
-        varPos += len;
       }
     }
 
@@ -229,7 +231,7 @@ public class Unpivots {
       final int count,
       final int seekInOutput) {
     final long fixedAddr = fixedVector.getMemoryAddress();
-    final long variableAddr = variableVector.getMemoryAddress();
+    final long variableAddr = (variableVector != null ? variableVector.getMemoryAddress() : 0);
     unpivotToAllocedOutput(pivot, fixedAddr, variableAddr, start, count, seekInOutput);
   }
 

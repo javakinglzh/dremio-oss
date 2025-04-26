@@ -17,3 +17,10 @@
 export const ClickableCell = (props: any) => {
   return <div {...props} className="clickable-cell" />;
 };
+
+export const WithClickableCell = (props: any) =>
+  props.onClick ? (
+    <ClickableCell onClick={props.onClick}>{props.children}</ClickableCell>
+  ) : (
+    props.children
+  );

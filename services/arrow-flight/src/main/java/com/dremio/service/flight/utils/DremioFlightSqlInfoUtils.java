@@ -216,7 +216,7 @@ public final class DremioFlightSqlInfoUtils {
       case VARCHAR:
       case VAR16CHAR:
         return Types.VARCHAR;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return Types.TIMESTAMP;
       case TIMESTAMPTZ:
         return Types.TIMESTAMP_WITH_TIMEZONE;

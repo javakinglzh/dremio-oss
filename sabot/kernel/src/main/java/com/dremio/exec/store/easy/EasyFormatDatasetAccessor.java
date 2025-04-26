@@ -34,11 +34,11 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.ColumnCountTooLargeException;
 import com.dremio.exec.catalog.FileConfigMetadata;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.VectorWrapper;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.PartitionChunkListingImpl;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.SampleMutator;
@@ -208,7 +208,7 @@ public class EasyFormatDatasetAccessor
 
   private BatchSchema getBatchSchema(
       BatchSchema oldSchema, final FileSelection selection, final FileSystem dfs) throws Exception {
-    final SabotContext context = formatPlugin.getContext();
+    final PluginSabotContext context = formatPlugin.getContext();
     try (BufferAllocator sampleAllocator =
             context.getAllocator().newChildAllocator("sample-alloc", 0, Long.MAX_VALUE);
         OperatorContextImpl operatorContext =

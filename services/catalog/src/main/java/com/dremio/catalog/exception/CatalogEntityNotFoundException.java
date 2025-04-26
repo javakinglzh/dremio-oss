@@ -15,8 +15,20 @@
  */
 package com.dremio.catalog.exception;
 
+import javax.ws.rs.NotFoundException;
+import javax.ws.rs.WebApplicationException;
+
 public class CatalogEntityNotFoundException extends CatalogException {
   public CatalogEntityNotFoundException(String message, Throwable cause) {
     super(message, cause);
+  }
+
+  public CatalogEntityNotFoundException(String message) {
+    super(message);
+  }
+
+  @Override
+  public WebApplicationException toRestApiException() {
+    return new NotFoundException(getMessage(), this);
   }
 }

@@ -24,19 +24,20 @@ public class TestV2TreeResource {
 
   @Test
   public void testDisableAssignReference() {
-    assertThatThrownBy(() -> new V2TreeResource(null).assignReference(null, "main", null))
+    assertThatThrownBy(() -> new V2TreeResource(null, null).assignReference(null, "main", null))
         .isInstanceOf(WebApplicationException.class);
   }
 
   @Test
   public void testDisableTransplantCommitsIntoBranch() {
-    assertThatThrownBy(() -> new V2TreeResource(null).transplantCommitsIntoBranch("main", null))
+    assertThatThrownBy(
+            () -> new V2TreeResource(null, null).transplantCommitsIntoBranch("main", null))
         .isInstanceOf(WebApplicationException.class);
   }
 
   @Test
   public void testDisableCommitMultipleOperations() {
-    assertThatThrownBy(() -> new V2TreeResource(null).commitMultipleOperations("main", null))
+    assertThatThrownBy(() -> new V2TreeResource(null, null).commitMultipleOperations("main", null))
         .isInstanceOf(WebApplicationException.class);
   }
 }

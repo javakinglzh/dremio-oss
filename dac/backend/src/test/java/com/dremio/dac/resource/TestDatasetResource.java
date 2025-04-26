@@ -27,6 +27,7 @@ import com.dremio.dac.model.sources.UIMetadataPolicy;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.server.FamilyExpectation;
 import com.dremio.dac.server.ValidationErrorMessage;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -89,7 +90,8 @@ public class TestDatasetResource extends BaseTestServer {
     source.setMetadataPolicy(
         UIMetadataPolicy.of(CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE));
     source.setConfig(nas);
-    getSourceService().registerSourceWithRuntime(source);
+    getSourceService()
+        .registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     createNewFile(DATASET_NAME);
     getHttpClient().getDatasetApi().getPreview(DATASET_PATH);
@@ -443,7 +445,6 @@ public class TestDatasetResource extends BaseTestServer {
     verifyRawReflection(
         recommendedReflections.get(0),
         true,
-        false,
         ImmutableList.of(
             new ReflectionField("key"), new ReflectionField("value"), new ReflectionField("loc")));
   }
@@ -469,7 +470,6 @@ public class TestDatasetResource extends BaseTestServer {
     verifyAggReflection(
         recommendedReflectionsLowercase.get(0),
         true,
-        false,
         ImmutableList.of(
             new ReflectionDimensionField("key").setGranularity(DimensionGranularity.DATE)),
         ImmutableList.of(
@@ -499,14 +499,12 @@ public class TestDatasetResource extends BaseTestServer {
     verifyRawReflection(
         recommendedReflections.get(0),
         true,
-        false,
         ImmutableList.of(
             new ReflectionField("key"), new ReflectionField("value"), new ReflectionField("loc")));
 
     verifyAggReflection(
         recommendedReflections.get(1),
         true,
-        false,
         ImmutableList.of(
             new ReflectionDimensionField("key").setGranularity(DimensionGranularity.DATE)),
         ImmutableList.of(
@@ -517,11 +515,9 @@ public class TestDatasetResource extends BaseTestServer {
   private void verifyRawReflection(
       Map<String, Object> reflectionToVerify,
       boolean enabled,
-      boolean arrowCachingEnabled,
       List<ReflectionField> displayFields) {
     assertEquals(ReflectionType.RAW.toString(), reflectionToVerify.get("type"));
     assertEquals(enabled, reflectionToVerify.get("enabled"));
-    assertEquals(arrowCachingEnabled, reflectionToVerify.get("arrowCachingEnabled"));
 
     List<Map<String, String>> displayFieldsMap =
         (List<Map<String, String>>) reflectionToVerify.get("displayFields");
@@ -534,12 +530,10 @@ public class TestDatasetResource extends BaseTestServer {
   private void verifyAggReflection(
       Map<String, Object> reflectionToVerify,
       boolean enabled,
-      boolean arrowCachingEnabled,
       List<ReflectionDimensionField> dimensionFields,
       List<ReflectionMeasureField> measureFields) {
     assertEquals(ReflectionType.AGGREGATION.toString(), reflectionToVerify.get("type"));
     assertEquals(enabled, reflectionToVerify.get("enabled"));
-    assertEquals(arrowCachingEnabled, reflectionToVerify.get("arrowCachingEnabled"));
 
     List<Map<String, String>> dimensionFieldsMap =
         (List<Map<String, String>>) reflectionToVerify.get("dimensionFields");

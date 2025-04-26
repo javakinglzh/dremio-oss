@@ -113,10 +113,13 @@ public class TestQueriesClerkBase {
     assertEquals(expectedValue, numPhases);
   }
 
-  protected QueriesClerk makeClerk(WorkloadTicketDepot ticketDepot) {
+  protected QueriesClerk makeClerk(
+      WorkloadTicketDepot ticketDepot,
+      ReservedResourceDepot reservedResourceDepot,
+      boolean enforceDLRReservations) {
     ExecToCoordTunnelCreator mockTunnelCreator = mock(ExecToCoordTunnelCreator.class);
     ExecToCoordTunnel mockTunnel = mock(ExecToCoordTunnel.class);
-    return new QueriesClerk(ticketDepot);
+    return new QueriesClerk(ticketDepot, reservedResourceDepot, enforceDLRReservations);
   }
 
   public final class TestAllocator implements BufferAllocator {

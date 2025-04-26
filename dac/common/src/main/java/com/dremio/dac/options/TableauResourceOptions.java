@@ -17,10 +17,12 @@ package com.dremio.dac.options;
 
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators;
+import com.dremio.options.UserControlledOption;
 
 @Options
 public final class TableauResourceOptions {
   // Special option for enabling the Tableau TDS endpoint.
+  @UserControlledOption
   public static final TypeValidators.BooleanValidator CLIENT_TOOLS_TABLEAU =
       new TypeValidators.BooleanValidator("client.tools.tableau", true);
 }

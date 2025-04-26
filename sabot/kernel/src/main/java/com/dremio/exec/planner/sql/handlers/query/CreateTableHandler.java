@@ -23,6 +23,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.DatasetCatalog;
 import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
@@ -34,6 +35,7 @@ import com.dremio.exec.planner.sql.parser.SqlCreateTable;
 import com.dremio.exec.planner.sql.parser.SqlGrant;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
@@ -68,7 +70,13 @@ public class CreateTableHandler extends DataAdditionCmdHandler {
 
     IcebergUtils.validateIcebergLocalSortIfDeclared(sql, config.getContext().getOptions());
 
-    IcebergUtils.validateIcebergAutoClusteringIfDeclared(sql, config.getContext().getOptions());
+    if (!isAutoClusteringAllowed()
+        && sqlCreateTable.getClusterKeys() != null
+        && !sqlCreateTable.getClusterKeys().isEmpty()) {
+      throw UserException.unsupportedError()
+          .message("This Dremio edition doesn't support CLUSTER BY option")
+          .buildSilently();
+    }
 
     // this map has properties specified using 'STORE AS' in sql
     // will be null if 'STORE AS' is not in query
@@ -140,6 +148,14 @@ public class CreateTableHandler extends DataAdditionCmdHandler {
       CatalogEntityKey catalogEntityKey,
       OptionManager options,
       ResolvedVersionContext resolvedVersionContext) {
+    if (!(catalog.getSource(catalogEntityKey.toNamespaceKey().getRoot())
+        instanceof MutablePlugin)) {
+      throw UserException.unsupportedError()
+          .message(
+              String.format(
+                  "Source [%s] does not support CREATE TABLE.", catalogEntityKey.getRootEntity()))
+          .buildSilently();
+    }
     validateTableFormatOptions(catalog, catalogEntityKey, options, resolvedVersionContext);
     DremioTable table = catalog.getTableNoResolve(catalogEntityKey);
     if (table != null) {
@@ -180,7 +196,13 @@ public class CreateTableHandler extends DataAdditionCmdHandler {
               ? tableEntry.getIcebergTableProps().getTableLocation()
               : tableEntry.getLocation();
       FileSystem fs =
-          tableEntry.getPlugin().createFS(tableLocation, tableEntry.getUserName(), null);
+          tableEntry
+              .getPlugin()
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(tableLocation)
+                      .userName(tableEntry.getUserName())
+                      .datasetFromCreateTableEntry(tableEntry));
 
       // delete folders created by CTAS
       Path path = Path.of(tableLocation);

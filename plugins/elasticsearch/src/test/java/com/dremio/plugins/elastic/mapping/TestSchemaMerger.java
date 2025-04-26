@@ -220,7 +220,7 @@ public class TestSchemaMerger {
         final ElasticMappingSet.ElasticField otherField =
             createElasticField("field1", otherType, false);
         final ElasticMappingSet.ElasticField mergedField =
-            field.merge(null, otherField, null, null, null, null);
+            field.merge(null, otherField, null, null, null, null, false);
 
         final TypePair typePair = new TypePair(type, otherType);
         if (INVALID_MERGE_PAIRS.contains(typePair)) {
@@ -252,7 +252,7 @@ public class TestSchemaMerger {
         createElasticField("field1", ElasticMappingSet.Type.LONG, false);
 
     final ElasticMappingSet.ElasticField mergedField =
-        field.merge(null, otherField, null, null, null, null);
+        field.merge(null, otherField, null, null, null, null, false);
     assertTrue(mergedField.isNormalized());
   }
 

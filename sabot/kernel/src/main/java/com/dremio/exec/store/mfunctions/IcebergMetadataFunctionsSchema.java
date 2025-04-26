@@ -26,7 +26,7 @@ import org.apache.iceberg.types.Types;
  * Captures metadata for iceberg metadata functions tables Iceberg APi returns schema with map
  * fields as well. Dremio currently doesn't support map so same is being casted as List<Struct>
  */
-final class IcebergMetadataFunctionsSchema {
+public final class IcebergMetadataFunctionsSchema {
 
   private static final BatchSchema HISTORY;
   private static final BatchSchema SNAPSHOTS;

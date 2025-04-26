@@ -88,6 +88,7 @@ class MaestroProxyQueryTracker implements QueryTracker {
   private Set<FragmentHandle> pendingFragments = null;
   private Set<FragmentHandle> notStartedFragments = null;
   private boolean notifyFileCursorManagerDone;
+  private final DuplicateRpcHandler<StreamObserver<Empty>, Empty> duplicateStartFragmentHandler;
 
   /**
    * Initialize with the set of fragment handles for the query before starting the query.
@@ -121,6 +122,7 @@ class MaestroProxyQueryTracker implements QueryTracker {
     this.retryExecutor = retryExecutor;
     this.expirationTime = System.currentTimeMillis() + evictionDelayMillis;
     this.clusterCoordinator = clusterCoordinator;
+    this.duplicateStartFragmentHandler = new DuplicateRpcHandler<>();
   }
 
   /**
@@ -135,7 +137,9 @@ class MaestroProxyQueryTracker implements QueryTracker {
       QueryTicket queryTicket,
       NodeEndpoint foreman,
       MaestroClient maestroServiceClient,
-      JobTelemetryExecutorClient jobTelemetryClient) {
+      JobTelemetryExecutorClient jobTelemetryClient,
+      StreamObserver<Empty> startFragmentObserver) {
+    this.duplicateStartFragmentHandler.replaceLatestStreamObserver(startFragmentObserver);
     if (state != State.INVALID) {
       // query already started, probably a duplicate request.
       return false;
@@ -307,7 +311,7 @@ class MaestroProxyQueryTracker implements QueryTracker {
                     .setError(firstErrorInQuery)
                     .build();
           }
-          // fall-through
+        // fall-through
 
         case CANCELLED:
         case FINISHED:
@@ -321,7 +325,28 @@ class MaestroProxyQueryTracker implements QueryTracker {
                     .setId(handle.getQueryId())
                     .setEndpoint(EndpointHelper.getMinimalEndpoint(selfEndpoint.get()))
                     .setForeman(foreman)
+                    .build(); // Update NodeQueryScreenCompletion with profile endTime
+            final NodeQueryScreenCompletion completion =
+                screenCompletion.toBuilder()
+                    .setScreenOperatorCompletionTime(profile.getEndTime())
                     .build();
+            Consumer<StreamObserver<Empty>> consumer =
+                observer -> {
+                  try {
+                    logger.debug(
+                        "sending screen completion to foreman {}:{}",
+                        foreman.getAddress(),
+                        foreman.getFabricPort());
+                    maestroServiceClient.screenComplete(
+                        completion.toBuilder().setRpcStartedAt(System.currentTimeMillis()).build(),
+                        observer);
+                  } catch (Exception e) {
+                    observer.onError(e);
+                  }
+                };
+            consumer.accept(
+                new RetryingObserver(
+                    consumer, MaestroServiceGrpc.getScreenCompleteMethod().getBareMethodName()));
           }
           checkIfResultsSent(fragmentStatus);
           checkIfAllFragmentDone();
@@ -330,31 +355,6 @@ class MaestroProxyQueryTracker implements QueryTracker {
         default:
           // ignore other status.
       }
-    }
-
-    if (screenCompletion != null) {
-      // Update NodeQueryScreenCompletion with profile endTime
-      final NodeQueryScreenCompletion completion =
-          screenCompletion.toBuilder()
-              .setScreenOperatorCompletionTime(profile.getEndTime())
-              .build();
-      Consumer<StreamObserver<Empty>> consumer =
-          observer -> {
-            try {
-              logger.debug(
-                  "sending screen completion to foreman {}:{}",
-                  foreman.getAddress(),
-                  foreman.getFabricPort());
-              maestroServiceClient.screenComplete(
-                  completion.toBuilder().setRpcStartedAt(System.currentTimeMillis()).build(),
-                  observer);
-            } catch (Exception e) {
-              observer.onError(e);
-            }
-          };
-      consumer.accept(
-          new RetryingObserver(
-              consumer, MaestroServiceGrpc.getScreenCompleteMethod().getBareMethodName()));
     }
     if (firstError != null) {
       final NodeQueryFirstError error = firstError;
@@ -554,6 +554,13 @@ class MaestroProxyQueryTracker implements QueryTracker {
   @Override
   public FileCursorManagerFactory getFileCursorManagerFactory() {
     return fileCursorManagerFactory;
+  }
+
+  @Override
+  public void markStartFragmentDone(
+      StreamObserver<Empty> startFragmentObserver, Throwable throwable) {
+    duplicateStartFragmentHandler.markAndSendAck(
+        Empty.getDefaultInstance(), throwable, startFragmentObserver);
   }
 
   private class ForemanDeathListener implements NodeStatusListener {

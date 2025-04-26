@@ -14,10 +14,7 @@
  * limitations under the License.
  */
 import parseMilliseconds from "parse-ms";
-import type {
-  EngineConfiguration,
-  EngineProperties,
-} from "../../interfaces/Engine.js";
+import type { EngineConfiguration, EngineProperties } from "./Engine.ts";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const engineEntityToProperties = (properties: any): EngineProperties => {

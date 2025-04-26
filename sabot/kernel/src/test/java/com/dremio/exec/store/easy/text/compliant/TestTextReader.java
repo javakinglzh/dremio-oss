@@ -199,7 +199,6 @@ public class TestTextReader extends BaseTestQuery {
 
   @BeforeClass
   public static void beforeClass() throws Exception {
-    setupDefaultTestCluster();
     tblPathSmall = new File(getDfsTestTmpSchemaLocation(), TMP_CSV_FILE_SMALL);
     tblPathLarge = new File(getDfsTestTmpSchemaLocation(), TMP_CSV_FILE_LARGE);
     tblPathCountStar = new File(getDfsTestTmpSchemaLocation(), TMP_CSV_FILE_COUNT_STAR);

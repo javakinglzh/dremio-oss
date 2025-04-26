@@ -15,6 +15,8 @@
  */
 package com.dremio.exec;
 
+import static org.mockito.Mockito.mock;
+
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.JULBridge;
 import com.dremio.common.utils.protos.QueryWritableBatch;
@@ -35,35 +37,20 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocatorFactory;
 import org.junit.After;
 import org.junit.Before;
-import org.mockito.Mockito;
 
 public class ExecTest extends DremioTest {
 
   private BufferAllocator rootAllocator;
   protected BufferAllocator allocator;
 
-  private static volatile FunctionImplementationRegistry FUNCTION_REGISTRY;
-  private static volatile FunctionImplementationRegistry FUNCTION_REGISTRY_DECIMAL;
-  private static final OptionManager OPTION_MANAGER = Mockito.mock(OptionManager.class);
-
   protected static FunctionImplementationRegistry FUNCTIONS() {
-    // initialize once so avoid having to regenerate functions repetitvely in tests. So so lazily so
-    // tests that don't need, don't do.
-    if (FUNCTION_REGISTRY == null) {
-      FUNCTION_REGISTRY =
-          FunctionImplementationRegistry.create(
-              DEFAULT_SABOT_CONFIG, CLASSPATH_SCAN_RESULT, OPTION_MANAGER, false);
-    }
-    return FUNCTION_REGISTRY;
+    return FunctionImplementationRegistry.create(
+        DEFAULT_SABOT_CONFIG, CLASSPATH_SCAN_RESULT, mock(OptionManager.class), false);
   }
 
   protected static FunctionImplementationRegistry DECIMAL_FUNCTIONS() {
-    if (FUNCTION_REGISTRY_DECIMAL == null) {
-      FUNCTION_REGISTRY_DECIMAL =
-          FunctionImplementationRegistry.create(
-              DEFAULT_SABOT_CONFIG, CLASSPATH_SCAN_RESULT, OPTION_MANAGER, true);
-    }
-    return FUNCTION_REGISTRY_DECIMAL;
+    return FunctionImplementationRegistry.create(
+        DEFAULT_SABOT_CONFIG, CLASSPATH_SCAN_RESULT, mock(OptionManager.class), true);
   }
 
   static {
@@ -90,8 +77,7 @@ public class ExecTest extends DremioTest {
   }
 
   public static UserClientConnection mockUserClientConnection(QueryContext context) {
-    final UserSession session =
-        context != null ? context.getSession() : Mockito.mock(UserSession.class);
+    final UserSession session = context != null ? context.getSession() : mock(UserSession.class);
     return new UserClientConnection() {
 
       @Override

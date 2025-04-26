@@ -35,7 +35,7 @@ import org.apache.arrow.memory.BufferAllocator;
 import org.apache.commons.collections4.CollectionUtils;
 
 public class PartitionColFilters implements AutoCloseable {
-  private final org.slf4j.Logger logger =
+  private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(PartitionColFilters.class);
   public static final long BLOOMFILTER_MAX_SIZE = 2 * 1024 * 1024;
 

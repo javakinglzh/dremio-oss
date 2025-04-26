@@ -16,10 +16,8 @@
 
 :global {
   .toggle {
-    border-radius: 4px;
-    // &:focus-within {
-    //   border: 1.5px solid var(--border--focused);
-    // }
+    overflow: hidden;
+    border-radius: 10px;
     .MuiSwitch-track {
       background-color: var(--border--neutral--solid);
       opacity: 1 !important;
@@ -34,12 +32,25 @@
       background-color: var(--fill--primary--hover);
     }
 
+    &:focus-within {
+      outline-offset: -6px;
+      outline: 1.5px solid var(--border--focused);
+    }
+
     // Circle
     .MuiSwitch-switchBase {
       color: var(--fill--secondary);
       opacity: 1 !important;
+
+      &:hover {
+        color: var(--fill--secondary--hover);
+      }
+
       &.Mui-checked {
         color: var(--fill--toggle--checked);
+        &:hover {
+          color: var(--fill--toggle--checked--hover);
+        }
       }
       &.Mui-checked.Mui-disabled {
         color: var(--fill--primary--selected--hover);

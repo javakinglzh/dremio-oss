@@ -24,14 +24,12 @@ import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import java.io.IOException;
 import java.util.Collections;
-import java.util.List;
 import java.util.Optional;
 
 /**
@@ -69,15 +67,6 @@ public class MissingStoragePlugin implements StoragePlugin, SupportsListingDatas
   @Override
   public SourceCapabilities getSourceCapabilities() {
     return new SourceCapabilities();
-  }
-
-  @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    if (throwOnInvocation) {
-      throw new UnsupportedOperationException(errorMessage);
-    }
-
-    return null;
   }
 
   @Override

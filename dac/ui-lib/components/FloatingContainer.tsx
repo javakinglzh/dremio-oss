@@ -29,19 +29,25 @@ import { cloneElement } from "react";
 import mergeRefs from "react-merge-refs";
 
 export const FloatingContainer = (props: any) => {
-  const { trigger, children, isOpen, placement } = props;
+  const {
+    trigger,
+    children,
+    isOpen,
+    placement,
+    matchTriggerWidth = true,
+  } = props;
+
+  const middleware = [offset(4), flip()];
+  const sizeMiddleware = size({
+    apply({ rects, elements }) {
+      Object.assign(elements.floating.style, {
+        width: `${rects.reference.width}px`,
+      });
+    },
+  });
+
   const { x, y, strategy, refs } = useFloating({
-    middleware: [
-      offset(4),
-      flip(),
-      size({
-        apply({ rects, elements }) {
-          Object.assign(elements.floating.style, {
-            width: `${rects.reference.width}px`,
-          });
-        },
-      }),
-    ],
+    middleware: [...middleware, matchTriggerWidth ? sizeMiddleware : null],
     placement,
     strategy: "fixed",
     whileElementsMounted: autoUpdate,

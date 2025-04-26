@@ -145,5 +145,6 @@
 .bg-disabled {
   background: var(--fill--disabled) !important;
   color: var(--text--disabled);
+  --bg: var(--fill--disabled);
   --text--hovered: var(--text--disabled);
 }

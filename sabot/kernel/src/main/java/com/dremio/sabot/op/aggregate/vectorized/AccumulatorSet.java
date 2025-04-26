@@ -266,6 +266,13 @@ public class AccumulatorSet implements ResizeListener, AutoCloseable {
     }
   }
 
+  public void output(
+      int startBatchIndex, int startRow, int recordsToOutput, int numRecordsInBatch) {
+    for (Accumulator a : children) {
+      a.output(startBatchIndex, startRow, recordsToOutput, numRecordsInBatch);
+    }
+  }
+
   public Accumulator[] getChildren() {
     return children;
   }

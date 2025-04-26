@@ -19,3 +19,4 @@ export * from "./levelContext";
 export * from "./renderExpandedIcon";
 export * from "./useTree";
 export * from "./useTreeItem";
+export * from "./useTreeKeyboardListener";

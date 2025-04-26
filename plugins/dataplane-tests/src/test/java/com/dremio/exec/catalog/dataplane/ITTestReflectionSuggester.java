@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.catalog.dataplane;
 
-import static com.dremio.exec.ExecConstants.LAYOUT_REFRESH_MAX_ATTEMPTS;
 import static com.dremio.exec.ExecConstants.PARQUET_MAXIMUM_PARTITIONS_VALIDATOR;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
@@ -23,6 +22,7 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.create
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tablePathWithSource;
+import static com.dremio.service.reflection.ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.dremio.catalog.model.CatalogEntityKey;
@@ -65,7 +65,7 @@ public class ITTestReflectionSuggester extends ITBaseTestReflection {
 
   @AfterEach
   public void cleanUp() throws Exception {
-    resetSystemOption(LAYOUT_REFRESH_MAX_ATTEMPTS);
+    resetSystemOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS);
     resetSystemOption(PARQUET_MAXIMUM_PARTITIONS_VALIDATOR);
     allocator.close();
   }

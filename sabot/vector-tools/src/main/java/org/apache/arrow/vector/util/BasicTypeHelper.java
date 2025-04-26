@@ -464,7 +464,10 @@ public class BasicTypeHelper {
       case UNION:
         UnionVector unionVector =
             new UnionVector(
-                field.getName(), allocator, new FieldType(true, field.getType(), null), callBack);
+                field.getName(),
+                allocator,
+                new FieldType(field.isNullable(), field.getType(), null),
+                callBack);
         if (!children.isEmpty()) {
           unionVector.initializeChildrenFromFields(children);
         }
@@ -474,7 +477,7 @@ public class BasicTypeHelper {
             new ListVector(
                 field.getName(),
                 allocator,
-                new FieldType(true, ArrowType.List.INSTANCE, null),
+                new FieldType(field.isNullable(), ArrowType.List.INSTANCE, null),
                 callBack);
         if (!children.isEmpty()) {
           listVector.initializeChildrenFromFields(children);
@@ -485,7 +488,7 @@ public class BasicTypeHelper {
             new StructVector(
                 field.getName(),
                 allocator,
-                new FieldType(true, ArrowType.Struct.INSTANCE, null, null),
+                new FieldType(field.isNullable(), ArrowType.Struct.INSTANCE, null, null),
                 callBack);
         if (!children.isEmpty()) {
           structVector.initializeChildrenFromFields(children);
@@ -496,7 +499,7 @@ public class BasicTypeHelper {
             new MapVector(
                 field.getName(),
                 allocator,
-                new FieldType(true, new ArrowType.Map(false), null),
+                new FieldType(field.isNullable(), new ArrowType.Map(false), null),
                 callBack);
         if (!children.isEmpty()) {
           mapVector.initializeChildrenFromFields(children);
@@ -641,10 +644,10 @@ public class BasicTypeHelper {
     // unsupported type TimeStampSec
     else if (holderClass.equals(TimeStampMilliHolder.class)) {
       return com.dremio.common.types.Types.required(
-          com.dremio.common.types.TypeProtos.MinorType.TIMESTAMP);
+          com.dremio.common.types.TypeProtos.MinorType.TIMESTAMPMILLI);
     } else if (holderClass.equals(NullableTimeStampMilliHolder.class)) {
       return com.dremio.common.types.Types.optional(
-          com.dremio.common.types.TypeProtos.MinorType.TIMESTAMP);
+          com.dremio.common.types.TypeProtos.MinorType.TIMESTAMPMILLI);
     }
     // unsupported type TimeStampMicro
     // unsupported type TimeStampNano
@@ -1212,7 +1215,7 @@ public class BasicTypeHelper {
           default:
             return;
         }
-        // unsupported type DateDay
+      // unsupported type DateDay
       case INTERVALYEAR:
         switch (type.getMode()) {
           case REQUIRED:
@@ -1232,7 +1235,7 @@ public class BasicTypeHelper {
           default:
             return;
         }
-        // unsupported type TimeSec
+      // unsupported type TimeSec
       case TIME:
         switch (type.getMode()) {
           case REQUIRED:
@@ -1328,9 +1331,9 @@ public class BasicTypeHelper {
           default:
             return;
         }
-        // unsupported type Duration
-        // unsupported type TimeStampSec
-      case TIMESTAMP:
+      // unsupported type Duration
+      // unsupported type TimeStampSec
+      case TIMESTAMPMILLI:
         switch (type.getMode()) {
           case REQUIRED:
             ((TimeStampMilliVector) vector).setSafe(index, (TimeStampMilliHolder) holder);
@@ -1350,14 +1353,14 @@ public class BasicTypeHelper {
           default:
             return;
         }
-        // unsupported type TimeStampMicro
-        // unsupported type TimeStampNano
-        // unsupported type TimeStampSecTZ
-        // unsupported type TimeStampMilliTZ
-        // unsupported type TimeStampMicroTZ
-        // unsupported type TimeStampNanoTZ
-        // unsupported type TimeMicro
-        // unsupported type TimeNano
+      // unsupported type TimeStampMicro
+      // unsupported type TimeStampNano
+      // unsupported type TimeStampSecTZ
+      // unsupported type TimeStampMilliTZ
+      // unsupported type TimeStampMicroTZ
+      // unsupported type TimeStampNanoTZ
+      // unsupported type TimeMicro
+      // unsupported type TimeNano
       case INTERVALDAY:
         switch (type.getMode()) {
           case REQUIRED:
@@ -1818,7 +1821,7 @@ public class BasicTypeHelper {
           default:
             throw new AssertionError("Unsupported data mode: " + type.getMode());
         }
-        // unsupported type DateDay
+      // unsupported type DateDay
       case INTERVALYEAR:
         switch (type.getMode()) {
           case REQUIRED:
@@ -1838,7 +1841,7 @@ public class BasicTypeHelper {
           default:
             throw new AssertionError("Unsupported data mode: " + type.getMode());
         }
-        // unsupported type TimeSec
+      // unsupported type TimeSec
       case TIME:
         switch (type.getMode()) {
           case REQUIRED:
@@ -1934,9 +1937,9 @@ public class BasicTypeHelper {
           default:
             throw new AssertionError("Unsupported data mode: " + type.getMode());
         }
-        // unsupported type Duration
-        // unsupported type TimeStampSec
-      case TIMESTAMP:
+      // unsupported type Duration
+      // unsupported type TimeStampSec
+      case TIMESTAMPMILLI:
         switch (type.getMode()) {
           case REQUIRED:
           case REPEATED:
@@ -1955,14 +1958,14 @@ public class BasicTypeHelper {
           default:
             throw new AssertionError("Unsupported data mode: " + type.getMode());
         }
-        // unsupported type TimeStampMicro
-        // unsupported type TimeStampNano
-        // unsupported type TimeStampSecTZ
-        // unsupported type TimeStampMilliTZ
-        // unsupported type TimeStampMicroTZ
-        // unsupported type TimeStampNanoTZ
-        // unsupported type TimeMicro
-        // unsupported type TimeNano
+      // unsupported type TimeStampMicro
+      // unsupported type TimeStampNano
+      // unsupported type TimeStampSecTZ
+      // unsupported type TimeStampMilliTZ
+      // unsupported type TimeStampMicroTZ
+      // unsupported type TimeStampNanoTZ
+      // unsupported type TimeMicro
+      // unsupported type TimeNano
       case INTERVALDAY:
         switch (type.getMode()) {
           case REQUIRED:
@@ -2194,7 +2197,7 @@ public class BasicTypeHelper {
             throw new UnsupportedOperationException(
                 "You can not convert repeated type " + type + " to nullable type!");
         }
-        // unsupported type DateDay
+      // unsupported type DateDay
       case INTERVALYEAR:
         switch (type.getMode()) {
           case REQUIRED:
@@ -2209,7 +2212,7 @@ public class BasicTypeHelper {
             throw new UnsupportedOperationException(
                 "You can not convert repeated type " + type + " to nullable type!");
         }
-        // unsupported type TimeSec
+      // unsupported type TimeSec
       case TIME:
         switch (type.getMode()) {
           case REQUIRED:
@@ -2280,9 +2283,9 @@ public class BasicTypeHelper {
             throw new UnsupportedOperationException(
                 "You can not convert repeated type " + type + " to nullable type!");
         }
-        // unsupported type Duration
-        // unsupported type TimeStampSec
-      case TIMESTAMP:
+      // unsupported type Duration
+      // unsupported type TimeStampSec
+      case TIMESTAMPMILLI:
         switch (type.getMode()) {
           case REQUIRED:
             NullableTimeStampMilliHolder newHolder = new NullableTimeStampMilliHolder();
@@ -2296,14 +2299,14 @@ public class BasicTypeHelper {
             throw new UnsupportedOperationException(
                 "You can not convert repeated type " + type + " to nullable type!");
         }
-        // unsupported type TimeStampMicro
-        // unsupported type TimeStampNano
-        // unsupported type TimeStampSecTZ
-        // unsupported type TimeStampMilliTZ
-        // unsupported type TimeStampMicroTZ
-        // unsupported type TimeStampNanoTZ
-        // unsupported type TimeMicro
-        // unsupported type TimeNano
+      // unsupported type TimeStampMicro
+      // unsupported type TimeStampNano
+      // unsupported type TimeStampSecTZ
+      // unsupported type TimeStampMilliTZ
+      // unsupported type TimeStampMicroTZ
+      // unsupported type TimeStampNanoTZ
+      // unsupported type TimeMicro
+      // unsupported type TimeNano
       case INTERVALDAY:
         switch (type.getMode()) {
           case REQUIRED:

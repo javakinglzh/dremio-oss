@@ -20,15 +20,14 @@ import com.dremio.exec.store.sys.accel.AccelerationListManager;
 import com.dremio.exec.store.sys.accel.AccelerationListManager.ReflectionLineageInfo;
 import com.dremio.exec.store.sys.accel.AccelerationManager.ExcludedReflectionsProvider;
 import com.dremio.service.Service;
-import com.dremio.service.reflection.MaterializationCache.CacheViewer;
 import com.dremio.service.reflection.analysis.ReflectionSuggester.ReflectionSuggestionType;
+import com.dremio.service.reflection.descriptor.MaterializationCacheViewer;
 import com.dremio.service.reflection.proto.ExternalReflection;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
 import com.dremio.service.reflection.proto.ReflectionEntry;
 import com.dremio.service.reflection.proto.ReflectionGoal;
 import com.dremio.service.reflection.proto.ReflectionId;
-import com.dremio.service.reflection.proto.Refresh;
 import com.google.common.collect.ImmutableList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -36,6 +35,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
+import java.util.function.BiConsumer;
 import javax.inject.Provider;
 
 /** Reflection service */
@@ -45,9 +45,10 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
 
   Optional<ReflectionEntry> getEntry(ReflectionId reflectionId);
 
-  ExcludedReflectionsProvider getExcludedReflectionsProvider();
+  ExcludedReflectionsProvider getExcludedReflectionsProvider(boolean allowEmptyExclusionList);
 
-  void saveEntry(ReflectionEntry reflectionEntry);
+  void saveReflectionEntryField(
+      ReflectionEntry reflectionEntry, BiConsumer<ReflectionEntry, ReflectionEntry> updateField);
 
   @Override
   Optional<Materialization> getLastDoneMaterialization(ReflectionId reflectionId);
@@ -63,9 +64,7 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
 
   Optional<Materialization> getMaterialization(MaterializationId materializationId);
 
-  Iterable<Refresh> getRefreshes(Materialization materialization);
-
-  Provider<CacheViewer> getCacheViewerProvider();
+  Provider<MaterializationCacheViewer> getCacheViewerProvider();
 
   Optional<ReflectionManager> getReflectionManager();
 
@@ -122,7 +121,7 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
     public void dropExternalReflection(String idOrName) {}
 
     @Override
-    public void update(ReflectionGoal goal) {}
+    public void update(ReflectionGoal goal, ChangeCause changeCause) {}
 
     @Override
     public void setSubstitutionEnabled(boolean enable) {}
@@ -133,7 +132,7 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
     }
 
     @Override
-    public void remove(ReflectionGoal goal) {}
+    public void remove(ReflectionGoal goal, ChangeCause changeCause) {}
 
     @Override
     public Optional<ReflectionEntry> getEntry(ReflectionId reflectionId) {
@@ -141,7 +140,9 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
     }
 
     @Override
-    public void saveEntry(ReflectionEntry reflectionEntry) {}
+    public void saveReflectionEntryField(
+        ReflectionEntry reflectionEntry,
+        BiConsumer<ReflectionEntry, ReflectionEntry> updateField) {}
 
     @Override
     public Optional<ReflectionGoal> getGoal(ReflectionId reflectionId) {
@@ -189,11 +190,6 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
     }
 
     @Override
-    public Iterable<Refresh> getRefreshes(Materialization materialization) {
-      return Collections.emptyList();
-    }
-
-    @Override
     public List<ReflectionGoal> getRecommendedReflections(
         String datasetId, ReflectionSuggestionType type) {
       return Collections.emptyList();
@@ -223,12 +219,13 @@ public interface ReflectionService extends Service, ReflectionAdministrationServ
     }
 
     @Override
-    public Provider<CacheViewer> getCacheViewerProvider() {
+    public Provider<MaterializationCacheViewer> getCacheViewerProvider() {
       return null;
     }
 
     @Override
-    public ExcludedReflectionsProvider getExcludedReflectionsProvider() {
+    public ExcludedReflectionsProvider getExcludedReflectionsProvider(
+        boolean allowEmptyExclusionList) {
       return new ExcludedReflectionsProvider() {
         @Override
         public List<String> getExcludedReflections(String rId) {

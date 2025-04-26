@@ -14,13 +14,8 @@
  * limitations under the License.
  */
 import { Err, Ok, type Result } from "ts-results-es";
-import type {
-  EngineConfiguration,
-  Engine as EngineInterface,
-  EngineProperties,
-} from "../../interfaces/Engine.js";
-import type { SonarV3Config } from "../../_internal/types/Config.js";
-import { engineEntityToProperties, enginePropertiesToEntity } from "./utils.js";
+import type { SonarV3Config } from "../../_internal/types/Config.ts";
+import { engineEntityToProperties, enginePropertiesToEntity } from "./utils.ts";
 
 export class Engine implements EngineInterface {
   readonly activeReplicas: EngineInterface["activeReplicas"];
@@ -50,7 +45,7 @@ export class Engine implements EngineInterface {
 
   update(
     properties: Partial<EngineConfiguration>,
-  ): Promise<Result<EngineInterface, unknown>> {
+  ): Promise<Result<Engine, unknown>> {
     return this.#config
       .sonarV3Request(`engines/${this.id}`, {
         body: JSON.stringify({
@@ -69,3 +64,52 @@ export class Engine implements EngineInterface {
       .catch((e) => Err(e));
   }
 }
+
+export type EngineSize =
+  | "XX_SMALL_V1"
+  | "X_SMALL_V1"
+  | "SMALL_V1"
+  | "MEDIUM_V1"
+  | "LARGE_V1"
+  | "X_LARGE_V1"
+  | "XX_LARGE_V1"
+  | "XXX_LARGE_V1";
+
+export type EngineConfiguration = {
+  readonly autoStopDelay: Temporal.Duration;
+  readonly cloudTags: { key: string; value: string }[];
+  readonly description: string | null;
+  readonly drainTimeLimit: Temporal.Duration;
+  readonly maxConcurrency: number;
+  readonly maxReplicas: number;
+  readonly minReplicas: number;
+  readonly queueTimeLimit: Temporal.Duration;
+  readonly runTimeLimit: Temporal.Duration;
+  readonly size: EngineSize;
+};
+
+export type EngineProperties = {
+  readonly activeReplicas: number;
+  readonly additionalEngineStateInfo: "NONE";
+  readonly configuration: EngineConfiguration;
+  readonly id: string;
+  readonly instanceFamily: unknown;
+  readonly name: string;
+  readonly state:
+    | "DELETING"
+    | "DISABLED"
+    | "DISABLING"
+    | "ENABLED"
+    | "ENABLING"
+    | "INVALID";
+  readonly statusChangedAt: Date;
+  readonly queriedAt: Date | null;
+};
+
+export type EngineMethods = {
+  update(
+    properties: Partial<EngineConfiguration>,
+  ): Promise<Result<Engine, unknown>>;
+};
+
+export type EngineInterface = EngineProperties & EngineMethods;

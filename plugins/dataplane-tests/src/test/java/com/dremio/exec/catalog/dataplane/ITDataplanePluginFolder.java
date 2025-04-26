@@ -21,28 +21,46 @@ import static com.dremio.exec.catalog.dataplane.test.ContainerEntity.viewCThird;
 import static com.dremio.exec.catalog.dataplane.test.ContainerEntity.viewDFourth;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.convertFolderNameToList;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createFolderAtQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createFolderQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createViewQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.folderA;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.folderB;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateNestedFolderPath;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueFolderName;
-import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueRawRefName;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTagName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.tableA;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.useBranchQuery;
+import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertLastCommitMadeBySpecifiedAuthor;
+import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieDoesNotHaveNamespace;
+import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.assertNessieHasNamespace;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.dremio.BaseTestQuery;
+import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.common.exceptions.UserRemoteException;
+import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.catalog.dataplane.test.ContainerEntity;
+import com.dremio.exec.catalog.dataplane.test.DataplaneStorage;
 import com.dremio.exec.catalog.dataplane.test.ITDataplanePluginTestSetup;
 import com.dremio.plugins.ExternalNamespaceEntry;
-import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.space.proto.FolderConfig;
 import com.google.common.collect.Streams;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -99,7 +117,8 @@ import org.projectnessie.model.Namespace;
  */
 public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
 
-  private static final VersionContext MAIN = VersionContext.ofBranch("main");
+  private static final VersionContext DEFAULT_VERSION_CONTEXT =
+      VersionContext.ofBranch(DEFAULT_BRANCH_NAME);
 
   private static final String longTableNameForMaxDepthTest =
       "tableWithFortySixCharacterssssssssssssssssssss";
@@ -293,7 +312,7 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
         getNessieApi()
             .createNamespace()
             .namespace(Namespace.of(container.getPathWithoutRoot()))
-            .refName("main")
+            .refName(DEFAULT_BRANCH_NAME)
             .create();
         break;
       default:
@@ -311,7 +330,7 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
         createSingleTable(container, tableA);
         break;
       case EMPTY:
-        // Intentional fallthrough
+      // Intentional fallthrough
       case FOLDERS_ONLY:
         // we are manually creating folder. other than creating here. so we just break.
         break;
@@ -377,14 +396,37 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
 
   private Stream<List<String>> listEntries(ContainerEntity container) {
     return getDataplanePlugin()
-        .listEntries(container.getPathWithoutRoot(), MAIN)
+        .listEntries(
+            container.getPathWithoutRoot(),
+            getDataplanePlugin().resolveVersionContext(DEFAULT_VERSION_CONTEXT),
+            VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+            VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY)
         .map(ExternalNamespaceEntry::getNameElements);
   }
 
   private Stream<List<String>> listEntriesIncludeNested(ContainerEntity container) {
     return getDataplanePlugin()
-        .listEntriesIncludeNested(container.getPathWithoutRoot(), MAIN)
+        .listEntries(
+            container.getPathWithoutRoot(),
+            getDataplanePlugin().resolveVersionContext(DEFAULT_VERSION_CONTEXT),
+            VersionedPlugin.NestingMode.INCLUDE_NESTED_CHILDREN,
+            VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY)
         .map(ExternalNamespaceEntry::getNameElements);
+  }
+
+  @Test
+  public void getFolder() {
+    Optional<FolderConfig> optionalFolderConfig =
+        getDataplanePlugin()
+            .getFolder(
+                CatalogEntityKey.newBuilder()
+                    .keyComponents(explicitFolder1.getFullPath())
+                    .tableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+                    .build());
+    assertThat(optionalFolderConfig).isPresent();
+    assertThat(optionalFolderConfig.get().getName()).isEqualTo(explicitFolder1.getName());
+    assertThat(optionalFolderConfig.get().getFullPathList())
+        .isEqualTo(explicitFolder1.getFullPath());
   }
 
   @Test
@@ -534,7 +576,13 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
 
     // Assert that dataplane_test.folderB.folderB does not have entry that has name of tableA
     List<String> incorrectFullPath = Arrays.asList(folderB, folderB);
-    assertThat(getDataplanePlugin().listEntries(incorrectFullPath, MAIN))
+    assertThat(
+            getDataplanePlugin()
+                .listEntries(
+                    incorrectFullPath,
+                    getDataplanePlugin().resolveVersionContext(DEFAULT_VERSION_CONTEXT),
+                    VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                    VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY))
         .map(ExternalNamespaceEntry::getNameElements)
         .isEmpty();
   }
@@ -545,12 +593,14 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
     final String someTag = generateUniqueTagName();
     // Setup
     final List<String> folderPath = Arrays.asList(DATAPLANE_PLUGIN_NAME, rootFolder);
-    final NamespaceKey namespaceKey = new NamespaceKey(folderPath);
     runSQL(createTagQuery(someTag, DEFAULT_BRANCH_NAME));
-
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath)
+            .tableVersionContext(TableVersionContext.of(VersionContext.ofTag(someTag)))
+            .build();
     // Act + Assert
-    assertThatThrownBy(
-            () -> getDataplanePlugin().createNamespace(namespaceKey, VersionContext.ofTag(someTag)))
+    assertThatThrownBy(() -> getDataplanePlugin().createFolder(folderKey, null))
         .isInstanceOf(UserException.class)
         .hasMessageContaining(
             "Create folder is only supported for branches - not on tags or commits");
@@ -559,20 +609,201 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
   @Test
   public void createFolderWithCommitContext() throws Exception {
     final String rootFolder = generateUniqueFolderName();
-    final String someCommitHash = generateUniqueRawRefName();
+    final String someCommitHash =
+        "c7a79c74adf76649e643354c34ed69abfee5a3b070ef68cbe782a072b0a418ba";
     // Setup
     final List<String> folderPath = Arrays.asList(DATAPLANE_PLUGIN_NAME, rootFolder);
-    final NamespaceKey namespaceKey = new NamespaceKey(folderPath);
-    runSQL(createTagQuery(someCommitHash, DEFAULT_BRANCH_NAME));
+    final CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath)
+            .tableVersionContext(TableVersionContext.of(VersionContext.ofCommit(someCommitHash)))
+            .build();
 
     // Act + Assert
-    assertThatThrownBy(
-            () ->
-                getDataplanePlugin()
-                    .createNamespace(namespaceKey, VersionContext.ofTag(someCommitHash)))
+    assertThatThrownBy(() -> getDataplanePlugin().createFolder(folderKey, null))
         .isInstanceOf(UserException.class)
         .hasMessageContaining(
             "Create folder is only supported for branches - not on tags or commits");
+  }
+
+  @Test
+  public void createFolder() throws Exception {
+    // Arrange
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Collections.singletonList(folderName);
+
+    // Act
+    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
+
+    // Assert
+    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
+    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+    assertCommitLogTail(String.format("CREATE FOLDER %s", folderName));
+  }
+
+  @Test
+  public void createNestedFolder() throws Exception {
+    // Arrange
+    final String folderName1 = generateUniqueFolderName();
+    final String folderName2 = generateUniqueFolderName();
+    final List<String> folderPath = generateNestedFolderPath(folderName1, folderName2);
+    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
+
+    // Assert
+    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
+    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+  }
+
+  @Test
+  public void testCreateFolderWithContext() throws Exception {
+    // Arrange
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Collections.singletonList(folderName);
+
+    // Act
+    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
+
+    // Assert
+    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
+    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+
+    final String folderName2 = generateUniqueFolderName();
+    final List<String> folderPath2 = Collections.singletonList(folderName2);
+    final String branch2 = "branch2";
+
+    runSQL(createBranchAtBranchQuery(branch2, DEFAULT_BRANCH_NAME));
+    // set current context to branch2
+    runSQL(useBranchQuery(branch2));
+    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath2));
+
+    // Assert that when we do not have [AT] token, we use
+    // context as a default.
+    assertLastCommitMadeBySpecifiedAuthor(branch2, this);
+    assertNessieHasNamespace(folderPath2, branch2, this);
+    assertNessieDoesNotHaveNamespace(folderPath2, DEFAULT_BRANCH_NAME, this);
+
+    final String folderName3 = generateUniqueFolderName();
+    final List<String> folderPath3 = Collections.singletonList(folderName3);
+    final String branch3 = "branch3";
+
+    // create folder3 at branch3 with current context branch2
+    runSQL(createBranchAtBranchQuery(branch3, DEFAULT_BRANCH_NAME));
+    runSQL(
+        createFolderAtQuery(DATAPLANE_PLUGIN_NAME, folderPath3, VersionContext.ofBranch(branch3)));
+
+    // the version context specified in AT token should override the context.
+    // Therefore we have folder in branch3 not in branch2 nor main.
+    assertLastCommitMadeBySpecifiedAuthor(branch3, this);
+    assertNessieHasNamespace(folderPath3, branch3, this);
+    assertNessieDoesNotHaveNamespace(folderPath3, DEFAULT_BRANCH_NAME, this);
+    assertNessieDoesNotHaveNamespace(folderPath3, branch2, this);
+  }
+
+  @Test
+  public void testCreateFolderWithAtTag() throws Exception {
+    String tagName = "myTag";
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Collections.singletonList(folderName);
+    runSQL(createTagQuery(tagName, DEFAULT_BRANCH_NAME));
+    // expect error for TAG
+    assertThatThrownBy(
+            () ->
+                runSQL(
+                    createFolderAtQuery(
+                        DATAPLANE_PLUGIN_NAME,
+                        folderPath,
+                        VersionContext.ofTag(DEFAULT_BRANCH_NAME))))
+        .isInstanceOf(UserRemoteException.class);
+  }
+
+  @Test
+  public void createFolderWithSingleElementWithContext() throws Exception {
+    BaseTestQuery.test(String.format("USE %s", DATAPLANE_PLUGIN_NAME));
+    // Arrange
+    final String folderName = generateUniqueFolderName();
+    final List<String> sqlFolderPath = convertFolderNameToList(folderName);
+    // since sqlFolderPath only has the name of the folder, its namespaceKey should be
+    // DATAPLANE_PLUGIN_NAME.folderName
+
+    runSQL(createFolderQuery(DATAPLANE_PLUGIN_NAME, sqlFolderPath));
+
+    // Act
+    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
+    assertNessieHasNamespace(Collections.singletonList(folderName), DEFAULT_BRANCH_NAME, this);
+  }
+
+  @Test
+  public void createFolderUsingAt() throws Exception {
+    // Arrange
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Collections.singletonList(folderName);
+
+    runSQL(
+        createFolderAtQuery(
+            DATAPLANE_PLUGIN_NAME, folderPath, VersionContext.ofBranch(DEFAULT_BRANCH_NAME)));
+
+    // Act
+    assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
+    assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+  }
+
+  @Test
+  public void testCreateFolderWithAtCommit() throws Exception {
+    String commitHash = "c7a79c74adf76649e643354c34ed69abfee5a3b070ef68cbe782a072b0a418ba";
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Collections.singletonList(folderName);
+    // expect error for TAG
+    assertThatThrownBy(
+            () ->
+                runSQL(
+                    createFolderAtQuery(
+                        DATAPLANE_PLUGIN_NAME, folderPath, VersionContext.ofCommit(commitHash))))
+        .isInstanceOf(UserRemoteException.class);
+  }
+
+  @Test
+  public void createFolderWithStorageUri() throws Exception {
+    final String rootFolder = generateUniqueFolderName();
+    final String storageUri =
+        String.format(
+            "%s://bucket1/folder1,", getScheme(DataplaneStorage.BucketSelection.ALTERNATE_BUCKET));
+    // Setup
+    final List<String> folderPath = Arrays.asList(DATAPLANE_PLUGIN_NAME, rootFolder);
+    final CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath)
+            .tableVersionContext(
+                TableVersionContext.of(VersionContext.ofBranch(DEFAULT_BRANCH_NAME)))
+            .build();
+
+    // Act
+    assertThatThrownBy(() -> getDataplanePlugin().createFolder(folderKey, storageUri))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("Storage URI is not supported for folders");
+  }
+
+  @Test
+  public void updateFolderWithStorageUri() throws Exception {
+    // Arrange
+    final String tableName = generateUniqueTableName();
+    final String folderName = generateUniqueFolderName();
+    final List<String> folderPath = Arrays.asList(DATAPLANE_PLUGIN_NAME, folderName);
+
+    final String alternateStorageUri =
+        String.format(
+            "%s://bucket1/folder1,", getScheme(DataplaneStorage.BucketSelection.ALTERNATE_BUCKET));
+
+    final CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath)
+            .tableVersionContext(
+                TableVersionContext.of(VersionContext.ofBranch(DEFAULT_BRANCH_NAME)))
+            .build();
+
+    // Act and Assert
+    assertThatThrownBy(() -> getDataplanePlugin().updateFolder(folderKey, alternateStorageUri))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("Storage URI is not supported for folders");
   }
 
   public Stream<List<String>> getFullPath(ContainerEntity parent) {
@@ -586,5 +817,10 @@ public class ITDataplanePluginFolder extends ITDataplanePluginTestSetup {
     return Stream.of(
         Streams.concat(parent.getPathWithoutRoot().stream(), Stream.of(nameElement))
             .collect(Collectors.toList()));
+  }
+
+  private String getScheme(DataplaneStorage.BucketSelection bucketSelection)
+      throws URISyntaxException {
+    return new URI(getDataplaneStorage().getWarehousePath(bucketSelection)).getScheme();
   }
 }

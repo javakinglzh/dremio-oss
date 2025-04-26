@@ -18,16 +18,19 @@ package com.dremio.exec.store.dfs;
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import javax.inject.Provider;
 
 public class DirectorySupportLackingFileSystemPlugin<C extends FileSystemConf<C, ?>>
     extends FileSystemPlugin<C> {
 
   public DirectorySupportLackingFileSystemPlugin(
-      C config, SabotContext context, String name, Provider<StoragePluginId> idProvider) {
-    super(config, context, name, idProvider);
+      C config,
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> idProvider) {
+    super(config, pluginSabotContext, name, idProvider);
   }
 
   @Override

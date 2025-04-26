@@ -41,6 +41,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -66,9 +67,7 @@ public class TestInternalQueryStreamingMode extends BaseTestServer {
         InProcessServerBuilder.forName(name)
             .directExecutor()
             .addService(new JobsServiceAdapter(p(LocalJobsService.class)))
-            .addService(
-                new Chronicle(
-                    p(LocalJobsService.class), () -> getSabotContext().getExecutorService()))
+            .addService(new Chronicle(p(LocalJobsService.class), p(ExecutorService.class)))
             .build();
     server.start();
 

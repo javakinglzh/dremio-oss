@@ -19,12 +19,12 @@ import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.dac.explore.model.Dataset;
 import com.dremio.dac.model.common.Function;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
+import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.sources.PhysicalDataset;
 import com.dremio.dac.model.sources.SourceName;
 import com.dremio.dac.service.source.ExternalListResponse;
 import com.dremio.plugins.ExternalNamespaceEntry;
-import com.dremio.service.namespace.space.proto.FolderConfig;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -76,10 +76,23 @@ public final class ExternalNamespaceTreeUtils {
               break;
             case FOLDER:
               namespaceTree.addFolder(
-                  Folder.newInstance(
-                      sourceName,
-                      new FolderConfig().setFullPathList(fullPathList).setName(name),
-                      versionedDatasetId));
+                  new FolderModel(
+                      (versionedDatasetId == null)
+                          ? UUID.randomUUID().toString()
+                          : versionedDatasetId,
+                      name,
+                      new FolderPath(fullPathList).toUrlPath(),
+                      false,
+                      false,
+                      false,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      0,
+                      null,
+                      null));
               break;
             case ICEBERG_TABLE:
               namespaceTree.addPhysicalDataset(

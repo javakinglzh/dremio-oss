@@ -29,4 +29,6 @@ public interface ExcelParser extends AutoCloseable {
    * @return State.READ_SUCCESSFUL if a row was read, State.END_OF_STREAM otherwise
    */
   State parseNextRecord() throws Exception;
+
+  int getAndResetRowSize();
 }

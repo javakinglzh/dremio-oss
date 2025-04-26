@@ -32,6 +32,7 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.create
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagAtSpecifierQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQueryWithFrom;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropBranchAtCommitQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropBranchForceQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.dropBranchQuery;
@@ -705,5 +706,41 @@ public class ITDataplanePluginBranchTag extends ITDataplanePluginTestSetup {
     // cleanup
     runSQL(dropTagQuery(beforeTag));
     runSQL(dropTagQuery(afterTag));
+  }
+
+  @Test
+  public void createTagsToCompareHashWithBranch() throws Exception {
+    // Arrange
+    final String tagWithFrom = generateUniqueTagName();
+    final String tagWithAt = generateUniqueTagName();
+    final String branchHash = getCommitHashForBranch(DEFAULT_BRANCH_NAME);
+
+    // Act, create tag and get commitHash
+    runSQL(createTagQueryWithFrom(tagWithFrom, DEFAULT_BRANCH_NAME));
+    runSQL(createTagQuery(tagWithAt, DEFAULT_BRANCH_NAME));
+
+    final String tagWithFromHash = getCommitHashForTag(tagWithFrom);
+    final String tagWithAtHash = getCommitHashForTag(tagWithAt);
+
+    // Assert
+    assertThat(branchHash).isEqualTo(tagWithFromHash);
+    assertThat(branchHash).isEqualTo(tagWithAtHash);
+
+    // cleanup
+    runSQL(dropTagQuery(tagWithFrom));
+    runSQL(dropTagQuery(tagWithAt));
+  }
+
+  @Test
+  public void testCreateTagFromNonExistentBranch() throws Exception {
+    final String tagName = generateUniqueTagName();
+    final String branchName = generateUniqueBranchName();
+
+    // Assert
+    assertQueryThrowsExpectedError(
+        createTagQueryWithFrom(tagName, branchName),
+        String.format(
+            "VALIDATION ERROR: Source branch %s not found in source %s",
+            branchName, DATAPLANE_PLUGIN_NAME));
   }
 }

@@ -23,7 +23,6 @@ import com.dremio.exec.planner.MatchCountListener;
 import com.dremio.exec.planner.PlannerPhase;
 import com.dremio.exec.planner.PlannerType;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
-import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.MaterializationList;
 import com.dremio.exec.planner.acceleration.substitution.AccelerationAwareSubstitutionProvider;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
@@ -31,7 +30,6 @@ import com.dremio.exec.planner.logical.ConstExecutor;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
-import com.dremio.exec.store.dfs.FilesystemScanDrel;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
@@ -41,13 +39,11 @@ import com.google.common.collect.Sets;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptPlanner;
 import org.apache.calcite.plan.RelOptRule;
@@ -141,7 +137,7 @@ public class PlannerUtil {
 
       // Modify RelMetaProvider for every RelNode in the SQL operator Rel tree.
       RelOptCluster cluster = input.getCluster();
-      cluster.setMetadataQuery(config.getContext().getRelMetadataQuerySupplier());
+      cluster.setMetadataQuerySupplier(config.getContext().getRelMetadataQuerySupplier());
       cluster.invalidateMetadataQuery();
 
       // Begin planning
@@ -153,7 +149,20 @@ public class PlannerUtil {
       planner = hepPlanner;
       toPlan =
           () -> {
-            RelNode relNode = hepPlanner.findBestExp();
+            RelNode relNode;
+            try {
+              relNode = hepPlanner.findBestExp();
+            } catch (Throwable t) {
+              try {
+                // In case of an exception, lets collect planner rule stats, so we don't lose them
+                PlanLogUtil.log(plannerType, phase, input, LOGGER, null);
+                List<PlannerPhaseRulesStats> stats = matchCountListener.getRulesBreakdownStats();
+                config.getObserver().planRelTransform(phase, planner, input, input, 0, stats);
+              } catch (Throwable unexpected) {
+                t.addSuppressed(unexpected);
+              }
+              throw t;
+            }
             List<PlannerPhaseRulesStats> rulesBreakdownStats =
                 matchCountListener.getRulesBreakdownStats();
             if (log) {
@@ -177,7 +186,7 @@ public class PlannerUtil {
 
       // Modify RelMetaProvider for every RelNode in the SQL operator Rel tree.
       RelOptCluster cluster = input.getCluster();
-      cluster.setMetadataQuery(config.getContext().getRelMetadataQuerySupplier());
+      cluster.setMetadataQuerySupplier(config.getContext().getRelMetadataQuerySupplier());
       cluster.invalidateMetadataQuery();
 
       // Configure substitutions
@@ -201,6 +210,17 @@ public class PlannerUtil {
                 LOGGER.debug(volcanoPlanner.getMatchCountListener().toString());
               }
               return new TransformationContext(relNode, rulesBreakdownStats);
+            } catch (Throwable t) {
+              try {
+                // In case of an exception, lets collect planner rule stats, so we don't lose them
+                PlanLogUtil.log(plannerType, phase, input, LOGGER, null);
+                List<PlannerPhaseRulesStats> stats =
+                    volcanoPlanner.getMatchCountListener().getRulesBreakdownStats();
+                config.getObserver().planRelTransform(phase, planner, input, input, 0, stats);
+              } catch (Throwable unexpected) {
+                t.addSuppressed(unexpected);
+              }
+              throw t;
             } finally {
               substitutions.setEnabled(false);
             }
@@ -252,7 +272,7 @@ public class PlannerUtil {
             forcedLogical = best != null ? best.getRel() : intermediateNode;
           }
         }
-        output = processBoostedMaterializations(config, forcedLogical);
+        output = forcedLogical;
       } else {
         output = intermediateNode;
       }
@@ -290,40 +310,6 @@ public class PlannerUtil {
         t.addSuppressed(unexpected);
       }
       throw t;
-    }
-  }
-
-  private static RelNode processBoostedMaterializations(SqlHandlerConfig config, RelNode relNode) {
-    final Set<List<String>> qualifiedNames =
-        config.getMaterializations().isPresent()
-            ? config.getMaterializations().get().getConsideredMaterializations().stream()
-                .filter(m -> m.getLayoutInfo().isArrowCachingEnabled())
-                .map(DremioMaterialization::getTableRel)
-                .map(
-                    rel -> {
-                      BoostMaterializationVisitor visitor = new BoostMaterializationVisitor();
-                      rel.accept(visitor);
-                      return visitor.getQualifiedName();
-                    })
-                .collect(Collectors.toSet())
-            : new HashSet<>();
-    if (qualifiedNames.isEmpty()) {
-      return relNode;
-    } else {
-      // Only update the scans if there is any acceleration which is boosted
-      return relNode.accept(
-          new StatelessRelShuttleImpl() {
-            @Override
-            public RelNode visit(TableScan scan) {
-              if (scan instanceof FilesystemScanDrel) {
-                FilesystemScanDrel scanDrel = (FilesystemScanDrel) scan;
-                if (qualifiedNames.contains(scanDrel.getTable().getQualifiedName())) {
-                  return scanDrel.applyArrowCachingEnabled(true);
-                }
-              }
-              return super.visit(scan);
-            }
-          });
     }
   }
 

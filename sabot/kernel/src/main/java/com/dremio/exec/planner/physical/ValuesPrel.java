@@ -15,17 +15,22 @@
  */
 package com.dremio.exec.planner.physical;
 
+import static com.dremio.exec.planner.physical.PrelUtil.getSettings;
+import static com.dremio.exec.planner.sql.CalciteArrowHelper.fromCalciteRowTypeJson;
+
 import com.dremio.common.JSONOptions;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.config.Values;
+import com.dremio.exec.planner.common.MoreRexUtil;
 import com.dremio.exec.planner.fragment.DistributionAffinity;
 import com.dremio.exec.planner.physical.visitor.PrelVisitor;
-import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.LongValidator;
 import com.dremio.options.TypeValidators.PositiveLongValidator;
+import com.fasterxml.jackson.core.JsonLocation;
+import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
@@ -37,6 +42,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.metadata.RelMetadataQuery;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexLiteral;
 
 @Options
 public class ValuesPrel extends AbstractRelNode implements LeafPrel {
@@ -46,37 +52,49 @@ public class ValuesPrel extends AbstractRelNode implements LeafPrel {
   public static final LongValidator LIMIT =
       new PositiveLongValidator("planner.op.values.limit_bytes", Long.MAX_VALUE, DEFAULT_LIMIT);
 
-  @SuppressWarnings("unused")
-  private static final org.slf4j.Logger logger =
-      org.slf4j.LoggerFactory.getLogger(ValuesPrel.class);
-
-  private JSONOptions content;
-  private final double rowCount;
+  private final List<? extends List<RexLiteral>> tuples;
+  private final JSONOptions jsonOptions;
 
   public ValuesPrel(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       RelDataType rowType,
-      JSONOptions content,
-      double rowCount) {
+      List<? extends List<RexLiteral>> tuples) {
+    this(
+        cluster,
+        traitSet,
+        rowType,
+        tuples,
+        new JSONOptions(
+            MoreRexUtil.convertToJsonNode(
+                rowType, tuples, getSettings(cluster).isValueCastEnabled()),
+            JsonLocation.NA));
+  }
+
+  private ValuesPrel(
+      RelOptCluster cluster,
+      RelTraitSet traitSet,
+      RelDataType rowType,
+      List<? extends List<RexLiteral>> tuples,
+      JSONOptions jsonOptions) {
     super(cluster, traitSet);
     this.rowType = rowType;
-    this.content = content;
-    this.rowCount = rowCount;
+    this.tuples = tuples;
+    this.jsonOptions = jsonOptions;
   }
 
   @Override
   public RelWriter explainTerms(RelWriter pw) {
-    if (content.isOpaque()) {
-      return super.explainTerms(pw).item("Key", content.hashCode());
+    if (jsonOptions.isOpaque()) {
+      return super.explainTerms(pw).item("Key", jsonOptions.hashCode());
     } else {
-      return super.explainTerms(pw).item("Values", content.asNode());
+      return super.explainTerms(pw).item("Values", jsonOptions.asNode());
     }
   }
 
   @Override
   public double estimateRowCount(RelMetadataQuery mq) {
-    return rowCount;
+    return tuples.size();
   }
 
   @Override
@@ -86,13 +104,15 @@ public class ValuesPrel extends AbstractRelNode implements LeafPrel {
 
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
-    BatchSchema schema = CalciteArrowHelper.fromCalciteRowTypeJson(this.getRowType());
-    return new Values(creator.props(this, null, schema, RESERVE, LIMIT), schema, content);
+    BatchSchema schema =
+        fromCalciteRowTypeJson(this.getRowType(), getSettings(getCluster()).isValueCastEnabled());
+    return new Values(creator.props(this, null, schema, RESERVE, LIMIT), schema, jsonOptions);
   }
 
   @Override
   public Prel copy(RelTraitSet traitSet, List<RelNode> inputs) {
-    return new ValuesPrel(getCluster(), traitSet, rowType, content, rowCount);
+    Preconditions.checkArgument(inputs.isEmpty());
+    return new ValuesPrel(getCluster(), traitSet, rowType, tuples, jsonOptions);
   }
 
   @Override
@@ -134,5 +154,9 @@ public class ValuesPrel extends AbstractRelNode implements LeafPrel {
   @Override
   public DistributionAffinity getDistributionAffinity() {
     return DistributionAffinity.NONE;
+  }
+
+  public List<? extends List<RexLiteral>> getTuples() {
+    return tuples;
   }
 }

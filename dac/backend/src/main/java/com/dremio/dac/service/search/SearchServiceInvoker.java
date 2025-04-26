@@ -40,7 +40,7 @@ import org.apache.arrow.memory.BufferAllocator;
 public class SearchServiceInvoker implements SearchService {
   private static final int TYPE_SEARCH_QUERY = 0;
 
-  private final boolean isMaster;
+  private final boolean isMasterOrMasterlessCoordinator;
   private final Provider<NodeEndpoint> nodeEndpointProvider;
   private final Provider<Optional<NodeEndpoint>> taskLeaderProvider;
   private final Provider<FabricService> fabricService;
@@ -51,13 +51,13 @@ public class SearchServiceInvoker implements SearchService {
       findEndpointCreator;
 
   public SearchServiceInvoker(
-      boolean isMaster,
+      boolean isMasterOrMasterlessCoordinator,
       Provider<NodeEndpoint> nodeEndpointProvider,
       final Provider<Optional<NodeEndpoint>> taskLeaderProvider,
       Provider<FabricService> fabricService,
       BufferAllocator allocator,
       SearchService searchService) {
-    this.isMaster = isMaster;
+    this.isMasterOrMasterlessCoordinator = isMasterOrMasterlessCoordinator;
     this.nodeEndpointProvider = nodeEndpointProvider;
     this.taskLeaderProvider = taskLeaderProvider;
     this.fabricService = fabricService;
@@ -145,13 +145,12 @@ public class SearchServiceInvoker implements SearchService {
 
   @Override
   public List<SearchContainer> search(String query, String username) throws NamespaceException {
-    // TODO DX-14433 - should have better way to deal with Local/Remote KVStore
-    final NodeEndpoint master = taskLeaderProvider.get().orElse(null);
-    final NodeEndpoint thisNode = nodeEndpointProvider.get();
-    if (isMaster && thisNode.equals(master)) {
+    // Either this coordinator is a master (in masterful) or it is a master-less environment.
+    if (isMasterOrMasterlessCoordinator) {
       return searchService.search(query, username);
     }
 
+    // This path is only invoked from scale-out coordinators in a masterful environment.
     try {
       return doRPCSearch(query, username);
     } catch (RpcException e) {
@@ -212,7 +211,7 @@ public class SearchServiceInvoker implements SearchService {
     final NodeEndpoint master = taskLeaderProvider.get().orElse(null);
     final NodeEndpoint thisNode = nodeEndpointProvider.get();
 
-    if (isMaster && thisNode.equals(master)) {
+    if (isMasterOrMasterlessCoordinator && thisNode.equals(master)) {
       searchService.wakeupManager(reason);
     }
   }

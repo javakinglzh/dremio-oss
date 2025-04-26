@@ -55,15 +55,11 @@ public class ElasticLimitRule extends RelOptRule {
 
     final PlannerSettings plannerSettings =
         PrelUtil.getPlannerSettings(limit.getCluster().getPlanner());
-    if (intermediatePrel.contains(ElasticsearchSample.class)
-        && limit.getFetch() != null
-        && RexLiteral.intValue(limit.getFetch())
-            >= SampleRelBase.getSampleSizeAndSetMinSampleSize(
-                plannerSettings, ElasticSampleRule.SAMPLE_SIZE_DENOMINATOR)) {
-      return false;
-    }
-
-    return true;
+    return !intermediatePrel.contains(ElasticsearchSample.class)
+        || limit.getFetch() == null
+        || RexLiteral.intValue(limit.getFetch())
+            < SampleRelBase.getSampleSizeAndSetMinSampleSize(
+                plannerSettings, ElasticSampleRule.SAMPLE_SIZE_DENOMINATOR);
   }
 
   @Override

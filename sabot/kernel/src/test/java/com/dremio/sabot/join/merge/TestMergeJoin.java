@@ -18,8 +18,11 @@ package com.dremio.sabot.join.merge;
 import static com.dremio.sabot.Fixtures.t;
 import static com.dremio.sabot.Fixtures.th;
 import static com.dremio.sabot.Fixtures.tr;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.dremio.common.logical.data.JoinCondition;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.physical.config.MergeJoinPOP;
 import com.dremio.sabot.BaseTestOperator;
 import com.dremio.sabot.Fixtures;
@@ -92,6 +95,42 @@ public class TestMergeJoin extends BaseTestOperator {
         t(
             th("bool2", "name2"),
             tr(false, "a1"),
+            tr(true, "a2"),
+            tr(true, "a4"),
+            tr(true, "a5"),
+            tr(false, "a6"),
+            tr(true, Fixtures.NULL_VARCHAR));
+    validateDual(
+        info.operator,
+        info.clazz,
+        left.toGenerator(getTestAllocator()),
+        right.toGenerator(getTestAllocator()),
+        DEFAULT_BATCH,
+        expected);
+    validateDual(
+        info.operator,
+        info.clazz,
+        left.toGenerator(getTestAllocator()),
+        right.toGenerator(getTestAllocator()),
+        DEFAULT_SMALL_BATCH,
+        expected);
+  }
+
+  private void rowSizeLimitDataGen(JoinInfo info, Table expected) throws Exception {
+    final Table left =
+        t(
+            th("bool1", "name1"),
+            tr(true, "a1a1a1a1a1"),
+            tr(false, "a2"),
+            tr(true, "a3"),
+            tr(false, "a4"),
+            tr(false, "a6"),
+            tr(true, Fixtures.NULL_VARCHAR));
+
+    final Table right =
+        t(
+            th("bool2", "name2"),
+            tr(false, "a1a1a1a1a1"),
             tr(true, "a2"),
             tr(true, "a4"),
             tr(true, "a5"),
@@ -257,6 +296,23 @@ public class TestMergeJoin extends BaseTestOperator {
               tr(false, "a6", false, "a6"),
               tr(true, Fixtures.NULL_VARCHAR, true, Fixtures.NULL_VARCHAR));
       nullHighSingleRowsData(joinInfo, expected);
+    }
+  }
+
+  @Test
+  public void testRowSizeLimit() throws Exception {
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 19); ) {
+      JoinInfo joinInfo =
+          getJoinInfo(
+              Arrays.asList(new JoinCondition("IS_NOT_DISTINCT_FROM", f("name1"), f("name2"))),
+              JoinRelType.INNER);
+
+      rowSizeLimitDataGen(joinInfo, null);
+
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
     }
   }
 

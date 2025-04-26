@@ -151,7 +151,7 @@ public class VectorizedHashJoinOperatorTest {
   public void testTryPushRuntimeFilterNonPartitionColOnlyBroadcastJoin() throws Exception {
     FragmentHandle fh = FragmentHandle.newBuilder().setMinorFragmentId(1).build();
     RuntimeFilterInfo runtimeFilterInfo =
-        newRuntimeFilterInfo(true, Collections.EMPTY_LIST, Lists.newArrayList("col1"));
+        newRuntimeFilterInfo(true, Collections.emptyList(), Lists.newArrayList("col1"));
     ArgumentCaptor<RuntimeFilter> valCaptor = ArgumentCaptor.forClass(RuntimeFilter.class);
     try (VectorizedHashJoinOperator joinOp = newVecHashJoinOp(runtimeFilterInfo, fh);
         MockedStatic<RuntimeFilterUtil> runtimeFilterUtilMockedStatic =
@@ -356,7 +356,7 @@ public class VectorizedHashJoinOperatorTest {
     FragmentHandle fh = FragmentHandle.newBuilder().setMinorFragmentId(1).build();
     ArgumentCaptor<RuntimeFilter> valCaptor = ArgumentCaptor.forClass(RuntimeFilter.class);
     RuntimeFilterInfo runtimeFilterInfo =
-        newRuntimeFilterInfo(true, Collections.EMPTY_LIST, Lists.newArrayList("npCol1", "npCol2"));
+        newRuntimeFilterInfo(true, Collections.emptyList(), Lists.newArrayList("npCol1", "npCol2"));
     try (VectorizedHashJoinOperator joinOp = newVecHashJoinOp(runtimeFilterInfo, fh);
         MockedStatic<RuntimeFilterUtil> runtimeFilterUtilMockedStatic =
             getRuntimeFilterUtilClassMocked(valCaptor)) {
@@ -505,7 +505,7 @@ public class VectorizedHashJoinOperatorTest {
     try (VectorizedHashJoinOperator joinOp =
             newVecHashJoinOp(
                 newRuntimeFilterInfo(
-                    false, Collections.EMPTY_LIST, Lists.newArrayList("col1", "col2")),
+                    false, Collections.emptyList(), Lists.newArrayList("col1", "col2")),
                 fh);
         MockedStatic<RuntimeFilterUtil> runtimeFilterUtilMockedStatic =
             getRuntimeFilterUtilClassMocked(valCaptor)) {
@@ -525,13 +525,13 @@ public class VectorizedHashJoinOperatorTest {
       // Get pieces from all other fragments. At last piece's merge, filter is sent to probe scan
       OutOfBandMessage oobMsg2 =
           utils.newOOB(
-              11, 101, 2, Collections.EMPTY_LIST, null, valueListFilter3, valueListFilter4);
+              11, 101, 2, Collections.emptyList(), null, valueListFilter3, valueListFilter4);
       OutOfBandMessage oobMsg3 =
           utils.newOOB(
-              11, 101, 3, Collections.EMPTY_LIST, null, valueListFilter5, valueListFilter6);
+              11, 101, 3, Collections.emptyList(), null, valueListFilter5, valueListFilter6);
       OutOfBandMessage oobMsg4 =
           utils.newOOB(
-              11, 101, 4, Collections.EMPTY_LIST, null, valueListFilter7, valueListFilter8);
+              11, 101, 4, Collections.emptyList(), null, valueListFilter7, valueListFilter8);
 
       joinOp.workOnOOB(oobMsg2);
       joinOp.workOnOOB(oobMsg3);
@@ -1470,7 +1470,7 @@ public class VectorizedHashJoinOperatorTest {
   }
 
   private RuntimeFilterInfo newRuntimeFilterInfo(boolean isBroadcast, String... partitionCols) {
-    return newRuntimeFilterInfo(isBroadcast, Arrays.asList(partitionCols), Collections.EMPTY_LIST);
+    return newRuntimeFilterInfo(isBroadcast, Arrays.asList(partitionCols), Collections.emptyList());
   }
 
   private RuntimeFilterInfo newRuntimeFilterInfo(

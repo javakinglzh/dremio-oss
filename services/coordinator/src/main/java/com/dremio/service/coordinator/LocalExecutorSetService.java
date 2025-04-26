@@ -50,6 +50,11 @@ public class LocalExecutorSetService implements ExecutorSetService {
   }
 
   @Override
+  public OptionManager getOptionManager() {
+    return this.optionManagerProvider.get();
+  }
+
+  @Override
   public void start() {}
 
   @Override

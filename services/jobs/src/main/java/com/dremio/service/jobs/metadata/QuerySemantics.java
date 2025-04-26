@@ -209,7 +209,7 @@ public final class QuerySemantics {
                   @Override
                   public Order visit(SqlCall call) {
                     switch (call.getOperator().getKind()) {
-                        // there's no ASCENDING. It always fall in the id case above
+                      // there's no ASCENDING. It always fall in the id case above
                       case DESCENDING:
                         List<SqlNode> operandList = call.getOperandList();
                         if (operandList.size() != 1) {

@@ -23,6 +23,7 @@ import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.service.APrivateSource;
 import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.ConnectionReaderImpl;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
@@ -142,7 +143,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
 
     sourceConfig.setConfig(nasConfig.toBytesString());
 
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     final AccelerationSettings settings =
         new AccelerationSettings()
@@ -213,7 +217,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
 
     sourceConfig.setConfig(nasConfig.toBytesString());
 
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     final AccelerationSettings settings =
         new AccelerationSettings()
@@ -262,7 +269,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
 
     sourceConfig.setConfig(nasConfig.toBytesString());
 
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     final AccelerationSettings settings =
         new AccelerationSettings()
@@ -343,7 +353,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
     nasConfig.path = "/";
 
     sourceConfig.setConfig(nasConfig.toBytesString());
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     DeprecatedSourceResource.SourceDeprecated source =
         expectSuccess(
@@ -377,7 +390,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
 
     sourceConfig.setConfig(nasConfig.toBytesString());
 
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     expectSuccess(
         getBuilder(
@@ -512,7 +528,10 @@ public class TestDeprecatedSourceResource extends BaseTestServer {
 
     sourceConfig.setConfig(nasConfig.toBytesString());
 
-    SourceConfig createdSourceConfig = getSourceService().registerSourceWithRuntime(sourceConfig);
+    SourceConfig createdSourceConfig =
+        getSourceService()
+            .registerSourceWithRuntime(
+                sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     try {
       final AccelerationSettings settings =

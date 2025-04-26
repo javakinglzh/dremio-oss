@@ -73,6 +73,12 @@ final class PerTaskScheduleTracker
   // Amount of time to wait at each iteration to check if a cancelled task is complete
   private static final int MAX_RUN_WAIT_TIME_MILLIS = 50;
 
+  private enum SuspendState {
+    RESUMED,
+    PAUSED,
+    LOST;
+  }
+
   private final String taskName;
   private final Runnable actualTask;
   private final ClusteredSingletonCommon schedulerCommon;
@@ -93,7 +99,7 @@ final class PerTaskScheduleTracker
   private volatile long bookingOwnerSessionId;
   private volatile boolean taskDone;
   private volatile Instant lastRun;
-  private volatile long sessionIdWhenLost;
+  private volatile SuspendState suspendState;
   private ScheduledFuture<?> scheduledTaskFuture;
   private Future<?> runningTaskFuture;
   private Instant firstRun;
@@ -140,7 +146,7 @@ final class PerTaskScheduleTracker
     this.recoveryMonitor = recoveryMonitorManager.addTask(this, eventsCollector);
     this.loadController = loadControllerManager.addTask(this, eventsCollector);
     this.doneHandler = doneHandlerManager.addTask(this);
-    this.sessionIdWhenLost = PerTaskInfo.INVALID_SESSION_ID;
+    this.suspendState = SuspendState.RESUMED;
   }
 
   PerTaskScheduleTracker(
@@ -252,7 +258,7 @@ final class PerTaskScheduleTracker
    *
    * @param newSchedule the modified schedule
    */
-  void setNewSchedule(Schedule newSchedule) {
+  void setNewSchedule(Schedule newSchedule, boolean isNew) {
     Preconditions.checkArgument(
         newSchedule != null, "Modified Schedule cannot be null for task %s", this);
     Preconditions.checkArgument(
@@ -267,6 +273,11 @@ final class PerTaskScheduleTracker
     Preconditions.checkArgument(
         !newSchedule.isToRunExactlyOnce(),
         "Illegal schedule modification. Cannot modify single shot schedules for task %s",
+        this);
+    // do not allow explicit schedule calls with same name, unless it is a single shot chain
+    Preconditions.checkArgument(
+        !isNew || currentSchedule.getPeriod() == null,
+        "Illegal schedule modification. Duplicate creation of normal schedules for task %s",
         this);
     currentSchedule = newSchedule;
     instantsRef.set(newSchedule.iterator());
@@ -285,11 +296,18 @@ final class PerTaskScheduleTracker
   public void run() {
     try {
       boolean addToRunSet = false;
+      if (SuspendState.PAUSED.equals(suspendState)) {
+        // this will make a call to LHS to confirm we are still the owner, which means we may block
+        // until LHS connection comes back. It is not safe to continue the run if LHS connection is
+        // unhealthy, until the LHS connection comes back to healthy state and we are still
+        // confirmed to be the booking owner
+        recoverSession();
+      }
       cancelLock.lock();
       try {
         if (!isBookingOwner()) {
           weightBalancer.removeTask(this.taskName);
-          LOGGER.info("Lost booking ownership for task {}", taskName);
+          LOGGER.info("Lost booking ownership for task {}:{}", taskName, bookingOwnerSessionId);
           return;
         }
         if (isTaskReallyDone()) {
@@ -596,56 +614,50 @@ final class PerTaskScheduleTracker
   }
 
   /**
-   * Handles a potential session loss.
+   * Handle a Suspended/Lost signal.
    *
-   * <p>Since session loss is rare, it is better to do a dirty check for whether the job is still
-   * running.
+   * <p>Setting the suspend flag will ensure all future runs will block on a synchronous LHS call,
+   * until the LHS recovers in the call to tryRecoverSession
    */
   public void handlePotentialSessionLoss() {
-    cancelLock.lock();
-    try {
-      if (scheduledTaskFuture != null) {
-        scheduledTaskFuture.cancel(false);
-      }
-    } finally {
-      cancelLock.unlock();
+    suspendState = SuspendState.PAUSED;
+    if (isBookingOwner()) {
+      LOGGER.debug(
+          "{} Potential for session loss for Session {}.", taskName, bookingOwnerSessionId);
+      eventsCollector.bookingPaused();
     }
-    boolean done = false;
-    int i = 0;
-    while (!done) {
-      done = i++ > 10 || checkCurrentRunCompleted();
-    }
-    releaseBookingLocalState(true);
   }
 
-  public void tryRecoverSession() {
-    if (sessionIdWhenLost == PerTaskInfo.INVALID_SESSION_ID) {
-      // nothing to recover
-      return;
+  public boolean tryRecoverSession() {
+    try {
+      if (isBookingOwner() && SuspendState.PAUSED.equals(suspendState)) {
+        if (recoverSession()) {
+          eventsCollector.bookingRegained();
+        }
+      }
+      return !SuspendState.LOST.equals(suspendState);
+    } finally {
+      suspendState = SuspendState.RESUMED;
     }
+  }
+
+  private boolean recoverSession() {
     eventsCollector.bookingRechecked();
     Stats stats = this.schedulerCommon.getTaskStore().getStats(bookFqPathLocal);
-    if (stats == null || stats.getSessionId() != sessionIdWhenLost) {
-      // we have confirmed loss of session.
-      sessionIdWhenLost = PerTaskInfo.INVALID_SESSION_ID;
-      eventsCollector.bookingLost();
-      return;
-    }
-    bookingOwnerSessionId = stats.getSessionId();
-    eventsCollector.bookingRegained();
-    sessionIdWhenLost = PerTaskInfo.INVALID_SESSION_ID;
-    if (!taskDone) {
-      // session is not lost and we are still the booking owner
-      // save the last schedule time for recovery of lastRun
-      recoveryMonitor.storeScheduleTime();
-      long delay = ChronoUnit.MILLIS.between(Instant.now(), nextInstant());
-      cancelLock.lock();
-      try {
-        scheduledTaskFuture =
-            schedulerCommon.getSchedulePool().schedule(this, delay, TimeUnit.MILLISECONDS);
-      } finally {
-        cancelLock.unlock();
+    // if we have come out of the above call LHS connection is healthy
+    cancelLock.lock();
+    try {
+      if (suspendState.equals(SuspendState.PAUSED)
+          && (stats == null || stats.getSessionId() != bookingOwnerSessionId)) {
+        // we have confirmed loss of session due to session expiry
+        releaseBookingLocalState();
+        eventsCollector.bookingLost();
+        suspendState = SuspendState.LOST;
+        return false;
       }
+      return !SuspendState.LOST.equals(suspendState);
+    } finally {
+      cancelLock.unlock();
     }
   }
 
@@ -728,7 +740,7 @@ final class PerTaskScheduleTracker
       if (endTask && RUN_ONCE_EVERY_MEMBER_DEATH.equals(currentSchedule.getSingleShotType())) {
         // ask recovery monitor to keep triggering a run even if task is done
         recoveryMonitor.addToDeathWatchLocal(true);
-        releaseBookingLocalState(false);
+        releaseBookingLocalState();
       }
       cancelLock.unlock();
       if (taskDone) {
@@ -748,7 +760,7 @@ final class PerTaskScheduleTracker
   private Instant checkAndAdjustForScheduleModifications() {
     final Schedule newSchedule = currentSchedule.getScheduleModifier().apply(currentSchedule);
     if (newSchedule != null) {
-      setNewSchedule(newSchedule);
+      setNewSchedule(newSchedule, false);
     }
     return nextInstant();
   }
@@ -814,19 +826,14 @@ final class PerTaskScheduleTracker
     }
   }
 
-  private void releaseBookingLocalState(boolean onPotentialSessionLoss) {
+  private void releaseBookingLocalState() {
     if (currentSchedule.getPeriod() == null) {
       // prepare for next re-mastering of schedules that has no periodicity
       this.instantsRef.set(currentSchedule.iterator());
     }
     if (isBookingOwner()) {
       weightBalancer.removeTask(this.taskName);
-      if (onPotentialSessionLoss) {
-        // defer cleanup until we are certain we actually lost the session
-        sessionIdWhenLost = bookingOwnerSessionId;
-      } else {
-        eventsCollector.bookingReleased();
-      }
+      eventsCollector.bookingReleased();
       if (!cancelled) {
         currentSchedule.getCleanupListener().cleanup();
       }
@@ -845,7 +852,22 @@ final class PerTaskScheduleTracker
    */
   private boolean isTaskReallyDone() {
     return cancelled
-        || (taskDone && !RUN_ONCE_EVERY_MEMBER_DEATH.equals(currentSchedule.getSingleShotType()));
+        || (!RUN_ONCE_EVERY_MEMBER_DEATH.equals(currentSchedule.getSingleShotType())
+            && (taskDone || forceCheckTaskDoneForSingleShot()));
+  }
+
+  /**
+   * Force check with done handler for single shot tasks (doneHandler is non-null only for single
+   * shot tasks).
+   *
+   * <p>NOTE: To completely close the window where a task gets done too quickly, double check with
+   * the done handler whether the task is really done. Since the booking is removed in the same LHS
+   * transaction as the done path creation. this check will close that minor window completely.
+   *
+   * @return true, if single shot and task done on any node, false otherwise
+   */
+  private boolean forceCheckTaskDoneForSingleShot() {
+    return doneHandler != null && doneHandler.hasDoneChildren();
   }
 
   @Override

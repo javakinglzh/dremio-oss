@@ -19,8 +19,12 @@ import com.dremio.common.config.LogicalPlanPersistence;
 import com.dremio.common.scanner.ClassPathScanner;
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.config.DremioConfig;
+import com.dremio.dac.daemon.KVStoreProviderHelper;
+import com.dremio.dac.server.DACConfig;
 import com.dremio.datastore.LocalKVStoreProvider;
+import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
+import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.server.options.OptionValidatorListingImpl;
 import com.dremio.exec.server.options.SystemOptionManager;
 import com.dremio.exec.server.options.SystemOptionManagerImpl;
@@ -28,6 +32,7 @@ import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
 import com.dremio.options.impl.DefaultOptionManager;
 import com.dremio.options.impl.OptionManagerWrapper;
+import io.opentracing.noop.NoopTracerFactory;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
@@ -95,6 +100,22 @@ public final class CmdUtils {
         new LocalKVStoreProvider(
             classPathScan, dbDir, false, true, noDBOpenRetry, noDBMessages, readOnly);
     return Optional.of(provider);
+  }
+
+  /**
+   * Returns a KVStore provider configured using {@link KVStoreProviderHelper}. The KVStore provider
+   * could be a local or distributed KVStore.
+   *
+   * @param dacConfig
+   * @return
+   */
+  public static Optional<KVStoreProvider> getStoreProvider(DACConfig dacConfig) {
+    ScanResult scan = ClassPathScanner.fromPrescan(dacConfig.getConfig().getSabotConfig());
+    // TODO: do we need BootStrapContext here for its startTelemetry() and registerMetrics() ?
+    BootStrapContext context = new BootStrapContext(dacConfig.getConfig(), scan);
+    return Optional.of(
+        KVStoreProviderHelper.newKVStoreProvider(
+            dacConfig, scan, context.getAllocator(), null, null, NoopTracerFactory.create()));
   }
 
   public static Optional<LocalKVStoreProvider> getKVStoreProvider(DremioConfig dremioConfig) {

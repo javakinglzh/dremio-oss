@@ -24,7 +24,6 @@ import com.dremio.exec.planner.acceleration.StrippingFactory;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.planner.sql.ViewExpander;
-import java.util.Collections;
 import java.util.List;
 import org.apache.calcite.rel.RelNode;
 
@@ -48,9 +47,9 @@ public class ExternalMaterializationDescriptor extends BaseMaterializationDescri
         physicalDatasetPath,
         0D,
         0,
-        Collections.emptyList(),
         IncrementalUpdateSettings.NON_INCREMENTAL,
-        false);
+        false,
+        null);
     this.virtualDatasetPath = virtualDatasetPath;
   }
 
@@ -90,6 +89,7 @@ public class ExternalMaterializationDescriptor extends BaseMaterializationDescri
         null,
         Long.MAX_VALUE,
         false,
-        StrippingFactory.LATEST_STRIP_VERSION);
+        StrippingFactory.LATEST_STRIP_VERSION,
+        null);
   }
 }

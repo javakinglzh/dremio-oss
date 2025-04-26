@@ -317,20 +317,20 @@ class DremioMetaServerImpl implements DremioMeta {
             return Types.BOOLEAN;
           case "CHARACTER":
             return Types.CHAR;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "CHARACTER LARGE OBJECT":
             return Types.CLOB;
           case "CHARACTER VARYING":
             return Types.VARCHAR;
 
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "DATALINK":
             return Types.DATALINK;
           case "DATE":
             return Types.DATE;
           case "DECIMAL":
             return Types.DECIMAL;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "DISTINCT":
             return Types.DISTINCT;
           case "DOUBLE":
@@ -345,63 +345,63 @@ class DremioMetaServerImpl implements DremioMeta {
           case "INTERVAL":
             return Types.OTHER;
 
-            // Resolve: Not seen in Dremio yet. Can it ever appear?:
+          // Resolve: Not seen in Dremio yet. Can it ever appear?:
           case "JAVA_OBJECT":
             return Types.JAVA_OBJECT;
 
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "LONGNVARCHAR":
             return Types.LONGNVARCHAR;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "LONGVARBINARY":
             return Types.LONGVARBINARY;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "LONGVARCHAR":
             return Types.LONGVARCHAR;
 
           case "MAP":
             return Types.OTHER;
 
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "NATIONAL CHARACTER":
             return Types.NCHAR;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "NATIONAL CHARACTER LARGE OBJECT":
             return Types.NCLOB;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "NATIONAL CHARACTER VARYING":
             return Types.NVARCHAR;
 
-            // TODO: Resolve following about NULL (and then update comment and
-            // code):
-            // It is not clear whether Types.NULL can represent a type (perhaps the
-            // type of the literal NULL when no further type information is known?)
-            // or
-            // whether 'NULL' can appear in INFORMATION_SCHEMA.COLUMNS.DATA_TYPE.
-            // For now, since it shouldn't hurt, include 'NULL'/Types.NULL in
-            // mapping.
+          // TODO: Resolve following about NULL (and then update comment and
+          // code):
+          // It is not clear whether Types.NULL can represent a type (perhaps the
+          // type of the literal NULL when no further type information is known?)
+          // or
+          // whether 'NULL' can appear in INFORMATION_SCHEMA.COLUMNS.DATA_TYPE.
+          // For now, since it shouldn't hurt, include 'NULL'/Types.NULL in
+          // mapping.
           case "NULL":
             return Types.NULL;
-            // (No NUMERIC--Dremio seems to map any to DECIMAL currently.)
+          // (No NUMERIC--Dremio seems to map any to DECIMAL currently.)
           case "NUMERIC":
             return Types.NUMERIC;
 
-            // Resolve: Unexpectedly, has appeared in Dremio. Should it?
+          // Resolve: Unexpectedly, has appeared in Dremio. Should it?
           case "OTHER":
             return Types.OTHER;
 
           case "REAL":
             return Types.REAL;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "REF":
             return Types.REF;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "ROWID":
             return Types.ROWID;
 
           case "SMALLINT":
             return Types.SMALLINT;
-            // Resolve: Not seen in Dremio yet. Can it appear?:
+          // Resolve: Not seen in Dremio yet. Can it appear?:
           case "SQLXML":
             return Types.SQLXML;
           case "STRUCT":

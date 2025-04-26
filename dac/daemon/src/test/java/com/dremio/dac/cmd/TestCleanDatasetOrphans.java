@@ -98,7 +98,7 @@ public class TestCleanDatasetOrphans extends CleanBaseTest {
 
       // Add dataset test-table1 to source test-source1
       NamespaceKey sourceKey1 = new NamespaceKey(SOURCE1);
-      SourceConfig sourceConfig1 = new SourceConfig().setName(SOURCE1).setCtime(100L);
+      SourceConfig sourceConfig1 = new SourceConfig().setName(SOURCE1);
       namespaceService.addOrUpdateSource(sourceKey1, sourceConfig1);
 
       NamespaceKey datasetPath3 = new NamespaceKey(TABLE1);
@@ -113,7 +113,7 @@ public class TestCleanDatasetOrphans extends CleanBaseTest {
 
       // Add dataset test-table2 to source test-source2
       NamespaceKey sourceKey2 = new NamespaceKey(SOURCE2);
-      SourceConfig sourceConfig2 = new SourceConfig().setName(SOURCE2).setCtime(100L);
+      SourceConfig sourceConfig2 = new SourceConfig().setName(SOURCE2);
       namespaceService.addOrUpdateSource(sourceKey2, sourceConfig2);
 
       NamespaceKey datasetPath4 = new NamespaceKey(TABLE2);

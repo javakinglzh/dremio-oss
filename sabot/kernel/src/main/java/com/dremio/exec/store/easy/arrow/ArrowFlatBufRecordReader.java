@@ -15,7 +15,10 @@
  */
 package com.dremio.exec.store.easy.arrow;
 
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.cache.VectorAccessibleFlatBufSerializable;
 import com.dremio.exec.expr.TypeHelper;
 import com.dremio.exec.record.VectorContainer;
@@ -23,6 +26,7 @@ import com.dremio.exec.store.RecordReader;
 import com.dremio.io.FSInputStream;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.scan.OutputMutator;
 import com.google.common.base.Preconditions;
 import io.netty.util.internal.PlatformDependent;
@@ -31,9 +35,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.commons.io.IOUtils;
@@ -46,10 +53,13 @@ public class ArrowFlatBufRecordReader implements RecordReader {
   private static final String MAGIC_STRING = "DREMARROWFLATBUF";
   private static final int MAGIC_STRING_LENGTH = MAGIC_STRING.getBytes().length;
   private static final int FOOTER_OFFSET_SIZE = Long.BYTES;
+  private static final long INT_SIZE = 4;
 
   private final OperatorContext context;
   private FSInputStream inputStream;
   private final long size;
+  private final int rowSizeLimit;
+  private final boolean rowSizeLimitEnabled;
 
   private BufferAllocator allocator;
   private List<Long> batchOffsets = new ArrayList<>();
@@ -60,6 +70,10 @@ public class ArrowFlatBufRecordReader implements RecordReader {
   private List<ValueVector> vectors = new ArrayList<>();
 
   private VectorAccessibleFlatBufSerializable serializable;
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private boolean rowSizeLimitEnabledForThisOperator;
 
   public ArrowFlatBufRecordReader(
       final OperatorContext context, final FSInputStream inputStream, final long size) {
@@ -67,6 +81,11 @@ public class ArrowFlatBufRecordReader implements RecordReader {
     this.inputStream = inputStream;
     this.size = size;
     this.serializable = new VectorAccessibleFlatBufSerializable();
+    this.rowSizeLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
+    this.rowSizeLimit =
+        Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
   }
 
   @Override
@@ -167,6 +186,22 @@ public class ArrowFlatBufRecordReader implements RecordReader {
       // Reset to beginning of the file
       inputStream.setPosition(0);
       nextBatchIndex = 0;
+      createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      this.variableVectorSizer = VectorContainerHelper.createSizer(vectors, false);
+      for (ValueVector vv : vectors) {
+        if (vv instanceof BaseFixedWidthVector) {
+          fixedDataLenPerRow += ((BaseFixedWidthVector) vv).getTypeWidth();
+        }
+      }
+      if (rowSizeLimitEnabled) {
+        if (fixedDataLenPerRow <= rowSizeLimit && variableVectorSizer.getVectorCount() == 0) {
+          rowSizeLimitEnabledForThisOperator = false;
+        }
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+        }
+      }
     } catch (Exception e) {
       throw UserException.dataReadError(e)
           .message("Failed to read the Arrow formatted file.")
@@ -196,10 +231,11 @@ public class ArrowFlatBufRecordReader implements RecordReader {
       serializable.clear();
       serializable.setup(container, allocator, context.getStats());
       serializable.readFromStream(inputStream);
-
+      int recordCount = container.getRecordCount();
+      checkForRowSizeOverLimit(recordCount);
       nextBatchIndex++;
 
-      return container.getRecordCount();
+      return recordCount;
     } catch (final Exception e) {
       throw UserException.dataReadError(e)
           .message("Failed to read data from Arrow format file.")
@@ -213,7 +249,12 @@ public class ArrowFlatBufRecordReader implements RecordReader {
   }
 
   @Override
-  public void close() throws Exception {}
+  public void close() throws Exception {
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
+  }
 
   /**
    * Return size of the record batch
@@ -253,5 +294,33 @@ public class ArrowFlatBufRecordReader implements RecordReader {
   public void setNextBatchIndex(int batchIndex) {
     Preconditions.checkArgument(batchIndex < this.batchSizes.size(), "Invalid record batch index");
     nextBatchIndex = batchIndex;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        vectors,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 }

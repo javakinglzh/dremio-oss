@@ -96,4 +96,59 @@ public class BaseTestTableFunction extends BaseTestOperator {
       AutoCloseables.close(data);
     }
   }
+
+  protected List<RecordBatchData> getTableFunctionOutput(
+      TableFunctionPOP pop,
+      Generator generator,
+      int batchSize,
+      OperatorTestContext operatorTestContext)
+      throws Exception {
+    return getTableFunctionOutput(pop, generator, batchSize, batchSize, operatorTestContext);
+  }
+
+  protected List<RecordBatchData> getTableFunctionOutput(
+      TableFunctionPOP pop,
+      Generator generator,
+      int inputBatchSize,
+      int outputBatchSize,
+      OperatorTestContext operatorTestContext)
+      throws Exception {
+    final List<RecordBatchData> data = new ArrayList<>();
+
+    try (TableFunctionOperator op =
+        newOperatorWithStats(
+                TableFunctionOperator.class, pop, outputBatchSize, null, null, operatorTestContext)
+            .first) {
+
+      final VectorAccessible output = op.setup(generator.getOutput());
+      int count;
+      while (op.getState() != SingleInputOperator.State.DONE
+          && (count = generator.next(inputBatchSize)) != 0) {
+        assertState(op, SingleInputOperator.State.CAN_CONSUME);
+        op.consumeData(count);
+        while (op.getState() == SingleInputOperator.State.CAN_PRODUCE) {
+          if (op.outputData() > 0) {
+            data.add(new RecordBatchData(output, getTestAllocator()));
+          }
+        }
+      }
+
+      if (op.getState() == SingleInputOperator.State.CAN_CONSUME) {
+        op.noMoreToConsume();
+      }
+
+      while (op.getState() == SingleInputOperator.State.CAN_PRODUCE) {
+        if (op.outputData() > 0) {
+          data.add(new RecordBatchData(output, getTestAllocator()));
+        }
+      }
+
+      if (op.getState() == SingleInputOperator.State.CAN_CONSUME) {
+        op.noMoreToConsume();
+      }
+      assertState(op, SingleInputOperator.State.DONE);
+    }
+
+    return data;
+  }
 }

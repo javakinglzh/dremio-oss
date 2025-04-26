@@ -24,7 +24,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.store.SplitAndPartitionInfo;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.ParquetScanTableFunction;
 import com.dremio.exec.store.parquet.ParquetSplitReaderCreatorIterator;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
@@ -93,11 +93,13 @@ public class BoostTableFunction extends ParquetScanTableFunction {
   public VectorAccessible setup(VectorAccessible accessible) throws Exception {
     super.setup(accessible);
     FileSystem fs;
-    FileSystemPlugin<?> plugin =
+    SupportsFsCreation plugin =
         fec.getStoragePlugin(functionConfig.getFunctionContext().getPluginId());
 
     try {
-      fs = plugin.createFS(props.getUserName(), context);
+      fs =
+          plugin.createFS(
+              SupportsFsCreation.builder().userName(props.getUserName()).operatorContext(context));
     } catch (IOException e) {
       throw new ExecutionSetupException("Unable to setup filesystem for boosting.", e);
     }

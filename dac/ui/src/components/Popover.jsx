@@ -121,6 +121,7 @@ class DremioPopoverAdapter extends PureComponent {
           root: classes && classes.root,
         }}
         {...commonProps}
+        container={container || document.body}
       >
         {children}
       </Popover>

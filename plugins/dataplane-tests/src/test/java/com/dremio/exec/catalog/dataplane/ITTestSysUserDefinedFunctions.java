@@ -69,7 +69,6 @@ public class ITTestSysUserDefinedFunctions extends ITBaseTestVersioned {
 
   @Test
   public void sysUdfsWithOneVersionedUdf() throws JobNotFoundException {
-    setSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     final String functionName1 = generateUniqueFunctionName();
     List<String> functionKey1 = tablePathWithFolders(functionName1);
     runQuery(createUdfQuery(functionKey1));
@@ -89,7 +88,6 @@ public class ITTestSysUserDefinedFunctions extends ITBaseTestVersioned {
 
   @Test
   public void sysUdfsWithOnlyVersionedUdfs() throws JobNotFoundException {
-    setSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     final String functionName1 = generateUniqueFunctionName();
     List<String> functionKey1 = tablePathWithFolders(functionName1);
     runQuery(createUdfQuery(functionKey1));
@@ -118,7 +116,6 @@ public class ITTestSysUserDefinedFunctions extends ITBaseTestVersioned {
 
   @Test
   public void sysUdfsWithCombinationUdfs() throws JobNotFoundException {
-    setSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     final String versionedUdf1 = generateUniqueFunctionName();
     List<String> versionedUdfKey1 = tablePathWithFolders(versionedUdf1);
     runQuery(createUdfQuery(versionedUdfKey1));
@@ -160,7 +157,6 @@ public class ITTestSysUserDefinedFunctions extends ITBaseTestVersioned {
 
   @Test
   public void sysUdfsWithSupportKeyOff() throws JobNotFoundException {
-    setSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     final String functionName1 = generateUniqueFunctionName();
     List<String> functionKey1 = tablePathWithFolders(functionName1);
     runQuery(createUdfQuery(functionKey1));
@@ -191,7 +187,6 @@ public class ITTestSysUserDefinedFunctions extends ITBaseTestVersioned {
 
   @Test
   public void sysUdfsWithUdfMetadataNotAccessible() throws Exception {
-    setSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
     final String functionName1 = generateUniqueFunctionName();
     List<String> functionKey1 = tablePathWithFolders(functionName1);
     runQuery(createUdfQuery(functionKey1));

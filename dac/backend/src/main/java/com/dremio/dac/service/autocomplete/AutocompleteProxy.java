@@ -110,14 +110,11 @@ public final class AutocompleteProxy {
         catalogEntityKeys.size() == 1,
         "Must have one and only one path to follow from the top level.");
 
+    final List<String> catalogEntityKey = catalogEntityKeys.get(0);
     final List<CatalogItem> matchingContainers =
         getMatchingContainers(
-            catalogServiceHelper,
-            catalogEntityKeys.get(0),
-            queryContext,
-            prefix,
-            refType,
-            refValue);
+            catalogServiceHelper, catalogEntityKey, queryContext, prefix, refType, refValue);
+
     return AutocompleteHelper.buildContainerSuggestions(matchingContainers);
   }
 
@@ -194,13 +191,13 @@ public final class AutocompleteProxy {
       String prefix,
       String refType,
       String refValue) {
-    List<CatalogItem> matchingContainers;
+    List<CatalogItem> matchingContainers = new ArrayList<>();
     if (catalogEntityKey.isEmpty()) {
-      matchingContainers = catalogServiceHelper.getTopLevelCatalogItems(Collections.EMPTY_LIST);
+      matchingContainers.addAll(
+          catalogServiceHelper.getTopLevelCatalogItems(Collections.emptyList()));
       addSystemSources(matchingContainers, catalogServiceHelper);
     } else {
       try {
-        matchingContainers = new ArrayList<>();
         CatalogPageToken pageToken = null;
         do {
           CatalogListingResult listingResult =
@@ -210,7 +207,36 @@ public final class AutocompleteProxy {
           pageToken = listingResult.nextPageToken().orElse(null);
         } while (pageToken != null);
       } catch (AccessControlException ignored) {
-        matchingContainers = Collections.EMPTY_LIST;
+        matchingContainers = Collections.emptyList();
+      }
+
+      // The list of matching containers gathered so far are obtained by
+      // doing a list operation on the KV store.
+      // In the case of system namespace, however, some tables
+      // as not being part of SysFlight tables are not put in KV store.
+      if (SystemStoragePlugin.NAME.equalsIgnoreCase(catalogEntityKey.get(0))) {
+        matchingContainers.addAll(
+            catalogServiceHelper.getUnlistedSystemTablesOrViews().stream()
+                .filter(
+                    // Here filtering is done only for the catalogEntityKey as the prefix
+                    // filtering is done for all matchingContainers at once before returning.
+                    entityPath ->
+                        catalogEntityKey.size() == 1
+                            || (catalogEntityKey.size() == 2
+                                && entityPath.getComponents().size() == 3
+                                && entityPath
+                                    .getComponents()
+                                    .get(1)
+                                    .equalsIgnoreCase(catalogEntityKey.get(1))))
+                .map(
+                    entityPath -> {
+                      return new CatalogItem.Builder()
+                          .setPath(entityPath.getComponents())
+                          .setType(CatalogItem.CatalogItemType.DATASET)
+                          .setDatasetType(CatalogItem.DatasetSubType.DIRECT)
+                          .build();
+                    })
+                .collect(Collectors.toList()));
       }
     }
 
@@ -237,7 +263,7 @@ public final class AutocompleteProxy {
         final Optional<CatalogEntity> source =
             catalogServiceHelper.getCatalogEntityByPath(
                 Collections.singletonList(sourceName),
-                Collections.EMPTY_LIST,
+                Collections.emptyList(),
                 Collections.singletonList("children"));
         if (source.isPresent() && source.get() instanceof Source) {
           CatalogItem item = CatalogItem.fromSource((Source) source.get());
@@ -298,14 +324,14 @@ public final class AutocompleteProxy {
       Optional<CatalogEntity> entity =
           catalogServiceHelper.getCatalogEntityByPath(
               catalogEntityKey,
-              Collections.EMPTY_LIST,
+              Collections.emptyList(),
               Collections.singletonList("children"),
               refType,
               refValue,
               null,
               null);
       if (entity.isPresent() && entity.get() instanceof Dataset) {
-        List<Field> matchingColumns = ((Dataset) entity.get()).getFields();
+        List<Field> matchingColumns = ((Dataset) entity.get()).getFields().getFields();
         return matchingColumns.stream()
             .filter(
                 (column) -> {
@@ -349,6 +375,6 @@ public final class AutocompleteProxy {
           .collect(Collectors.toList());
     } catch (SourceNotFoundException ignored) {
     }
-    return Collections.EMPTY_LIST;
+    return Collections.emptyList();
   }
 }

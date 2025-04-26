@@ -24,7 +24,7 @@ import { SonarSideNav } from "#oss/exports/components/SideNav/SonarSideNav";
 import { getTitle } from "@inject/pages/AdminPage/navSections";
 import NavCrumbs from "@inject/components/NavCrumbs/NavCrumbs";
 import { PageTop } from "dremio-ui-common/components/PageTop.js";
-import { SearchTriggerWrapper } from "#oss/exports/searchModal/SearchTriggerWrapper";
+import SearchTriggerWrapper from "@inject/catalogSearch/SearchTriggerWrapper";
 import "./AdminPage.less";
 
 class AdminPageView extends PureComponent {
@@ -62,7 +62,7 @@ class AdminPageView extends PureComponent {
       <SettingPage id="admin-page" style={style}>
         <div className="page-content">
           <SonarSideNav />
-          <div className="page-content-inner">
+          <div className="page-content-inner overflow-hidden">
             <PageTop>
               <NavCrumbs />
               <SearchTriggerWrapper className="ml-auto" />

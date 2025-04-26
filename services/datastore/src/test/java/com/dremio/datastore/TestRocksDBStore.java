@@ -271,7 +271,7 @@ public class TestRocksDBStore {
     Path blobDir = Paths.get(rocksDBResource.getDbDir(), "blob", "test");
     try (Stream<Path> stream = Files.list(blobDir)) {
       List<Path> remainingBlobFiles = stream.collect(Collectors.toList());
-      assertEquals("Expected zero remaining files.", Collections.EMPTY_LIST, remainingBlobFiles);
+      assertEquals("Expected zero remaining files.", Collections.emptyList(), remainingBlobFiles);
     }
 
     // do empty gets and make sure things work correctly.

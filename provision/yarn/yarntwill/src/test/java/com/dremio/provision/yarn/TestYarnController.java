@@ -15,7 +15,6 @@
  */
 package com.dremio.provision.yarn;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY;
 import static org.apache.hadoop.yarn.conf.YarnConfiguration.RM_HOSTNAME;
 import static org.junit.Assert.assertEquals;
@@ -27,7 +26,6 @@ import com.dremio.common.VM;
 import com.dremio.config.DremioConfig;
 import com.dremio.provision.Property;
 import com.dremio.provision.PropertyType;
-import com.dremio.provision.yarn.service.YarnDefaultsConfigurator;
 import com.dremio.test.TemporarySystemProperties;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -62,8 +60,6 @@ public class TestYarnController {
           + "Caused by: java.lang.Throwable: logThrowableChild1 Exception\n"
           + "Caused by: java.lang.Throwable: Initial Exception\n";
 
-  private static final String SHIM_LOADER_NAME =
-      "dremio-shimloader-0.9.2-201703030219530674-3d10a7e.jar";
   private static final String SOME_JAR_TO_LOAD = "some-jar-to-load.jar";
 
   @ClassRule public static final TemporaryFolder tempDir = new TemporaryFolder();
@@ -71,21 +67,15 @@ public class TestYarnController {
   public static final DremioConfig dremioConfig = DremioConfig.create();
 
   private static File finalPath;
-  private static File thirdrdPartyDir;
 
   @BeforeClass
   public static void beforeClass() throws Exception {
     DacDaemonYarnApplication.isTestingModeOn = true;
     finalPath = tempDir.newFolder("jars", "bundled");
-    thirdrdPartyDir = tempDir.newFolder("jars", "3rdparty");
     File filePath = new File(finalPath, "dremio-daemon-bundle.jar");
     filePath.createNewFile();
-    File shimFilePath = new File(finalPath, SHIM_LOADER_NAME);
-    shimFilePath.createNewFile();
-    File randomFilePath = new File(finalPath, "some-jar-to-load.jar");
+    File randomFilePath = new File(finalPath, SOME_JAR_TO_LOAD);
     randomFilePath.createNewFile();
-    File maprfsJar = new File(thirdrdPartyDir, "dremio-maprfs-shaded-5.1.0-mapr.jar");
-    maprfsJar.createNewFile();
   }
 
   @AfterClass
@@ -102,7 +92,6 @@ public class TestYarnController {
 
   @Test
   public void testYarnController() throws Exception {
-    assumeNonMaprProfile();
     YarnController yarnController = new YarnController();
     YarnConfiguration yarnConfiguration =
         createYarnConfig("resource-manager", "hdfs://name-node:8020");
@@ -212,7 +201,6 @@ public class TestYarnController {
       String expectedInJvmOptions,
       String shouldNotBeInJvmOptions)
       throws Exception {
-    assumeNonMaprProfile();
     YarnController yarnController =
         new YarnController() {
           @Override
@@ -239,7 +227,6 @@ public class TestYarnController {
 
   @Test
   public void testDeploymentPolicy() throws Exception {
-    assumeNonMaprProfile();
     YarnConfiguration yarnConfiguration =
         createYarnConfig("resource-manager", "hdfs://name-node:8020");
 
@@ -300,40 +287,6 @@ public class TestYarnController {
 
   @Test
   public void testRegexInPath() throws Exception {
-    assumeNonMaprProfile();
-    DacDaemonYarnApplication.Environment myEnv =
-        new DacDaemonYarnApplication.Environment() {
-          @Override
-          public String getEnv(String name) {
-            return tempDir.getRoot().toString();
-          }
-        };
-
-    System.setProperty(
-        "provisioning.yarn.classpath",
-        "[" + tempDir.getRoot().toString() + "/jars/bundled/" + SOME_JAR_TO_LOAD + "]");
-    YarnConfiguration yarnConfiguration =
-        createYarnConfig("resource-manager", "hdfs://name-node:8020");
-    yarnConfiguration.set(
-        YarnDefaultsConfigurator.CLASSPATH_JARS,
-        YarnDefaultsConfigurator.MapRYarnDefaults.getAppClassPath());
-    DacDaemonYarnApplication dacDaemonApp =
-        new DacDaemonYarnApplication(DremioConfig.create(), yarnConfiguration, myEnv);
-
-    List<String> names = dacDaemonApp.getJarNames();
-    assertFalse(names.isEmpty());
-    assertEquals(3, names.size());
-
-    String flatNames = names.toString();
-    assertTrue(flatNames.contains(SHIM_LOADER_NAME));
-    assertTrue(flatNames.contains("dremio-maprfs-shaded-5.1.0-mapr.jar"));
-    assertTrue(flatNames.contains(SOME_JAR_TO_LOAD));
-    System.clearProperty("provisioning.yarn.classpath");
-  }
-
-  @Test
-  public void testRegexInPathNonMapR() throws Exception {
-    assumeNonMaprProfile();
     DacDaemonYarnApplication.Environment myEnv =
         new DacDaemonYarnApplication.Environment() {
           @Override
@@ -360,8 +313,7 @@ public class TestYarnController {
   }
 
   @Test
-  public void testEmptyYarnClasspath() throws Exception {
-    assumeNonMaprProfile();
+  public void testYarnClasspath() throws Exception {
     DacDaemonYarnApplication.Environment myEnv =
         new DacDaemonYarnApplication.Environment() {
           @Override
@@ -372,49 +324,11 @@ public class TestYarnController {
 
     YarnConfiguration yarnConfiguration =
         createYarnConfig("resource-manager", "hdfs://name-node:8020");
-    yarnConfiguration.set(
-        YarnDefaultsConfigurator.CLASSPATH_JARS,
-        YarnDefaultsConfigurator.MapRYarnDefaults.getAppClassPath());
     DacDaemonYarnApplication dacDaemonApp =
         new DacDaemonYarnApplication(DremioConfig.create(), yarnConfiguration, myEnv);
 
     List<String> names = dacDaemonApp.getJarNames();
-    assertFalse(names.isEmpty());
-    assertEquals(2, names.size());
-
-    String flatNames = names.toString();
-    assertTrue(flatNames.contains(SHIM_LOADER_NAME));
-    assertTrue(flatNames.contains("dremio-maprfs-shaded-5.1.0-mapr.jar"));
-  }
-
-  @Test
-  public void testNonMapRYarnClasspath() throws Exception {
-    assumeNonMaprProfile();
-    DacDaemonYarnApplication.Environment myEnv =
-        new DacDaemonYarnApplication.Environment() {
-          @Override
-          public String getEnv(String name) {
-            return tempDir.getRoot().toString();
-          }
-        };
-    File shimFilePath = new File(finalPath, SHIM_LOADER_NAME);
-    File maprfsJar = new File(thirdrdPartyDir, "dremio-maprfs-shaded-5.1.0-mapr.jar");
-
-    try {
-      shimFilePath.delete();
-      maprfsJar.delete();
-
-      YarnConfiguration yarnConfiguration =
-          createYarnConfig("resource-manager", "hdfs://name-node:8020");
-      DacDaemonYarnApplication dacDaemonApp =
-          new DacDaemonYarnApplication(DremioConfig.create(), yarnConfiguration, myEnv);
-
-      List<String> names = dacDaemonApp.getJarNames();
-      assertTrue(names.isEmpty());
-    } finally {
-      shimFilePath.createNewFile();
-      maprfsJar.createNewFile();
-    }
+    assertTrue(names.isEmpty());
   }
 
   @Test

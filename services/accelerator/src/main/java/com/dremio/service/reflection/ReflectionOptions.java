@@ -73,20 +73,11 @@ public interface ReflectionOptions {
   // allows users to set sub-hour refresh and grace periods
   BooleanValidator ENABLE_SUBHOUR_POLICIES =
       new BooleanValidator("accelerator.enable.subhour.policies", false);
-  // control how many voted datasets are promoted every 24 hours
-  PositiveLongValidator MAX_AUTOMATIC_REFLECTIONS =
-      new PositiveLongValidator("reflection.auto.max", Integer.MAX_VALUE, 10);
-  // should the voting service create aggregation reflections
-  BooleanValidator ENABLE_AUTOMATIC_AGG_REFLECTIONS =
-      new BooleanValidator("reflection.auto.agg.enable", false);
-  // should the voting service create raw reflections
-  BooleanValidator ENABLE_AUTOMATIC_RAW_REFLECTIONS =
-      new BooleanValidator("reflection.auto.raw.enable", false);
+
   // set to true to prevent external events from waking up the reflection manager
   BooleanValidator REFLECTION_PERIODIC_WAKEUP_ONLY =
       new BooleanValidator("reflection.manager.wakeup.periodic_only", false);
-  BooleanValidator REFLECTION_ENABLE_SUBSTITUTION =
-      new BooleanValidator("reflection.enable.substitutions", true);
+
   // if a reflection has no known dependencies how long should we wait before we attempt to refresh
   // again
   // this typically occurs when the refresh job fails in planning
@@ -95,15 +86,6 @@ public interface ReflectionOptions {
           "reflection.no_dependency.refresh_period_seconds",
           Long.MAX_VALUE,
           TimeUnit.MINUTES.toSeconds(30));
-  // should compaction be enabled
-  BooleanValidator ENABLE_COMPACTION = new BooleanValidator("reflection.compaction.enabled", false);
-  // at least how many files there should be to trigger compaction
-  PositiveLongValidator COMPACTION_TRIGGER_NUMBER_FILES =
-      new PositiveLongValidator("reflection.compaction.trigger.num_files", Long.MAX_VALUE, 1);
-  // Compaction will be triggered if the median file size is less than or equal to this parameter
-  PositiveLongValidator COMPACTION_TRIGGER_FILE_SIZE =
-      new PositiveLongValidator(
-          "reflection.compaction.trigger.file_size_mb", Long.MAX_VALUE / (1024 * 1024), 16);
   // Enable caching of reflection whose dist storage is in cloud ( S3, AzureDataLake,
   // AzureFileSystem)
   BooleanValidator CLOUD_CACHING_ENABLED =
@@ -155,24 +137,19 @@ public interface ReflectionOptions {
   // longer than this period it will be forced to refresh.
   PositiveLongValidator REFLECTION_MANAGER_REFRESH_PENDING_TIMEOUT_MINUTES =
       new PositiveLongValidator("reflection.manager.refresh_pending.timeout", Long.MAX_VALUE, 30);
-  // Enable using schedule policies on datasets and sources for reflection refresh
-  BooleanValidator REFLECTION_SCHEDULE_POLICY_ENABLED =
-      new BooleanValidator("reflection.manager.refresh_schedule_policy.enabled", true);
-  // Enable LOAD MATERIALIZATION job to register metadata as an async process,
-  // or register table synchronously in handleMaterializationDone when the flag is off
-  BooleanValidator LOAD_MATERIALIZATION_JOB_ENABLED =
-      new BooleanValidator("reflection.manager.load_materialization_job.enabled", false);
   // Avoid redundant refreshes using table snapshots
   BooleanValidator REFLECTION_MANAGER_AVOID_REDUNDANT_REFRESH =
       new BooleanValidator("reflection.manager.avoid_redundant_refresh", true);
-  // Skip the async materialization deletion process of submitting a DROP TABLE job to clean up
-  // records and physical data for incremental refresh.
-  BooleanValidator SKIP_DROP_TABLE_JOB_FOR_INCREMENTAL_REFRESH =
-      new BooleanValidator("reflection.manager.skip_drop_table_job_for_incremental_refresh", true);
   // The new code path in ReflectionSuggester and ReflectionAnalyzer allows us to suggest
   // reflections base on the reflection type user provides.
   BooleanValidator SUGGEST_REFLECTION_BASED_ON_TYPE =
       new BooleanValidator("reflection.manager.suggest_reflection_based_on_type", true);
+  // Maximum number of retries for failed/canceled materialization before the reflection is
+  // given up and marked as FAILED. Default number of 24 with exponential retry policy covers
+  // ~72hrs (71.8).
+  PositiveLongValidator MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS =
+      new PositiveLongValidator(
+          "reflection.manager.max_reflection_refresh_retry_attempts", Integer.MAX_VALUE, 24);
   // Retry using retry backoff by default. Immediate retry when the support key is off.
   BooleanValidator ENABLE_EXPONENTIAL_BACKOFF_FOR_RETRY_POLICY =
       new BooleanValidator("reflection.manager.enable_exponential_backoff_for_retry_policy", true);
@@ -181,7 +158,7 @@ public interface ReflectionOptions {
       new BooleanValidator("reflection.manager.backoff_retry_policy", true);
   // Enable the "reflection.max_num_reflections_limit" support key
   BooleanValidator MAX_NUM_REFLECTIONS_LIMIT_ENABLED =
-      new BooleanValidator("reflection.max_num_reflections_limit.enabled", false);
+      new BooleanValidator("reflection.max_num_reflections_limit.enabled", true);
   // The maximum number of reflections allowed by Reflection Manager.
   LongValidator MAX_NUM_REFLECTIONS_LIMIT =
       new RangeLongValidator("reflection.max_num_reflections_limit", 0L, Long.MAX_VALUE, 500);

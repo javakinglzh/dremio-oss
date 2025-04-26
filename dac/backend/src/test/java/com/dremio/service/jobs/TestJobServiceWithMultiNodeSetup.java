@@ -112,29 +112,16 @@ public class TestJobServiceWithMultiNodeSetup extends BaseTestServer {
   }
 
   private DremioClient getDremioClient(boolean master) throws Exception {
+    final UserServer server = master ? lMaster(UserServer.class) : l(UserServer.class);
     DremioClient dremioClient = new DremioClient(true);
-    if (master) {
-      final UserServer server = l(UserServer.class);
-      dremioClient.connect(
-          new Properties() {
-            {
-              put("direct", "localhost:" + server.getPort());
-              put("user", "dremio");
-              put("password", "dremio123");
-            }
-          });
-    } else {
-      final UserServer server = l(UserServer.class);
-      dremioClient.connect(
-          new Properties() {
-            {
-              put("direct", "localhost:" + server.getPort());
-              put("user", "dremio");
-              put("password", "dremio123");
-            }
-          });
-    }
-
+    dremioClient.connect(
+        new Properties() {
+          {
+            put("direct", "localhost:" + server.getPort());
+            put("user", "dremio");
+            put("password", "dremio123");
+          }
+        });
     return dremioClient;
   }
 

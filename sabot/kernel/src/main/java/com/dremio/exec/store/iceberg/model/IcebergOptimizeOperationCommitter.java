@@ -20,6 +20,8 @@ import static com.dremio.sabot.op.writer.WriterCommitterOperator.SnapshotCommitS
 import static com.dremio.sabot.op.writer.WriterCommitterOperator.SnapshotCommitStatus.SKIPPED;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.physical.base.ClusteringOptions;
+import com.dremio.exec.proto.ExecProtos.ClusteringStatus;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.OperationType;
 import com.dremio.exec.store.dfs.IcebergTableProps;
@@ -49,6 +51,7 @@ import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
+import org.apache.iceberg.Table;
 import org.apache.iceberg.exceptions.CommitFailedException;
 import org.apache.iceberg.exceptions.CommitStateUnknownException;
 import org.apache.iceberg.exceptions.ValidationException;
@@ -77,6 +80,8 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
   private final FileSystem fs;
   private final Long startingSnapshotId;
 
+  private ClusteringOptions clusteringOptions;
+
   public IcebergOptimizeOperationCommitter(
       IcebergCommand icebergCommand,
       OperatorStats operatorStats,
@@ -84,7 +89,8 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
       Long minInputFiles,
       Long snapshotId,
       IcebergTableProps tableProps,
-      FileSystem fs) {
+      FileSystem fs,
+      ClusteringOptions clusteringOptions) {
     Preconditions.checkState(icebergCommand != null, "Unexpected state");
     Preconditions.checkNotNull(
         datasetConfig.getPhysicalDataset().getIcebergMetadata().getMetadataFileLocation());
@@ -97,6 +103,7 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
     this.tableProps = tableProps;
     this.fs = fs;
     this.startingSnapshotId = snapshotId;
+    this.clusteringOptions = clusteringOptions;
   }
 
   @Override
@@ -110,17 +117,18 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
     Stopwatch stopwatch = Stopwatch.createStarted();
     Snapshot snapshot = null;
     WriterCommitterOperator.SnapshotCommitStatus commitStatus = NONE;
+    boolean shouldCommit = false;
     try {
       Set<String> skippedSingleRewrites =
           singleRewriteTracker.removeSingleFileChanges(addedDataFiles, removedDataFiles);
-      boolean shouldCommit = hasAnythingChanged() && hasMinInputFilesCriteriaPassed();
+      shouldCommit = hasAnythingChanged() && hasMinInputFilesCriteriaPassed();
       snapshot =
           shouldCommit
               ? icebergCommand.rewriteFiles(
                   removedDataFiles,
                   removedDeleteFiles,
                   addedDataFiles,
-                  Collections.EMPTY_SET,
+                  Collections.emptySet(),
                   startingSnapshotId)
               : icebergCommand.loadTable().currentSnapshot();
 
@@ -157,6 +165,12 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
       operatorStats.addLongStat(
           WriterCommitterOperator.Metric.ICEBERG_COMMIT_TIME, totalCommitTime);
       IcebergOpCommitter.writeSnapshotStats(operatorStats, commitStatus, snapshot);
+
+      // update clustering status in case commit happens
+      if (clusteringOptions != null && shouldCommit) {
+        Table table = icebergCommand.loadTable();
+        clusteringOptions.updateClusteringStatus(table, snapshot);
+      }
     }
   }
 
@@ -257,6 +271,11 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
   public void consumeDeleteDeleteFile(DeleteFile deleteFile) throws UnsupportedOperationException {
     this.removedDeleteFiles.add(deleteFile);
     this.singleRewriteTracker.consumeDeletedDeleteFile(deleteFile);
+  }
+
+  @Override
+  public void consumeClusteringStatus(ClusteringStatus clusteringStatus) {
+    icebergCommand.consumeClusteringStatus(clusteringStatus);
   }
 
   @Override

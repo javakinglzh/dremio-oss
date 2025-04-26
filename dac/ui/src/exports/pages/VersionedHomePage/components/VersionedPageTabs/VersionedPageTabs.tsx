@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { useState } from "react";
 import { useIntl } from "react-intl";
 import {
   constructVersionedEntityUrl,
@@ -28,6 +29,7 @@ import {
 import { TabsNavigationItem } from "dremio-ui-lib";
 import { withRouter, type WithRouterProps } from "react-router";
 import { useNessieContext } from "#oss/pages/NessieHomePage/utils/context";
+import { useTabsKeyboardListener } from "dremio-ui-lib/components";
 
 import classes from "./VersionedPageTabs.module.less";
 
@@ -82,9 +84,15 @@ const VersionedHomePageTabs = ({ router, children }: any & WithRouterProps) => {
     router.push(url);
   };
 
+  const { setTabsEl } = useTabsKeyboardListener();
+
   return (
     <>
-      <div className={classes["versionedPage__tabs"]} role="tablist">
+      <div
+        ref={(r) => setTabsEl(r)}
+        className={classes["versionedPage__tabs"]}
+        role="tablist"
+      >
         {tabs
           .filter((tab) => tab !== "settings" && tab !== "commit")
           .map((tab) => (

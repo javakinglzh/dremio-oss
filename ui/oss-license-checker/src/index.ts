@@ -39,6 +39,7 @@ const compatibleLicenses = new Set([
   "Unlicense",
   "(GPL-2.0 OR MIT)",
   "(MIT OR GPL-2.0)",
+  "(MPL-2.0 OR Apache-2.0)",
 ]);
 
 const ignoredDependencies = new Set(["caniuse-lite", "options"]);

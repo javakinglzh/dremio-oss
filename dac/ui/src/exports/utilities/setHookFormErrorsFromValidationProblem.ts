@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ValidationProblem } from "@dremio/dremio-js/interfaces";
+import type { ValidationProblem } from "@dremio/dremio-js/oss";
 import { type UseFormSetError } from "react-hook-form";
 import { JsonPointer } from "json-ptr";
 

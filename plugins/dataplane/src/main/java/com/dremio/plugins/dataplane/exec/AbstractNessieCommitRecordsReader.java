@@ -16,9 +16,13 @@
 package com.dremio.plugins.dataplane.exec;
 
 import static com.dremio.exec.store.IcebergExpiryMetric.COMMIT_SCAN_TIME;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createTableSkipLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
 import static org.projectnessie.gc.contents.LiveContentSet.Status.IDENTIFY_SUCCESS;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.logging.StructuredLogger;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.store.IcebergExpiryMetric;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.iceberg.IcebergUtils;
@@ -26,6 +30,7 @@ import com.dremio.exec.store.iceberg.NessieCommitsSubScan;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
 import com.dremio.exec.store.iceberg.SnapshotsScanOptions;
 import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType;
 import com.dremio.plugins.dataplane.exec.gc.NessieLiveContentRetriever;
 import com.dremio.plugins.dataplane.store.DataplanePlugin;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -47,6 +52,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.projectnessie.client.api.NessieApiV2;
 import org.projectnessie.gc.contents.ContentReference;
@@ -60,6 +66,7 @@ import org.slf4j.LoggerFactory;
 public abstract class AbstractNessieCommitRecordsReader implements RecordReader {
   private static final Logger LOGGER =
       LoggerFactory.getLogger(AbstractNessieCommitRecordsReader.class);
+  private static final StructuredLogger vacuumLogger = getVacuumLogger();
 
   private final NessieCommitsSubScan config;
   private final FragmentExecutionContext fragmentExecutionContext;
@@ -153,11 +160,15 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
   private int publishRecords(int startIdx) {
     final AtomicInteger idx = new AtomicInteger(startIdx);
     int runningIdx = startIdx;
-    List<CompletableFuture<Optional<SnapshotEntry>>> snapshotEntries = new ArrayList<>();
+    List<Pair<String, CompletableFuture<Optional<SnapshotEntry>>>> snapshotEntriesWithDataset =
+        new ArrayList<>();
     while (contentRefsIterator.hasNext() && runningIdx++ < context.getTargetBatchSize()) {
-      snapshotEntries.add(getEntries(idx, contentRefsIterator.next()));
+      final ContentReference contentReference = contentRefsIterator.next();
+      snapshotEntriesWithDataset.add(
+          Pair.of(getDataset(contentReference), getEntries(idx, contentReference)));
     }
-    snapshotEntries.forEach(e -> e.join().ifPresent(se -> populateOutputVectors(idx, se)));
+    snapshotEntriesWithDataset.forEach(
+        e -> e.getRight().join().ifPresent(se -> populateOutputVectors(idx, se, e.getLeft())));
     return idx.intValue();
   }
 
@@ -167,7 +178,8 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
   protected abstract CompletableFuture<Optional<SnapshotEntry>> getEntries(
       AtomicInteger idx, ContentReference next);
 
-  protected abstract void populateOutputVectors(AtomicInteger idx, SnapshotEntry entry);
+  protected abstract void populateOutputVectors(
+      AtomicInteger idx, SnapshotEntry entry, String dataset);
 
   protected abstract void setValueCount(int valueCount);
 
@@ -209,7 +221,28 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
           .addLongStat(
               IcebergExpiryMetric.NUM_TABLES, liveContentSet.fetchDistinctContentIdCount());
 
-      try (Stream<String> stream = liveContentSet.fetchContentIds()) {
+      try (Stream<String> stream =
+          liveContentSet
+              .fetchContentIds()
+              .filter(
+                  contentId -> {
+                    boolean isExcludedContentId =
+                        config.getExcludedContentIDs().contains(contentId);
+                    final String queryId =
+                        QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
+                    if (isExcludedContentId) {
+                      vacuumLogger.warn(
+                          createTableSkipLog(
+                              queryId,
+                              contentId,
+                              ErrorType.VACUUM_EXCEPTION,
+                              String.format(
+                                  "Skipping commit scan on contentID %s because it was excluded through SQL.",
+                                  contentId)),
+                          "");
+                    }
+                    return !isExcludedContentId;
+                  })) {
         liveContentIdsSetIterator = stream.iterator();
       }
     } catch (LiveContentSetNotFoundException e) {
@@ -219,5 +252,21 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
           .getStats()
           .addLongStat(COMMIT_SCAN_TIME, liveContentScanWatch.elapsed(TimeUnit.MILLISECONDS));
     }
+  }
+
+  protected List<String> getDatasetElements(ContentReference contentReference) {
+    return buildDatasetList(contentReference);
+  }
+
+  protected String getDataset(ContentReference contentReference) {
+    List<String> datasetList = buildDatasetList(contentReference);
+    return String.join(".", datasetList);
+  }
+
+  private List<String> buildDatasetList(ContentReference contentReference) {
+    List<String> datasetList = new ArrayList<>();
+    datasetList.add(getPlugin().getId().getName());
+    datasetList.addAll(contentReference.contentKey().getElements());
+    return datasetList;
   }
 }

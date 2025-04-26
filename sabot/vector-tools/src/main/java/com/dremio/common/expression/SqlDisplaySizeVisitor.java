@@ -18,6 +18,7 @@ package com.dremio.common.expression;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -30,12 +31,14 @@ import org.apache.arrow.vector.types.pojo.ArrowType.LargeBinary;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeList;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeUtf8;
 import org.apache.arrow.vector.types.pojo.ArrowType.List;
+import org.apache.arrow.vector.types.pojo.ArrowType.ListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Null;
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct;
 import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 
 public class SqlDisplaySizeVisitor implements ArrowTypeVisitor<Integer> {
 
@@ -51,6 +54,11 @@ public class SqlDisplaySizeVisitor implements ArrowTypeVisitor<Integer> {
 
   @Override
   public Integer visit(List paramList) {
+    return 0;
+  }
+
+  @Override
+  public Integer visit(ListView paramList) {
     return 0;
   }
 
@@ -95,7 +103,17 @@ public class SqlDisplaySizeVisitor implements ArrowTypeVisitor<Integer> {
   }
 
   @Override
+  public Integer visit(Utf8View paramUtf8) {
+    return 65536;
+  }
+
+  @Override
   public Integer visit(Binary paramBinary) {
+    return 65536;
+  }
+
+  @Override
+  public Integer visit(BinaryView paramBinary) {
     return 65536;
   }
 
@@ -165,6 +183,16 @@ public class SqlDisplaySizeVisitor implements ArrowTypeVisitor<Integer> {
   @Override
   public Integer visit(ArrowType.Duration paramDuration) {
     throw new UnsupportedOperationException("Dremio does not support duration.");
+  }
+
+  @Override
+  public Integer visit(ArrowType.LargeListView param) {
+    throw new UnsupportedOperationException("Dremio does not support LargeListView.");
+  }
+
+  @Override
+  public Integer visit(ArrowType.RunEndEncoded param) {
+    throw new UnsupportedOperationException("Dremio does not support RunEndEncoded.");
   }
 
   @Override

@@ -19,7 +19,6 @@ import com.dremio.common.Wrapper;
 import com.dremio.connector.ConnectorException;
 import com.dremio.connector.metadata.SourceMetadata;
 import com.dremio.datastore.Serializer;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.service.Service;
@@ -111,9 +110,6 @@ public interface StoragePlugin extends Service, SourceMetadata, Wrapper {
   default BatchSchema mergeSchemas(DatasetConfig oldConfig, BatchSchema newSchema) {
     return CalciteArrowHelper.fromDataset(oldConfig).merge(newSchema);
   }
-
-  @Deprecated // Remove this method as the namespace should keep track of views.
-  ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig);
 
   /**
    * Converts a byte string to a list of column extended properties grouped by column name.

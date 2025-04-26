@@ -15,13 +15,15 @@
  */
 package com.dremio.plugins.dataplane.exec;
 
+import static com.dremio.common.FSConstants.MAXIMUM_CONNECTIONS;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_ACCESS_DENIED;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_NOT_FOUND;
 import static com.dremio.exec.store.IcebergExpiryMetric.NUM_PARTIAL_FAILURES;
 import static com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType.NOT_FOUND_EXCEPTION;
 import static com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType.PERMISSION_EXCEPTION;
 import static com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType.UNKNOWN;
-import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createNessieExpireSnapshotLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createExpireSnapshotLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createTableSkipLog;
 import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
 import static com.dremio.plugins.dataplane.exec.NessieCommitsRecordReader.readTableMetadata;
 
@@ -40,10 +42,12 @@ import com.dremio.exec.store.iceberg.IcebergExpiryAction;
 import com.dremio.exec.store.iceberg.IcebergExpirySnapshotsReader;
 import com.dremio.exec.store.iceberg.SnapshotsScanOptions;
 import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType;
 import com.dremio.plugins.dataplane.store.DataplanePlugin;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.scan.OutputMutator;
 import com.google.common.base.Stopwatch;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
@@ -79,7 +83,6 @@ import org.slf4j.LoggerFactory;
  */
 public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsReader {
 
-  public static final String FS_EXPIRY_PARALLELISM_CONF_KEY = "vacuum.expiry_action.parallelism";
   private static final Logger LOGGER =
       LoggerFactory.getLogger(NessieIcebergExpirySnapshotsReader.class);
   private static final StructuredLogger vacuumLogger = getVacuumLogger();
@@ -92,6 +95,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
   private final String schemeVariate;
   private final String fsScheme;
   private final String queryId;
+  private final List<String> excludedContentIDs;
 
   public NessieIcebergExpirySnapshotsReader(
       OperatorContext context,
@@ -99,7 +103,8 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
       OpProps props,
       SnapshotsScanOptions snapshotsScanOptions,
       String schemeVariate,
-      String fsScheme) {
+      String fsScheme,
+      List<String> excludedContentIDs) {
     super(context, icebergMutablePlugin, props, snapshotsScanOptions);
     DataplanePlugin plugin = (DataplanePlugin) icebergMutablePlugin;
     this.nessieApi = plugin.getNessieApi();
@@ -109,7 +114,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     // Since S3 is the only supported FS, using that value.
     int maxParallelism =
         plugin
-            .getProperty(FS_EXPIRY_PARALLELISM_CONF_KEY)
+            .getProperty(MAXIMUM_CONNECTIONS)
             .map(Integer::parseInt)
             .orElse(S3ConnectionConstants.DEFAULT_MAX_THREADS / 2);
     this.slots = new Semaphore(maxParallelism);
@@ -117,6 +122,8 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     this.schemeVariate = schemeVariate;
     this.fsScheme = fsScheme;
     this.queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
+
+    this.excludedContentIDs = excludedContentIDs;
   }
 
   @Override
@@ -185,7 +192,8 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
               .orElse(null);
       ResolvedVersionContext tableVersionContext = tableHolder.getVersionContext();
 
-      super.setupFsIfNecessary(metadataLocation);
+      List<String> dataset = getDataset(tableHolder.getTableId());
+      super.setupFs(metadataLocation, dataset);
       Optional<TableMetadata> tableMetadata =
           readTableMetadata(io, metadataLocation, tableId, context);
       if (tableMetadata.isEmpty()) {
@@ -217,7 +225,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
                   fsScheme));
       status = true;
       vacuumLogger.info(
-          createNessieExpireSnapshotLog(
+          createExpireSnapshotLog(
               queryId,
               tableId,
               metadataLocation,
@@ -228,37 +236,39 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
           "");
       return ret;
     } catch (NotFoundException nfe) {
-      String message = "Skipping since table metadata is missing for the table " + tableId;
+      String message =
+          String.format("Skipping since table metadata is missing for the table %s.\n", tableId);
       LOGGER.warn(message, nfe);
       vacuumLogger.warn(
-          createNessieExpireSnapshotLog(
+          createExpireSnapshotLog(
               queryId,
               tableId,
               metadataLocation,
               snapshotsScanOptions,
               NOT_FOUND_EXCEPTION,
-              message + "./n" + nfe.toString()),
+              message + nfe.toString()),
           "");
       context.getStats().addLongStat(NUM_PARTIAL_FAILURES, 1L);
       context.getStats().addLongStat(NUM_NOT_FOUND, 1L);
       return Optional.empty();
     } catch (UserException e) {
       vacuumLogger.warn(
-          createNessieExpireSnapshotLog(
+          createExpireSnapshotLog(
               queryId, tableId, metadataLocation, snapshotsScanOptions, UNKNOWN, e.toString()),
           "");
       if (UserBitShared.DremioPBError.ErrorType.PERMISSION.equals(e.getErrorType())) {
-        String message = "Skipping since access is denied on the table ";
+        String message =
+            String.format("Skipping since access is denied on the table %s.\n", tableId);
         vacuumLogger.warn(
-            createNessieExpireSnapshotLog(
+            createExpireSnapshotLog(
                 queryId,
                 tableId,
                 metadataLocation,
                 snapshotsScanOptions,
                 PERMISSION_EXCEPTION,
-                message),
+                message + e.toString()),
             "");
-        LOGGER.warn(message + tableId, e);
+        LOGGER.warn(message, e);
         context.getStats().addLongStat(NUM_PARTIAL_FAILURES, 1L);
         context.getStats().addLongStat(NUM_ACCESS_DENIED, 1L);
         return Optional.empty();
@@ -312,6 +322,14 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     }
   }
 
+  private List<String> getDataset(TableIdentifier tableId) {
+    List<String> dataset = new ArrayList<>();
+    dataset.add(icebergMutablePlugin.getId().getName());
+    dataset.addAll(List.of(tableId.namespace().levels()));
+    dataset.add(tableId.name());
+    return dataset;
+  }
+
   private void checkProducerState() {
     if (producer.isCompletedExceptionally()) {
       try {
@@ -328,7 +346,24 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
             nessieApi, branch.getName(), branch.getHash(), Collections.emptyMap());
     try {
       return nessieApi.getEntries().reference(branch).stream()
-          .filter(e -> Content.Type.ICEBERG_TABLE == e.getType())
+          .filter(
+              e -> {
+                final String contentId = e.getContentId();
+                boolean isTable = Content.Type.ICEBERG_TABLE == e.getType();
+                boolean isTableExcluded = excludedContentIDs.contains(contentId);
+                if (isTableExcluded) {
+                  vacuumLogger.warn(
+                      createTableSkipLog(
+                          queryId,
+                          contentId,
+                          ErrorType.VACUUM_EXCEPTION,
+                          String.format(
+                              "Skipping commit scan on contentID %s because it was excluded through SQL.",
+                              contentId)),
+                      "");
+                }
+                return isTable && !isTableExcluded;
+              })
           .map(this::toIdentifier)
           .map(id -> new IcebergTableInfo(branch, id, nessieIcebergClient.table(id)));
     } catch (NessieNotFoundException e) {

@@ -15,8 +15,12 @@
  */
 package com.dremio.plugins.s3.store;
 
+import static com.dremio.plugins.Constants.DREMIO_ENABLE_BUCKET_DISCOVERY;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockStatic;
@@ -25,6 +29,7 @@ import static org.mockito.Mockito.when;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.model.AccessControlList;
 import com.amazonaws.services.s3.model.AmazonS3Exception;
+import com.amazonaws.services.s3.model.Bucket;
 import com.amazonaws.services.s3.model.CanonicalGrantee;
 import com.amazonaws.services.s3.model.Grant;
 import com.amazonaws.services.s3.model.ListObjectsV2Request;
@@ -34,9 +39,17 @@ import com.dremio.plugins.util.CloseableResource;
 import com.dremio.plugins.util.ContainerAccessDeniedException;
 import com.dremio.plugins.util.ContainerNotFoundException;
 import java.io.IOException;
+import java.net.URI;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileStatus;
+import org.apache.hadoop.fs.FileSystem;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider;
+import org.apache.hadoop.fs.s3a.Constants;
+import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.junit.Assert;
 import org.junit.Test;
 import org.mockito.MockedStatic;
@@ -116,6 +129,50 @@ public class TestS3FileSystem {
     assertNotNull(fs.getUnknownContainer("testunknown"));
   }
 
+  @Test
+  public void testUnknownContainerUnderlyingFSClosesOnFSClose() throws Exception {
+    final TestExtendedS3FileSystem dremioFS = new TestExtendedS3FileSystem();
+    final String bucketName = "someContainer";
+
+    // Set up S3 Mock
+    final AmazonS3 s3Mock = mock(AmazonS3.class);
+    final ListObjectsV2Result result = new ListObjectsV2Result();
+    result.setBucketName(bucketName);
+
+    when(s3Mock.doesBucketExistV2(any(String.class))).thenReturn(true);
+    when(s3Mock.listObjectsV2(any(ListObjectsV2Request.class))).thenReturn(result);
+    when(s3Mock.listBuckets()).thenReturn(List.of(new Bucket(bucketName)));
+
+    dremioFS.setCustomClient(s3Mock);
+
+    // Set up Verify Mocks to simulate a success
+    final StsClient mockedClient = mock(StsClient.class);
+    final StsClientBuilder mockedClientBuilder = mock(StsClientBuilder.class);
+    when(mockedClientBuilder.credentialsProvider(any(AwsCredentialsProvider.class)))
+        .thenReturn(mockedClientBuilder);
+    when(mockedClientBuilder.region(any(Region.class))).thenReturn(mockedClientBuilder);
+    when(mockedClientBuilder.build()).thenReturn(mockedClient);
+    when(mockedClient.getCallerIdentity(any(GetCallerIdentityRequest.class))).thenReturn(null);
+
+    // Mocking static calls for Hadoop's FileSystem in order to return our custom S3AFileSystem,
+    // which can be used to keep track of closed state without relying on static properties.
+    try (MockedStatic<FileSystem> mockedHadoopFS = mockStatic(FileSystem.class);
+        MockedStatic<StsClient> mockedStsClient = mockStatic(StsClient.class)) {
+      final TestExtendS3AFileSystem fakeHadoopFs = new TestExtendS3AFileSystem(bucketName);
+      mockedHadoopFS.when(() -> FileSystem.get(any(), any())).thenReturn(fakeHadoopFs);
+      mockedStsClient.when(StsClient::builder).thenReturn(mockedClientBuilder);
+
+      // Initialize the DremioFS and call getFileStatus to ensure fakeHadoopFs gets cached.
+      dremioFS.initialize(new URI("s3a://" + bucketName), new Configuration());
+      dremioFS.getFileStatus(new Path("/" + bucketName));
+
+      // Assert underlying cached fakeHadoopFs is closed when DremioFS is closed.
+      assertFalse(fakeHadoopFs.wasFSClosed());
+      dremioFS.close();
+      assertTrue(fakeHadoopFs.wasFSClosed());
+    }
+  }
+
   @Test(expected = ContainerNotFoundException.class)
   public void testUnknownContainerNotExists() throws IOException {
     TestExtendedS3FileSystem fs = new TestExtendedS3FileSystem();
@@ -136,6 +193,23 @@ public class TestS3FileSystem {
                 "Access Denied (Service: Amazon S3; Status Code: 403; Error Code: AccessDenied; Request ID: FF025EBC3B2BF017; S3 Extended Request ID: 9cbmmg2cbPG7+3mXBizXNJ1haZ/0FUhztplqsm/dJPJB32okQRAhRWVWyqakJrKjCNVqzT57IZU=), S3 Extended Request ID: 9cbmmg2cbPG7+3mXBizXNJ1haZ/0FUhztplqsm/dJPJB32okQRAhRWVWyqakJrKjCNVqzT57IZU="));
     fs.setCustomClient(mockedS3Client);
     fs.getUnknownContainer("testunknown");
+  }
+
+  @Test
+  public void testUnknownContainerWithoutBucketDiscovery() throws IOException {
+    TestExtendedS3FileSystem fs = new TestExtendedS3FileSystem();
+    AmazonS3 mockedS3Client = mock(AmazonS3.class);
+    when(mockedS3Client.doesBucketExistV2(any(String.class))).thenReturn(true);
+    fs.setCustomClient(mockedS3Client);
+    Configuration confWithBucketDiscovery = new Configuration();
+    confWithBucketDiscovery.setBoolean(DREMIO_ENABLE_BUCKET_DISCOVERY, false);
+    confWithBucketDiscovery.set(
+        Constants.AWS_CREDENTIALS_PROVIDER, AnonymousAWSCredentialsProvider.NAME);
+    fs.setup(confWithBucketDiscovery);
+    assertDoesNotThrow(
+        () -> {
+          fs.getUnknownContainer("testunknown");
+        });
   }
 
   @Test
@@ -218,6 +292,21 @@ public class TestS3FileSystem {
     assertEquals(1, retryAttemptNo.get());
   }
 
+  @Test
+  public void testIsPathStyleAccessEnabled() {
+    Configuration conf = new Configuration();
+    Assert.assertEquals(S3FileSystem.isPathStyleAccessEnabled(conf), false);
+
+    conf.setBoolean("fs.s3a.path.style.access.wrongconfigname", true);
+    Assert.assertEquals(S3FileSystem.isPathStyleAccessEnabled(conf), false);
+
+    conf.setBoolean(Constants.PATH_STYLE_ACCESS, true);
+    Assert.assertEquals(S3FileSystem.isPathStyleAccessEnabled(conf), true);
+
+    conf.setBoolean(Constants.PATH_STYLE_ACCESS, false);
+    Assert.assertEquals(S3FileSystem.isPathStyleAccessEnabled(conf), false);
+  }
+
   private AccessControlList getAcl(final AmazonS3 s3Client) {
     ArrayList<Grant> grantCollection = new ArrayList<>();
 
@@ -231,6 +320,30 @@ public class TestS3FileSystem {
     AccessControlList bucketAcl = new AccessControlList();
     bucketAcl.grantAllPermissions(grantCollection.toArray(new Grant[0]));
     return bucketAcl;
+  }
+
+  public static class TestExtendS3AFileSystem extends S3AFileSystem {
+    private final String bucketName;
+    private boolean fsWasClosed;
+
+    public TestExtendS3AFileSystem(String bucketName) {
+      this.bucketName = bucketName;
+      fsWasClosed = false;
+    }
+
+    @Override
+    public void close() throws IOException {
+      fsWasClosed = true;
+    }
+
+    @Override
+    public FileStatus getFileStatus(Path f) throws IOException {
+      return new FileStatus(0, false, 0, 0, 0, new Path("/" + bucketName));
+    }
+
+    public boolean wasFSClosed() {
+      return fsWasClosed;
+    }
   }
 
   private static final class TestExtendedS3FileSystem extends S3FileSystem {

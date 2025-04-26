@@ -16,19 +16,22 @@
 package com.dremio.service.execselector;
 
 import com.dremio.common.exceptions.UserException;
+import org.apache.commons.lang3.StringUtils;
 
 /** Utilities for Executor selection. */
 public final class ExecutorSelectionUtils {
-  private static final org.slf4j.Logger logger =
-      org.slf4j.LoggerFactory.getLogger(ExecutorSelectionUtils.class);
 
   public static void throwEngineOffline(String queueTag) {
-    if (queueTag == null || queueTag.isEmpty()) {
-      queueTag = "Default";
+    if (StringUtils.isBlank(queueTag)) {
+      throw UserException.resourceError()
+          .message(
+              "There are no executors available on your cluster to run the query on. "
+                  + "If you have a stopped engine, you must start it or change the queue destination from 'Any' to a specific named engine.")
+          .buildSilently();
     }
     throw UserException.resourceError()
         .message(String.format("The %s engine is not online.", queueTag))
-        .build(logger);
+        .buildSilently();
   }
 
   private ExecutorSelectionUtils() {}

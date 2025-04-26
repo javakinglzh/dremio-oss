@@ -917,7 +917,7 @@ public abstract class PruneScanRuleBase<T extends ScanRelBase & PruneableScan> e
           }
           return;
         }
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         {
           TimeStampMilliVector timeStampVector = (TimeStampMilliVector) vv;
           if (pv.hasLongValue()) {

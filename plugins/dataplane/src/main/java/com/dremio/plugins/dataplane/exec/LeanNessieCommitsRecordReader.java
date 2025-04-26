@@ -22,6 +22,7 @@ import com.dremio.exec.store.iceberg.SnapshotEntry;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.op.scan.OutputMutator;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -32,6 +33,7 @@ import org.projectnessie.gc.contents.ContentReference;
 public class LeanNessieCommitsRecordReader extends AbstractNessieCommitRecordsReader {
 
   private VarCharVector metadataFilePathOutVector;
+  private VarCharVector datasetOutVector;
 
   public LeanNessieCommitsRecordReader(
       FragmentExecutionContext fragmentExecutionContext,
@@ -43,6 +45,7 @@ public class LeanNessieCommitsRecordReader extends AbstractNessieCommitRecordsRe
   @Override
   public void setup(OutputMutator output) throws ExecutionSetupException {
     metadataFilePathOutVector = (VarCharVector) output.getVector(SystemSchemas.METADATA_FILE_PATH);
+    datasetOutVector = (VarCharVector) output.getVector(SystemSchemas.DATASET_FIELD);
     super.setup(output);
   }
 
@@ -56,13 +59,16 @@ public class LeanNessieCommitsRecordReader extends AbstractNessieCommitRecordsRe
   }
 
   @Override
-  protected void populateOutputVectors(AtomicInteger idx, SnapshotEntry snapshot) {
+  protected void populateOutputVectors(AtomicInteger idx, SnapshotEntry snapshot, String dataset) {
     byte[] metadataJsonPath = toSchemeAwarePath(snapshot.getMetadataJsonPath());
-    metadataFilePathOutVector.setSafe(idx.getAndIncrement(), metadataJsonPath);
+    byte[] datasetByte = dataset.getBytes(StandardCharsets.UTF_8);
+    metadataFilePathOutVector.setSafe(idx.get(), metadataJsonPath);
+    datasetOutVector.setSafe(idx.getAndIncrement(), datasetByte);
   }
 
   @Override
   protected void setValueCount(int valueCount) {
     metadataFilePathOutVector.setValueCount(valueCount);
+    datasetOutVector.setValueCount(valueCount);
   }
 }

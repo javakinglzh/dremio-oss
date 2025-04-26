@@ -10,7 +10,7 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
-    AsyncTaskStatus: unknown;
+    AsyncTaskStatus: components["schemas"]["QueuedStatus"] | components["schemas"]["RunningStatus"] | components["schemas"]["FailedStatus"] | components["schemas"]["CompletedStatus"];
     PercentageProgress: {
       /** @constant */
       type: "percentage";

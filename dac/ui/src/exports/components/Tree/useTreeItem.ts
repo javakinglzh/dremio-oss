@@ -34,5 +34,6 @@ export const useTreeItem = (id: string) => {
     isExpanded: expanded,
     onClick: useToggleTreeItemExpansion(id),
     role: "treeitem" as const,
+    tabIndex: -1,
   };
 };

@@ -595,7 +595,7 @@ public class PartitionStatsBasedPruner extends RecordPruner {
             timeVector.set(row, Math.toIntExact(timeVal / 1000));
           }
           break;
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           TimeStampMilliVector timeStampVector = (TimeStampMilliVector) vv;
           Long timestampVal = partitionData.get(indexInPartitionSpec, Long.class);
           if (timestampVal != null) {

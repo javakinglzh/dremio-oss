@@ -106,8 +106,7 @@ public class TestReflectionGoalChecker {
             .setCreatedAt(System.currentTimeMillis())
             .setModifiedAt(System.currentTimeMillis())
             .setVersion(System.currentTimeMillis())
-            .setName("Name")
-            .setArrowCachingEnabled(false);
+            .setName("Name");
 
     ReflectionGoalHash actual = ReflectionGoalChecker.Instance.calculateReflectionGoalVersion(goal);
     assertEquals(
@@ -116,7 +115,7 @@ public class TestReflectionGoalChecker {
 
   @Test
   public void testHashingEmptyWithBoostEnabledGoal() {
-    ReflectionGoal goal = new ReflectionGoal().setArrowCachingEnabled(true);
+    ReflectionGoal goal = new ReflectionGoal();
 
     ReflectionGoalHash actual = ReflectionGoalChecker.Instance.calculateReflectionGoalVersion(goal);
     assertEquals(

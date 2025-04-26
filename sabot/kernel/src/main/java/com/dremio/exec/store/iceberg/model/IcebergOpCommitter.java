@@ -21,6 +21,7 @@ import static com.dremio.sabot.op.writer.WriterCommitterOperator.Metric.SNAPSHOT
 import static com.dremio.sabot.op.writer.WriterCommitterOperator.SnapshotCommitStatus.COMMITTED;
 
 import com.dremio.exec.expr.fn.impl.ByteArrayWrapper;
+import com.dremio.exec.proto.ExecProtos.ClusteringStatus;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.writer.WriterCommitterOperator.SnapshotCommitStatus;
@@ -166,6 +167,8 @@ public interface IcebergOpCommitter {
 
   /** Cleanup in case of exceptions during commit */
   default void cleanup(FileIO fileIO) {}
+
+  default void consumeClusteringStatus(ClusteringStatus clusteringStatus) {}
 
   /** Writes operator stats if a new snapshot is created */
   static void writeSnapshotStats(

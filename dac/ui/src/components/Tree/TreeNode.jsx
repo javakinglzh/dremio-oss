@@ -21,6 +21,7 @@ import classNames from "clsx";
 import { intl } from "#oss/utils/intl";
 import { DATASET_TYPES_TO_ICON_TYPES } from "#oss/constants/datasetTypes";
 import { clearResourceTreeByName as clearResourceTreeByNameAction } from "#oss/actions/resources/tree";
+import { isLimitedVersionSource } from "@inject/utils/sourceUtils";
 import {
   CONTAINER_ENTITY_TYPES,
   DATASET_ENTITY_TYPES,
@@ -138,7 +139,12 @@ export const TreeNode = (props) => {
   }, [loadingItems, selectedStarredTab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const isBadState = nessieSource && nessieSource.state?.status !== "good";
-  const nessieDisabled = restrictSelection && nessieSource && !branchName;
+
+  const nessieDisabled =
+    restrictSelection &&
+    nessieSource &&
+    !isLimitedVersionSource(nessieSource?.type) &&
+    !branchName;
   const saveAsDisabled =
     restrictSelection &&
     !["SOURCE", "SPACE", "HOME", "FOLDER"].includes(node.get("type"));
@@ -556,35 +562,37 @@ export const TreeNode = (props) => {
             />
           </Tooltip>
         )}
-        {isSource && !!nessieSource && (
-          <SourceBranchPicker
-            redirect={false}
-            source={nessieSource}
-            anchorRef={() => containerRef.current}
-            onApply={(stateKey, { reference, hash }) => {
-              // Do not select node in save as dialog since tags/commits are not supported
-              if (
-                restrictSelection &&
-                (reference?.type.toUpperCase() !== "BRANCH" || !!hash)
-              ) {
-                handleSelectedNodeChange(null, null);
-                return;
-              }
+        {isSource &&
+          !!nessieSource &&
+          !isLimitedVersionSource(nessieSource.type) && (
+            <SourceBranchPicker
+              redirect={false}
+              source={nessieSource}
+              anchorRef={() => containerRef.current}
+              onApply={(stateKey, { reference, hash }) => {
+                // Do not select node in save as dialog since tags/commits are not supported
+                if (
+                  restrictSelection &&
+                  (reference?.type.toUpperCase() !== "BRANCH" || !!hash)
+                ) {
+                  handleSelectedNodeChange(null, null);
+                  return;
+                }
 
-              // Select node after clicking apply on branch picker, clear the children in redux also
-              clearResourceTreeByName(node.get("name"), fromModal);
-              const isExpanded = isNodeExpanded(nodeToRender, nodeError);
-              if (!isExpanded) return;
+                // Select node after clicking apply on branch picker, clear the children in redux also
+                clearResourceTreeByName(node.get("name"), fromModal);
+                const isExpanded = isNodeExpanded(nodeToRender, nodeError);
+                if (!isExpanded) return;
 
-              handleSelectedNodeChange(nodeToRender, isExpanded);
+                handleSelectedNodeChange(nodeToRender, isExpanded);
 
-              setImmediate(() => {
-                handleSelectedNodeChange(nodeToRender, !isExpanded);
-              });
-            }}
-            prefix={nessiePrefix}
-          />
-        )}
+                setImmediate(() => {
+                  handleSelectedNodeChange(nodeToRender, !isExpanded);
+                });
+              }}
+              prefix={nessiePrefix}
+            />
+          )}
       </div>
     );
 
@@ -657,6 +665,15 @@ export const TreeNode = (props) => {
     node.get("type"),
   );
 
+  // This hides sources that are creating/updating
+  if (
+    node.get("type") === "SOURCE" &&
+    node.get("sourceChangeState") &&
+    node.get("sourceChangeState") !== "SOURCE_CHANGE_STATE_NONE"
+  ) {
+    return null;
+  }
+
   return (
     <>
       <div
@@ -671,6 +688,8 @@ export const TreeNode = (props) => {
           "treeNode--isLeafNode": !isBaseNode,
           "treeNode--isColumnItem": !!node.get("isColumnItem"),
           "treeNode--isDisabledNode": isDisabledNode,
+          "treeNode--isSourcesHidden":
+            node.get("type") === "SOURCE" && isSourcesHidden,
         })}
       >
         <span ref={nodeRef}>{renderNode(node, nodeRef)}</span>

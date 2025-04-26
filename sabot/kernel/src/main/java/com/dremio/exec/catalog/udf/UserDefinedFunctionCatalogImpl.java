@@ -22,7 +22,7 @@ import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.FunctionManagingPlugin;
 import com.dremio.exec.catalog.SourceCatalog;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.planner.sql.DremioSqlOperatorTable;
@@ -35,7 +35,7 @@ import com.dremio.exec.store.sys.udf.UserDefinedFunctionSerde;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceNotFoundException;
-import com.dremio.service.namespace.NamespaceService;
+import com.dremio.service.namespace.function.FunctionNamespaceService;
 import com.dremio.service.namespace.function.proto.FunctionConfig;
 import com.google.common.collect.Iterators;
 import java.util.ArrayList;
@@ -48,14 +48,14 @@ import java.util.stream.Stream;
 public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalog {
   private final SchemaConfig schemaConfig;
   private final OptionManager optionManager;
-  private final NamespaceService userNamespaceService;
+  private final FunctionNamespaceService userNamespaceService;
   private final SourceCatalog sourceCatalog;
   private final CatalogService catalogService;
 
   public UserDefinedFunctionCatalogImpl(
       SchemaConfig schemaConfig,
       OptionManager optionManager,
-      NamespaceService userNamespaceService,
+      FunctionNamespaceService userNamespaceService,
       CatalogService catalogService,
       SourceCatalog sourceCatalog) {
     this.schemaConfig = schemaConfig;
@@ -86,17 +86,17 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
         // ignored.
       }
       if (plugin != null && plugin.isWrapperFor(VersionedPlugin.class)) {
-        MutablePlugin mutablePlugin = null;
+        FunctionManagingPlugin managingPlugin = null;
         if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)
-            && plugin.isWrapperFor(MutablePlugin.class)) {
-          mutablePlugin = plugin.unwrap(MutablePlugin.class);
+            && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
+          managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
         }
-        if (mutablePlugin != null) {
+        if (managingPlugin != null) {
           if (!isUpdate) {
-            mutablePlugin.createFunction(
+            managingPlugin.createFunction(
                 getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
           } else {
-            mutablePlugin.updateFunction(
+            managingPlugin.updateFunction(
                 getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
           }
         } else {
@@ -152,13 +152,13 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
         // ignored.
       }
       if (plugin != null && plugin.isWrapperFor(VersionedPlugin.class)) {
-        MutablePlugin mutablePlugin = null;
+        FunctionManagingPlugin managingPlugin = null;
         if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)
-            && plugin.isWrapperFor(MutablePlugin.class)) {
-          mutablePlugin = plugin.unwrap(MutablePlugin.class);
+            && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
+          managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
         }
-        if (mutablePlugin != null) {
-          mutablePlugin.dropFunction(getKeyWithVersionContext(key), schemaConfig);
+        if (managingPlugin != null) {
+          managingPlugin.dropFunction(getKeyWithVersionContext(key), schemaConfig);
         } else {
           throw UserException.unsupportedError()
               .message("Drop function in source '%s' not supported.", key.getRootEntity())
@@ -263,7 +263,7 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
     return sourceCatalog;
   }
 
-  protected NamespaceService getNamespaceService() {
+  protected FunctionNamespaceService getNamespaceService() {
     return userNamespaceService;
   }
 

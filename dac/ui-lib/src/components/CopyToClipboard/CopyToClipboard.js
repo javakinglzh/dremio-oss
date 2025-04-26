@@ -20,6 +20,7 @@ import clsx from "clsx";
 import { CopyToClipboard } from "react-copy-to-clipboard";
 import Tooltip from "@mui/material/Tooltip";
 import SvgIcon from "@mui/material/SvgIcon";
+import { IconButton } from "@mui/material";
 
 import { ReactComponent as CopyIcon } from "../../art/copy.svg";
 
@@ -58,7 +59,13 @@ const CopyText = (props) => {
     >
       <span className={iconClass}>
         <CopyToClipboard text={value} onCopy={handleCopySuccess}>
-          <SvgIcon component={CopyIcon} fontSize="large" />
+          <IconButton
+            style={{ padding: 0 }}
+            className="copy__icon__btn"
+            aria-label="Copy"
+          >
+            <SvgIcon component={CopyIcon} fontSize="large" />
+          </IconButton>
         </CopyToClipboard>
       </span>
     </Tooltip>

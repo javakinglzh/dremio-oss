@@ -30,6 +30,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.types.TypeProtos;
 import com.dremio.common.types.Types;
 import com.dremio.common.util.MajorTypeHelper;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.hadoop.HadoopFileSystemConfigurationAdapter;
 import com.dremio.exec.planner.sql.PartitionTransform;
@@ -92,19 +93,19 @@ public class TestIcebergUtils {
                   "y", Types.optional(TypeProtos.MinorType.VARCHAR)))
           .addField(
               MajorTypeHelper.getFieldForNameAndMajorType(
-                  "z", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                  "z", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
           .addField(
               MajorTypeHelper.getFieldForNameAndMajorType(
-                  "_", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                  "_", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
           .addField(
               MajorTypeHelper.getFieldForNameAndMajorType(
-                  "test_", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                  "test_", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
           .addField(
               MajorTypeHelper.getFieldForNameAndMajorType(
-                  "_identity", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                  "_identity", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
           .addField(
               MajorTypeHelper.getFieldForNameAndMajorType(
-                  "_hour", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                  "_hour", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
           .build();
 
   @Test
@@ -112,27 +113,10 @@ public class TestIcebergUtils {
     String testUrl =
         "/testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
 
-    Configuration azureConf = new Configuration();
-    azureConf.set("dremio.azure.account", "azurev1databricks2");
-    String modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(new Path(testUrl), azureConf, "dremioAzureStorage://");
-    Assert.assertEquals(
-        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
-        modifiedFileLocation);
-
-    Configuration datalakeCatalogAzureConf = new Configuration();
-    datalakeCatalogAzureConf.set("dremio.azure.account", "datalakecatalogazuredatabricks2");
-    datalakeCatalogAzureConf.set(ENABLE_AZURE_ABFSS_SCHEME, "true");
-    modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(
-            new Path(testUrl), datalakeCatalogAzureConf, "dremioAzureStorage://");
-    Assert.assertEquals(
-        "abfss://testdir@datalakecatalogazuredatabricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
-        modifiedFileLocation);
-
     Configuration conf = new Configuration();
 
-    modifiedFileLocation = IcebergUtils.getValidIcebergPath(new Path(testUrl), conf, "dremioS3");
+    String modifiedFileLocation =
+        IcebergUtils.getValidIcebergPath(new Path(testUrl), conf, "dremioS3");
     Assert.assertEquals(
         "s3://testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
         modifiedFileLocation);
@@ -161,22 +145,6 @@ public class TestIcebergUtils {
         modifiedFileLocation);
 
     String urlWithScheme =
-        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
-    modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(new Path(urlWithScheme), conf, "dremioAzureStorage://");
-    Assert.assertEquals(urlWithScheme, modifiedFileLocation);
-
-    urlWithScheme =
-        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
-    modifiedFileLocation =
-        IcebergUtils.getIcebergPathAndValidateScheme(
-            urlWithScheme, azureConf, "dremioAzureStorage://", "abfs");
-    Assert.assertEquals(
-        "'wasbs' should be replaced with 'abfs'",
-        "abfs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
-        modifiedFileLocation);
-
-    urlWithScheme =
         "s3://testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
     modifiedFileLocation =
         IcebergUtils.getValidIcebergPath(new Path(urlWithScheme), conf, "dremioS3");
@@ -216,29 +184,178 @@ public class TestIcebergUtils {
         "file:///testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
     modifiedFileLocation = IcebergUtils.getValidIcebergPath(new Path(urlWithScheme), conf, "file");
     Assert.assertEquals(urlWithScheme, modifiedFileLocation);
+  }
 
-    Configuration adlsConf = new Configuration();
-    adlsConf.set(FS_DEFAULT_NAME_KEY, "dremioAdl://accountname.azuredatalakestore.net/");
-    modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(new Path(testUrl), adlsConf, "dremioAdl");
+  // Azure sources will write 'abfss' by default, unless the scheme is already present, or if the
+  // configuration 'dremio.azure.mode' is STORAGE_V1.
+  @Test
+  public void testValidIcebergPathAzureSources() {
+    String testUrl =
+        "/testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
+
+    // StorageV1 conf. Wasbs will be written
+    Configuration azureConf = new Configuration();
+    azureConf.set(AzureStorageConfProperties.ACCOUNT, "azurev1databricks2");
+    azureConf.set(AzureStorageConfProperties.MODE, "STORAGE_V1");
+    String modifiedFileLocation =
+        IcebergUtils.getValidIcebergPath(new Path(testUrl), azureConf, "dremioAzureStorage://");
     Assert.assertEquals(
-        "adl://accountname.azuredatalakestore.net/testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
+        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
         modifiedFileLocation);
 
-    Configuration emptyAdlsConf = new Configuration();
+    // StorageV2 in conf. ABFSS will be written
+    Configuration datalakeCatalogAzureConf = new Configuration();
+    datalakeCatalogAzureConf.set(
+        AzureStorageConfProperties.ACCOUNT, "datalakecatalogazuredatabricks2");
+    datalakeCatalogAzureConf.set(AzureStorageConfProperties.MODE, "STORAGE_V2");
     modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(new Path(testUrl), emptyAdlsConf, "dremioAdl");
+        IcebergUtils.getValidIcebergPath(
+            new Path(testUrl), datalakeCatalogAzureConf, "dremioAzureStorage://");
     Assert.assertEquals(
-        "adl:///testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
+        "abfss://testdir@datalakecatalogazuredatabricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
         modifiedFileLocation);
 
-    Configuration onlyScheme = new Configuration();
-    onlyScheme.set(FS_DEFAULT_NAME_KEY, "dremioAdl://");
+    // StorageV2 but Force-Write Wasbs enabled. Wasbs will be written.
+    Configuration datalakeCatalogAzureConfForceWasbs = new Configuration();
+    datalakeCatalogAzureConfForceWasbs.set(
+        AzureStorageConfProperties.ACCOUNT, "datalakecatalogazuredatabricks2");
+    datalakeCatalogAzureConfForceWasbs.set(AzureStorageConfProperties.MODE, "STORAGE_V2");
     modifiedFileLocation =
-        IcebergUtils.getValidIcebergPath(new Path(testUrl), onlyScheme, "dremioAdl");
+        IcebergUtils.getValidIcebergPath(
+            new Path(testUrl), datalakeCatalogAzureConfForceWasbs, "dremioAzureStorage://");
     Assert.assertEquals(
-        "adl:///testdir/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
+        "abfss://testdir@datalakecatalogazuredatabricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
         modifiedFileLocation);
+
+    // Storage conf not configured (shouldn't ever happen, but here for safety). Will write abfss.
+    Configuration datalakeCatalogAzureConfAbfss = new Configuration();
+    datalakeCatalogAzureConfAbfss.set(
+        AzureStorageConfProperties.ACCOUNT, "datalakecatalogazuredatabricks2");
+    modifiedFileLocation =
+        IcebergUtils.getValidIcebergPath(
+            new Path(testUrl), datalakeCatalogAzureConfAbfss, "dremioAzureStorage://");
+    Assert.assertEquals(
+        "abfss://testdir@datalakecatalogazuredatabricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
+        modifiedFileLocation);
+
+    // No conf settings configured, but scheme already exists, so we short-return current scheme.
+    Configuration conf = new Configuration();
+    String urlWithScheme =
+        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
+    modifiedFileLocation =
+        IcebergUtils.getValidIcebergPath(new Path(urlWithScheme), conf, "dremioAzureStorage://");
+    Assert.assertEquals(urlWithScheme, modifiedFileLocation);
+
+    // No conf settings configured, but scheme already exists and a variate. Replace with variate.
+    urlWithScheme =
+        "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro";
+    modifiedFileLocation =
+        IcebergUtils.getIcebergPathAndValidateScheme(
+            urlWithScheme, azureConf, "dremioAzureStorage://", "abfs");
+    Assert.assertEquals(
+        "'wasbs' should be replaced with 'abfs'",
+        "abfs://testdir@azurev1databricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro",
+        modifiedFileLocation);
+  }
+
+  // return true (wasbs) because STORAGE_V1 configured
+  @Test
+  public void testWriteWasbs_StorageV1_NoForce() {
+    Configuration conf = new Configuration();
+    conf.set(AzureStorageConfProperties.MODE, "STORAGE_V1");
+    Assert.assertTrue(writeWasbs(new HadoopFileSystemConfigurationAdapter(conf)));
+  }
+
+  // return false (abfss) because STORAGE_V2 configured.
+  @Test
+  public void testWriteWasbs_StorageV2_NoForce() {
+    Configuration conf = new Configuration();
+    conf.set(AzureStorageConfProperties.MODE, "STORAGE_V2");
+    Assert.assertFalse(writeWasbs(new HadoopFileSystemConfigurationAdapter(conf)));
+  }
+
+  // convert .blob. to .dfs. because 'abfss' is the prefix
+  @Test
+  public void testBlobToDfs_WithAbfss() {
+    Path path =
+        new Path(
+            "abfss://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("abfss://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_DFS_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
+  }
+
+  // convert dfs to blob because 'wasbs' is the prefix
+  @Test
+  public void testDfsToBlob_WithWasbs() {
+    Path path =
+        new Path(
+            "wasbs://testdir@azurev1databricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("wasbs://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_BLOB_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
+  }
+
+  // no conversion necessary. wasbs and blob are current prefix + authority pair.
+  @Test
+  public void testNoChange_WithWasbs() {
+    Path path =
+        new Path(
+            "wasbs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("wasbs://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_BLOB_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
+  }
+
+  // no conversion necessary. abfss and dfs are the current prefix+ authority pair
+  @Test
+  public void testNoChange_WithDfsAndAbfss() {
+    Path path =
+        new Path(
+            "abfss://testdir@azurev1databricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("abfss://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_DFS_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
+  }
+
+  // convert blob to dfs because the prefix is 'abfs'
+  @Test
+  public void testBlobToDfs_WithAbfs() {
+    Path path =
+        new Path(
+            "abfs://testdir@azurev1databricks2.blob.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("abfs://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_DFS_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
+  }
+
+  // convert dfs to blob because the prefix is wasb
+  @Test
+  public void testDfsToBlob_WithWasb() {
+    Path path =
+        new Path(
+            "wasb://testdir@azurev1databricks2.dfs.core.windows.net/Automation/regression/iceberg/alltypes/metadata/snap-6325739561998439041.avro");
+    StringBuilder urlBuilder = new StringBuilder("wasb://testdir@azurev1databricks2");
+
+    String authority = syncAzurePrefixSuffix(path, urlBuilder);
+    Assert.assertEquals(
+        com.dremio.io.file.Path.AZURE_BLOB_AUTHORITY_SUFFIX,
+        authority.substring(authority.indexOf(".")));
   }
 
   @Test
@@ -364,7 +481,7 @@ public class TestIcebergUtils {
                     "f1", Types.optional(TypeProtos.MinorType.TIME)))
             .addField(
                 MajorTypeHelper.getFieldForNameAndMajorType(
-                    "f2", Types.optional(TypeProtos.MinorType.TIMESTAMP)))
+                    "f2", Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI)))
             .build();
 
     Assert.assertEquals(
@@ -740,7 +857,7 @@ public class TestIcebergUtils {
         toIcebergValue(
             valueLong,
             TypeProtos.MajorType.newBuilder()
-                .setMinorType(TypeProtos.MinorType.TIMESTAMP)
+                .setMinorType(TypeProtos.MinorType.TIMESTAMPMILLI)
                 .build()));
 
     // no conversion for the rest of the types
@@ -960,7 +1077,7 @@ public class TestIcebergUtils {
     IcebergUtils.fixupDefaultProperties(tableMetadata);
 
     // Assert
-    verify(tableMetadata, times(1)).replaceProperties(DEFAULT_TABLE_PROPERTIES);
+    verify(tableMetadata, times(1)).replaceProperties(any());
   }
 
   private Map<Integer, PartitionSpec> preparePartitionSpecMap() {

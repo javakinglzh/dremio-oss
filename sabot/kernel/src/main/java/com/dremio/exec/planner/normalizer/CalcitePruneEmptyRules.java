@@ -124,6 +124,23 @@ public final class CalcitePruneEmptyRules {
         }
       };
 
+  /** Rule that converts a {@link Correlate} to empty if its left child is empty. */
+  public static final RelOptRule CORRELATE_LEFT_INSTANCE =
+      new RelOptRule(
+          operand(
+              Correlate.class,
+              some(
+                  operandJ(Values.class, null, Values::isEmpty, none()),
+                  operand(RelNode.class, any()))),
+          "PruneEmptyCorrelate(left)") {
+        @Override
+        public void onMatch(RelOptRuleCall call) {
+          final Correlate corr = call.rel(0);
+          RelNode empty = call.builder().push(corr).empty().build();
+          call.transformTo(empty);
+        }
+      };
+
   /**
    * Rule that converts a {@link Correlate} to empty if its right child is empty.
    *

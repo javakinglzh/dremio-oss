@@ -31,7 +31,6 @@ import BreadCrumbs from "#oss/components/BreadCrumbs";
 
 import { IconButton } from "dremio-ui-lib/components";
 import { getIconStatusDatabase } from "utils/iconUtils";
-import { isNotSoftware } from "dyn-load/utils/versionUtils";
 import { getSettingsLocation } from "components/Menus/HomePage/AllSourcesMenu";
 import { Button } from "dremio-ui-lib/components";
 import {
@@ -197,23 +196,15 @@ class AllSourcesView extends PureComponent {
   };
 
   renderAddButton() {
-    const {
-      isExternalSource,
-      isDataPlaneSource,
-      isObjectStorageSource,
-      isLakehouseSource,
-    } = this.props;
+    const { isExternalSource, isDataPlaneSource, isLakehouseSource } =
+      this.props;
 
     /*eslint no-nested-ternary: "off"*/
     const headerId = isExternalSource
       ? "Source.AddDatabaseSource"
       : isLakehouseSource
-        ? isNotSoftware()
-          ? "Source.AddArcticCatalog"
-          : "Source.AddLakehouse"
-        : isObjectStorageSource
-          ? "Source.Add.Object.Storage"
-          : "Source.Add.Metastore";
+        ? "Source.AddLakehouse"
+        : "Source.Add.Object.Storage";
 
     return (
       this.context.loggedInUser.admin && (

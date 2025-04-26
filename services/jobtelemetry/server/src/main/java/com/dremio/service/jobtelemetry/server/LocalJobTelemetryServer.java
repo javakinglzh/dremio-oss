@@ -16,6 +16,10 @@
 
 package com.dremio.service.jobtelemetry.server;
 
+import static com.dremio.io.file.UriSchemes.DREMIO_AZURE_SCHEME;
+import static com.dremio.io.file.UriSchemes.DREMIO_GCS_SCHEME;
+import static com.dremio.io.file.UriSchemes.DREMIO_S3_SCHEME;
+
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableExecutorService;
 import com.dremio.common.concurrent.ContextMigratingExecutorService.ContextMigratingCloseableExecutorService;
@@ -28,10 +32,13 @@ import com.dremio.options.TypeValidators.BooleanValidator;
 import com.dremio.service.Service;
 import com.dremio.service.grpc.GrpcServerBuilderFactory;
 import com.dremio.service.jobtelemetry.JobTelemetryRpcUtils;
+import com.dremio.service.jobtelemetry.server.store.DistProfileStore;
 import com.dremio.service.jobtelemetry.server.store.LegacyLocalProfileStore;
 import com.dremio.service.jobtelemetry.server.store.LocalProfileStore;
+import com.dremio.service.jobtelemetry.server.store.ProfileDistStoreConfig;
 import com.dremio.service.jobtelemetry.server.store.ProfileStore;
 import com.dremio.telemetry.utils.GrpcTracerFacade;
+import com.google.common.annotations.VisibleForTesting;
 import io.grpc.Server;
 import io.grpc.util.TransmitStatusRuntimeExceptionInterceptor;
 import java.util.function.Function;
@@ -44,12 +51,15 @@ import org.slf4j.LoggerFactory;
 public class LocalJobTelemetryServer implements Service {
   private static final Logger logger = LoggerFactory.getLogger(LocalJobTelemetryServer.class);
   public static final BooleanValidator ENABLE_INTERMEDIATE_PROFILE_BLOB_STORAGE =
-      new BooleanValidator("intermediate.profile.blob.storage", false);
+      new BooleanValidator("intermediate.profile.blob.storage", true);
+  public static final BooleanValidator ENABLE_PROFILE_IN_DIST_STORE =
+      new BooleanValidator("profile.dist.store.enabled", false);
   private Provider<OptionManager> optionManagerProvider;
   private final GrpcServerBuilderFactory grpcFactory;
   private final Provider<LegacyKVStoreProvider> legacyKvStoreProvider;
   private final Provider<KVStoreProvider> kvStoreProvider;
   private final Provider<CoordinationProtos.NodeEndpoint> selfEndpoint;
+  private final Provider<ProfileDistStoreConfig> profileDistStoreConfigProvider;
   private final Function<String, CloseableExecutorService> executorServiceFactory;
   private ContextMigratingCloseableExecutorService executorService;
   private JobTelemetryServiceImpl jobTelemetryService;
@@ -63,12 +73,14 @@ public class LocalJobTelemetryServer implements Service {
       Provider<KVStoreProvider> kvStoreProvider,
       Provider<LegacyKVStoreProvider> legacyKvStoreProvider,
       Provider<CoordinationProtos.NodeEndpoint> selfEndpoint,
+      Provider<ProfileDistStoreConfig> profileDistStoreConfigProvider,
       GrpcTracerFacade tracer,
       Function<String, CloseableExecutorService> executorServiceFactory) {
     this.grpcFactory = grpcServerBuilderFactory;
     this.kvStoreProvider = kvStoreProvider;
     this.legacyKvStoreProvider = legacyKvStoreProvider;
     this.selfEndpoint = selfEndpoint;
+    this.profileDistStoreConfigProvider = profileDistStoreConfigProvider;
     this.tracer = tracer;
     this.executorServiceFactory = executorServiceFactory;
     this.optionManagerProvider = optionManagerProvider;
@@ -78,10 +90,17 @@ public class LocalJobTelemetryServer implements Service {
   public void start() throws Exception {
     boolean enableKVstoreProfileStorage =
         optionManagerProvider.get().getOption(ENABLE_INTERMEDIATE_PROFILE_BLOB_STORAGE);
-    profileStore =
-        enableKVstoreProfileStorage
-            ? new LocalProfileStore(kvStoreProvider.get())
-            : new LegacyLocalProfileStore(legacyKvStoreProvider.get());
+    boolean enableProfileInDistStore =
+        optionManagerProvider.get().getOption(ENABLE_PROFILE_IN_DIST_STORE)
+            && verifyCloudBasedDistStore();
+    if (enableProfileInDistStore) {
+      profileStore = new DistProfileStore(profileDistStoreConfigProvider);
+    } else {
+      profileStore =
+          enableKVstoreProfileStorage
+              ? new LocalProfileStore(kvStoreProvider.get())
+              : new LegacyLocalProfileStore(legacyKvStoreProvider.get());
+    }
     profileStore.start();
 
     executorService =
@@ -114,5 +133,27 @@ public class LocalJobTelemetryServer implements Service {
         executorService,
         profileStore);
     logger.info("LocalJobTelemetryServer stopped");
+  }
+
+  @VisibleForTesting
+  public Provider<ProfileDistStoreConfig> getProfileDistStoreConfigProvider() {
+    return profileDistStoreConfigProvider;
+  }
+
+  @VisibleForTesting
+  boolean verifyCloudBasedDistStore() {
+    String profileDistStoreConfigConnection = profileDistStoreConfigProvider.get().getConnection();
+    boolean isCloudBasedDistStore =
+        profileDistStoreConfigConnection != null
+            && (profileDistStoreConfigConnection.startsWith(DREMIO_S3_SCHEME)
+                || profileDistStoreConfigConnection.startsWith(DREMIO_AZURE_SCHEME)
+                || profileDistStoreConfigConnection.startsWith(DREMIO_GCS_SCHEME));
+    if (!isCloudBasedDistStore) {
+      logger.info(
+          "Storing profiles in distributed storage is not supported for {}",
+          profileDistStoreConfigConnection);
+      return false;
+    }
+    return true;
   }
 }

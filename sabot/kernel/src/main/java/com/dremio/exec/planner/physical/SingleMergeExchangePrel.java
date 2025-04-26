@@ -141,4 +141,8 @@ public class SingleMergeExchangePrel extends ExchangePrel {
   public SelectionVectorMode getEncoding() {
     return SelectionVectorMode.NONE;
   }
+
+  public RelCollation getCollation() {
+    return collation;
+  }
 }

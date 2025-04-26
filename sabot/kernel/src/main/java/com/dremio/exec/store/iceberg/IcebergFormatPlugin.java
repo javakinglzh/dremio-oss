@@ -20,8 +20,8 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.proto.UserBitShared;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.EmptyRecordReader;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
@@ -60,6 +60,7 @@ import java.nio.file.DirectoryStream;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Supplier;
+import javax.annotation.Nullable;
 import org.apache.iceberg.Table;
 
 public class IcebergFormatPlugin extends EasyFormatPlugin<IcebergFormatConfig> {
@@ -72,51 +73,47 @@ public class IcebergFormatPlugin extends EasyFormatPlugin<IcebergFormatConfig> {
       "This folder does not contain a filesystem-based Iceberg table. If the table in this folder is managed via a catalog "
           + "such as Hive, Glue, or Nessie, please use a data source configured for that catalog to connect to this table.";
 
-  private final SabotContext context;
   private final IcebergFormatMatcher formatMatcher;
   private final IcebergFormatConfig config;
   private final String name;
-  private SupportsIcebergRootPointer fsPlugin;
-  private FormatPlugin dataFormatPlugin;
-  private final boolean isLayered;
+  private final @Nullable FormatPlugin dataFormatPlugin;
 
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
   public IcebergFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       IcebergFormatConfig formatConfig,
-      FileSystemPlugin<?> fsPlugin) {
+      SupportsFsCreation supportsFsCreation) {
     super(
         name,
-        context,
+        pluginSabotContext,
         formatConfig,
-        true,
-        false,
         false,
         IS_COMPRESSIBLE,
         formatConfig.getExtensions(),
-        DEFAULT_NAME,
-        fsPlugin);
-    this.context = context;
+        DEFAULT_NAME);
     this.config = formatConfig;
     this.name = name == null ? DEFAULT_NAME : name;
     this.formatMatcher = new IcebergFormatMatcher(this);
-    this.isLayered = true;
-    if (fsPlugin != null) {
-      initialize(formatConfig, fsPlugin);
-    }
+    this.dataFormatPlugin =
+        initializeDataFormatPlugin(formatConfig, supportsFsCreation, pluginSabotContext, name);
   }
 
-  public void initialize(IcebergFormatConfig formatConfig, SupportsIcebergRootPointer fsPlugin) {
-    this.fsPlugin = fsPlugin;
-    if (formatConfig.getDataFormatType() == FileType.PARQUET
-        && fsPlugin instanceof FileSystemPlugin) {
-      dataFormatPlugin =
-          new ParquetFormatPlugin(
-              name,
-              context,
-              (ParquetFormatConfig) formatConfig.getDataFormatConfig(),
-              (FileSystemPlugin<?>) fsPlugin);
+  private static @Nullable FormatPlugin initializeDataFormatPlugin(
+      IcebergFormatConfig formatConfig,
+      SupportsFsCreation supportsFsCreation,
+      PluginSabotContext pluginSabotContext,
+      String name) {
+    if (supportsFsCreation != null
+        && formatConfig.getDataFormatType() == FileType.PARQUET
+        && supportsFsCreation instanceof FileSystemPlugin) {
+      return new ParquetFormatPlugin(
+          name,
+          pluginSabotContext,
+          (ParquetFormatConfig) formatConfig.getDataFormatConfig(),
+          supportsFsCreation);
     }
+    return null;
   }
 
   @Override
@@ -125,13 +122,8 @@ public class IcebergFormatPlugin extends EasyFormatPlugin<IcebergFormatConfig> {
   }
 
   @Override
-  public boolean supportsRead() {
-    return true;
-  }
-
-  @Override
   public boolean isLayered() {
-    return this.isLayered;
+    return true;
   }
 
   // TODO ravindra: should get the parquet file path by traversing the json file.
@@ -155,26 +147,6 @@ public class IcebergFormatPlugin extends EasyFormatPlugin<IcebergFormatConfig> {
   @Override
   public String getName() {
     return name;
-  }
-
-  @Override
-  public boolean supportsWrite() {
-    return false;
-  }
-
-  @Override
-  public boolean supportsAutoPartitioning() {
-    return true;
-  }
-
-  @Override
-  public SabotContext getContext() {
-    return context;
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return false;
   }
 
   @Override
@@ -245,11 +217,9 @@ public class IcebergFormatPlugin extends EasyFormatPlugin<IcebergFormatConfig> {
     return new IcebergExecutionDatasetAccessor(
         MetadataObjectsUtils.toEntityPath(tableSchemaPath),
         tableSupplier,
-        fsPlugin.getFsConfCopy(),
         this,
         fs,
         tableSnapshotProvider,
-        fsPlugin,
         tableSchemaProvider);
   }
 

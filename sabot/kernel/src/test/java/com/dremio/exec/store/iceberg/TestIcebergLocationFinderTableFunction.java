@@ -21,7 +21,6 @@ import static com.dremio.sabot.Fixtures.tr;
 import static org.apache.iceberg.DremioTableProperties.NESSIE_GC_ENABLED;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.expression.SchemaPath;
@@ -66,7 +65,7 @@ public class TestIcebergLocationFinderTableFunction extends BaseTestTableFunctio
   @Before
   public void prepareMocks() throws Exception {
     when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
-    when(plugin.createFSWithAsyncOptions(anyString(), anyString(), any())).thenReturn(fs);
+    when(plugin.createFS(any())).thenReturn(fs);
     when(plugin.getFsConfCopy()).thenReturn(CONF);
     when(plugin.createIcebergFileIO(any(), any(), any(), any(), any()))
         .thenReturn(
@@ -78,20 +77,24 @@ public class TestIcebergLocationFinderTableFunction extends BaseTestTableFunctio
   public void testTableLocationFinder() throws Exception {
     Table input =
         t(
-            th(SystemSchemas.METADATA_FILE_PATH),
+            th(SystemSchemas.DATASET_FIELD, SystemSchemas.METADATA_FILE_PATH),
             tr(
+                "iceberg.empty_table",
                 Resources.getResource("iceberg/empty_table/metadata/v1.metadata.json")
                     .toURI()
                     .toString()),
             tr(
+                "iceberg.empty_table",
                 Resources.getResource("iceberg/empty_table/metadata/v1.gc_disabled.metadata.json")
                     .toURI()
                     .toString()), // should get skipped
             tr(
+                "iceberg.partitionednation",
                 Resources.getResource("iceberg/partitionednation/metadata/v1.metadata.json")
                     .toURI()
                     .toString()),
             tr(
+                "iceberg.v2.orders",
                 Resources.getResource("iceberg/v2/orders/metadata/v1.metadata.json")
                     .toURI()
                     .toString()));
@@ -110,13 +113,17 @@ public class TestIcebergLocationFinderTableFunction extends BaseTestTableFunctio
   public void testTableLocationFinderContinueOnError() throws Exception {
     Table input =
         t(
-            th(SystemSchemas.METADATA_FILE_PATH),
+            th(SystemSchemas.DATASET_FIELD, SystemSchemas.METADATA_FILE_PATH),
             tr(
+                "iceberg.empty_table",
                 Resources.getResource("iceberg/empty_table/metadata/v1.metadata.json")
                     .toURI()
                     .toString()),
-            tr(new File("iceberg/v2/path/does/not/exist.metadata.json").toURI().toString()),
             tr(
+                "iceberg.v2.path.does.not.exist",
+                new File("iceberg/v2/path/does/not/exist.metadata.json").toURI().toString()),
+            tr(
+                "iceberg.partitionednation",
                 Resources.getResource("iceberg/partitionednation/metadata/v1.metadata.json")
                     .toURI()
                     .toString()));

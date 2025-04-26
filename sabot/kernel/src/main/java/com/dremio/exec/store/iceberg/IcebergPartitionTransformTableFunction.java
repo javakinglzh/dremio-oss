@@ -51,8 +51,15 @@ public class IcebergPartitionTransformTableFunction extends AbstractTableFunctio
   private final Map<String, CompleteType> inputFieldsType = new HashMap<>();
   private final Map<String, ValueVector> outputValueVectorMap = new HashMap<>();
   private final Map<String, ValueVector> partitionFieldsInputValueVectorMap = new HashMap<>();
-  private boolean doneWithRow = false;
+
+  // Current Row index of the incoming batch
   private int currentRow;
+
+  // Row index of the last processed row in incoming batch
+  // When the incoming batch size is larger than the outgoing batch size, a single incoming batch
+  // may be consumed by multiple outgoing batches. Therefore, we need to track the last processed
+  // row index to ensure that each outgoing batch processes the correct subset of rows.
+  private int lastProcessedRow;
 
   public IcebergPartitionTransformTableFunction(
       OperatorContext context, TableFunctionConfig functionConfig) {
@@ -100,19 +107,26 @@ public class IcebergPartitionTransformTableFunction extends AbstractTableFunctio
   @Override
   public void startRow(int row) throws Exception {
     currentRow = row;
-    if (row != 0) {
-      return;
+
+    // current row index is 0 means there is new incoming batch,
+    // reset lastProcessedRow
+    if (currentRow == 0) {
+      lastProcessedRow = -1;
     }
-    doneWithRow = false;
   }
 
   @Override
   public int processRow(int startOutIndex, int maxRecords) throws Exception {
-    if (currentRow != 0 || doneWithRow) {
+    // Rows are processed in batches,
+    // we would skip the rows which have been processed in last batch.
+    if (lastProcessedRow != -1 && currentRow <= lastProcessedRow) {
       return 0;
     }
 
-    int recordCount = Math.min(maxRecords, incoming.getRecordCount());
+    // the incoming batch size could be larger than the outgoing batch size, a single incoming batch
+    // may be consumed by multiple outgoing batches.
+    // use "incoming.getRecordCount() - currentRow" to calculate remaining rows
+    int recordCount = Math.min(maxRecords, incoming.getRecordCount() - currentRow);
     for (PartitionField partitionField : partitionSpec.fields()) {
       // skip identity transform since it returns the original value
       if (isIdentityPartitionColumn(partitionField)) {
@@ -126,15 +140,17 @@ public class IcebergPartitionTransformTableFunction extends AbstractTableFunctio
       ValueVector outputVector = outputValueVectorMap.get(partitionFieldName);
 
       for (int row = 0; row < recordCount; row++) {
-        Object columnValue = getValue(row, inputVector, inputFieldsType.get(inputColumnName));
+        Object columnValue =
+            getValue(currentRow + row, inputVector, inputFieldsType.get(inputColumnName));
         Object transformedValue = transform.apply(columnValue);
         writeToVector(outputVector, startOutIndex + row, transformedValue);
       }
     }
+    // transfer subset of rows in case incoming batch is larger than outgoing batch
+    transfers.forEach(tp -> tp.splitAndTransfer(currentRow, recordCount));
 
-    transfers.forEach(TransferPair::transfer);
-    outgoing.setAllCount(recordCount);
-    doneWithRow = true;
+    outgoing.setAllCount(startOutIndex + recordCount);
+    lastProcessedRow = currentRow + recordCount - 1;
     return recordCount;
   }
 
@@ -195,7 +211,7 @@ public class IcebergPartitionTransformTableFunction extends AbstractTableFunctio
       case TIME:
       case TIMETZ:
       case TIMESTAMPTZ:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case INTERVAL:
       case INTERVALYEAR:
       case INTERVALDAY:

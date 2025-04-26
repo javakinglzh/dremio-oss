@@ -17,6 +17,7 @@ package com.dremio.sabot.op.join.vhash.spill.slicer;
 
 import static com.dremio.sabot.op.join.vhash.spill.slicer.Sizer.BYTE_SIZE_BITS;
 
+import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.FormattingUtils;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
 import com.dremio.exec.record.VectorAccessible;
@@ -161,12 +162,15 @@ public class PageBatchSlicer {
       // have to fail..
       if (fitResult.recordCount == 0 && !current.isPartial()) {
         int required = sizer.computeBitsNeeded(sv2, startIdx, 1);
-        throw new IllegalStateException(
-            String.format(
-                "Individual record size (%s) is too large to fit into page size (%s). "
-                    + "Please increase the support option exec.op.join.spill.page_size accordingly.",
-                FormattingUtils.formatBytes(required / BYTE_SIZE_BITS),
-                FormattingUtils.formatBytes(current.getRemainingBits() / BYTE_SIZE_BITS)));
+
+        throw UserException.unsupportedError()
+            .message(
+                String.format(
+                    "Individual record size (%s) is too large to fit into page size (%s). "
+                        + "Please contact Dremio support for assistance.",
+                    FormattingUtils.formatBytes(required / BYTE_SIZE_BITS),
+                    FormattingUtils.formatBytes(current.getRemainingBits() / BYTE_SIZE_BITS)))
+            .buildSilently();
       }
 
       if (fitResult.recordCount != 0) {

@@ -37,7 +37,7 @@ import com.dremio.exec.store.common.EndpointsAffinity;
 import com.dremio.exec.store.common.HostAffinityComputer;
 import com.dremio.exec.store.common.InitializationException;
 import com.dremio.exec.store.iceberg.IcebergUtils;
-import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.schedule.AssignmentCreator2;
 import com.dremio.exec.store.schedule.CompleteWork;
 import com.dremio.exec.util.rhash.RendezvousHash;
@@ -100,7 +100,7 @@ public class SplitAssignmentTableFunction extends AbstractTableFunction {
   private final double balanceFactor;
   private final RendezvousHash<RendezvousPageHasher.PathOffset, ComparableEndpoint> hasher;
 
-  private final SupportsInternalIcebergTable plugin;
+  private final SupportsFsCreation plugin;
   private final StoragePluginId pluginId;
   private final OpProps props;
   private Pointer<BlockLocationsCacheManager> cacheManagerPointer;
@@ -120,7 +120,7 @@ public class SplitAssignmentTableFunction extends AbstractTableFunction {
       this.plugin = fec.getStoragePlugin(pluginId);
     } else {
       this.pluginId = functionConfig.getFunctionContext().getPluginId();
-      this.plugin = IcebergUtils.getSupportsInternalIcebergTablePlugin(fec, pluginId);
+      this.plugin = IcebergUtils.getSupportsIcebergRootPointerPlugin(fec, pluginId);
     }
     this.props = props;
 
@@ -309,7 +309,13 @@ public class SplitAssignmentTableFunction extends AbstractTableFunction {
   private FileSystem getFs(String filePath) {
     if (fs == null) {
       try {
-        fs = plugin.createFS(filePath, props.getUserName(), context);
+        fs =
+            plugin.createFS(
+                SupportsFsCreation.builder()
+                    .filePath(filePath)
+                    .userName(props.getUserName())
+                    .operatorContext(context)
+                    .datasetFromTableFunctionConfig(functionConfig));
       } catch (IOException e) {
         throw new UncheckedIOException(e);
       }

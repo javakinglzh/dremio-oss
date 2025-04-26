@@ -25,29 +25,29 @@ import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.util.Text;
 
 public final class VarcharArrayAggAccumulator extends ArrayAggAccumulator<Text> {
-  private final int maxFieldSizeBytes;
+  private final int maxArrayAggSize;
 
   public VarcharArrayAggAccumulator(
       FieldVector input,
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator computationVectorAllocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         computationVectorAllocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
-    this.maxFieldSizeBytes = maxFieldSizeBytes;
+    this.maxArrayAggSize = maxArrayAggSize;
   }
 
   @Override
   public int getDataBufferSize() {
     // Max allowed field size in Dremio
-    return maxFieldSizeBytes;
+    return maxArrayAggSize;
   }
 
   @Override
@@ -62,7 +62,7 @@ public final class VarcharArrayAggAccumulator extends ArrayAggAccumulator<Text> 
 
   @Override
   protected ArrayAggAccumulatorHolder<Text> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new VarcharArrayAggAccumulatorHolder(allocator, initialCapacity);
   }
 

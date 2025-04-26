@@ -74,14 +74,14 @@ public final class ArrayValueConstructorConvertlet extends RexCallConvertlet {
     RexBuilder rexBuilder = cx.getRexBuilder();
     RelBuilder relBuilder = cx.getRelBuilder();
 
+    RelDataType elementType = call.getType().getComponentType();
+    RelDataType valuesType = relBuilder.getTypeFactory().builder().add("col", elementType).build();
+
     List<List<RexLiteral>> literalColumn =
         call.getOperands().stream()
-            .map(x -> (RexLiteral) x)
+            .map(rexLiteral -> (RexLiteral) rexBuilder.makeCast(elementType, rexLiteral, true))
             .map(Collections::singletonList)
             .collect(Collectors.toList());
-
-    RelDataType valuesType =
-        relBuilder.getTypeFactory().builder().add("col", call.getType().getComponentType()).build();
 
     RelNode valuesSubquery =
         relBuilder

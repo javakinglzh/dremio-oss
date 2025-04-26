@@ -79,6 +79,7 @@ class ConfigurableSourceForm extends Component {
       fields,
       permissions,
       selectedTabName,
+      sourceFormConfig?.sourceType,
     );
 
     const tabConfig =
@@ -111,6 +112,7 @@ class ConfigurableSourceForm extends Component {
               changeTab={handleChangeTab}
               activeTab={tabConfig.getName()}
               tabs={finalTabs ? finalTabs : customTabs}
+              orientation="vertical"
             />
           )}
           <div className={scrollRightContainerWithHeader}>

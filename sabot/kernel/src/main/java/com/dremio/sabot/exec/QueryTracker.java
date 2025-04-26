@@ -24,6 +24,7 @@ import com.dremio.service.jobtelemetry.client.JobTelemetryExecutorClient;
 import com.dremio.service.maestroservice.MaestroClient;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.protobuf.Empty;
+import io.grpc.stub.StreamObserver;
 import java.util.Optional;
 import java.util.Set;
 
@@ -44,7 +45,8 @@ interface QueryTracker extends MayExpire {
       QueryTicket ticket,
       CoordinationProtos.NodeEndpoint foreman,
       MaestroClient maestroClient,
-      JobTelemetryExecutorClient telemetryClient);
+      JobTelemetryExecutorClient telemetryClient,
+      StreamObserver<Empty> startFragmentObserver);
 
   /**
    * @return whether the query is already started
@@ -107,4 +109,6 @@ interface QueryTracker extends MayExpire {
   void setQuerySentTime(long querySentTime);
 
   FileCursorManagerFactory getFileCursorManagerFactory();
+
+  void markStartFragmentDone(StreamObserver<Empty> startFragmentObserver, Throwable throwable);
 }

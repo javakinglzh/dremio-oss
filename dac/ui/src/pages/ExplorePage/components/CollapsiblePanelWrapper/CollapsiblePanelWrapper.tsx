@@ -20,6 +20,7 @@ import { isNotSoftware } from "dyn-load/utils/versionUtils";
 import { useMultiTabIsEnabled } from "#oss/components/SQLScripts/useMultiTabIsEnabled";
 import { isTabbableUrl } from "#oss/utils/explorePageTypeUtils";
 import * as classes from "./CollapsiblePanelWrapper.module.less";
+import { useEffect, useRef } from "react";
 
 type CollapsiblePanelWrapperProps = {
   headerTitle: string | React.ReactNode;
@@ -35,6 +36,14 @@ export const CollapsiblePanelWrapper = (
   const isOpen = !props.datasetDetailsCollapsed;
   const isMultiTabsEnabled = useMultiTabIsEnabled();
   const location = browserHistory.getCurrentLocation();
+  const closeRef = useRef<HTMLElement>();
+
+  useEffect(() => {
+    if (closeRef.current) {
+      (closeRef.current.firstChild as HTMLElement)?.focus?.();
+    }
+  }, [isOpen]);
+
   return (
     <div
       className={classes["collapsible-details-panel"]}
@@ -53,6 +62,7 @@ export const CollapsiblePanelWrapper = (
               tooltip="Collapse details panel"
               onClick={props.handleDatasetDetailsCollapse}
               className={classes["collapsible-details-panel__action-icon"]}
+              ref={closeRef}
             >
               <dremio-icon name="scripts/CollapseRight" alt="collapse" />
             </IconButton>

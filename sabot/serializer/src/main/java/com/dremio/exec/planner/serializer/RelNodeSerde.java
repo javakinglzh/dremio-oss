@@ -18,23 +18,41 @@ package com.dremio.exec.planner.serializer;
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.exec.catalog.DremioPrepareTable;
 import com.dremio.exec.catalog.DremioTranslatableTable;
+import com.dremio.exec.planner.serializer.core.AggregateCallSerde;
+import com.dremio.exec.planner.serializer.core.CommonRelSerde;
+import com.dremio.exec.planner.serializer.core.RelFieldCollationSerde;
 import com.dremio.exec.store.StoragePlugin;
+import com.dremio.plan.serialization.PAggregateCall;
+import com.dremio.plan.serialization.PGroupSet;
+import com.dremio.plan.serialization.PJoinType;
 import com.dremio.plan.serialization.PRelDataType;
+import com.dremio.plan.serialization.PRelDataTypeField;
+import com.dremio.plan.serialization.PRelFieldCollation;
+import com.dremio.plan.serialization.PRexLiteral;
 import com.dremio.plan.serialization.PRexNode;
 import com.dremio.plan.serialization.PRexWindowBound;
 import com.dremio.plan.serialization.PSqlOperator;
 import com.dremio.service.namespace.NamespaceKey;
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.google.protobuf.InvalidProtocolBufferException;
 import com.google.protobuf.Message;
+import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable.ToRelContext;
+import org.apache.calcite.rel.RelFieldCollation;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Aggregate;
+import org.apache.calcite.rel.core.AggregateCall;
+import org.apache.calcite.rel.core.JoinRelType;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexWindowBound;
 import org.apache.calcite.sql.SqlOperator;
 import org.apache.calcite.tools.RelBuilder;
+import org.apache.calcite.util.ImmutableBitSet;
 
 /**
  * Interface that defines how to move to and from a particular RelNode.
@@ -88,7 +106,27 @@ public interface RelNodeSerde<REL_NODE extends RelNode, PROTO_NODE extends Messa
   }
 
   /** Utility to help with RelNode serialization. */
-  public interface RelToProto {
+  interface RelToProto {
+
+    default PJoinType toProto(JoinRelType joinType) {
+      return CommonRelSerde.toProto(joinType);
+    }
+
+    default List<PAggregateCall> toProtoAggregateCall(Aggregate aggregate) {
+      return AggregateCallSerde.toProtoAggregateCall(aggregate, getSqlOperatorSerde());
+    }
+
+    default PGroupSet toProtoGroupSet(ImmutableBitSet immutableBitSet) {
+      return CommonRelSerde.toProtoGroupSet(immutableBitSet);
+    }
+
+    default List<PRelFieldCollation> toProtoRelFieldCollation(
+        List<RelFieldCollation> relFieldCollationList) {
+      return relFieldCollationList.stream()
+          .map(RelFieldCollationSerde::toProto)
+          .collect(ImmutableList.toImmutableList());
+    }
+
     /**
      * Convert a RelNode to a proto
      *
@@ -135,10 +173,28 @@ public interface RelNodeSerde<REL_NODE extends RelNode, PROTO_NODE extends Messa
      * @return The converted protobuf message.
      */
     PRexWindowBound toProto(RexWindowBound rexWindowBound);
+
+    /**
+     * Method for converting Row Type fields.
+     *
+     * @param fieldList list of fields for row type.
+     * @return List of proto representations of field types.
+     */
+    ImmutableList<PRelDataTypeField> toProto(List<RelDataTypeField> fieldList);
+
+    /**
+     * Converts a rex to a proto.
+     *
+     * @param rexLiteral
+     * @return Proto for literal
+     */
+    PRexLiteral toProtoLiteral(RexLiteral rexLiteral);
   }
 
   /** Utility to help with RelNode deserialization */
-  public interface RelFromProto {
+  interface RelFromProto {
+
+    SqlOperatorSerde sqlOperatorSerde();
 
     /**
      * Get the ToRelContext
@@ -163,6 +219,8 @@ public interface RelNodeSerde<REL_NODE extends RelNode, PROTO_NODE extends Messa
      */
     RexNode toRex(PRexNode rex);
 
+    RexLiteral toRex(PRexLiteral literal);
+
     /**
      * Retrieve a RexWindowBound based on its serialized form.
      *
@@ -179,14 +237,6 @@ public interface RelNodeSerde<REL_NODE extends RelNode, PROTO_NODE extends Messa
      * @return The hydrated RexNode.
      */
     RexNode toRex(PRexNode rex, RelDataType rowType);
-
-    /**
-     * Retrieve a SqlOperator from its serialized form
-     *
-     * @param op The serialized operator.
-     * @return The deserialized SqlOperator.
-     */
-    SqlOperator toOp(PSqlOperator op);
 
     /**
      * Retrieve a RelDataType from it's serialized form.
@@ -223,6 +273,35 @@ public interface RelNodeSerde<REL_NODE extends RelNode, PROTO_NODE extends Messa
      * @return A RelOptCluster.
      */
     RelOptCluster cluster();
+
+    /**
+     * Converts a fields list to RowType.
+     *
+     * @param fieldsList Proto list of rowType.
+     * @return {@link RelDataType} that is row type.
+     */
+    RelDataType toRowType(List<PRelDataTypeField> fieldsList);
+
+    /**
+     * Convert a to {@link RexLiteral}.
+     *
+     * @param literal Proto to convert.
+     * @return Converted RexLiteral.
+     */
+    RexLiteral toRexLiteral(PRexLiteral literal);
+
+    default JoinRelType fromProto(PJoinType joinType) {
+      return CommonRelSerde.fromProto(joinType);
+    }
+
+    default ImmutableBitSet fromProto(PGroupSet pGroupSet) {
+      return CommonRelSerde.fromProtoGroupSet(pGroupSet);
+    }
+
+    default List<AggregateCall> fromProto(
+        List<PAggregateCall> aggregateCall, PGroupSet pGroupSet, RelNode input) {
+      return AggregateCallSerde.fromProto(aggregateCall, pGroupSet, input, sqlOperatorSerde());
+    }
   }
 
   /** Simplified interface used for retrieving tables from a context. */

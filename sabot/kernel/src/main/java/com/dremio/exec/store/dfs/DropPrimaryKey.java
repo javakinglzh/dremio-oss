@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.dfs;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
@@ -28,7 +28,7 @@ import java.util.ArrayList;
 public class DropPrimaryKey extends PrimaryKeyOperations {
   public DropPrimaryKey(
       NamespaceKey table,
-      SabotContext context,
+      PluginSabotContext context,
       DatasetConfig datasetConfig,
       SchemaConfig schemaConfig,
       IcebergModel model,

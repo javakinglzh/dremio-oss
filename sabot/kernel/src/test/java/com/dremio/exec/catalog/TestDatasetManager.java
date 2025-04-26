@@ -45,14 +45,15 @@ import com.dremio.connector.impersonation.extensions.SupportsImpersonation;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.GetDatasetOption;
+import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.exec.catalog.CatalogImpl.IdentityResolver;
+import com.dremio.exec.catalog.ManagedStoragePlugin.StoragePluginChanging;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.ops.ViewExpansionContext;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.types.SqlTypeFactoryImpl;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.AuthorizationContext;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.SchemaConfig;
@@ -75,6 +76,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.security.AccessControlException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.ConcurrentModificationException;
 import java.util.List;
@@ -144,7 +146,9 @@ public class TestDatasetManager {
         implements ImpersonationConf {
       @Override
       public StoragePlugin newPlugin(
-          SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+          PluginSabotContext pluginSabotContext,
+          String name,
+          Provider<StoragePluginId> pluginIdProvider) {
         return null;
       }
 
@@ -338,7 +342,8 @@ public class TestDatasetManager {
     View.FieldType updatedField = ((ViewTable) table).getView().getFields().get(0);
     assertTrue(isComplexType(updatedField.getType()));
     assertEquals(
-        updatedField.getField().toString(), "struct_col: Struct<col1: Int(32, true), col2: Utf8>");
+        updatedField.getField().toString(),
+        "struct_col: Struct<col1: Int(32, true) not null, col2: Utf8 not null>");
   }
 
   @Test
@@ -387,7 +392,9 @@ public class TestDatasetManager {
         implements ImpersonationConf {
       @Override
       public StoragePlugin newPlugin(
-          SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+          PluginSabotContext pluginSabotContext,
+          String name,
+          Provider<StoragePluginId> pluginIdProvider) {
         return plugin;
       }
 
@@ -401,7 +408,7 @@ public class TestDatasetManager {
 
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
-    when(managedStoragePlugin.getPlugin()).thenReturn(plugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(plugin));
     doReturn(fakeSource).when(managedStoragePlugin).getConnectionConf();
     when(managedStoragePlugin.checkValidity(any(), any())).thenReturn(true);
 
@@ -561,7 +568,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(sp.unwrap(VersionedPlugin.class)).thenReturn(sp);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
@@ -612,7 +619,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
     when(managedStoragePlugin.checkValidity(any(), eq(metadataRequestOptions))).thenReturn(false);
@@ -666,7 +673,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
     when(managedStoragePlugin.checkValidity(any(), eq(metadataRequestOptions))).thenReturn(false);
@@ -722,7 +729,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
     when(managedStoragePlugin.checkValidity(any(), eq(metadataRequestOptions))).thenReturn(false);
@@ -778,7 +785,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(sp.unwrap(VersionedPlugin.class)).thenReturn(sp);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
@@ -835,7 +842,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(sp.unwrap(VersionedPlugin.class)).thenReturn(sp);
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
@@ -891,7 +898,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
 
     final PluginRetriever pluginRetriever = mock(PluginRetriever.class);
@@ -945,7 +952,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
 
     final PluginRetriever pluginRetriever = mock(PluginRetriever.class);
@@ -991,7 +998,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.DEFAULT);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
     when(managedStoragePlugin.getName()).thenReturn(sourceKey);
     when(sp.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
 
@@ -1101,7 +1108,7 @@ public class TestDatasetManager {
     final ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     final StoragePlugin sp = mock(FileSystemPlugin.class);
     when(managedStoragePlugin.checkValidity(any(), any())).thenReturn(true);
-    when(managedStoragePlugin.getPlugin()).thenReturn(sp);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(sp));
 
     final PluginRetriever pluginRetriever = mock(PluginRetriever.class);
     when(pluginRetriever.getPlugin(namespaceKey.getRoot(), false)).thenReturn(managedStoragePlugin);
@@ -1151,7 +1158,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     StoragePlugin fileSystemPlugin = mock(FileSystemPlugin.class);
     when(managedStoragePlugin.checkValidity(any(), any())).thenReturn(false);
-    when(managedStoragePlugin.getPlugin()).thenReturn(fileSystemPlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(fileSystemPlugin));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.newBuilder().setMaxNestedLevel(1).build());
     when(managedStoragePlugin.getDatasetMetadataState(any()))
@@ -1173,11 +1180,9 @@ public class TestDatasetManager {
     DatasetSaver saver = mock(DatasetSaver.class);
     when(managedStoragePlugin.getSaver()).thenReturn(saver);
     Stubber stubber =
-        numExceptionsThrown == 0
-            ? doNothing()
-            : doThrow(managedStoragePlugin.new StoragePluginChanging("first call"));
+        numExceptionsThrown == 0 ? doNothing() : doThrow(new StoragePluginChanging("first call"));
     if (numExceptionsThrown == 2) {
-      stubber = stubber.doThrow(managedStoragePlugin.new StoragePluginChanging("second call"));
+      stubber = stubber.doThrow(new StoragePluginChanging("second call"));
     } else {
       stubber = stubber.doNothing();
     }
@@ -1247,7 +1252,7 @@ public class TestDatasetManager {
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     StoragePlugin fileSystemPlugin = mock(FileSystemPlugin.class);
     when(managedStoragePlugin.checkValidity(any(), any())).thenReturn(false);
-    when(managedStoragePlugin.getPlugin()).thenReturn(fileSystemPlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(fileSystemPlugin));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.newBuilder().setMaxNestedLevel(1).build());
     when(managedStoragePlugin.getDatasetMetadataState(any()))
@@ -1358,7 +1363,7 @@ public class TestDatasetManager {
     ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     StoragePlugin fileSystemPlugin = mock(FileSystemPlugin.class);
-    when(managedStoragePlugin.getPlugin()).thenReturn(fileSystemPlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(fileSystemPlugin));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.newBuilder().setMaxNestedLevel(1).build());
     when(managedStoragePlugin.getDatasetMetadataState(any()))
@@ -1454,7 +1459,7 @@ public class TestDatasetManager {
     ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
     when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
     StoragePlugin fileSystemPlugin = mock(FileSystemPlugin.class);
-    when(managedStoragePlugin.getPlugin()).thenReturn(fileSystemPlugin);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(fileSystemPlugin));
     when(managedStoragePlugin.getDefaultRetrievalOptions())
         .thenReturn(DatasetRetrievalOptions.newBuilder().setMaxNestedLevel(1).build());
     when(managedStoragePlugin.getDatasetMetadataState(any()))
@@ -1506,6 +1511,73 @@ public class TestDatasetManager {
               || (key.equals(namespaceKey2) && datasetConfig.equals(datasetConfig2));
         };
     assertThat(res).matches(bulkResponse -> bulkResponse.responses().stream().allMatch(expected));
+  }
+
+  @Test
+  public void testGetViewTableFromPluginWithShallowConfig() throws Exception {
+    // Mock the necessary components
+    NamespaceKey namespaceKey = new NamespaceKey(Arrays.asList("test", "view"));
+    SchemaConfig schemaConfig = mock(SchemaConfig.class);
+    DatasetSaverImpl datasetSaver = mock(DatasetSaverImpl.class);
+    StoragePlugin storagePlugin =
+        mock(StoragePlugin.class, withSettings().extraInterfaces(SupportsRefreshViews.class));
+
+    when(schemaConfig.getUserName()).thenReturn("username");
+
+    MetadataRequestOptions metadataRequestOptions = mock(MetadataRequestOptions.class);
+    when(metadataRequestOptions.getSchemaConfig()).thenReturn(schemaConfig);
+
+    // Set up the shallow dataset configuration
+    DatasetConfig shallowDatasetConfig = new DatasetConfig();
+    shallowDatasetConfig.setType(DatasetType.VIRTUAL_DATASET);
+    shallowDatasetConfig.setFullPathList(ImmutableList.of("test", "view"));
+    shallowDatasetConfig.setVirtualDataset(new VirtualDataset());
+
+    // Mock the NamespaceService to return the shallow dataset config
+    NamespaceService namespaceService = mock(NamespaceService.class);
+    when(namespaceService.getDataset(namespaceKey)).thenReturn(shallowDatasetConfig);
+
+    // Mock the necessary components for DatasetManager
+    ManagedStoragePlugin managedStoragePlugin = mock(ManagedStoragePlugin.class);
+    when(managedStoragePlugin.getId()).thenReturn(mock(StoragePluginId.class));
+    when(managedStoragePlugin.getDefaultRetrievalOptions())
+        .thenReturn(DatasetRetrievalOptions.DEFAULT);
+    when(managedStoragePlugin.getPlugin()).thenReturn(Optional.of(storagePlugin));
+    when(storagePlugin.isWrapperFor(SupportsRefreshViews.class)).thenReturn(true);
+    when(managedStoragePlugin.getSaver()).thenReturn(datasetSaver);
+    doNothing().when(datasetSaver).save(any(), any(), any(), anyBoolean(), any(), anyString());
+
+    PluginRetriever pluginRetriever = mock(PluginRetriever.class);
+    when(pluginRetriever.getPlugin(namespaceKey.getRoot(), false)).thenReturn(managedStoragePlugin);
+    DatasetHandle viewDatasetHandle = mock(ViewDatasetHandle.class);
+    when(managedStoragePlugin.getDatasetHandle(eq(namespaceKey), eq(shallowDatasetConfig), any()))
+        .thenReturn(Optional.of(viewDatasetHandle));
+    when(viewDatasetHandle.getDatasetPath())
+        .thenReturn(new EntityPath(shallowDatasetConfig.getFullPathList()));
+    OptionManager optionManager = mock(OptionManager.class);
+
+    // Create the DatasetManager
+    MetadataIOPool metadataIOPool = mock(MetadataIOPool.class);
+    DatasetManager datasetManager =
+        new DatasetManager(
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            metadataIOPool);
+
+    // Call getTable and verify that a ViewTable is returned
+    try {
+      datasetManager.getTable(namespaceKey, metadataRequestOptions, true);
+    } catch (Exception e) {
+      // do nothing
+    }
+    verify(managedStoragePlugin)
+        .getDatasetHandle(
+            eq(namespaceKey), eq(shallowDatasetConfig), any(DatasetRetrievalOptions.class));
   }
 
   /** Fake Versioned Plugin interface for test */

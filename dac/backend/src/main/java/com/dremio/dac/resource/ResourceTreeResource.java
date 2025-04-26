@@ -30,7 +30,7 @@ import com.dremio.dac.service.source.ImmutableResourceTreeListResponse;
 import com.dremio.dac.service.source.ResourceTreeListResponse;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.exec.catalog.ConnectionReader;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.store.CatalogService;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
@@ -66,21 +66,21 @@ public class ResourceTreeResource {
   private final Provider<NamespaceService> namespaceService;
   private final SecurityContext securityContext;
   private final SourceService sourceService;
-  private final SabotContext context;
   private final ConnectionReader connectionReader;
+  private final CatalogService catalogService;
 
   @Inject
   public ResourceTreeResource(
       Provider<NamespaceService> namespaceService,
       @Context SecurityContext securityContext,
       SourceService sourceService,
-      SabotContext context,
-      ConnectionReader connectionReader) {
+      ConnectionReader connectionReader,
+      CatalogService catalogService) {
     this.namespaceService = namespaceService;
     this.securityContext = securityContext;
     this.sourceService = sourceService;
-    this.context = context;
     this.connectionReader = connectionReader;
+    this.catalogService = catalogService;
   }
 
   // TODO: DX-94503 showing UDFs in SQL Runner left side panel
@@ -339,7 +339,7 @@ public class ResourceTreeResource {
     for (SourceConfig sourceConfig : sourceService.getSources()) {
       resources.add(
           new ResourceTreeSourceEntity(
-              sourceConfig, sourceService.getSourceState(sourceConfig.getName())));
+              sourceConfig, catalogService.getSourceState(sourceConfig.getName())));
     }
     return resources;
   }

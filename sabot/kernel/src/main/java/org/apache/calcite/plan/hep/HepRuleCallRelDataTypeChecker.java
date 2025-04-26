@@ -22,8 +22,9 @@ import com.dremio.exec.planner.logical.PushProjectIntoScanRule;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer;
 import com.dremio.exec.planner.logical.RewriteProjectToFlattenRule;
 import com.dremio.exec.planner.logical.RollupWithBridgeExchangeRule;
+import com.dremio.exec.planner.normalizer.ArraySubQueryRemoveRule;
 import com.dremio.exec.planner.normalizer.DremioAggregateRemoveRule;
-import com.dremio.exec.planner.normalizer.DremioArraySubQueryRemoveRule;
+import com.dremio.exec.planner.normalizer.RemoveSingleValueAggregateRule;
 import com.dremio.exec.planner.normalizer.aggregaterewrite.CollectToArrayAggRule;
 import com.dremio.exec.planner.normalizer.aggregaterewrite.PercentileFunctionsRewriteRule;
 import com.google.common.collect.ImmutableList;
@@ -69,11 +70,12 @@ public final class HepRuleCallRelDataTypeChecker {
           PushFilterPastProjectRule.class,
           PushProjectIntoScanRule.class,
           CollectToArrayAggRule.class,
-          DremioArraySubQueryRemoveRule.class,
+          ArraySubQueryRemoveRule.class,
           ProjectSetOpTransposeRule.class,
           TabularUserDefinedFunctionExpanderRule.class,
           DremioAggregateRemoveRule.class,
-          ProjectWindowTransposeRule.class);
+          ProjectWindowTransposeRule.class,
+          RemoveSingleValueAggregateRule.class);
 
   public static List<Mismatch> getMismatches(HepRuleCall hepRuleCall) {
     RelNode originalRelNode = hepRuleCall.rel(0);

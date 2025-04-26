@@ -23,37 +23,21 @@ import java.util.Map;
 import org.apache.calcite.rel.RelNode;
 
 /** Holds a list of all the RelNodeSerde's available within a ScanResult. */
-class RelSerdeRegistry {
+public class RelSerdeRegistry {
 
+  public static final RelSerdeRegistry EMPTY =
+      new RelSerdeRegistry(ImmutableMap.of(), ImmutableMap.of());
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(RelSerdeRegistry.class);
 
   private Map<Class<?>, RelNodeSerde<? extends RelNode, ?>> serdesFromLogical;
   private Map<String, RelNodeSerde<?, ?>> protoHolders;
 
-  @SuppressWarnings({"rawtypes"})
-  public RelSerdeRegistry(ScanResult result) {
-    ImmutableMap.Builder<Class<?>, RelNodeSerde<?, ?>> serdesFromLogical = ImmutableMap.builder();
-    ImmutableMap.Builder<String, RelNodeSerde<?, ?>> protoHolders = ImmutableMap.builder();
-
-    for (Class<? extends RelNodeSerde> s : result.getImplementations(RelNodeSerde.class)) {
-      try {
-        RelNodeSerde<?, ?> serde = s.getDeclaredConstructor().newInstance();
-        serdesFromLogical.put(serde.getRelClass(), serde);
-        protoHolders.put(
-            "type.googleapis.com/"
-                + serde.getDefaultInstance().getDescriptorForType().getFullName(),
-            serde);
-      } catch (InstantiationException
-          | IllegalAccessException
-          | InvocationTargetException
-          | NoSuchMethodException e) {
-        logger.warn("Unable to instantiate {}", s.getName(), e);
-      }
-    }
-
-    this.serdesFromLogical = serdesFromLogical.build();
-    this.protoHolders = protoHolders.build();
+  public RelSerdeRegistry(
+      Map<String, RelNodeSerde<?, ?>> protoHolders,
+      Map<Class<?>, RelNodeSerde<? extends RelNode, ?>> serdesFromLogical) {
+    this.protoHolders = protoHolders;
+    this.serdesFromLogical = serdesFromLogical;
   }
 
   public Iterable<String> getProtoNames() {
@@ -70,5 +54,28 @@ class RelSerdeRegistry {
   public RelNodeSerde<?, ?> getSerdeByTypeString(String type) {
     return Preconditions.checkNotNull(
         protoHolders.get(type), "Unable to find RelNodeSerde for %s", type);
+  }
+
+  @SuppressWarnings({"rawtypes"})
+  public static RelSerdeRegistry create(ScanResult scanResult) {
+    ImmutableMap.Builder<Class<?>, RelNodeSerde<?, ?>> serdesFromLogical = ImmutableMap.builder();
+    ImmutableMap.Builder<String, RelNodeSerde<?, ?>> protoHolders = ImmutableMap.builder();
+
+    for (Class<? extends RelNodeSerde> s : scanResult.getImplementations(RelNodeSerde.class)) {
+      try {
+        RelNodeSerde<?, ?> serde = s.getDeclaredConstructor().newInstance();
+        serdesFromLogical.put(serde.getRelClass(), serde);
+        protoHolders.put(
+            "type.googleapis.com/"
+                + serde.getDefaultInstance().getDescriptorForType().getFullName(),
+            serde);
+      } catch (InstantiationException
+          | IllegalAccessException
+          | InvocationTargetException
+          | NoSuchMethodException e) {
+        logger.warn("Unable to instantiate {}", s.getName(), e);
+      }
+    }
+    return new RelSerdeRegistry(protoHolders.build(), serdesFromLogical.build());
   }
 }

@@ -45,6 +45,10 @@ export const isTmpDatasetUrl = (location: any) => {
   );
 };
 
+export const hasTemporaryQueryParam = (location: any) => {
+  return location.query?.scriptSearchResultId != null;
+};
+
 export const isTabbableUrl = (location: any) => {
   return rmProjectBase(location.pathname) === "/new_query";
 };

@@ -61,7 +61,6 @@ import com.dremio.service.listing.DatasetListingService;
 import com.dremio.service.listing.DatasetListingServiceImpl;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceIdentity;
-import com.dremio.service.namespace.NamespaceInvalidStateException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
@@ -225,7 +224,6 @@ public class TestDatasetCatalogServiceImpl {
             @Override
             public void close() throws Exception {}
           };
-      when(sabotContext.getNamespaceServiceFactory()).thenReturn(namespaceServiceFactory);
       when(sabotContext.getNamespaceService(anyString())).thenReturn(namespaceService);
       when(sabotContext.getOrphanageFactory()).thenReturn(orphanageFactory);
       when(sabotContext.getViewCreatorFactoryProvider()).thenReturn(() -> viewCreatorFactory);
@@ -311,7 +309,8 @@ public class TestDatasetCatalogServiceImpl {
                       () -> optionManager),
               () -> new VersionedDatasetAdapterFactory(),
               () -> new CatalogStatusEventsImpl(),
-              () -> mock(ExecutorService.class));
+              () -> mock(ExecutorService.class),
+              () -> namespaceServiceFactory);
       catalogService.start();
 
       mockUpPlugin = new TestCatalogServiceImpl.MockUpPlugin();
@@ -321,10 +320,11 @@ public class TestDatasetCatalogServiceImpl {
           new SourceConfig()
               .setName(TestCatalogServiceImpl.MOCK_UP)
               .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY)
-              .setCtime(100L)
               .setConnectionConf(new TestCatalogServiceImpl.MockUpConfig(mockUpPlugin));
 
-      catalogService.getSystemUserCatalog().createSource(mockUpConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .createSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
       datasetCatalogService =
           new DatasetCatalogServiceImpl(() -> catalogService, () -> namespaceServiceFactory);
     }
@@ -551,13 +551,6 @@ public class TestDatasetCatalogServiceImpl {
       checkGrpcStatusFromError(
           Status.NOT_FOUND.getCode(),
           new NamespaceNotFoundException(new NamespaceKey("Fake"), "NamespaceNotFoundException"));
-    }
-
-    @Test
-    public void testNamespaceInvalidStateException() throws NamespaceException {
-      checkGrpcStatusFromError(
-          Status.INTERNAL.getCode(),
-          new NamespaceInvalidStateException("NamespaceInvalidStateException"));
     }
 
     @Test

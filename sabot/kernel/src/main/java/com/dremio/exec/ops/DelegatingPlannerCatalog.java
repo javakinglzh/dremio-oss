@@ -22,6 +22,7 @@ import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogIdentity;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.SimpleCatalog;
+import com.dremio.exec.planner.sql.SqlValidatorAndToRelContext;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.dremio.service.namespace.NamespaceKey;
 import java.util.Collection;
@@ -149,6 +150,11 @@ public final class DelegatingPlannerCatalog<T extends SimpleCatalog<T>> implemen
 
   @Override
   public void dispose() {
+    throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public SqlValidatorAndToRelContext getSqlValidatorAndToRelContext() {
     throw new UnsupportedOperationException();
   }
 }

@@ -141,7 +141,7 @@ public class UpdateIdWrapper {
         case INT:
           return updateId.getIntUpdateId();
         case BIGINT:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           return updateId.getLongUpdateId();
         default:
       }
@@ -169,8 +169,8 @@ public class UpdateIdWrapper {
       case INT:
         update(updateValue.getIntUpdateId(), MinorType.INT);
         break;
-      case TIMESTAMP:
-        update(updateValue.getLongUpdateId(), MinorType.TIMESTAMP);
+      case TIMESTAMPMILLI:
+        update(updateValue.getLongUpdateId(), MinorType.TIMESTAMPMILLI);
         break;
       case DATE:
         update(updateValue.getIntUpdateId(), MinorType.DATE);
@@ -195,7 +195,7 @@ public class UpdateIdWrapper {
         case INT:
         case DATE:
           return String.valueOf(updateId.getIntUpdateId());
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case BIGINT:
           return String.valueOf(updateId.getLongUpdateId());
         default:
@@ -261,7 +261,7 @@ public class UpdateIdWrapper {
       case BIGINT:
         return MinorType.BIGINT;
       case TIMESTAMP:
-        return MinorType.TIMESTAMP;
+        return MinorType.TIMESTAMPMILLI;
       case DATE:
         return MinorType.DATE;
       default:

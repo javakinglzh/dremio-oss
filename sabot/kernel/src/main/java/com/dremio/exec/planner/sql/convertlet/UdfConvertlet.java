@@ -21,6 +21,8 @@ import com.dremio.exec.catalog.udf.CorrelatedUdfDetector;
 import com.dremio.exec.catalog.udf.DremioScalarUserDefinedFunction;
 import com.dremio.exec.catalog.udf.ParameterizedQueryParameterReplacer;
 import com.dremio.exec.ops.UserDefinedFunctionExpander;
+import com.dremio.exec.planner.decorrelation.DecorrelationAssertions;
+import com.dremio.exec.planner.sql.handlers.RexSubQueryUtils;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -37,9 +39,7 @@ import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.rex.RexSubQuery;
 import org.apache.calcite.schema.Function;
 import org.apache.calcite.schema.FunctionParameter;
-import org.apache.calcite.sql.SqlKind;
 import org.apache.calcite.sql.SqlOperator;
-import org.apache.calcite.sql.fun.SqlQuantifyOperator;
 import org.apache.calcite.sql.validate.SqlUserDefinedFunction;
 
 public final class UdfConvertlet extends RexCallConvertlet {
@@ -145,7 +145,6 @@ public final class UdfConvertlet extends RexCallConvertlet {
     public RexNode visitSubQuery(RexSubQuery subQuery) {
       // For a subquery we want to rewrite the RelNode using correlates:
       RelNode rewrittenRelNode = subQuery.rel.accept(correlateRelReplacer);
-      boolean relRewritten = rewrittenRelNode != subQuery.rel;
 
       // And the operands with ref indexes:
       List<RexNode> rewrittenOperands =
@@ -169,32 +168,17 @@ public final class UdfConvertlet extends RexCallConvertlet {
       // `SAL`, `DEPTNO`, `COMM`], splits=[1])
       // })
 
-      CorrelationId rewrittenCorrelateId = relRewritten ? correlationId : null;
-      // TODO: add RexSubQuery.clone(CorrelationId) so we don't need this switch case
-      SqlKind kind = subQuery.op.kind;
-      switch (kind) {
-        case SCALAR_QUERY:
-          return RexSubQuery.scalar(rewrittenRelNode, rewrittenCorrelateId);
+      boolean usedCorrelationId =
+          !RexSubQueryUtils.collectCorrelatedVariables(rewrittenRelNode, correlationId).isEmpty();
+      CorrelationId rewrittenCorrelationId = usedCorrelationId ? correlationId : null;
 
-        case EXISTS:
-          return RexSubQuery.exists(rewrittenRelNode, rewrittenCorrelateId);
+      RexSubQuery rewrittenSubQuery =
+          subQuery.clone(rewrittenRelNode).clone(subQuery.getType(), rewrittenOperands);
+      rewrittenSubQuery = RexSubQueryUtils.clone(rewrittenSubQuery, rewrittenCorrelationId);
 
-        case IN:
-          return RexSubQuery.in(rewrittenRelNode, rewrittenOperands, rewrittenCorrelateId);
+      DecorrelationAssertions.assertRexSubquery(rewrittenSubQuery);
 
-        case SOME:
-          return RexSubQuery.some(
-              rewrittenRelNode,
-              rewrittenOperands,
-              (SqlQuantifyOperator) subQuery.op,
-              rewrittenCorrelateId);
-
-        case ARRAY_QUERY_CONSTRUCTOR:
-          return RexSubQuery.array(rewrittenRelNode, rewrittenCorrelateId);
-
-        default:
-          throw new UnsupportedOperationException("Can not support kind: " + kind);
-      }
+      return rewrittenSubQuery;
     }
 
     @Override

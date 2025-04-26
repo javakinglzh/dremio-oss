@@ -17,9 +17,10 @@ package com.dremio.exec.store.dfs;
 
 import com.dremio.common.FSConstants;
 import com.dremio.common.util.S3ConnectionConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.dremio.exec.catalog.conf.Property;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.service.coordinator.ClusterCoordinator;
@@ -37,8 +38,11 @@ public class MayBeDistFileSystemPlugin<C extends MayBeDistFileSystemConf<C, ?>>
       org.slf4j.LoggerFactory.getLogger(MayBeDistFileSystemPlugin.class);
 
   public MayBeDistFileSystemPlugin(
-      C config, SabotContext context, String name, Provider<StoragePluginId> idProvider) {
-    super(config, context, name, idProvider);
+      C config,
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> idProvider) {
+    super(config, pluginSabotContext, name, idProvider);
   }
 
   @Override
@@ -52,7 +56,7 @@ public class MayBeDistFileSystemPlugin<C extends MayBeDistFileSystemConf<C, ?>>
       props.add(new Property(FSConstants.FS_S3A_ACCESS_KEY, getConfig().getAccessKey()));
       props.add(new Property(FSConstants.FS_S3A_SECRET_KEY, getConfig().getSecretKey()));
     } else if (!Strings.isNullOrEmpty(getConfig().getClientSecret())) {
-      props.add(new Property(FSConstants.AZURE_ACCOUNT, getConfig().getAccountName()));
+      props.add(new Property(AzureStorageConfProperties.ACCOUNT, getConfig().getAccountName()));
       props.add(new Property(FSConstants.AZURE_SECURE, Boolean.toString(Boolean.TRUE)));
       props.add(new Property(FSConstants.AZURE_MODE, getConfig().getAccountKind()));
       props.add(new Property(FSConstants.AZURE_CLIENT_ID, getConfig().getClientId()));
@@ -69,7 +73,6 @@ public class MayBeDistFileSystemPlugin<C extends MayBeDistFileSystemConf<C, ?>>
     props.add(new Property("fs.dremioS3.impl.disable.cache", "true"));
     props.add(new Property("fs.dremiogcs.impl.disable.cache", "true"));
     props.add(new Property("fs.dremioAzureStorage.impl.disable.cache", "true"));
-    props.add(new Property("fs.dremioAdl.impl.disable.cache", "true"));
     return props;
   }
 

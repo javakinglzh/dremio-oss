@@ -137,8 +137,49 @@ public class IndexedSearchQueryConverterUtil {
         return SearchQueryUtils.newRangeLong(
             key.getIndexFieldName(), searchQuery.getGreaterThan().getValue(), null, false, false);
 
-      default:
+      case GREATER_THAN_OR_EQUAL:
+        key = indexMap.get(searchQuery.getGreaterThanOrEqual().getField());
+        if (key == null) {
+          LOGGER.debug(
+              "The filter on field {} is not pushed down as it is not indexed",
+              searchQuery.getGreaterThanOrEqual().getField());
+          return null;
+        }
+        return SearchQueryUtils.newRangeLong(
+            key.getIndexFieldName(),
+            searchQuery.getGreaterThanOrEqual().getValue(),
+            null,
+            true,
+            false);
+
+      case LESS_THAN:
+        key = indexMap.get(searchQuery.getLessThan().getField());
+        if (key == null) {
+          LOGGER.debug(
+              "The filter on field {} is not pushed down as it is not indexed",
+              searchQuery.getLessThan().getField());
+          return null;
+        }
+        return SearchQueryUtils.newRangeLong(
+            key.getIndexFieldName(), null, searchQuery.getLessThan().getValue(), false, false);
+
+      case LESS_THAN_OR_EQUAL:
+        key = indexMap.get(searchQuery.getLessThanOrEqual().getField());
+        if (key == null) {
+          LOGGER.debug(
+              "The filter on field {} is not pushed down as it is not indexed",
+              searchQuery.getLessThanOrEqual().getField());
+          return null;
+        }
+        return SearchQueryUtils.newRangeLong(
+            key.getIndexFieldName(),
+            null,
+            searchQuery.getLessThanOrEqual().getValue(),
+            false,
+            true);
+
       case QUERY_NOT_SET:
+      default:
         throw new UnsupportedOperationException(
             String.format("%s is not supported", searchQuery.getQueryCase()));
     }
@@ -172,12 +213,12 @@ public class IndexedSearchQueryConverterUtil {
           sb.append("*");
           break;
 
-          // ESCAPE * if it occurs
+        // ESCAPE * if it occurs
         case '*':
           sb.append("\\*");
           break;
 
-          // ESCAPE ? if it occurs
+        // ESCAPE ? if it occurs
         case '?':
           sb.append("\\?");
           break;

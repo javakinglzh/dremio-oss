@@ -17,7 +17,6 @@ package com.dremio.service.tokens.jwks;
 
 import com.dremio.service.tokens.jwt.JWTSigner;
 import com.dremio.service.tokens.jwt.JWTValidator;
-import java.util.Map;
 
 public class NoOpJWKSetManager implements JWKSetManager {
   @Override
@@ -39,7 +38,7 @@ public class NoOpJWKSetManager implements JWKSetManager {
   }
 
   @Override
-  public Map<String, Object> getPublicJWKS() {
+  public JWKS getPublicJWKS() {
     throw new UnsupportedOperationException(
         "NoOpJWKSetManager does not support retrieving the public JWKS");
   }

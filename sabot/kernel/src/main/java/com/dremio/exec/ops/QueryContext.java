@@ -51,7 +51,7 @@ import com.dremio.exec.planner.normalizer.PlannerNormalizerComponent;
 import com.dremio.exec.planner.normalizer.PlannerNormalizerComponentImpl;
 import com.dremio.exec.planner.normalizer.PlannerNormalizerModule;
 import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.planner.plancache.PlanCache;
+import com.dremio.exec.planner.plancache.PlanCacheProvider;
 import com.dremio.exec.planner.sql.DremioCompositeSqlOperatorTable;
 import com.dremio.exec.planner.sql.ViewExpander;
 import com.dremio.exec.proto.CoordExecRPC.QueryContextInformation;
@@ -102,7 +102,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import javax.inject.Provider;
 import org.apache.arrow.memory.ArrowBuf;
@@ -121,6 +121,7 @@ import org.apache.calcite.tools.RuleSets;
 // Or else dangling child allocators could cause issues when closing resources finally in the daemon
 public class QueryContext
     implements AutoCloseable, ResourceSchedulingContext, OptimizerRulesContext {
+
   private final SabotQueryContext sabotQueryContext;
   private final UserSession session;
   private final QueryId queryId;
@@ -156,7 +157,7 @@ public class QueryContext
   protected final WorkloadType workloadType;
   private final RelMetadataQuerySupplier relMetadataQuerySupplier;
 
-  private final PlanCache planCache;
+  private final PlanCacheProvider planCacheProvider;
   private final PartitionStatsCache partitionStatsPredicateCache;
 
   /*
@@ -173,6 +174,20 @@ public class QueryContext
   private boolean queryRequiresGroupsInfo = false;
 
   public QueryContext(
+      final UserSession session, final SabotQueryContext sabotQueryContext, String allocatorTag) {
+    this(
+        session,
+        sabotQueryContext,
+        null,
+        null,
+        Long.MAX_VALUE,
+        Predicates.alwaysTrue(),
+        PlanCacheProvider.EMPTY,
+        null,
+        allocatorTag);
+  }
+
+  public QueryContext(
       final UserSession session, final SabotQueryContext sabotQueryContext, QueryId queryId) {
     this(
         session,
@@ -181,7 +196,7 @@ public class QueryContext
         null,
         Long.MAX_VALUE,
         Predicates.alwaysTrue(),
-        PlanCache.EMPTY_CACHE,
+        PlanCacheProvider.EMPTY,
         null);
   }
 
@@ -192,12 +207,34 @@ public class QueryContext
       QueryPriority priority,
       long maxAllocation,
       Predicate<DatasetConfig> datasetValidityChecker,
-      PlanCache planCache,
+      PlanCacheProvider planCacheProvider,
       PartitionStatsCache partitionStatsCache) {
+    this(
+        session,
+        sabotQueryContext,
+        queryId,
+        priority,
+        maxAllocation,
+        datasetValidityChecker,
+        planCacheProvider,
+        partitionStatsCache,
+        null);
+  }
+
+  public QueryContext(
+      final UserSession session,
+      final SabotQueryContext sabotQueryContext,
+      QueryId queryId,
+      QueryPriority priority,
+      long maxAllocation,
+      Predicate<DatasetConfig> datasetValidityChecker,
+      PlanCacheProvider planCacheProvider,
+      PartitionStatsCache partitionStatsCache,
+      String allocatorTag) {
     this.sabotQueryContext = sabotQueryContext;
     this.session = session;
     this.queryId = queryId;
-    this.planCache = Objects.requireNonNullElse(planCache, PlanCache.EMPTY_CACHE);
+    this.planCacheProvider = Objects.requireNonNullElse(planCacheProvider, planCacheProvider.EMPTY);
     this.partitionStatsPredicateCache = partitionStatsCache;
 
     this.queryOptionManager = new QueryOptionManager(sabotQueryContext.getOptionValidatorListing());
@@ -229,11 +266,15 @@ public class QueryContext
     this.contextInformation =
         new ContextInformationImpl(session.getCredentials(), queryContextInfo);
 
+    String planningAllocatorName =
+        allocatorTag == null
+            ? "query-planning:" + QueryIdHelper.getQueryId(queryId)
+            : "query-planning:" + allocatorTag + "-" + ThreadLocalRandom.current().nextInt();
     this.allocator =
         sabotQueryContext
             .getQueryPlanningAllocator()
             .newChildAllocator(
-                "query-planning:" + QueryIdHelper.getQueryId(queryId),
+                planningAllocatorName,
                 plannerSettings.getInitialPlanningMemorySize(),
                 plannerSettings.getPlanningMemoryLimit());
     this.bufferManager = new BufferManagerImpl(allocator);
@@ -249,6 +290,7 @@ public class QueryContext
             .setViewExpansionContext(viewExpansionContext)
             .exposeInternalSources(session.exposeInternalSources())
             .setDatasetValidityChecker(datasetValidityChecker)
+            .setCatalogAccessListener(new PlannerCatalogAccessListener())
             .build();
 
     // Using caching namespace for query planning.  The lifecycle of the cache is associated with
@@ -308,11 +350,7 @@ public class QueryContext
 
   public UserDefinedFunctionCatalog getUserDefinedFunctionCatalog() {
     return new UserDefinedFunctionCatalogImpl(
-        this.getSchemaConfig(),
-        getOptions(),
-        getNamespaceService(),
-        getCatalogService(),
-        getCatalog());
+        this.getSchemaConfig(), getOptions(), getCatalog(), getCatalogService(), getCatalog());
   }
 
   public AccelerationManager getAccelerationManager() {
@@ -346,8 +384,8 @@ public class QueryContext
             .collect(Collectors.toList()));
   }
 
-  public PlanCache getPlanCache() {
-    return planCache;
+  public PlanCacheProvider getPlanCacheCreator() {
+    return planCacheProvider;
   }
 
   @Override
@@ -523,6 +561,10 @@ public class QueryContext
     return workloadType;
   }
 
+  public String getWorkloadTypeForWlmRules() {
+    return Utilities.getWorkloadTypeForWlmRules(workloadType);
+  }
+
   @Override
   public BufferManager getBufferManager() {
     return bufferManager;
@@ -574,14 +616,6 @@ public class QueryContext
 
   public ExpressionSplitCache getExpressionSplitCache() {
     return sabotQueryContext.getExpressionSplitCache();
-  }
-
-  public ExecutorService getExecutorService() {
-    return sabotQueryContext.getExecutorService();
-  }
-
-  public NamespaceService getNamespaceService() {
-    return sabotQueryContext.getNamespaceService(getSession().getCredentials().getUserName());
   }
 
   public NamespaceService getSystemNamespaceService() {
@@ -654,5 +688,13 @@ public class QueryContext
 
   public SchemaConfig getSchemaConfig() {
     return schemaConfig;
+  }
+
+  public PlannerCatalogAccessListener getCatalogAccessListener() {
+    return (PlannerCatalogAccessListener) schemaConfig.getCatalogAccessListener();
+  }
+
+  public NamespaceService getNamespaceService() {
+    return sabotQueryContext.getNamespaceService(getSession().getCredentials().getUserName());
   }
 }

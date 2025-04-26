@@ -64,15 +64,12 @@ message VirtualDatasetUI {
   // version actually saved of a dataset
   optional string savedTag = 13;
 
-  // the origin of each column.
-  repeated com.dremio.service.namespace.dataset.proto.FieldOrigin fieldOrigins = 15;
-
   // is this dataset named? Once a dataset has been saved once, it and all transformations on top of it are named.
   optional bool isNamed = 16 [DEFAULT = true];
 
   optional Derivation derivation = 17 [DEFAULT = UNKNOWN];
 
-  repeated com.dremio.service.namespace.dataset.proto.ParentDataset grandParents = 18;
+  repeated com.dremio.service.namespace.dataset.proto.ParentDataset grandParents = 18 [deprecated=true];
 
   optional string owner = 19;
 
@@ -96,6 +93,9 @@ message VirtualDatasetUI {
 
   //where does VirtualDatasetUI come from.
   optional DatasetVersionOrigin datasetVersionOrigin = 25;
+
+  // Protostuff omits other fields found after reserved keyword, leave this at the end.
+  reserved 15; reserved "fieldOrigins";
 }
 
 enum Derivation {

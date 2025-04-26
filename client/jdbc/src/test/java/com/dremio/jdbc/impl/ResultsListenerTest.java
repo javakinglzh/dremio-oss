@@ -16,15 +16,19 @@
 package com.dremio.jdbc.impl;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import com.dremio.exec.proto.UserBitShared.QueryData;
 import com.dremio.exec.proto.UserBitShared.QueryResult.QueryState;
+import com.dremio.exec.rpc.ConnectionThrottle;
 import com.dremio.jdbc.impl.DremioCursor.ResultsListener;
 import com.dremio.sabot.rpc.user.QueryDataBatch;
 import com.dremio.test.DremioTest;
 import java.util.function.Consumer;
+import org.junit.Before;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 /** Class-level unit test for {@link ResultsListener}. */
 public class ResultsListenerTest extends DremioTest {
@@ -39,6 +43,34 @@ public class ResultsListenerTest extends DremioTest {
   private static final int DELAY_MS = 5;
   private static final int THROTTLING_THRESHOLD = 100;
 
+  private ResultsListener resultsListener;
+  private ConnectionThrottle mockThrottle;
+
+  @Before
+  public void setUp() {
+    resultsListener = new ResultsListener(THROTTLING_THRESHOLD, BATCH_QUEUE_POLL_TIMEOUT_MS);
+    mockThrottle = Mockito.mock(ConnectionThrottle.class);
+  }
+
+  @Test
+  public void testStopThrottlingIfSo() {
+    // Start throttling
+    boolean started = resultsListener.startThrottlingIfNot(mockThrottle);
+    assertTrue(started);
+    Mockito.verify(mockThrottle).setAutoRead(false);
+
+    // Verify throttling is active (cannot start again)
+    assertFalse(resultsListener.startThrottlingIfNot(mockThrottle));
+
+    // Stop throttling
+    boolean stopped = resultsListener.stopThrottlingIfSo();
+    assertTrue(stopped);
+    Mockito.verify(mockThrottle).setAutoRead(true);
+
+    // Verify throttling is no longer active (cannot stop again)
+    assertFalse(resultsListener.stopThrottlingIfSo());
+  }
+
   @Test
   public void testEndOfStreamMessageWithQueryCompleted() throws Exception {
     runTest(resultsListener -> resultsListener.queryCompleted(QueryState.COMPLETED));
@@ -50,9 +82,6 @@ public class ResultsListenerTest extends DremioTest {
   }
 
   private void runTest(Consumer<ResultsListener> resultsListenerConsumer) throws Exception {
-    final ResultsListener resultsListener =
-        new ResultsListener(THROTTLING_THRESHOLD, BATCH_QUEUE_POLL_TIMEOUT_MS);
-
     final Thread resultsListenerThread =
         new Thread(
             () -> {

@@ -48,10 +48,10 @@ import javax.inject.Provider;
 @Options
 public class TokenManagerImplV2 implements TokenManager {
   public static final BooleanValidator ENABLE_JWT_ACCESS_TOKENS =
-      new BooleanValidator("token.jwt-access-token.enabled", false);
+      new BooleanValidator("token.jwt-access-token.enabled", true);
   public static final RangeLongValidator TOKEN_EXPIRATION_TIME_MINUTES =
       new RangeLongValidator(
-          "token.jwt-access-token.expiration.minutes",
+          "token.access-token-v2.expiration.minutes",
           15,
           TimeUnit.MINUTES.convert(24, TimeUnit.HOURS),
           60);
@@ -114,19 +114,22 @@ public class TokenManagerImplV2 implements TokenManager {
     }
 
     final Instant now = clock.instant();
-    final Date expirationTime =
-        new Date(
-            Math.min(
-                now.plus(
-                        Duration.ofMinutes(
-                            optionManagerProvider.get().getOption(TOKEN_EXPIRATION_TIME_MINUTES)))
-                    .toEpochMilli(),
-                expiresAtEpochMs));
+    final Date expirationTime = computeTokenExpiration(now, expiresAtEpochMs);
     final String token =
         newJWT(
             username, expirationTime, new Date(now.toEpochMilli()), UUID.randomUUID().toString());
 
     return TokenDetails.of(token, username, expirationTime.getTime());
+  }
+
+  private Date computeTokenExpiration(Instant now, long expiresAtEpochMs) {
+    return new Date(
+        Math.min(
+            now.plus(
+                    Duration.ofMinutes(
+                        optionManagerProvider.get().getOption(TOKEN_EXPIRATION_TIME_MINUTES)))
+                .toEpochMilli(),
+            expiresAtEpochMs));
   }
 
   private String newJWT(String username, Date expirationTime, Date now, String jti) {
@@ -140,7 +143,7 @@ public class TokenManagerImplV2 implements TokenManager {
     final WebServerInfoProvider webServerInfo = webServerInfoProvider.get();
     final JWTClaims jwt =
         new ImmutableJWTClaims.Builder()
-            .setIssuer(webServerInfo.getBaseURL().toString())
+            .setIssuer(webServerInfo.getIssuer().toString())
             .setSubject(user.getUID().getId())
             .setAudience(webServerInfo.getClusterId())
             .setExpirationTime(expirationTime)
@@ -158,9 +161,20 @@ public class TokenManagerImplV2 implements TokenManager {
       String clientID,
       List<String> scopes,
       long durationMillis) {
-    return legacyTokenManagerProvider
-        .get()
-        .createThirdPartyToken(username, clientAddress, clientID, scopes, durationMillis);
+    if (optionManagerProvider.get().getOption(ENABLE_JWT_ACCESS_TOKENS)) {
+      final Instant now = clock.instant();
+      final Date expirationTime =
+          computeTokenExpiration(now, now.plusMillis(durationMillis).toEpochMilli());
+      final String token =
+          newJWT(
+              username, expirationTime, new Date(now.toEpochMilli()), UUID.randomUUID().toString());
+
+      return TokenDetails.of(token, username, expirationTime.getTime(), scopes);
+    } else {
+      return legacyTokenManagerProvider
+          .get()
+          .createThirdPartyToken(username, clientAddress, clientID, scopes, durationMillis);
+    }
   }
 
   @Override

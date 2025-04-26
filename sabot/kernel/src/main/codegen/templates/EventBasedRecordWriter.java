@@ -61,14 +61,19 @@ public class EventBasedRecordWriter {
     final int max = offset + length;
     for (; offset < max; offset++) {
       recordWriter.startRecord();
+      if (recordWriter.writeStatsListener != null) {
+        recordWriter.writeStatsListener.setBatchOffset(offset);
+      }
       // write the current record
       for (FieldConverter converter : fieldConverters) {
         converter.setPosition(offset);
         converter.startField();
         converter.writeField();
+        recordWriter.incrementRowSize(converter.getCurrentFieldSize());
         converter.endField();
       }
       recordWriter.endRecord();
+      recordWriter.checkRowSizeLimit();
     }
 
     return offset - initialOffset;
@@ -82,14 +87,19 @@ public class EventBasedRecordWriter {
    */
   public int writeOneRecord(int index) throws IOException {
     recordWriter.startRecord();
+    if (recordWriter.writeStatsListener != null) {
+      recordWriter.writeStatsListener.setBatchOffset(index);
+    }
     // write the current record
     for (FieldConverter converter : fieldConverters) {
       converter.setPosition(index);
       converter.startField();
       converter.writeField();
+      recordWriter.incrementRowSize(converter.getCurrentFieldSize());
       converter.endField();
     }
     recordWriter.endRecord();
+    recordWriter.checkRowSizeLimit();
 
     return 1;
   }
@@ -120,6 +130,7 @@ public class EventBasedRecordWriter {
     protected int fieldId;
     protected String fieldName;
     protected FieldReader reader;
+    protected int currentFieldSize;
 
     public FieldConverter(int fieldId, String fieldName, FieldReader reader) {
       this.fieldId = fieldId;
@@ -146,6 +157,10 @@ public class EventBasedRecordWriter {
     }
 
     public abstract void writeField() throws IOException;
+
+    public int getCurrentFieldSize() {
+      return currentFieldSize;
+    }
   }
 
   public static FieldConverter getConverter(final RowBasedRecordWriter recordWriter, final int fieldId,

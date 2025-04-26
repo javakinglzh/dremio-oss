@@ -15,6 +15,9 @@
  */
 package com.dremio.dac.model.spaces;
 
+import static com.dremio.service.namespace.NamespaceUtils.HOME_PREFIX;
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
+
 import com.dremio.dac.model.common.RootEntity;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
@@ -26,9 +29,9 @@ public final class SpaceName extends RootEntity {
   @JsonCreator
   public SpaceName(String name) {
     super(name);
-    if (name.startsWith(HomeName.HOME_PREFIX)) {
+    if (isHomeSpace(name)) {
       throw new IllegalArgumentException(
-          String.format("Space %s can not start with %s", name, HomeName.HOME_PREFIX));
+          String.format("Space %s can not start with %s", name, HOME_PREFIX));
     }
   }
 

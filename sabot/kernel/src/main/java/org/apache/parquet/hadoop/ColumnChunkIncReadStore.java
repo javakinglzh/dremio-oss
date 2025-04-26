@@ -213,7 +213,7 @@ public class ColumnChunkIncReadStore implements PageReadStore {
                   parquetMetadataConverter.getEncoding(
                       pageHeader.data_page_header.definition_level_encoding),
                   parquetMetadataConverter.getEncoding(pageHeader.data_page_header.encoding));
-              // TODO - finish testing this with more files
+            // TODO - finish testing this with more files
             case DATA_PAGE_V2:
               valueReadSoFar += pageHeader.data_page_header_v2.getNum_values();
               destBuffer = uncompressPage(pageHeader, true);
@@ -304,10 +304,10 @@ public class ColumnChunkIncReadStore implements PageReadStore {
         ByteBuffer destBuffer = dest.nioBuffer(0, uncompressedPageSize);
 
         switch (pageHeader.type) {
-            /**
-             * Page structure : [RepetitionLevelBytes][DefinitionLevelBytes][DataBytes] Only the
-             * data bytes are compressed.
-             */
+          /**
+           * Page structure : [RepetitionLevelBytes][DefinitionLevelBytes][DataBytes] Only the data
+           * bytes are compressed.
+           */
           case DATA_PAGE_V2:
             final int dataOffset =
                 pageHeader.getData_page_header_v2().getRepetition_levels_byte_length()

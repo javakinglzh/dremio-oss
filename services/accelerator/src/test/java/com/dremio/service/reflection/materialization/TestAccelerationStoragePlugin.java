@@ -25,11 +25,13 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.TableMutationOptions;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.io.file.Path;
+import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.reflection.ReflectionServiceImpl;
 import com.dremio.service.reflection.proto.Materialization;
@@ -60,12 +62,11 @@ public class TestAccelerationStoragePlugin {
         new Materialization()
             .setId(materializationId)
             .setReflectionId(reflectionId)
-            .setArrowCachingEnabled(false)
             .setReflectionGoalVersion("test")
             .setState(MaterializationState.DONE);
 
-    Refresh firstRefresh = new Refresh().setIsIcebergRefresh(false).setPath("refresh/test/path");
-    Refresh secondRefresh = new Refresh().setIsIcebergRefresh(false).setPath("refresh/test/path");
+    Refresh firstRefresh = new Refresh().setPath("refresh/test/path");
+    Refresh secondRefresh = new Refresh().setPath("refresh/test/path");
     RefreshId firstRefreshId = new RefreshId("firstRefresh");
     RefreshId secondRefreshId = new RefreshId("secondRefresh");
     firstRefresh.setId(firstRefreshId);
@@ -76,12 +77,16 @@ public class TestAccelerationStoragePlugin {
     SchemaConfig schemaConfig = mock(SchemaConfig.class);
     AccelerationStoragePluginConfig accelerationStoragePluginConfig =
         mock(AccelerationStoragePluginConfig.class);
-    SabotContext sabotContext = mock(SabotContext.class);
+    PluginSabotContext sabotContext = mock(PluginSabotContext.class);
+    OptionManager optionManager = mock(OptionManager.class);
     Provider<StoragePluginId> storagePluginIdProvider = mock(Provider.class);
     MaterializationStore materializationStore = mock(MaterializationStore.class);
     MaterializationPlanStore materializationPlanStore = mock(MaterializationPlanStore.class);
     NamespaceKey tableSchemaPath = mock(NamespaceKey.class);
     TableMutationOptions tableMutationOptions = mock(TableMutationOptions.class);
+    when(sabotContext.getOptionManager()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED))
+        .thenReturn((PlannerSettings.VALUES_CAST_ENABLED.getDefault().getBoolVal()));
     AccelerationStoragePlugin accelerationStoragePlugin =
         spy(
             new AccelerationStoragePlugin(
@@ -128,17 +133,20 @@ public class TestAccelerationStoragePlugin {
             .setSeriesId(5L)
             .setReflectionId(reflectionId);
 
-    Refresh refresh =
-        new Refresh().setIsIcebergRefresh(true).setPath("r_id/m_id_0").setBasePath("m_id_0");
+    Refresh refresh = new Refresh().setPath("r_id/m_id_0").setBasePath("m_id_0");
 
     AccelerationStoragePluginConfig accelerationStoragePluginConfig =
         mock(AccelerationStoragePluginConfig.class);
     when(accelerationStoragePluginConfig.getPath())
         .thenReturn(Path.of(ReflectionServiceImpl.ACCELERATOR_STORAGEPLUGIN_NAME));
-    SabotContext sabotContext = mock(SabotContext.class);
+    PluginSabotContext sabotContext = mock(PluginSabotContext.class);
+    OptionManager optionManager = mock(OptionManager.class);
     Provider<StoragePluginId> storagePluginIdProvider = mock(Provider.class);
     MaterializationStore materializationStore = mock(MaterializationStore.class);
     MaterializationPlanStore materializationPlanStore = mock(MaterializationPlanStore.class);
+    when(sabotContext.getOptionManager()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED))
+        .thenReturn((PlannerSettings.VALUES_CAST_ENABLED.getDefault().getBoolVal()));
     AccelerationStoragePlugin accelerationStoragePlugin =
         spy(
             new AccelerationStoragePlugin(
@@ -171,10 +179,14 @@ public class TestAccelerationStoragePlugin {
         mock(AccelerationStoragePluginConfig.class);
     when(accelerationStoragePluginConfig.getPath())
         .thenReturn(Path.of(ReflectionServiceImpl.ACCELERATOR_STORAGEPLUGIN_NAME));
-    SabotContext sabotContext = mock(SabotContext.class);
+    PluginSabotContext sabotContext = mock(PluginSabotContext.class);
+    OptionManager optionManager = mock(OptionManager.class);
     Provider<StoragePluginId> storagePluginIdProvider = mock(Provider.class);
     MaterializationStore materializationStore = mock(MaterializationStore.class);
     MaterializationPlanStore materializationPlanStore = mock(MaterializationPlanStore.class);
+    when(sabotContext.getOptionManager()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VALUES_CAST_ENABLED))
+        .thenReturn((PlannerSettings.VALUES_CAST_ENABLED.getDefault().getBoolVal()));
     AccelerationStoragePlugin accelerationStoragePlugin =
         spy(
             new AccelerationStoragePlugin(
@@ -209,5 +221,11 @@ public class TestAccelerationStoragePlugin {
         "Non-HDFS file paths shouldn't be changed by sanitization",
         s3Path,
         accelerationStoragePlugin.sanitizePath(s3Path));
+
+    String s3CleanedPath = Path.getContainerSpecificRelativePath(Path.of(s3Path));
+    assertEquals(
+        "Non-HDFS file paths shouldn't be changed by sanitization",
+        s3CleanedPath,
+        accelerationStoragePlugin.sanitizePath(s3CleanedPath));
   }
 }

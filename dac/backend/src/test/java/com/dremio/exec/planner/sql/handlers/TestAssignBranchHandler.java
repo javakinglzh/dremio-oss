@@ -163,8 +163,8 @@ public class TestAssignBranchHandler extends DremioTest {
     // Assert
     assertThatThrownBy(() -> handler.toResult("", assignBranch))
         .isInstanceOf(UserException.class)
-        .hasMessageContaining("does not support")
-        .hasMessageContaining(DEFAULT_SOURCE_NAME);
+        .hasMessageContaining(
+            String.format("Source [%s] was not properly functioning", DEFAULT_SOURCE_NAME));
   }
 
   @Test

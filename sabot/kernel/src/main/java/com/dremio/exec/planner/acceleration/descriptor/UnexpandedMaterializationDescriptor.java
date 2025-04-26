@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 public class UnexpandedMaterializationDescriptor extends BaseMaterializationDescriptor {
   private final byte[] planBytes;
+  private final byte[] hashFragementBytes;
   private final int stripVersion;
   private final JoinDependencyProperties joinDependencyProperties;
   private final CatalogService catalogService;
@@ -37,12 +38,13 @@ public class UnexpandedMaterializationDescriptor extends BaseMaterializationDesc
       final ReflectionInfo reflection,
       final String materializationId,
       final String version,
-      final long expirationTimestamp,
+      final Long expirationTimestamp,
       final byte[] planBytes,
+      final byte[] hashFragementBytes,
+      final String matchingHash,
       final List<String> path,
       final @Nullable Double originalCost,
       final long jobStart,
-      final List<String> partition,
       final IncrementalUpdateSettings incrementalUpdateSettings,
       final JoinDependencyProperties joinDependencyProperties,
       final Integer stripVersion,
@@ -57,10 +59,11 @@ public class UnexpandedMaterializationDescriptor extends BaseMaterializationDesc
         path,
         originalCost,
         jobStart,
-        partition,
         incrementalUpdateSettings,
-        isStale);
+        isStale,
+        matchingHash);
     this.planBytes = planBytes;
+    this.hashFragementBytes = hashFragementBytes;
     this.joinDependencyProperties = joinDependencyProperties;
     this.stripVersion = Optional.ofNullable(stripVersion).orElse(1);
     this.forceExpansion = forceExpansion;
@@ -73,6 +76,10 @@ public class UnexpandedMaterializationDescriptor extends BaseMaterializationDesc
 
   public byte[] getPlan() {
     return planBytes;
+  }
+
+  public byte[] getHashFragementBytes() {
+    return hashFragementBytes;
   }
 
   public JoinDependencyProperties getJoinDependencyProperties() {

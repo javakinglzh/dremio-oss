@@ -105,7 +105,7 @@ class SearchField extends Component {
           style={{
             ...this.props.inputStyle,
             ...(this.props.showIcon && { paddingLeft: 32 }),
-            ...(this.props.showCloseIcon && { paddingRight: 24 }),
+            ...(this.props.showCloseIcon && { paddingRight: 32 }),
           }}
           value={val}
           onChange={(e) => this.onChange(e.target.value)}
@@ -118,7 +118,7 @@ class SearchField extends Component {
           <div
             style={{
               position: "absolute",
-              right: "var(--dremio--spacing--2)",
+              right: 3,
               top: 0,
             }}
           >

@@ -38,7 +38,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public abstract class ReconnectingConnection<
         CONNECTION_TYPE extends RemoteConnection, OUTBOUND_HANDSHAKE extends MessageLite>
     implements Closeable {
-  private final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(this.getClass());
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(ReconnectingConnection.class);
 
   private static final MeterProvider<Counter> CONNECTION_BREAK_COUNTER =
       newCounterProvider("rpc.failure", "Counts the number of RPC connection breaks");

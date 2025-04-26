@@ -19,18 +19,25 @@ import static com.dremio.telemetry.api.metrics.Metrics.MetricServletFactory.crea
 
 import com.dremio.common.liveness.LiveHealthMonitor;
 import com.dremio.config.DremioConfig;
+import com.dremio.exec.server.NodeRegistration;
+import com.dremio.exec.work.protector.ForemenWorkManager;
 import com.dremio.service.Service;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableSet;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import javax.inject.Provider;
+import javax.servlet.DispatcherType;
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.servlet.ServletHandler;
+import org.eclipse.jetty.servlet.FilterHolder;
+import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
@@ -54,12 +61,19 @@ public class LivenessService implements Service {
   private final boolean livenessEnabled;
 
   private final Server embeddedLivenessJetty = new Server(new QueuedThreadPool(MAX_THREADS));
+  private final Provider<NodeRegistration> nodeRegistrationProvider;
+  private final Provider<ForemenWorkManager> foremenWorkManagerProvider;
   private int livenessPort;
   private long pollCount;
   private final List<LiveHealthMonitor> healthMonitors = new ArrayList<>();
 
-  public LivenessService(DremioConfig config) {
+  public LivenessService(
+      DremioConfig config,
+      Provider<NodeRegistration> nodeRegistrationProvider,
+      Provider<ForemenWorkManager> foremenWorkManagerProvider) {
     this.config = config;
+    this.nodeRegistrationProvider = nodeRegistrationProvider;
+    this.foremenWorkManagerProvider = foremenWorkManagerProvider;
     this.livenessEnabled = config.getBoolean(DremioConfig.LIVENESS_ENABLED);
     pollCount = 0;
   }
@@ -86,13 +100,19 @@ public class LivenessService implements Service {
     serverConnector.setHost(config.getString(DremioConfig.LIVENESS_HOST));
     serverConnector.setAcceptQueueSize(ACCEPT_QUEUE_BACKLOG);
     embeddedLivenessJetty.addConnector(serverConnector);
+    ServletContextHandler contextHandler =
+        new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+    contextHandler.setContextPath("/");
+    embeddedLivenessJetty.setHandler(contextHandler);
 
-    ServletHandler handler = new ServletHandler();
-    embeddedLivenessJetty.setHandler(handler);
+    contextHandler.addServlet(new ServletHolder(new LivenessServlet()), "/live");
+    contextHandler.addServlet(new ServletHolder(createMetricsServlet()), "/metrics");
+    contextHandler.addServlet(new ServletHolder(new QuiesceServlet()), "/quiesce");
 
-    handler.addServletWithMapping(new ServletHolder(new LivenessServlet()), "/live");
-    handler.addServletWithMapping(new ServletHolder(createMetricsServlet()), "/metrics");
-
+    contextHandler.addFilter(
+        new FilterHolder(new DisableHttpMethodsFilter(ImmutableSet.of("TRACE", "OPTIONS"))),
+        "/*",
+        EnumSet.of(DispatcherType.REQUEST));
     embeddedLivenessJetty.start();
     livenessPort = serverConnector.getLocalPort();
     logger.info("Started liveness service on port {}", livenessPort);
@@ -132,6 +152,32 @@ public class LivenessService implements Service {
         }
       }
       response.setStatus(HttpServletResponse.SC_OK);
+    }
+  }
+
+  public class QuiesceServlet extends HttpServlet {
+    @Override
+    protected void doPost(HttpServletRequest request, HttpServletResponse response) {
+      logger.info("Received request to quiesce node");
+      try {
+        foremenWorkManagerProvider.get().stopAcceptingQueries();
+        nodeRegistrationProvider.get().close();
+      } catch (Exception e) {
+        throw new RuntimeException(e);
+      }
+
+      response.setStatus(HttpServletResponse.SC_OK);
+    }
+
+    @Override
+    protected void doGet(HttpServletRequest request, HttpServletResponse response)
+        throws ServletException, IOException {
+
+      var activeQueries = foremenWorkManagerProvider.get().getActiveQueryCount();
+      response.setStatus(
+          activeQueries == 0 ? HttpServletResponse.SC_OK : HttpServletResponse.SC_BAD_REQUEST);
+      response.setContentType("application/json");
+      response.getWriter().printf("{\"active_queries\": %d}", activeQueries);
     }
   }
 }

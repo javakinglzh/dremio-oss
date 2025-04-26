@@ -46,7 +46,6 @@ public abstract class FileSystemConf<C extends FileSystemConf<C, P>, P extends F
   /** Defines the constants used for cloud file systems. */
   public enum CloudFileSystemScheme {
     S3_FILE_SYSTEM_SCHEME("dremioS3"),
-    ADL_FILE_SYSTEM_SCHEME("dremioAdl"),
     AZURE_STORAGE_FILE_SYSTEM_SCHEME("dremioAzureStorage://"),
     GOOGLE_CLOUD_FILE_SYSTEM("dremiogcs");
 

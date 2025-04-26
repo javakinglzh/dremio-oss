@@ -17,6 +17,8 @@ package com.dremio.exec.store.iceberg.model;
 
 import static com.dremio.exec.planner.VacuumCatalogUtil.isGCEnabledForIcebergTable;
 import static com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.getTimestampFromMillis;
+import static com.dremio.exec.store.iceberg.IcebergUtils.CLUSTERING_INFO;
+import static com.dremio.exec.store.iceberg.IcebergUtils.PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY;
 import static com.dremio.exec.store.iceberg.model.IcebergOpCommitter.CONCURRENT_OPERATION_ERROR;
 import static org.apache.iceberg.DremioTableProperties.NESSIE_GC_ENABLED;
 import static org.apache.iceberg.TableProperties.GC_ENABLED;
@@ -30,6 +32,7 @@ import com.dremio.exec.catalog.RollbackOption;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.sql.PartitionTransform;
 import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
+import com.dremio.exec.proto.ExecProtos.ClusteringStatus;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.DremioFileIO;
@@ -45,6 +48,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -69,6 +73,7 @@ import org.apache.iceberg.OverwriteFiles;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.PendingUpdate;
 import org.apache.iceberg.ReplaceSortOrder;
+import org.apache.iceberg.RewriteFiles;
 import org.apache.iceberg.RowDelta;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.Snapshot;
@@ -112,6 +117,7 @@ public class IcebergBaseCommand implements IcebergCommand {
   protected final Path fsPath;
   private Snapshot currentSnapshot;
   private final UserBitShared.QueryId queryId;
+  private ClusteringStatus clusteringStatus;
 
   public IcebergBaseCommand(
       Configuration configuration,
@@ -154,7 +160,6 @@ public class IcebergBaseCommand implements IcebergCommand {
 
     Map<String, String> tableProp =
         tableProperties == null ? Collections.emptyMap() : new HashMap<>(tableProperties);
-    tableProp.put(TableProperties.SNAPSHOT_ID_INHERITANCE_ENABLED, "true");
     tableProp.put(TableProperties.MANIFEST_TARGET_SIZE_BYTES, MANIFEST_FILE_DEFAULT_SIZE);
     TableMetadata metadata =
         TableMetadata.newTableMetadata(
@@ -270,8 +275,18 @@ public class IcebergBaseCommand implements IcebergCommand {
       beginTransaction();
     }
     try {
-      transaction
-          .newRewrite()
+      RewriteFiles rewriteFiles = transaction.newRewrite();
+      if (clusteringStatus != null) {
+        // 5 digits after dot
+        DecimalFormat df = new DecimalFormat("#." + "#".repeat(5));
+        rewriteFiles.set(
+            CLUSTERING_INFO,
+            String.format(
+                "startClusteringDepth = %s estimatedEndClusteringDepth = %s",
+                df.format(clusteringStatus.getStartClusteringDepth()),
+                df.format(clusteringStatus.getEstimatedEndsClusteringDepth())));
+      }
+      rewriteFiles
           .validateFromSnapshot(snapshotId)
           .rewriteFiles(removedDataFiles, removedDeleteFiles, addedDataFiles, addedDeleteFiles)
           .commit();
@@ -394,7 +409,9 @@ public class IcebergBaseCommand implements IcebergCommand {
         }
       } else {
         logger.warn(
-            "Skipping expiry on {} because {} is set to 'false'", table.name(), NESSIE_GC_ENABLED);
+            "Skipping expiry on {} because {} is set to 'false'",
+            table.name(),
+            isVersionedTable ? NESSIE_GC_ENABLED : GC_ENABLED);
       }
       table.refresh();
       return findSnapshots(tableOperations.refresh());
@@ -607,25 +624,37 @@ public class IcebergBaseCommand implements IcebergCommand {
     Preconditions.checkState(transaction == null, "Unexpected state");
     Table table = loadTable();
     try {
-      transaction = table.newTransaction();
       SqlAlterTablePartitionColumns.Mode mode = partitionSpecAlterOption.getMode();
       PartitionTransform partitionTransform = partitionSpecAlterOption.getPartitionTransform();
       Term term = IcebergUtils.getIcebergTerm(partitionTransform);
       switch (mode) {
         case ADD:
-          transaction.updateSpec().caseSensitive(false).addField(term).commit();
+          table.updateSpec().caseSensitive(false).addField(term).commit();
+          if (table.properties().containsKey(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY)) {
+            table.updateProperties().remove(PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY).commit();
+          }
           break;
         case DROP:
-          transaction.updateSpec().caseSensitive(false).removeField(term).commit();
+          table.updateSpec().caseSensitive(false).removeField(term).commit();
+          table.refresh();
+          if (!table.spec().isPartitioned()) {
+            table
+                .updateProperties()
+                .set(
+                    PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY,
+                    String.valueOf(table.currentSnapshot().sequenceNumber()))
+                .commit();
+          }
           break;
       }
-      transaction.commitTransaction();
-      transaction = null;
     } catch (ValidationException | CommitFailedException | CommitStateUnknownException e) {
       logger.error(CONCURRENT_OPERATION_ERROR, e);
       throw UserException.concurrentModificationError(e)
           .message(CONCURRENT_OPERATION_ERROR)
           .buildSilently();
+    } catch (IllegalArgumentException e) {
+      // It could drop the partition that does not exist.
+      throw UserException.unsupportedError(e).message(e.getMessage().toString()).buildSilently();
     }
   }
 
@@ -686,6 +715,13 @@ public class IcebergBaseCommand implements IcebergCommand {
       throw UserException.unsupportedError()
           .message(
               "[%s] is a partition column. Partition spec change is not supported.",
+              columnInIceberg.name())
+          .buildSilently();
+    } else if (table.sortOrder().schema().findField(columnInIceberg.fieldId())
+        != null) { // column is part of SortOrder/ClusterKey
+      throw UserException.unsupportedError()
+          .message(
+              "[%s] is a clustering key or sort order column. This change is not supported.",
               columnInIceberg.name())
           .buildSilently();
     }
@@ -759,7 +795,7 @@ public class IcebergBaseCommand implements IcebergCommand {
     return calciteTypeFromMinorType.toString();
   }
 
-  private void performNonTransactionCommit(PendingUpdate pendingUpdate) {
+  protected void performNonTransactionCommit(PendingUpdate pendingUpdate) {
     try {
       pendingUpdate.commit();
     } catch (ValidationException | CommitFailedException | CommitStateUnknownException e) {
@@ -859,6 +895,21 @@ public class IcebergBaseCommand implements IcebergCommand {
             isInternalField);
       }
     }
+
+    // Provide a more informative error message when trying to change
+    // column nullability from optional to required.
+    if (columnToChangeInIceberg.isOptional() && !batchField.isNullable()) {
+      try {
+        updateSchema.requireColumn(columnToChange);
+      } catch (IllegalArgumentException e) {
+        throw UserException.validationError()
+            .message(
+                e.getMessage()
+                    + ". There maybe existing records with null values in the nullable column. "
+                    + "Schema updates do not allow incompatible changes.")
+            .buildSilently();
+      }
+    }
   }
 
   private void changeComplexColumn(
@@ -926,6 +977,10 @@ public class IcebergBaseCommand implements IcebergCommand {
     if (!isInternalField && !currentColumn.name().equalsIgnoreCase(newFieldDef.getName())) {
       updateSchema.renameColumn(currentColumn.name(), newFieldDef.getName());
     }
+
+    if (newFieldDef.isNullable()) {
+      updateSchema.makeColumnOptional(table.schema().findColumnName(currentColumn.fieldId()));
+    }
   }
 
   private void changePrimitiveColumn(
@@ -949,16 +1004,24 @@ public class IcebergBaseCommand implements IcebergCommand {
               sqlTypeNameWithPrecisionAndScale(newDef.type()))
           .buildSilently();
     }
+
+    final String columnOrInnerFieldToChangeName =
+        isInternalField
+            ? table.schema().findColumnName(columnToChangeInIceberg.fieldId())
+            : columnToChangeInIceberg.name();
+
     if (isInternalField) {
       // We are processing a field inside a complex column.Only update is possible here. Rename
       // happens via drop and add.
-      updateSchema.updateColumn(
-          table.schema().findColumnName(columnToChangeInIceberg.fieldId()),
-          newDef.type().asPrimitiveType());
+      updateSchema.updateColumn(columnOrInnerFieldToChangeName, newDef.type().asPrimitiveType());
     } else {
       updateSchema
-          .renameColumn(columnToChangeInIceberg.name(), newDef.name())
-          .updateColumn(columnToChangeInIceberg.name(), newDef.type().asPrimitiveType());
+          .renameColumn(columnOrInnerFieldToChangeName, newDef.name())
+          .updateColumn(columnOrInnerFieldToChangeName, newDef.type().asPrimitiveType());
+    }
+
+    if (batchField.isNullable()) {
+      updateSchema.makeColumnOptional(columnOrInnerFieldToChangeName);
     }
   }
 
@@ -999,6 +1062,11 @@ public class IcebergBaseCommand implements IcebergCommand {
   @Override
   public long propertyAsLong(String propertyName, long defaultValue) {
     return tableOperations.current().propertyAsLong(propertyName, defaultValue);
+  }
+
+  @Override
+  public void consumeClusteringStatus(ClusteringStatus clusteringStatus) {
+    this.clusteringStatus = clusteringStatus;
   }
 
   @Override

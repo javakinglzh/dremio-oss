@@ -58,7 +58,6 @@ enum DistroType {
   APACHE = 2;
   CDH = 3;
   HDP = 4;
-  MAPR = 5;
 }
 
 // type of property: Java Property, Java System Property, Environment Variable

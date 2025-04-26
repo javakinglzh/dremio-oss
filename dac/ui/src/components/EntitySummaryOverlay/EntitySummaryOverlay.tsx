@@ -33,7 +33,7 @@ type EntitySummaryOverlayProps = {
   openDetailsPanel: (dataset: any) => void;
   entityUrl?: string;
   versionContext?: VersionContextType;
-  getEntityUrl?: () => string[];
+  getEntityUrl?: () => string;
 };
 
 const EntitySummaryOverlay = ({

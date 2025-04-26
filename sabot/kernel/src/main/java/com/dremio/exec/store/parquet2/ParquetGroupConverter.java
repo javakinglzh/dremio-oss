@@ -23,6 +23,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.PathSegment.PathSegmentType;
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.common.util.DateTimes;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.store.parquet.ParquetColumnResolver;
 import com.dremio.exec.store.parquet.ParquetReaderUtility;
@@ -69,13 +70,19 @@ import org.apache.parquet.io.api.Binary;
 import org.apache.parquet.io.api.Converter;
 import org.apache.parquet.io.api.GroupConverter;
 import org.apache.parquet.io.api.PrimitiveConverter;
-import org.apache.parquet.schema.DecimalMetadata;
 import org.apache.parquet.schema.GroupType;
-import org.apache.parquet.schema.OriginalType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DateLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.MapLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.StringLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeUnit;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.Type;
 import org.apache.parquet.schema.Type.Repetition;
-import org.joda.time.DateTimeConstants;
 
 abstract class ParquetGroupConverter extends GroupConverter implements ParquetListElementConverter {
 
@@ -191,7 +198,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
       PathSegment colNextChild) {
     Collection<SchemaPath> c = new ArrayList<>();
 
-    if (groupType.getOriginalType() == OriginalType.LIST
+    if (groupType.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation
         && colNextChild != null
         && colNextChild.getType().equals(PathSegmentType.NAME)
         && colNextChild.getNameSegment().getPath().equals("list")) {
@@ -253,7 +260,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
       // make sure the parquet schema matches the arrow schema and delegate handling the logical
       // list to defaultGroupConverter()
       Preconditions.checkState(
-          groupType.getOriginalType() == OriginalType.LIST,
+          groupType.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation,
           "parquet schema doesn't match the arrow schema for LIST " + nameForChild);
     }
 
@@ -267,7 +274,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
       Collection<SchemaPath> c,
       List<Field> arrowSchema) {
 
-    if (groupType.getOriginalType() == OriginalType.LIST
+    if (groupType.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation
         && LogicalListL1Converter.isSupportedSchema(groupType)) {
       return new LogicalListL1Converter(
           columnResolver,
@@ -324,7 +331,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
 
   private boolean isEligibleForMapVectorConversion(GroupType groupType) {
     if (schemaHelper.isMapDataTypeEnabled()
-        && groupType.getOriginalType() == OriginalType.MAP
+        && groupType.getLogicalTypeAnnotation() instanceof MapLogicalTypeAnnotation
         && groupType.getFieldCount() == 1
         && groupType.getType(0).isRepetition(Repetition.REPEATED)
         && groupType.getType(0).asGroupType().getFieldCount() == 2) {
@@ -364,54 +371,51 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
     switch (type.getPrimitiveTypeName()) {
       case INT32:
         {
-          OriginalType originalType = type.getOriginalType();
-          if (originalType != null) {
-            switch (type.getOriginalType()) {
-              case DECIMAL:
-                {
-                  ParquetReaderUtility.checkDecimalTypeEnabled(options);
-                  DecimalWriter writer =
-                      isRepeated
-                          ? list(name).decimal()
-                          : getWriterProvider()
-                              .decimal(
-                                  name,
-                                  type.getDecimalMetadata().getScale(),
-                                  type.getDecimalMetadata().getPrecision());
-                  return new Decimal9Converter(
-                      writer,
-                      type.getDecimalMetadata().getPrecision(),
-                      type.getDecimalMetadata().getScale(),
-                      mutator.getManagedBuffer());
-                }
-              case DATE:
-                {
-                  DateMilliWriter writer =
-                      isRepeated ? list(name).dateMilli() : getWriterProvider().date(name);
-                  switch (schemaHelper.getDateCorruptionStatus()) {
-                    case META_SHOWS_CORRUPTION:
-                      return new CorruptedDateConverter(writer);
-                    case META_SHOWS_NO_CORRUPTION:
-                      return new DateConverter(writer);
-                    case META_UNCLEAR_TEST_VALUES:
-                      return new CorruptionDetectingDateConverter(writer);
-                    default:
-                      // See DRILL-4203
-                      throw new RuntimeException(
-                          String.format(
-                              "Issue setting up parquet reader for date type, "
-                                  + "unrecognized date corruption status %s.",
-                              schemaHelper.getDateCorruptionStatus()));
-                  }
-                }
-              case TIME_MILLIS:
-                {
-                  TimeMilliWriter writer =
-                      isRepeated ? list(name).timeMilli() : getWriterProvider().time(name);
-                  return new TimeConverter(writer);
-                }
-              default:
-                // fall back to primitive type
+          LogicalTypeAnnotation logicalTypeAnnotation = type.getLogicalTypeAnnotation();
+          if (logicalTypeAnnotation != null) {
+            if (logicalTypeAnnotation instanceof DecimalLogicalTypeAnnotation) {
+              ParquetReaderUtility.checkDecimalTypeEnabled(options);
+              DecimalLogicalTypeAnnotation decimalAnnotation =
+                  (DecimalLogicalTypeAnnotation) logicalTypeAnnotation;
+              DecimalWriter writer =
+                  isRepeated
+                      ? list(name).decimal()
+                      : getWriterProvider()
+                          .decimal(
+                              name, decimalAnnotation.getScale(), decimalAnnotation.getPrecision());
+              return new Decimal9Converter(
+                  writer,
+                  decimalAnnotation.getPrecision(),
+                  decimalAnnotation.getScale(),
+                  mutator.getManagedBuffer());
+            }
+            if (logicalTypeAnnotation instanceof DateLogicalTypeAnnotation) {
+              DateMilliWriter writer =
+                  isRepeated ? list(name).dateMilli() : getWriterProvider().date(name);
+              switch (schemaHelper.getDateCorruptionStatus()) {
+                case META_SHOWS_CORRUPTION:
+                  return new CorruptedDateConverter(writer);
+                case META_SHOWS_NO_CORRUPTION:
+                  return new DateConverter(writer);
+                case META_UNCLEAR_TEST_VALUES:
+                  return new CorruptionDetectingDateConverter(writer);
+                default:
+                  // See DRILL-4203
+                  throw new RuntimeException(
+                      String.format(
+                          "Issue setting up parquet reader for date type, "
+                              + "unrecognized date corruption status %s.",
+                          schemaHelper.getDateCorruptionStatus()));
+              }
+            }
+            if (logicalTypeAnnotation instanceof TimeLogicalTypeAnnotation) {
+              TimeLogicalTypeAnnotation timeAnnotation =
+                  (TimeLogicalTypeAnnotation) logicalTypeAnnotation;
+              if (timeAnnotation.getUnit() == TimeUnit.MILLIS) {
+                TimeMilliWriter writer =
+                    isRepeated ? list(name).timeMilli() : getWriterProvider().time(name);
+                return new TimeConverter(writer);
+              }
             }
           }
           IntWriter writer = isRepeated ? list(name).integer() : getWriterProvider().integer(name);
@@ -419,48 +423,48 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
         }
       case INT64:
         {
-          OriginalType originalType = type.getOriginalType();
-          if (originalType != null) {
-            switch (originalType) {
-              case DECIMAL:
-                {
-                  ParquetReaderUtility.checkDecimalTypeEnabled(options);
-                  DecimalMetadata metadata = type.getDecimalMetadata();
-                  DecimalWriter writer =
-                      isRepeated
-                          ? list(name).decimal()
-                          : getWriterProvider()
-                              .decimal(name, metadata.getScale(), metadata.getPrecision());
-                  return new Decimal18Converter(
-                      writer,
-                      type.getDecimalMetadata().getPrecision(),
-                      type.getDecimalMetadata().getScale(),
-                      mutator.getManagedBuffer());
-                }
-              case TIMESTAMP_MILLIS:
-                {
-                  TimeStampMilliWriter writer =
-                      isRepeated
-                          ? list(name).timeStampMilli()
-                          : getWriterProvider().timeStamp(name);
+          LogicalTypeAnnotation logicalTypeAnnotation = type.getLogicalTypeAnnotation();
+          if (logicalTypeAnnotation != null) {
+            if (logicalTypeAnnotation instanceof DecimalLogicalTypeAnnotation) {
+              ParquetReaderUtility.checkDecimalTypeEnabled(options);
+              DecimalLogicalTypeAnnotation decimalAnnotation =
+                  (DecimalLogicalTypeAnnotation) logicalTypeAnnotation;
+              DecimalWriter writer =
+                  isRepeated
+                      ? list(name).decimal()
+                      : getWriterProvider()
+                          .decimal(
+                              name, decimalAnnotation.getScale(), decimalAnnotation.getPrecision());
+              return new Decimal18Converter(
+                  writer,
+                  decimalAnnotation.getPrecision(),
+                  decimalAnnotation.getScale(),
+                  mutator.getManagedBuffer());
+            }
+            if (logicalTypeAnnotation instanceof TimestampLogicalTypeAnnotation) {
+              TimeStampMilliWriter writer =
+                  isRepeated ? list(name).timeStampMilli() : getWriterProvider().timeStamp(name);
+              TimestampLogicalTypeAnnotation timestampAnnotation =
+                  (TimestampLogicalTypeAnnotation) logicalTypeAnnotation;
+
+              switch (timestampAnnotation.getUnit()) {
+                case MILLIS:
                   return new TimeStampConverter(writer);
-                }
-              case TIMESTAMP_MICROS:
-                {
-                  TimeStampMilliWriter writer =
-                      isRepeated
-                          ? list(name).timeStampMilli()
-                          : getWriterProvider().timeStamp(name);
+                case MICROS:
                   return new TimeStampMicroConverter(writer);
-                }
-              case TIME_MICROS:
-                {
-                  TimeMilliWriter writer =
-                      isRepeated ? list(name).timeMilli() : getWriterProvider().time(name);
-                  return new TimeMicroConverter(writer);
-                }
-              default:
-                // fall back to primitive type
+                default:
+                  throw new UnsupportedOperationException(
+                      "Unsupported timestamp unit: " + timestampAnnotation.getUnit());
+              }
+            }
+            if (logicalTypeAnnotation instanceof TimeLogicalTypeAnnotation) {
+              TimeLogicalTypeAnnotation timeAnnotation =
+                  (TimeLogicalTypeAnnotation) logicalTypeAnnotation;
+              if (timeAnnotation.getUnit() == TimeUnit.MICROS) {
+                TimeMilliWriter writer =
+                    isRepeated ? list(name).timeMilli() : getWriterProvider().time(name);
+                return new TimeMicroConverter(writer);
+              }
             }
           }
           BigIntWriter writer = isRepeated ? list(name).bigInt() : getWriterProvider().bigInt(name);
@@ -503,34 +507,29 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
         }
       case BINARY:
         {
-          OriginalType originalType = type.getOriginalType();
-          if (originalType != null) {
-            switch (type.getOriginalType()) {
-              case UTF8:
-                {
-                  VarCharWriter writer =
-                      isRepeated ? list(name).varChar() : getWriterProvider().varChar(name);
-                  return new VarCharConverter(
-                      writer, mutator.getManagedBuffer(), maxFieldSizeLimit);
-                }
-                // TODO not sure if BINARY/DECIMAL is actually supported
-              case DECIMAL:
-                {
-                  ParquetReaderUtility.checkDecimalTypeEnabled(options);
-                  DecimalMetadata metadata = type.getDecimalMetadata();
-                  DecimalWriter writer =
-                      isRepeated
-                          ? list(name).decimal()
-                          : getWriterProvider()
-                              .decimal(name, metadata.getScale(), metadata.getPrecision());
-                  return new BinaryToDecimal28Converter(
-                      writer,
-                      metadata.getPrecision(),
-                      metadata.getScale(),
-                      mutator.getManagedBuffer());
-                }
-              default:
-                // fall back to primitive type
+          LogicalTypeAnnotation logicalTypeAnnotation = type.getLogicalTypeAnnotation();
+          if (logicalTypeAnnotation != null) {
+            if (logicalTypeAnnotation instanceof StringLogicalTypeAnnotation) {
+              VarCharWriter writer =
+                  isRepeated ? list(name).varChar() : getWriterProvider().varChar(name);
+              return new VarCharConverter(writer, mutator.getManagedBuffer(), maxFieldSizeLimit);
+            }
+            // TODO not sure if BINARY/DECIMAL is actually supported
+            if (logicalTypeAnnotation instanceof DecimalLogicalTypeAnnotation) {
+              ParquetReaderUtility.checkDecimalTypeEnabled(options);
+              DecimalLogicalTypeAnnotation decimalAnnotation =
+                  (DecimalLogicalTypeAnnotation) logicalTypeAnnotation;
+              DecimalWriter writer =
+                  isRepeated
+                      ? list(name).decimal()
+                      : getWriterProvider()
+                          .decimal(
+                              name, decimalAnnotation.getScale(), decimalAnnotation.getPrecision());
+              return new BinaryToDecimal28Converter(
+                  writer,
+                  decimalAnnotation.getPrecision(),
+                  decimalAnnotation.getScale(),
+                  mutator.getManagedBuffer());
             }
           }
 
@@ -545,15 +544,21 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
           return new VarBinaryConverter(writer, mutator.getManagedBuffer(), maxFieldSizeLimit);
         }
       case FIXED_LEN_BYTE_ARRAY:
-        if (type.getOriginalType() == OriginalType.DECIMAL) {
+        if (type.getLogicalTypeAnnotation() instanceof DecimalLogicalTypeAnnotation) {
           ParquetReaderUtility.checkDecimalTypeEnabled(options);
-          DecimalMetadata metadata = type.getDecimalMetadata();
+          DecimalLogicalTypeAnnotation decimalAnnotation =
+              (DecimalLogicalTypeAnnotation) type.getLogicalTypeAnnotation();
           DecimalWriter writer =
               isRepeated
                   ? list(name).decimal()
-                  : getWriterProvider().decimal(name, metadata.getScale(), metadata.getPrecision());
+                  : getWriterProvider()
+                      .decimal(
+                          name, decimalAnnotation.getScale(), decimalAnnotation.getPrecision());
           return new BinaryToDecimal28Converter(
-              writer, metadata.getPrecision(), metadata.getScale(), mutator.getManagedBuffer());
+              writer,
+              decimalAnnotation.getPrecision(),
+              decimalAnnotation.getScale(),
+              mutator.getManagedBuffer());
         }
         if (schemaHelper.isVarChar(SchemaPath.getSimplePath(name))) {
           VarCharWriter writer =
@@ -707,10 +712,9 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
     public void addInt(int value) {
       if (value > ParquetReaderUtility.DATE_CORRUPTION_THRESHOLD) {
         holder.value =
-            (value - ParquetReaderUtility.CORRECT_CORRUPT_DATE_SHIFT)
-                * DateTimeConstants.MILLIS_PER_DAY;
+            (value - ParquetReaderUtility.CORRECT_CORRUPT_DATE_SHIFT) * DateTimes.MILLIS_PER_DAY;
       } else {
-        holder.value = value * (long) DateTimeConstants.MILLIS_PER_DAY;
+        holder.value = value * DateTimes.MILLIS_PER_DAY;
       }
       writer.write(holder);
       setWritten();
@@ -733,8 +737,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
     @Override
     public void addInt(int value) {
       holder.value =
-          (value - ParquetReaderUtility.CORRECT_CORRUPT_DATE_SHIFT)
-              * DateTimeConstants.MILLIS_PER_DAY;
+          (value - ParquetReaderUtility.CORRECT_CORRUPT_DATE_SHIFT) * DateTimes.MILLIS_PER_DAY;
       writer.write(holder);
       setWritten();
     }
@@ -755,7 +758,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
 
     @Override
     public void addInt(int value) {
-      holder.value = value * (long) DateTimeConstants.MILLIS_PER_DAY;
+      holder.value = value * DateTimes.MILLIS_PER_DAY;
       writer.writeDateMilli(holder.value);
       setWritten();
     }
@@ -1136,7 +1139,7 @@ abstract class ParquetGroupConverter extends GroupConverter implements ParquetLi
         return 64;
       case INT96:
         return 96;
-        // binary and fixed length byte array
+      // binary and fixed length byte array
       default:
         throw new IllegalStateException("Length cannot be determined for type " + type);
     }

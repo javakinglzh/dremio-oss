@@ -90,4 +90,7 @@ public interface TransientStore<K, V> {
    * @return
    */
   Iterable<Document<K, V>> find(String pattern, KVStore.GetOption... options);
+
+  /** Removes all the entries from the given transient store. */
+  void deleteAll();
 }

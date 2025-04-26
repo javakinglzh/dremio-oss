@@ -182,6 +182,11 @@ final class TaskInfoLogger implements SchedulerEvents, AutoCloseable {
     }
 
     @Override
+    public void bookingPaused() {
+      this.currentLogEventQ.add(new DefaultLogEvent(LogEventType.BOOKING_PAUSED));
+    }
+
+    @Override
     public void contractError() {
       // do immediate logging at warning level as this should never happen
       LOGGER.warn(
@@ -440,6 +445,7 @@ final class TaskInfoLogger implements SchedulerEvents, AutoCloseable {
     BOOKING_LOST("%s: Booking lost for task %s"),
     BOOKING_RECHECK("%s: Checking if booking is still available for task %s"),
     BOOKING_REGAINED("%s: Booking regained for task %s"),
+    BOOKING_PAUSED("%s: Booking paused for task %s"),
     RECOVERED("%s: Task %s successfully recovered"),
     RECOVERY_REJECTED("%s: Recovery rejected for task %s due to %s "),
     SCHEDULE_MODIFIED("%s: Schedule Modified for task %s. New Scheduled Details : %s"),

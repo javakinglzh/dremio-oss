@@ -24,7 +24,7 @@ import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
 type DataPlaneSectionProps = {
   dataPlaneSources: any;
   sourcesViewState: any;
-  addHref: () => void;
+  addHref?: () => void;
   height?: string;
   location?: any;
   onToggle?: any;
@@ -45,7 +45,7 @@ function DataPlaneSection({
   const intl = useIntl();
   const hasProjectId = getSonarContext()?.getSelectedProjectId?.();
   const linkTo = hasProjectId
-    ? commonPaths.arctic.link({
+    ? commonPaths.lakehouse.link({
         projectId: getSonarContext()?.getSelectedProjectId?.(),
       })
     : commonPaths.lakehouse.link({});
@@ -69,14 +69,10 @@ function DataPlaneSection({
           location={location}
           navItems={dataPlaneSources}
           title={intl.formatMessage({
-            id: hasProjectId
-              ? "Source.ArcticCatalogs"
-              : "Source.LakehouseCatalogs",
+            id: "Source.LakehouseCatalogs",
           })}
           addTooltip={intl.formatMessage({
-            id: hasProjectId
-              ? "Source.AddArcticCatalog"
-              : "Source.AddLakehouse",
+            id: "Source.AddLakehouse",
           })}
           isInProgress={sourcesViewState.get("isInProgress")}
           addHref={addHref}

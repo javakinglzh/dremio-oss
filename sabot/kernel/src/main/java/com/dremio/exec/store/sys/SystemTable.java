@@ -22,12 +22,12 @@ import com.dremio.connector.metadata.DatasetStats;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.PartitionChunk;
 import com.dremio.connector.metadata.PartitionChunkListing;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordDataType;
 import com.dremio.exec.store.pojo.PojoDataType;
 import com.dremio.exec.store.sys.OptionIterator.OptionValueWrapper;
@@ -63,22 +63,25 @@ import org.apache.calcite.rel.type.RelDataType;
 public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChunkListing {
   OPTION(false, OptionValueWrapper.class, "options") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new OptionIterator(sContext, context, OptionIterator.Mode.SYS_SESS);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new OptionIterator(pluginSabotContext, context, OptionIterator.Mode.SYS_SESS);
     }
   },
 
   BOOT(false, OptionValueWrapper.class, "boot") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new OptionIterator(sContext, context, OptionIterator.Mode.BOOT);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new OptionIterator(pluginSabotContext, context, OptionIterator.Mode.BOOT);
     }
   },
 
   NODES(true, NodeInstance.class, "nodes") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new NodeIterator(sContext, context);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new NodeIterator(pluginSabotContext, context);
     }
   },
 
@@ -86,59 +89,68 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   // users have inconsistent versions installed across their cluster?
   VERSION(false, VersionIterator.VersionInfo.class, "version") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
       return new VersionIterator();
     }
   },
 
   MEMORY(true, MemoryIterator.MemoryInfo.class, "memory") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new MemoryIterator(sContext);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new MemoryIterator(
+          pluginSabotContext.getEndpoint(), pluginSabotContext.getAllocator());
     }
   },
 
   THREADS(true, ThreadsIterator.ThreadSummary.class, "threads") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new ThreadsIterator(sContext);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new ThreadsIterator(
+          pluginSabotContext.getWorkStatsProvider().get(), pluginSabotContext.getEndpoint());
     }
   },
 
   FRAGMENTS(true, FragmentInfo.class, "fragments") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new FragmentIterator(sContext, context);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new FragmentIterator(pluginSabotContext, context);
     }
   },
 
   REFLECTIONS(false, ReflectionInfo.class, "reflections") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getAccelerationListManager().getReflections();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext.getAccelerationListManager().getReflections();
     }
   },
 
   REFRESH(false, AccelerationListManager.RefreshInfo.class, "refreshes") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getAccelerationListManager().getRefreshInfos();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext.getAccelerationListManager().getRefreshInfos();
     }
   },
 
   MATERIALIZATIONS(false, MaterializationInfo.class, "materializations") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getAccelerationListManager().getMaterializations();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext.getAccelerationListManager().getMaterializations();
     }
   },
 
   SLICING_THREADS(true, SlicingThreadInfo.class, "slicing_threads") {
     @Override
-    public Iterator<?> getIterator(SabotContext sContext, OperatorContext context) {
-      final CoordinationProtos.NodeEndpoint endpoint = sContext.getEndpoint();
+    public Iterator<?> getIterator(PluginSabotContext pluginSabotContext, OperatorContext context) {
+      final CoordinationProtos.NodeEndpoint endpoint = pluginSabotContext.getEndpoint();
       final Iterable<TaskPool.ThreadInfo> threadInfos =
-          sContext.getWorkStatsProvider().get().getSlicingThreads();
+          pluginSabotContext.getWorkStatsProvider().get().getSlicingThreads();
       return StreamSupport.stream(threadInfos.spliterator(), false)
           .map(
               (info) ->
@@ -149,51 +161,57 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
 
   DEPENDENCIES(false, AccelerationListManager.DependencyInfo.class, "dependencies") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getAccelerationListManager().getReflectionDependencies();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext.getAccelerationListManager().getReflectionDependencies();
     }
   },
 
   SERVICES(false, ServicesIterator.ServiceSetInfo.class, "services") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new ServicesIterator(sContext);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new ServicesIterator(pluginSabotContext);
     }
   },
 
   CACHE_MANAGER_MOUNT_POINTS(true, CacheManagerMountPointInfo.class, "cache", "mount_points") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new CacheManagerMountPointIterator(sContext, context);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new CacheManagerMountPointIterator(pluginSabotContext, context);
     }
   },
 
   CACHE_MANAGER_STORAGE_PLUGINS(
       true, CacheManagerStoragePluginInfo.class, "cache", "storage_plugins") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new CacheManagerStoragePluginIterator(sContext, context);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new CacheManagerStoragePluginIterator(pluginSabotContext, context);
     }
   },
 
   CACHE_MANAGER_DATASETS(true, CacheManagerDatasetInfo.class, "cache", "datasets") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new CacheManagerDatasetIterator(sContext);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new CacheManagerDatasetIterator(pluginSabotContext);
     }
   },
 
   CACHE_MANAGER_FILES(true, CacheManagerFilesInfo.class, "cache", "objects") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return new CacheManagerFilesIterator(sContext);
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return new CacheManagerFilesIterator(pluginSabotContext);
     }
   },
 
   TIMEZONE_ABBREVIATIONS(false, TimezoneAbbreviations.TimezoneAbbr.class, "timezone_abbrevs") {
     @Override
     public Iterator<?> getIterator(
-        final SabotContext sabotContext, final OperatorContext operatorContext) {
+        final PluginSabotContext sabotContext, final OperatorContext operatorContext) {
       return TimezoneAbbreviations.getIterator();
     }
   },
@@ -201,7 +219,7 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   TIMEZONE_NAMES(false, TimezoneNames.TimezoneRegion.class, "timezone_names") {
     @Override
     public Iterator<?> getIterator(
-        final SabotContext sabotContext, final OperatorContext operatorContext) {
+        final PluginSabotContext sabotContext, final OperatorContext operatorContext) {
       return TimezoneNames.getIterator();
     }
   },
@@ -209,7 +227,7 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   ROLES(false, SysTableRoleInfo.class, "roles") {
     @Override
     public Iterator<?> getIterator(
-        final SabotContext sabotContext, final OperatorContext operatorContext) {
+        final PluginSabotContext sabotContext, final OperatorContext operatorContext) {
       try {
         final AccessControlListingManager accessControlListingManager =
             sabotContext.getAccessControlListingManager();
@@ -227,7 +245,7 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   PRIVILEGES(false, SysTablePrivilegeInfo.class, "privileges") {
     @Override
     public Iterator<?> getIterator(
-        final SabotContext sabotContext, final OperatorContext operatorContext) {
+        final PluginSabotContext sabotContext, final OperatorContext operatorContext) {
       try {
         final AccessControlListingManager accessControlListingManager =
             sabotContext.getAccessControlListingManager();
@@ -245,7 +263,7 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   MEMBERSHIP(false, SysTableMembershipInfo.class, "membership") {
     @Override
     public Iterator<?> getIterator(
-        final SabotContext sabotContext, final OperatorContext operatorContext) {
+        final PluginSabotContext sabotContext, final OperatorContext operatorContext) {
       try {
         final AccessControlListingManager accessControlListingManager =
             sabotContext.getAccessControlListingManager();
@@ -262,16 +280,26 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
 
   TABLE_STATISTICS(false, StatisticsListManager.StatisticsInfo.class, "table_statistics") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getStatisticsListManagerProvider().get().getStatisticsInfos().iterator();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext
+          .getStatisticsListManagerProvider()
+          .get()
+          .getStatisticsInfos()
+          .iterator();
     }
   },
 
   USER_DEFINED_FUNCTIONS(
       false, UserDefinedFunctionService.FunctionInfo.class, "user_defined_functions") {
     @Override
-    public Iterator<?> getIterator(final SabotContext sContext, final OperatorContext context) {
-      return sContext.getUserDefinedFunctionListManagerProvider().get().functionInfos().iterator();
+    public Iterator<?> getIterator(
+        final PluginSabotContext pluginSabotContext, final OperatorContext context) {
+      return pluginSabotContext
+          .getUserDefinedFunctionListManagerProvider()
+          .get()
+          .functionInfos()
+          .iterator();
     }
   };
 
@@ -301,7 +329,7 @@ public enum SystemTable implements DatasetHandle, DatasetMetadata, PartitionChun
   }
 
   public abstract Iterator<?> getIterator(
-      final SabotContext sContext, final OperatorContext context);
+      final PluginSabotContext pluginSabotContext, final OperatorContext context);
 
   public boolean isDistributed() {
     return distributed;

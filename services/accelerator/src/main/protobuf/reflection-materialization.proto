@@ -47,17 +47,17 @@ message Materialization {
   optional Failure failure = 13; // failure details set if state is failed
 
   optional int64 series_id = 23;
-  repeated DataPartition partition = 8; // nodes containing materialized data
+  repeated DataPartition partition = 8 [deprecated = true]; // nodes containing materialized data
   optional int64 init_refresh_submit = 19;
   optional int64 init_refresh_execution = 20;
   optional string init_refresh_job_id = 21;
   optional int32 seriesOrdinal = 22 [default = 0];
   optional string tag = 24;
   optional string reflectionGoalVersion = 25;
-  optional bool arrowCachingEnabled = 27 [default = false]; // true if boost columns are enabled for caching
+  optional bool arrowCachingEnabled = 27 [default = false, deprecated = true]; // true if boost columns are enabled for caching
   optional ReflectionGoalHash reflection_goal_hash = 28;
   optional string base_path = 29;
-  optional bool is_iceberg_dataset = 30;
+  optional bool is_iceberg_dataset = 30 [default = true];
   optional bool force_full_refresh = 31;
   optional int32 strip_version = 32;
   optional int64 previous_iceberg_snapshot = 33;
@@ -83,11 +83,11 @@ message Refresh {
   optional JobDetails job = 7;
   optional MaterializationMetrics metrics = 8;
   optional int64 legacy_update_id = 9 [deprecated = true];
-  repeated DataPartition partition = 10; // nodes containing materialized data
+  repeated DataPartition partition = 10 [deprecated = true]; // nodes containing materialized data
   optional int32 seriesOrdinal = 11 [default = 0]; // refresh order in its series, 0 for initial refresh
   optional bool compacted = 12 [default = false]; // true if this refresh is the result of a compaction
   optional UpdateId update_id = 13;
-  optional bool is_iceberg_refresh = 14;
+  optional bool is_iceberg_refresh = 14 [default = true];
   optional string base_path = 15;
 }
 
@@ -104,6 +104,8 @@ message MaterializationPlan {
   required int64 created_at = 6;
   required int64 modified_at = 7;
   optional string tag = 8;
+  optional string matching_hash = 9;
+  optional bytes hash_fragment = 10;
 }
 
 // materialization job details
@@ -124,7 +126,7 @@ message RefreshDecision {
   optional int64 series_id = 3;
   optional com.dremio.service.namespace.dataset.proto.AccelerationSettings acceleration_settings = 4;
   optional int32 dataset_hash = 5;
-  optional bytes logical_plan = 6;
+  optional bytes logical_plan = 6 [deprecated = true];
   optional int64 logical_plan_stripped_hash = 9;
   repeated ScanPath scan_paths = 7;
   optional int32 series_ordinal = 8 [default = 0];
@@ -141,7 +143,7 @@ message RefreshDecision {
 
 // data partition host address
 message DataPartition {
-  required string address = 1;
+  required string address = 1 [deprecated = true];
 }
 
 // details about materialization

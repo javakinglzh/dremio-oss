@@ -18,12 +18,18 @@ package com.dremio.telemetry.api.metrics;
 
 import static io.micrometer.core.instrument.Metrics.globalRegistry;
 
+import com.google.common.base.Preconditions;
+import com.google.common.base.Strings;
+import com.google.common.util.concurrent.AtomicDouble;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.DistributionSummary;
-import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Meter.MeterProvider;
 import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
 import io.micrometer.core.instrument.Timer;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /** Factory class to simplify creation of Micrometer meters. */
@@ -232,8 +238,8 @@ public final class MeterProviders {
    * @param f a function that yields a double value for the gauge
    * @return a new Gauge
    */
-  public static Gauge newGauge(String name, Supplier<Number> f) {
-    return Gauge.builder(name, f).register(globalRegistry);
+  public static io.micrometer.core.instrument.Gauge newGauge(String name, Supplier<Number> f) {
+    return io.micrometer.core.instrument.Gauge.builder(name, f).register(globalRegistry);
   }
 
   /**
@@ -245,8 +251,11 @@ public final class MeterProviders {
    * @param f a function that yields a double value for the gauge
    * @return a new Gauge
    */
-  public static Gauge newGauge(String name, String description, Supplier<Number> f) {
-    return Gauge.builder(name, f).description(description).register(globalRegistry);
+  public static io.micrometer.core.instrument.Gauge newGauge(
+      String name, String description, Supplier<Number> f) {
+    return io.micrometer.core.instrument.Gauge.builder(name, f)
+        .description(description)
+        .register(globalRegistry);
   }
 
   /**
@@ -259,9 +268,47 @@ public final class MeterProviders {
    * @param f a function that yields a double value for the gauge
    * @return a new Gauge
    */
-  public static Gauge newGauge(
+  public static io.micrometer.core.instrument.Gauge newGauge(
       String name, String description, Iterable<Tag> tags, Supplier<Number> f) {
-    return Gauge.builder(name, f).description(description).tags(tags).register(globalRegistry);
+    return io.micrometer.core.instrument.Gauge.builder(name, f)
+        .description(description)
+        .tags(tags)
+        .register(globalRegistry);
+  }
+
+  private static final Map<Meter.Id, AtomicDouble> gauges = new ConcurrentHashMap<>();
+
+  /**
+   * Create a new Gauge with the given name and description, which can be updated manually (for
+   * example, when an event occurs).
+   *
+   * @param name the name of the Gauge
+   * @param description the description of the Gauge
+   * @return a new Gauge
+   */
+  public static Gauge newGaugeProvider(String name, String description) {
+    Preconditions.checkArgument(
+        !Strings.isNullOrEmpty(name), "Gauge name can not be null or empty!");
+
+    return new Gauge() {
+      @Override
+      public void set(double value, String... labelValues) {
+        throw new UnsupportedOperationException();
+      }
+
+      @Override
+      public void set(double value, Tags tags) {
+        // If we have new labelValues for existing labels, we introduce a unique gauge variable for
+        // the new combination.
+        AtomicDouble gauge =
+            gauges.computeIfAbsent(
+                new Meter.Id(name, tags, null, description, Meter.Type.GAUGE),
+                k -> new AtomicDouble());
+
+        newGauge(name, description, tags, gauge::get);
+        gauge.set(value);
+      }
+    };
   }
 
   private MeterProviders() {

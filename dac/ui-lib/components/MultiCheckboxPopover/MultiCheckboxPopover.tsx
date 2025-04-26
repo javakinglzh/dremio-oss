@@ -33,6 +33,7 @@ type MultiCheckboxPopoverProps = {
   hasSearch?: boolean;
   searchPlaceholder?: string;
   onSearch?: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  searchTerm?: string;
   className?: string;
   buttonProps?: {
     leftIcon?: JSX.Element;
@@ -46,8 +47,10 @@ export const MultiCheckboxPopover = forwardRef<
   HTMLDivElement,
   MultiCheckboxPopoverProps
 >((props, ref) => {
-  const { selectedtListItems = [] } = props;
+  const { selectedtListItems = [], searchTerm = "" } = props;
   const [search, setSearch] = React.useState("");
+
+  const searchKey = props.onSearch ? searchTerm : search;
 
   const handleCheck = (newItem: Item) => {
     if (!selectedtListItems.find((item) => item.id === newItem.id)) {
@@ -97,6 +100,7 @@ export const MultiCheckboxPopover = forwardRef<
                   <Input
                     placeholder={props.searchPlaceholder || "Search"}
                     onChange={onSearch}
+                    value={searchKey}
                     className="mt-1 mb-1"
                   />
                 </div>

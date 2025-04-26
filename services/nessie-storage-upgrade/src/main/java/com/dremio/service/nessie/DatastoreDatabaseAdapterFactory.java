@@ -15,9 +15,9 @@
  */
 package com.dremio.service.nessie;
 
-import org.projectnessie.versioned.persist.adapter.events.AdapterEventConsumer;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
-import org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterFactory;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.events.AdapterEventConsumer;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterConfig;
+import com.dremio.legacy.org.projectnessie.versioned.persist.nontx.NonTransactionalDatabaseAdapterFactory;
 
 public class DatastoreDatabaseAdapterFactory
     extends NonTransactionalDatabaseAdapterFactory<

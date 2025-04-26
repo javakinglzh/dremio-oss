@@ -47,7 +47,7 @@ import com.dremio.dac.explore.model.InitialRunResponse;
 import com.dremio.dac.explore.model.InitialUntitledRunResponse;
 import com.dremio.dac.explore.model.ParentDatasetUI;
 import com.dremio.dac.explore.model.VersionContextReq;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.job.JobDataFragment;
 import com.dremio.dac.model.job.JobFilterItems;
 import com.dremio.dac.model.job.QueryError;
@@ -64,6 +64,7 @@ import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.service.errors.InvalidQueryException;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.jobs.JobRequest;
@@ -129,6 +130,7 @@ public class TestServer extends BaseTestServer {
             getBuilder(getHttpClient().getAPIv2().path(sourceResource))
                 .buildPut(Entity.json(source)),
             SourceUI.class);
+    putSource1.setTag(waitForSourceModificationAndGetNewTag(putSource1.getName()));
 
     doc("update source 1");
     ((NASConf) putSource1.getConfig()).path = v1.getAbsolutePath();
@@ -202,7 +204,8 @@ public class TestServer extends BaseTestServer {
       final NASConf nas = new NASConf();
       nas.path = System.getProperty("user.dir") + "/src/test/resources/datasets";
       sourceUI.setConfig(nas);
-      sourceService.registerSourceWithRuntime(sourceUI);
+      sourceService.registerSourceWithRuntime(
+          sourceUI, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
 
     final SourceUI source =
@@ -469,11 +472,11 @@ public class TestServer extends BaseTestServer {
 
     String spaceResource = "space/s1/folder/f1";
     doc("create folder 1");
-    final Folder postFolder1 =
+    final FolderModel postFolder1 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/"))
                 .buildPost(Entity.json("{\"name\": \"f1\"}")),
-            Folder.class);
+            FolderModel.class);
 
     // Currently we use the same method to create new and update existing entries. This doesn't help
     // throwing proper errors to client
@@ -541,38 +544,38 @@ public class TestServer extends BaseTestServer {
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s2/folder/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s3/folder/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
 
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/"))
             .buildPost(Entity.json("{\"name\": \"f2\"}")),
-        Folder.class);
+        FolderModel.class);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1"))
             .buildPost(Entity.json("{\"name\": \"f2\"}")),
-        Folder.class);
+        FolderModel.class);
 
     doc("get folder config");
-    Folder s1f1 =
+    FolderModel s1f1 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1")).buildGet(),
-            Folder.class);
+            FolderModel.class);
     assertEquals("f1", s1f1.getName());
     Assert.assertArrayEquals(new String[] {"s1", "f1"}, s1f1.getFullPathList().toArray());
 
@@ -582,7 +585,7 @@ public class TestServer extends BaseTestServer {
     assertEquals(2, lists1f1.getFolders().size());
 
     doc("folder with no content");
-    Folder noContents1f1 =
+    FolderModel noContents1f1 =
         expectSuccess(
             getBuilder(
                     getHttpClient()
@@ -590,7 +593,7 @@ public class TestServer extends BaseTestServer {
                         .path("space/s1/folder/f1")
                         .queryParam("includeContents", false))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     assertEquals("f1", noContents1f1.getName());
     Assert.assertArrayEquals(new String[] {"s1", "f1"}, noContents1f1.getFullPathList().toArray());
     assertNull(noContents1f1.getContents());
@@ -598,7 +601,7 @@ public class TestServer extends BaseTestServer {
     NamespaceTree lists1f1f2 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f2")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(0, lists1f1f2.getDatasets().size());
     assertEquals(0, lists1f1f2.getFolders().size());
@@ -606,7 +609,7 @@ public class TestServer extends BaseTestServer {
     NamespaceTree lists1f1f1f1 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(0, lists1f1f1f1.getDatasets().size());
     assertEquals(1, lists1f1f1f1.getFolders().size());
@@ -615,15 +618,15 @@ public class TestServer extends BaseTestServer {
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1/f2"))
                     .buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(0, lists1f1f1f1f2.getDatasets().size());
     assertEquals(0, lists1f1f1f1f2.getFolders().size());
 
-    Folder f2 =
+    FolderModel f2 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1/f2")).buildGet(),
-            Folder.class);
+            FolderModel.class);
     expectSuccess(
         getBuilder(
                 getHttpClient()
@@ -635,7 +638,7 @@ public class TestServer extends BaseTestServer {
     lists1f1f1f1 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(0, lists1f1f1f1.getDatasets().size());
     assertEquals(0, lists1f1f1f1.getFolders().size());
@@ -669,7 +672,7 @@ public class TestServer extends BaseTestServer {
     lists1f1f1f1 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f1/f1")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(1, lists1f1f1f1.getDatasets().size());
     assertEquals(0, lists1f1f1f1.getFolders().size());
@@ -677,7 +680,7 @@ public class TestServer extends BaseTestServer {
     lists1f1 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(2, lists1f1.getDatasets().size());
     assertEquals(2, lists1f1.getFolders().size());
@@ -685,7 +688,7 @@ public class TestServer extends BaseTestServer {
     lists1f1f2 =
         expectSuccess(
                 getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/f1/f2")).buildGet(),
-                Folder.class)
+                FolderModel.class)
             .getContents();
     assertEquals(0, lists1f1f2.getDatasets().size());
     assertEquals(0, lists1f1f2.getFolders().size());
@@ -734,7 +737,7 @@ public class TestServer extends BaseTestServer {
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/s1/folder/"))
             .buildPost(Entity.json("{\"name\": \"f1\"}")),
-        Folder.class);
+        FolderModel.class);
 
     expectStatus(
         Status.BAD_REQUEST,
@@ -867,10 +870,10 @@ public class TestServer extends BaseTestServer {
     assertEquals(2, space1.getDatasetCount());
 
     doc("get folder");
-    Folder folder2 =
+    FolderModel folder2 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("space/space1/folder/f2")).buildGet(),
-            Folder.class);
+            FolderModel.class);
     assertEquals("f2", folder2.getName());
 
     doc("list inside space");
@@ -895,10 +898,6 @@ public class TestServer extends BaseTestServer {
     assertEquals(Arrays.asList("tag1", "tag2"), summary.getTags());
     assertEquals(summary.getEntityId(), UUID.fromString(summary.getEntityId()).toString());
     assertFalse(summary.getHasReflection());
-    assertEquals("dremio", summary.getOwnerName());
-    assertEquals("dremio@dremio.test", summary.getOwnerEmail());
-    assertEquals("dremio", summary.getLastModifyingUserName());
-    assertEquals("dremio@dremio.test", summary.getLastModifyingUserEmail());
     assertTrue(summary.getCreatedAt() <= summary.getLastModified());
     assertTrue(summary.getViewSpecVersion() == null);
     assertTrue(summary.getViewDialect() == null);
@@ -922,10 +921,6 @@ public class TestServer extends BaseTestServer {
     assertEquals(Arrays.asList("tag3", "tag4"), summary.getTags());
     assertEquals(summary.getEntityId(), UUID.fromString(summary.getEntityId()).toString());
     assertFalse(summary.getHasReflection());
-    assertEquals("dremio", summary.getOwnerName());
-    assertEquals("dremio@dremio.test", summary.getOwnerEmail());
-    assertEquals("dremio", summary.getLastModifyingUserName());
-    assertEquals("dremio@dremio.test", summary.getLastModifyingUserEmail());
     assertTrue(summary.getCreatedAt() <= summary.getLastModified());
     assertTrue(summary.getViewSpecVersion() == null);
     assertTrue(summary.getViewDialect() == null);
@@ -958,10 +953,6 @@ public class TestServer extends BaseTestServer {
     assertEquals(3, summary.getFields().size());
     assertEquals(summary.getEntityId(), UUID.fromString(summary.getEntityId()).toString());
     assertFalse(summary.getHasReflection());
-    assertEquals("dremio", summary.getOwnerName());
-    assertEquals("dremio@dremio.test", summary.getOwnerEmail());
-    assertEquals("dremio", summary.getLastModifyingUserName());
-    assertEquals("dremio@dremio.test", summary.getLastModifyingUserEmail());
     assertTrue(summary.getCreatedAt() <= summary.getLastModified());
 
     references = new HashMap<>();
@@ -978,10 +969,6 @@ public class TestServer extends BaseTestServer {
     assertEquals(3, summary.getFields().size());
     assertEquals(summary.getEntityId(), UUID.fromString(summary.getEntityId()).toString());
     assertFalse(summary.getHasReflection());
-    assertEquals("dremio", summary.getOwnerName());
-    assertEquals("dremio@dremio.test", summary.getOwnerEmail());
-    assertEquals("dremio", summary.getLastModifyingUserName());
-    assertEquals("dremio@dremio.test", summary.getLastModifyingUserEmail());
     assertTrue(summary.getCreatedAt() <= summary.getLastModified());
 
     references = new HashMap<>();
@@ -1002,10 +989,6 @@ public class TestServer extends BaseTestServer {
     assertEquals(3, summary.getFields().size());
     assertEquals(summary.getEntityId(), UUID.fromString(summary.getEntityId()).toString());
     assertFalse(summary.getHasReflection());
-    assertEquals("dremio", summary.getOwnerName());
-    assertEquals("dremio@dremio.test", summary.getOwnerEmail());
-    assertEquals("dremio", summary.getLastModifyingUserName());
-    assertEquals("dremio@dremio.test", summary.getLastModifyingUserEmail());
     assertTrue(summary.getCreatedAt() <= summary.getLastModified());
     assertThat(summary.getReferences()).usingRecursiveComparison().isEqualTo(references);
 

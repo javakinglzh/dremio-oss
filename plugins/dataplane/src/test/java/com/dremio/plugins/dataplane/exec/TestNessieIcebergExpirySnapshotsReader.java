@@ -39,6 +39,7 @@ import static org.mockito.Mockito.when;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.protos.QueryIdHelper;
+import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.expr.TypeHelper;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.hadoop.HadoopFileSystemConfigurationAdapter;
@@ -53,6 +54,7 @@ import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.IcebergFileType;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
 import com.dremio.exec.store.iceberg.SnapshotsScanOptions;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
 import com.dremio.exec.store.iceberg.nessie.IcebergNessieVersionedModel;
@@ -82,7 +84,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -99,6 +100,7 @@ import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarCharVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.BaseTable;
 import org.apache.iceberg.CatalogProperties;
@@ -196,7 +198,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
         new SnapshotsScanOptions(LIVE_SNAPSHOTS, System.currentTimeMillis(), 1);
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
 
     OutputMutator outputMutator = outputMutator();
     reader.setup(outputMutator);
@@ -218,13 +226,19 @@ public class TestNessieIcebergExpirySnapshotsReader {
         new SnapshotsScanOptions(LIVE_SNAPSHOTS, System.currentTimeMillis(), 1);
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
 
     Results results = getResults(reader);
 
     assertThat(results.rowCount).isEqualTo(2);
     assertThat(results.metadataPaths).containsExactlyInAnyOrder(meta1, meta2);
-    assertThat(results.snapshotEntries).isEmpty();
+    assertThat(results.datasetSnapshotEntryPairs).isEmpty();
   }
 
   @Test
@@ -262,7 +276,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
 
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
 
     List<String> expectedMeta = new ArrayList<>();
     Results results = getResults(reader);
@@ -282,7 +302,7 @@ public class TestNessieIcebergExpirySnapshotsReader {
     assertThat(results.rowCount).isEqualTo(expectedCountPerTable * 2); // two tables
     assertThat(results.metadataPaths).containsExactlyInAnyOrderElementsOf(expectedMeta);
 
-    assertThat(results.snapshotEntries).isEmpty();
+    assertThat(results.datasetSnapshotEntryPairs).isEmpty();
   }
 
   private void addMetaPaths(List<String> expectedMeta, Table... tables) {
@@ -318,7 +338,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
 
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
     tables.forEach(Table::refresh);
 
     Results results = getResults(reader);
@@ -337,7 +363,7 @@ public class TestNessieIcebergExpirySnapshotsReader {
     assertThat(results.rowCount).isEqualTo(expectedCountPerTable * noOfTables);
     assertThat(results.metadataPaths).containsExactlyInAnyOrderElementsOf(expectedMeta);
 
-    assertThat(results.snapshotEntries).isEmpty();
+    assertThat(results.datasetSnapshotEntryPairs).isEmpty();
   }
 
   @Test
@@ -363,7 +389,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
 
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
     tables.forEach(Table::refresh);
 
     List<String> expectedMeta =
@@ -378,22 +410,30 @@ public class TestNessieIcebergExpirySnapshotsReader {
                 .previousFiles()
                 .forEach(f -> expectedMeta.add(f.file())));
 
-    List<SnapshotEntry> expected =
+    List<Pair<String, SnapshotEntry>> expected =
         tables.stream()
-            .map(t -> ((BaseTable) t).operations().current())
+            .map(t -> ((BaseTable) t))
             .flatMap(
-                t ->
-                    t.snapshots().stream()
-                        .filter(s -> s.timestampMillis() <= cutoff)
-                        .sorted(Comparator.comparing(Snapshot::timestampMillis).reversed())
-                        .skip(1) // Skip latest
-                        .map(s -> new SnapshotEntry(t.metadataFileLocation(), s)))
+                t -> {
+                  TableMetadata currentOps = t.operations().current();
+                  return currentOps.snapshots().stream()
+                      .filter(s -> s.timestampMillis() <= cutoff)
+                      .sorted(Comparator.comparing(Snapshot::timestampMillis).reversed())
+                      .skip(1) // Skip latest
+                      .map(
+                          s -> {
+                            int atIndex = t.name().indexOf('@');
+                            return Pair.of(
+                                t.name().substring(0, atIndex),
+                                new SnapshotEntry(currentOps.metadataFileLocation(), s));
+                          });
+                })
             .collect(Collectors.toList());
 
     Results results = getResults(reader);
 
     assertThat(results.metadataPaths).containsExactlyInAnyOrderElementsOf(expectedMeta);
-    assertThat(results.snapshotEntries).containsExactlyInAnyOrderElementsOf(expected);
+    assertThat(results.datasetSnapshotEntryPairs).containsExactlyInAnyOrderElementsOf(expected);
   }
 
   @Test
@@ -419,7 +459,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
 
     NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
     tables.forEach(Table::refresh);
 
     List<String> expectedMeta =
@@ -434,29 +480,34 @@ public class TestNessieIcebergExpirySnapshotsReader {
                     .skip(2)
                     .forEach(f -> expectedMeta.add(f.file())));
 
-    Set<Long> expectedSnapshotIds =
+    List<Pair<String, Long>> expectedDatasetSnapshotIdPairs =
         tables.stream()
-            .map(t -> ((BaseTable) t).operations().current())
+            .map(t -> ((BaseTable) t))
             .flatMap(
-                t ->
-                    t.snapshots().stream()
-                        .filter(s -> s.timestampMillis() <= cutoff)
-                        .sorted(Comparator.comparing(Snapshot::timestampMillis).reversed())
-                        .limit(4)
-                        .skip(1) // min snapshots to keep excluding the latest one = 4-1
-                        .map(Snapshot::snapshotId))
-            .collect(Collectors.toSet());
+                t -> {
+                  TableMetadata currentOps = t.operations().current();
+                  return currentOps.snapshots().stream()
+                      .filter(s -> s.timestampMillis() <= cutoff)
+                      .sorted(Comparator.comparing(Snapshot::timestampMillis).reversed())
+                      .limit(4)
+                      .skip(1) // min snapshots to keep excluding the latest one = 4-1
+                      .map(
+                          s -> {
+                            int atIndex = t.name().indexOf('@');
+                            return Pair.of(t.name().substring(0, atIndex), s.snapshotId());
+                          });
+                })
+            .collect(Collectors.toList());
 
     Results results = getResults(reader);
     tables.forEach(t -> addMetaPaths(expectedMeta, t));
 
     assertThat(results.metadataPaths).containsExactlyInAnyOrderElementsOf(expectedMeta);
 
-    Set<Long> actualSnapshotIds =
-        results.snapshotEntries.stream()
-            .map(SnapshotEntry::getSnapshotId)
-            .collect(Collectors.toSet());
-    assertThat(actualSnapshotIds).containsExactlyInAnyOrderElementsOf(expectedSnapshotIds);
+    assertThat(
+            results.datasetSnapshotEntryPairs.stream()
+                .map(pair -> Pair.of(pair.getLeft(), pair.getRight().getSnapshotId())))
+        .containsExactlyInAnyOrderElementsOf(expectedDatasetSnapshotIdPairs);
   }
 
   @Test
@@ -492,7 +543,13 @@ public class TestNessieIcebergExpirySnapshotsReader {
         new SnapshotsScanOptions(LIVE_SNAPSHOTS, System.currentTimeMillis(), 1);
     final NessieIcebergExpirySnapshotsReader reader =
         new NessieIcebergExpirySnapshotsReader(
-            operatorContext(), plugin(exceptionalIO), props(), scanOptions, scheme, scheme);
+            operatorContext(),
+            plugin(exceptionalIO),
+            props(),
+            scanOptions,
+            scheme,
+            scheme,
+            Collections.emptyList());
     final Results results = getResults(reader);
 
     verify(exceptionalIO, times(1)).newInputFile(contains(noContainer));
@@ -500,8 +557,8 @@ public class TestNessieIcebergExpirySnapshotsReader {
     assertThat(results.rowCount).isEqualTo(workingSnaps * 2);
     assertThat(results.metadataPaths).contains(workingMeta);
     assertThat(results.metadataPaths).hasSize(workingSnaps + 1);
-    assertThat(results.snapshotEntries).isNotEmpty();
-    assertThat(results.snapshotEntries).hasSize(workingSnaps - 1);
+    assertThat(results.datasetSnapshotEntryPairs).isNotEmpty();
+    assertThat(results.datasetSnapshotEntryPairs).hasSize(workingSnaps - 1);
   }
 
   private static void setupIO() {
@@ -546,6 +603,8 @@ public class TestNessieIcebergExpirySnapshotsReader {
   }
 
   private Results getActualEntries(OutputMutator outputMutator) {
+    VarCharVector datasetVector =
+        (VarCharVector) outputMutator.getVector(SystemSchemas.DATASET_FIELD);
     BigIntVector snapshotIdVector =
         (BigIntVector) outputMutator.getVector(SystemSchemas.SNAPSHOT_ID);
     VarCharVector metadataVector =
@@ -558,7 +617,7 @@ public class TestNessieIcebergExpirySnapshotsReader {
     int recordCount =
         snapshotIdVector.getValueCount(); // value count is expected to be same in all vectors
 
-    List<SnapshotEntry> snapshotEntries = new ArrayList<>();
+    List<Pair<String, SnapshotEntry>> datasetSnapshotEntryPairs = new ArrayList<>();
     List<String> metadataJsonPaths = new ArrayList<>();
     for (int i = 0; i < recordCount; i++) {
       if (!fileType.isNull(i) && fileType.get(i).length > 0) {
@@ -572,14 +631,18 @@ public class TestNessieIcebergExpirySnapshotsReader {
                 snapshotIdVector.get(i),
                 new String(manifestListVector.get(i), StandardCharsets.UTF_8),
                 null);
-        snapshotEntries.add(snapshotEntry);
+        datasetSnapshotEntryPairs.add(
+            Pair.of(new String(datasetVector.get(i), StandardCharsets.UTF_8), snapshotEntry));
       }
     }
-    return new Results(snapshotEntries, metadataJsonPaths, recordCount);
+    return new Results(datasetSnapshotEntryPairs, metadataJsonPaths, recordCount);
   }
 
   private OutputMutator outputMutator() {
     TestOutputMutator outputMutator = new TestOutputMutator(allocator);
+    FieldVector datasetVector =
+        TypeHelper.getNewVector(
+            Field.nullable(SystemSchemas.DATASET_FIELD, new ArrowType.Utf8()), allocator);
     FieldVector metaVector =
         TypeHelper.getNewVector(
             Field.nullable(SystemSchemas.METADATA_FILE_PATH, new ArrowType.Utf8()), allocator);
@@ -596,6 +659,7 @@ public class TestNessieIcebergExpirySnapshotsReader {
         TypeHelper.getNewVector(
             Field.nullable(SystemSchemas.FILE_PATH, new ArrowType.Utf8()), allocator);
 
+    outputMutator.addField(datasetVector);
     outputMutator.addField(metaVector);
     outputMutator.addField(snapshotVector);
     outputMutator.addField(manifestListVector);
@@ -610,8 +674,11 @@ public class TestNessieIcebergExpirySnapshotsReader {
 
   private SupportsIcebergMutablePlugin plugin(final FileIO icebergFileIO) throws IOException {
     DataplanePlugin plugin = mock(DataplanePlugin.class);
-    when(plugin.createFS(anyString(), anyString(), any(OperatorContext.class))).thenReturn(fs);
+    StoragePluginId pluginId = mock(StoragePluginId.class);
+    when(plugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
     when(plugin.getNessieApi()).thenReturn(nessieApi);
+    when(plugin.getId()).thenReturn(pluginId);
+    when(pluginId.getName()).thenReturn(nessieIcebergCatalog.name());
 
     when(plugin.createIcebergFileIO(any(), any(), any(), any(), any())).thenReturn(icebergFileIO);
     when(plugin.getSystemUserFS()).thenReturn(fs);
@@ -644,7 +711,6 @@ public class TestNessieIcebergExpirySnapshotsReader {
                       nessieClient,
                       operatorContext,
                       version,
-                      plugin,
                       user,
                       null,
                       s -> s);
@@ -723,18 +789,21 @@ public class TestNessieIcebergExpirySnapshotsReader {
   }
 
   private static class Results {
-    private final List<SnapshotEntry> snapshotEntries;
+    private final List<Pair<String, SnapshotEntry>> datasetSnapshotEntryPairs;
     private final List<String> metadataPaths;
     private int rowCount;
 
-    public Results(List<SnapshotEntry> snapshotEntries, List<String> metadataPaths, int rowCount) {
-      this.snapshotEntries = snapshotEntries;
+    public Results(
+        List<Pair<String, SnapshotEntry>> datasetSnapshotEntryPairs,
+        List<String> metadataPaths,
+        int rowCount) {
+      this.datasetSnapshotEntryPairs = datasetSnapshotEntryPairs;
       this.metadataPaths = metadataPaths;
       this.rowCount = rowCount;
     }
 
     public void merge(Results that) {
-      this.snapshotEntries.addAll(that.snapshotEntries);
+      this.datasetSnapshotEntryPairs.addAll(that.datasetSnapshotEntryPairs);
       this.metadataPaths.addAll(that.metadataPaths);
       this.rowCount += that.rowCount;
     }
@@ -748,14 +817,14 @@ public class TestNessieIcebergExpirySnapshotsReader {
         return false;
       }
       Results results = (Results) o;
-      return Objects.equals(snapshotEntries, results.snapshotEntries)
+      return Objects.equals(datasetSnapshotEntryPairs, results.datasetSnapshotEntryPairs)
           && Objects.equals(metadataPaths, results.metadataPaths)
           && rowCount == results.rowCount;
     }
 
     @Override
     public int hashCode() {
-      return Objects.hash(snapshotEntries, metadataPaths, rowCount);
+      return Objects.hash(datasetSnapshotEntryPairs, metadataPaths, rowCount);
     }
 
     @Override
@@ -763,7 +832,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
       return "Results{count="
           + rowCount
           + "\n\nsnapshotEntries=\n"
-          + snapshotEntries.stream().map(Object::toString).collect(Collectors.joining("\n"))
+          + datasetSnapshotEntryPairs.stream()
+              .map(pair -> pair.getRight().toString())
+              .collect(Collectors.joining("\n"))
           + "\n\nmetadataPaths=\n"
           + String.join("\n", metadataPaths)
           + '}';

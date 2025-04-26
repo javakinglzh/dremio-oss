@@ -164,6 +164,10 @@ public class IcebergManifestListPrel extends AbstractRelNode
     return relDataType;
   }
 
+  public BatchSchema getSchema() {
+    return schema;
+  }
+
   @Override
   public RelWriter explainTerms(RelWriter pw) {
     pw =
@@ -191,6 +195,18 @@ public class IcebergManifestListPrel extends AbstractRelNode
   @Override
   public TableMetadata getTableMetadata() {
     return tableMetadata;
+  }
+
+  public Expression getIcebergExpression() {
+    return icebergExpression;
+  }
+
+  public ManifestContentType getManifestContent() {
+    return manifestContent;
+  }
+
+  public List<SchemaPath> getProjectedColumns() {
+    return projectedColumns;
   }
 
   @Override

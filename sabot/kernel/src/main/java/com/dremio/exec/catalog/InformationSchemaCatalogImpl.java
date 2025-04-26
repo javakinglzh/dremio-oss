@@ -18,7 +18,6 @@ package com.dremio.exec.catalog;
 
 import static com.dremio.datastore.indexed.IndexKey.LOWER_CASE_SUFFIX;
 import static com.dremio.exec.ExecConstants.INFO_SCHEMA_FIND_PAGE_SIZE;
-import static com.dremio.exec.ExecConstants.VERSIONED_INFOSCHEMA_ENABLED;
 import static com.dremio.exec.util.InformationSchemaCatalogUtil.getEscapeCharacter;
 
 import com.dremio.common.exceptions.UserException;
@@ -55,6 +54,7 @@ import java.security.AccessControlException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -63,6 +63,9 @@ import java.util.stream.StreamSupport;
 
 /** Implementation of {@link InformationSchemaCatalog} that relies on namespace. */
 class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(InformationSchemaCatalogImpl.class);
+
   private static final String DEFAULT_CATALOG_NAME = "DREMIO";
   private static final String CATALOG_DESCRIPTION = "The internal metadata used by Dremio";
   private static final String CATALOG_CONNECT = "";
@@ -183,22 +186,22 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
       }
 
       switch (c) {
-          // Percent is treated as wildchar which matches with (empty or any number) characters
+        // Percent is treated as wildchar which matches with (empty or any number) characters
         case '%':
           sb.append("*");
           break;
 
-          // Underscore is treated as wildchar which matches with (only one) any character
+        // Underscore is treated as wildchar which matches with (only one) any character
         case '_':
           sb.append("?");
           break;
 
-          // ESCAPE * if it occurs
+        // ESCAPE * if it occurs
         case '*':
           sb.append("\\*");
           break;
 
-          // ESCAPE ? if it occurs
+        // ESCAPE ? if it occurs
         case '?':
           sb.append("\\?");
           break;
@@ -240,13 +243,13 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     final Iterator<Schema>[] res = new Iterator[] {Collections.emptyIterator()};
     Stream<VersionedPlugin> versionedPlugins = versionedPluginsRetriever();
 
-    if (versionedPlugins != null && optionManager.getOption(VERSIONED_INFOSCHEMA_ENABLED)) {
+    if (versionedPlugins != null) {
       versionedPlugins
           .filter(versionedPlugin -> validateUserHasPrivilegeOn(versionedPlugin.getName()))
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, new UserContext(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.Schema> schemata =
@@ -278,15 +281,8 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> !alreadySent.contains(entry.getKey().toUnescapedString()))
             .peek(entry -> alreadySent.add(entry.getKey().toUnescapedString()))
-            .map(
-                entry ->
-                    Schema.newBuilder()
-                        .setCatalogName(DEFAULT_CATALOG_NAME)
-                        .setSchemaName(entry.getKey().toUnescapedString())
-                        .setSchemaOwner("<owner>")
-                        .setSchemaType(SchemaType.SIMPLE)
-                        .setIsMutable(false)
-                        .build())
+            .map(this::convertDocumentToSchema)
+            .filter(Objects::nonNull)
             .iterator());
   }
 
@@ -296,13 +292,13 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     final Iterator[] res = {Collections.emptyIterator()};
     Stream<VersionedPlugin> versionedPlugins = versionedPluginsRetriever();
 
-    if (versionedPlugins != null && optionManager.getOption(VERSIONED_INFOSCHEMA_ENABLED)) {
+    if (versionedPlugins != null) {
       versionedPlugins
           .filter(versionedPlugin -> validateUserHasPrivilegeOn(versionedPlugin.getName()))
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, new UserContext(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.Table> tables =
@@ -323,26 +319,8 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         res[0],
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
-            .map(
-                input -> {
-                  final String sourceName = input.getKey().getRoot();
-
-                  final TableType tableType;
-                  if (input.getValue().getDataset().getType() == DatasetType.VIRTUAL_DATASET) {
-                    tableType = TableType.VIEW;
-                  } else if ("sys".equals(sourceName) || "INFORMATION_SCHEMA".equals(sourceName)) {
-                    tableType = TableType.SYSTEM_TABLE;
-                  } else {
-                    tableType = TableType.TABLE;
-                  }
-
-                  return Table.newBuilder()
-                      .setCatalogName(DEFAULT_CATALOG_NAME)
-                      .setSchemaName(input.getKey().getParent().toUnescapedString())
-                      .setTableName(input.getKey().getName())
-                      .setTableType(tableType)
-                      .build();
-                })
+            .map(this::convertDocumentToTable)
+            .filter(Objects::nonNull)
             .iterator());
   }
 
@@ -351,13 +329,13 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     final Iterator[] res = {Collections.emptyIterator()};
     Stream<VersionedPlugin> versionedPlugins = versionedPluginsRetriever();
 
-    if (versionedPlugins != null && optionManager.getOption(VERSIONED_INFOSCHEMA_ENABLED)) {
+    if (versionedPlugins != null) {
       versionedPlugins
           .filter(versionedPlugin -> validateUserHasPrivilegeOn(versionedPlugin.getName()))
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, new UserContext(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.View> views =
@@ -379,15 +357,8 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> entry.getValue().getDataset().getType() == DatasetType.VIRTUAL_DATASET)
-            .map(
-                entry ->
-                    View.newBuilder()
-                        .setCatalogName(DEFAULT_CATALOG_NAME)
-                        .setSchemaName(entry.getKey().getParent().toUnescapedString())
-                        .setTableName(entry.getKey().getName())
-                        .setViewDefinition(
-                            entry.getValue().getDataset().getVirtualDataset().getSql())
-                        .build())
+            .map(this::convertDocumentToView)
+            .filter(Objects::nonNull)
             .iterator());
   }
 
@@ -396,13 +367,13 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     final Iterator[] res = {Collections.emptyIterator()};
     Stream<VersionedPlugin> versionedPlugins = versionedPluginsRetriever();
 
-    if (versionedPlugins != null && optionManager.getOption(VERSIONED_INFOSCHEMA_ENABLED)) {
+    if (versionedPlugins != null) {
       versionedPlugins
           .filter(versionedPlugin -> validateUserHasPrivilegeOn(versionedPlugin.getName()))
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, new UserContext(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.TableSchema> columns =
@@ -424,16 +395,8 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> DatasetHelper.getSchemaBytes(entry.getValue().getDataset()) != null)
-            .map(
-                entry ->
-                    TableSchema.newBuilder()
-                        .setCatalogName(DEFAULT_CATALOG_NAME)
-                        .setSchemaName(entry.getKey().getParent().toUnescapedString())
-                        .setTableName(entry.getKey().getName())
-                        .setBatchSchema(
-                            rewriteBatchSchema(
-                                DatasetHelper.getSchemaBytes(entry.getValue().getDataset())))
-                        .build())
+            .map(this::convertDocumentToTableSchema)
+            .filter(Objects::nonNull)
             .iterator());
   }
 
@@ -470,6 +433,88 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
       throw UserException.validationError(e)
           .message("sourceName [%s] not found.", sourceName)
           .buildSilently();
+    }
+  }
+
+  private Schema convertDocumentToSchema(Document<NamespaceKey, NameSpaceContainer> entry) {
+    try {
+      return Schema.newBuilder()
+          .setCatalogName(DEFAULT_CATALOG_NAME)
+          .setSchemaName(entry.getKey().toUnescapedString())
+          .setSchemaOwner("<owner>")
+          .setSchemaType(SchemaType.SIMPLE)
+          .setIsMutable(false)
+          .build();
+    } catch (Exception ignored) {
+      logger.warn(
+          "Failed to retrieve information for schema {}",
+          entry.getValue().getFullPathList(),
+          ignored);
+      return null;
+    }
+  }
+
+  private Table convertDocumentToTable(Document<NamespaceKey, NameSpaceContainer> entry) {
+    try {
+      final String sourceName = entry.getKey().getRoot();
+
+      final TableType tableType;
+      if (entry.getValue().getDataset().getType() == DatasetType.VIRTUAL_DATASET) {
+        tableType = TableType.VIEW;
+      } else if ("sys".equals(sourceName) || "INFORMATION_SCHEMA".equals(sourceName)) {
+        tableType = TableType.SYSTEM_TABLE;
+      } else {
+        tableType = TableType.TABLE;
+      }
+
+      return Table.newBuilder()
+          .setCatalogName(DEFAULT_CATALOG_NAME)
+          .setSchemaName(entry.getKey().getParent().toUnescapedString())
+          .setTableName(entry.getKey().getName())
+          .setTableType(tableType)
+          .build();
+    } catch (Exception ignored) {
+      logger.warn(
+          "Failed to retrieve information for table {}",
+          entry.getValue().getFullPathList(),
+          ignored);
+      return null;
+    }
+  }
+
+  private View convertDocumentToView(Document<NamespaceKey, NameSpaceContainer> entry) {
+    try {
+      return View.newBuilder()
+          .setCatalogName(DEFAULT_CATALOG_NAME)
+          .setSchemaName(entry.getKey().getParent().toUnescapedString())
+          .setTableName(entry.getKey().getName())
+          .setViewDefinition(entry.getValue().getDataset().getVirtualDataset().getSql())
+          .build();
+    } catch (Exception ignored) {
+      logger.warn(
+          "Failed to retrieve information for view {}",
+          entry.getValue().getFullPathList(),
+          ignored);
+      return null;
+    }
+  }
+
+  private TableSchema convertDocumentToTableSchema(
+      Document<NamespaceKey, NameSpaceContainer> entry) {
+    try {
+      return TableSchema.newBuilder()
+          .setCatalogName(DEFAULT_CATALOG_NAME)
+          .setSchemaName(entry.getKey().getParent().toUnescapedString())
+          .setTableName(entry.getKey().getName())
+          .setBatchSchema(
+              rewriteBatchSchema(DatasetHelper.getSchemaBytes(entry.getValue().getDataset())))
+          .build();
+    } catch (Exception ignored) {
+      logger.warn(
+          "Failed to retrieve information for table schema {}",
+          entry.getValue().getFullPathList(),
+          ignored);
+      return null;
     }
   }
 }

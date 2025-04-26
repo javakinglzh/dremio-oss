@@ -700,7 +700,8 @@ public class TestDatasetVersionResource extends BaseTestServer {
             "select commit_id from sys.version",
             parentVDS.getSqlContext(),
             parentVDS.getFormat(),
-            null);
+            null,
+            false);
     expectSuccess(
         getBuilder(getHttpClient().getAPIv3().path("catalog").path(updatedParentVDS.getId()))
             .buildPut(Entity.json(updatedParentVDS)),
@@ -1015,6 +1016,7 @@ public class TestDatasetVersionResource extends BaseTestServer {
         sql,
         null,
         null,
-        null);
+        null,
+        false);
   }
 }

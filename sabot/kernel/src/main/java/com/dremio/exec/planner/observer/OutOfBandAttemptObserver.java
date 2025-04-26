@@ -27,12 +27,13 @@ import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.planner.fragment.PlanningSet;
 import com.dremio.exec.planner.physical.Prel;
-import com.dremio.exec.planner.plancache.CachedPlan;
+import com.dremio.exec.planner.plancache.PlanCacheEntry;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -116,8 +117,9 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
   }
 
   @Override
-  public void planText(final String text, final long millisTaken) {
-    execute(() -> innerObserver.planText(text, millisTaken));
+  public void planFinalPhysical(
+      final String text, final long millisTaken, List<PlannerPhaseRulesStats> stats) {
+    execute(() -> innerObserver.planFinalPhysical(text, millisTaken, stats));
   }
 
   @Override
@@ -181,6 +183,11 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
   }
 
   @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+    execute(() -> innerObserver.planConsidered(profile, target));
+  }
+
+  @Override
   public void planSubstituted(
       final DremioMaterialization materialization,
       final List<RelWithInfo> substitutions,
@@ -204,7 +211,7 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
   }
 
   @Override
-  public void addAccelerationProfileToCachedPlan(CachedPlan plan) {
+  public void addAccelerationProfileToCachedPlan(PlanCacheEntry plan) {
     execute(() -> innerObserver.addAccelerationProfileToCachedPlan(plan));
   }
 
@@ -273,8 +280,8 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
   }
 
   @Override
-  public void planCacheUsed(int count) {
-    execute(() -> innerObserver.planCacheUsed(count));
+  public void planStepLogging(String phaseName, String text, long millisTaken) {
+    execute(() -> innerObserver.planStepLogging(phaseName, text, millisTaken));
   }
 
   @Override
@@ -328,6 +335,15 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
       Thread.currentThread().interrupt();
     }
   }
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {}
+
+  @Override
+  public void queryClosed() {}
 
   @Override
   public void executorsSelected(
@@ -406,6 +422,11 @@ public class OutOfBandAttemptObserver implements AttemptObserver {
   @Override
   public void putProfileFailed() {
     execute(innerObserver::putProfileFailed);
+  }
+
+  @Override
+  public void putProfileUpdateComplete() {
+    execute(innerObserver::putProfileUpdateComplete);
   }
 
   /**

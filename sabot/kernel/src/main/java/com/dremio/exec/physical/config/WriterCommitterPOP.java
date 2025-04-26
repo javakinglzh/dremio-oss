@@ -16,8 +16,8 @@
 
 package com.dremio.exec.physical.config;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.physical.base.AbstractSingle;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
@@ -46,7 +46,7 @@ public class WriterCommitterPOP extends AbstractSingle {
 
   private final String tempLocation;
   private final String finalLocation;
-  private final MutablePlugin plugin;
+  private final SupportsFsMutablePlugin plugin;
   private final IcebergTableProps icebergTableProps;
   private boolean partialRefresh;
   private final NamespaceKey datasetPath;
@@ -97,7 +97,7 @@ public class WriterCommitterPOP extends AbstractSingle {
       NamespaceKey datasetPath,
       Optional<DatasetConfig> datasetConfig,
       PhysicalOperator child,
-      MutablePlugin plugin,
+      SupportsFsMutablePlugin plugin,
       StoragePlugin sourceTablePlugin,
       boolean isPartialRefresh,
       boolean isReadSignatureEnabled,
@@ -161,7 +161,7 @@ public class WriterCommitterPOP extends AbstractSingle {
   }
 
   @JsonIgnore
-  public MutablePlugin getPlugin() {
+  public SupportsFsMutablePlugin getPlugin() {
     return plugin;
   }
 

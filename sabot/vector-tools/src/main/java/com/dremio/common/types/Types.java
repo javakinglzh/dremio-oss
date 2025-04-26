@@ -99,7 +99,7 @@ public final class Types {
 
     switch (type.getMinorType()) {
 
-        // Standard SQL atomic data types:
+      // Standard SQL atomic data types:
 
       case BIT:
         return "BOOLEAN";
@@ -146,7 +146,7 @@ public final class Types {
         return "TIME";
       case TIMETZ:
         return "TIME WITH TIME ZONE";
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return "TIMESTAMP";
       case TIMESTAMPTZ:
         return "TIMESTAMP WITH TIME ZONE";
@@ -156,7 +156,7 @@ public final class Types {
       case INTERVALDAY:
         return "INTERVAL DAY TO SECOND";
 
-        // Non-standard SQL atomic data types:
+      // Non-standard SQL atomic data types:
 
       case INTERVAL:
         return "INTERVAL";
@@ -165,8 +165,8 @@ public final class Types {
       case TINYINT:
         return "TINYINT";
 
-        // Composite types and other types that are not atomic types (SQL standard
-        // or not) except ARRAY types (handled above):
+      // Composite types and other types that are not atomic types (SQL standard
+      // or not) except ARRAY types (handled above):
       case MAP:
         return "MAP";
       case STRUCT:
@@ -180,7 +180,7 @@ public final class Types {
       case GENERIC_OBJECT:
         return "JAVA_OBJECT";
 
-        // Internal types not actually used at level of SQL types(?):
+      // Internal types not actually used at level of SQL types(?):
 
       case UINT1:
         return "TINYINT";
@@ -280,7 +280,7 @@ public final class Types {
       case REQUIRED:
       case OPTIONAL:
         switch (type.getMinorType()) {
-            // Verified signed types:
+          // Verified signed types:
           case SMALLINT:
           case INT: // SQL INTEGER
           case BIGINT:
@@ -288,7 +288,7 @@ public final class Types {
           case FLOAT8: // SQL DOUBLE PRECISION / FLOAT(N)
           case INTERVALYEAR: // SQL INTERVAL w/YEAR and/or MONTH
           case INTERVALDAY: // SQL INTERVAL w/DAY, HOUR, MINUTE and/or SECOND
-            // Not-yet seen/verified signed types:
+          // Not-yet seen/verified signed types:
           case DECIMAL: // SQL DECIMAL (if used)
           case DECIMAL9: // SQL DECIMAL (if used)
           case DECIMAL18: // SQL DECIMAL (if used)
@@ -301,7 +301,7 @@ public final class Types {
           case INTERVAL: // unknown (given INTERVALYEAR and INTERVALDAY)
             isSigned = true;
             break;
-            // Verified unsigned types:
+          // Verified unsigned types:
           case BIT: // SQL BOOLEAN
           case VARCHAR:
           case FIXEDCHAR: // SQL CHARACTER
@@ -309,8 +309,8 @@ public final class Types {
           case FIXEDSIZEBINARY: // SQL BINARY
           case DATE:
           case TIME: // SQL TIME WITHOUT TIME ZONE
-          case TIMESTAMP: // SQL TIMESTAMP WITHOUT TIME ZONE
-            // Not-yet seen/verified unsigned types:
+          case TIMESTAMPMILLI: // SQL TIMESTAMP WITHOUT TIME ZONE
+          // Not-yet seen/verified unsigned types:
           case UINT1:
           case UINT2:
           case UINT4:
@@ -404,7 +404,7 @@ public final class Types {
         return precision > 0
             ? 15 + precision // hh-mm-ss.SSS-zz:zz
             : 14; // hh-mm-ss-zz:zz
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return precision > 0
             ? 20 + precision // yyyy-mm-ddThh:mm:ss.SSS
             : 19; // yyyy-mm-ddThh:mm:ss
@@ -457,7 +457,7 @@ public final class Types {
       case INTERVALYEAR:
       case DATE:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return false;
 
       default:
@@ -481,7 +481,7 @@ public final class Types {
       case INTERVALYEAR:
       case DATE:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return false;
 
       default:
@@ -670,7 +670,7 @@ public final class Types {
       case "var16char":
         return MinorType.VAR16CHAR;
       case "timestamp":
-        return MinorType.TIMESTAMP;
+        return MinorType.TIMESTAMPMILLI;
       case "interval_year_month":
         return MinorType.INTERVALYEAR;
       case "interval_day_time":
@@ -745,7 +745,7 @@ public final class Types {
         return "date";
       case TIME:
         return "time";
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return "timestamp";
       case VARBINARY:
         return "binary";

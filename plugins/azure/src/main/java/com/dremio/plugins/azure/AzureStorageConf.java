@@ -18,6 +18,7 @@ package com.dremio.plugins.azure;
 import static com.dremio.hadoop.security.alias.DremioCredentialProvider.DREMIO_SCHEME_PREFIX;
 import static com.dremio.hadoop.security.alias.DremioCredentialProvider.PROTOCOL_PREFIX;
 
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.DoNotDisplay;
 import com.dremio.exec.catalog.conf.SecretRef;

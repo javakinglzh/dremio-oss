@@ -59,16 +59,15 @@ public class StreamAggPrel extends AggregatePrel implements Prel {
       new PositiveLongValidator(
           "planner.op.streamingagg.limit_bytes", Long.MAX_VALUE, DEFAULT_LIMIT);
 
-  private StreamAggPrel(
+  public StreamAggPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,
       ImmutableBitSet groupSet,
-      List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls,
       OperatorPhase phase)
       throws InvalidRelException {
-    super(cluster, traits, child, groupSet, groupSets, aggCalls, phase);
+    super(cluster, traits, child, groupSet, aggCalls, phase);
   }
 
   public static StreamAggPrel create(
@@ -76,7 +75,6 @@ public class StreamAggPrel extends AggregatePrel implements Prel {
       RelTraitSet traits,
       RelNode child,
       ImmutableBitSet groupSet,
-      List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls,
       OperatorPhase phase)
       throws InvalidRelException {
@@ -93,7 +91,7 @@ public class StreamAggPrel extends AggregatePrel implements Prel {
                   return collation(groupSet);
                 });
 
-    return new StreamAggPrel(cluster, adjustedTraits, child, groupSet, groupSets, aggCalls, phase);
+    return new StreamAggPrel(cluster, adjustedTraits, child, groupSet, aggCalls, phase);
   }
 
   /**
@@ -150,7 +148,7 @@ public class StreamAggPrel extends AggregatePrel implements Prel {
       List<AggregateCall> aggCalls) {
     try {
       return StreamAggPrel.create(
-          getCluster(), traitSet, input, groupSet, groupSets, aggCalls, this.getOperatorPhase());
+          getCluster(), traitSet, input, groupSet, aggCalls, this.getOperatorPhase());
     } catch (InvalidRelException e) {
       throw new AssertionError(e);
     }

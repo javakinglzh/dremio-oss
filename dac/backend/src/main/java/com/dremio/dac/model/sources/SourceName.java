@@ -15,8 +15,10 @@
  */
 package com.dremio.dac.model.sources;
 
+import static com.dremio.service.namespace.NamespaceUtils.HOME_PREFIX;
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
+
 import com.dremio.dac.model.common.RootEntity;
-import com.dremio.dac.model.spaces.HomeName;
 import com.fasterxml.jackson.annotation.JsonCreator;
 
 /** name of a source */
@@ -27,9 +29,9 @@ public final class SourceName extends RootEntity {
   @JsonCreator
   public SourceName(String name) {
     super(name);
-    if (name.startsWith(HomeName.HOME_PREFIX)) {
+    if (isHomeSpace(name)) {
       throw new IllegalArgumentException(
-          String.format("Source %s can not start with %s", name, HomeName.HOME_PREFIX));
+          String.format("Source %s can not start with %s", name, HOME_PREFIX));
     }
   }
 

@@ -34,6 +34,13 @@ export const Legend = (props: {
               props.onSeriesClick?.(i);
             }}
             style={{ cursor: props.onSeriesClick ? "pointer" : "default" }}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                e.stopPropagation();
+                props.onSeriesClick?.(i);
+              }
+            }}
           >
             <div
               className={clsx(

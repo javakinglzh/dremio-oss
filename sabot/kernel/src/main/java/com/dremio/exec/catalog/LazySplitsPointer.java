@@ -18,9 +18,9 @@ package com.dremio.exec.catalog;
 import com.dremio.datastore.SearchTypes.SearchQuery;
 import com.dremio.exec.store.SplitsPointer;
 import com.dremio.service.namespace.DelegatingPartitionChunkMetadata;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
+import com.dremio.service.namespace.split.SplitNamespaceService;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 
@@ -32,20 +32,20 @@ abstract class LazySplitsPointer extends AbstractSplitsPointer {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(LazySplitsPointer.class);
 
-  private final NamespaceService namespaceService;
+  private final SplitNamespaceService namespaceService;
   private final long splitVersion;
   private final int totalSplitCount;
   private volatile Iterable<PartitionChunkMetadata> splitsIterable;
   private volatile boolean mayGetDataSplitsFired;
 
   protected LazySplitsPointer(
-      NamespaceService namespaceService, long splitVersion, int totalSplitCount) {
+      SplitNamespaceService namespaceService, long splitVersion, int totalSplitCount) {
     this.namespaceService = namespaceService;
     this.splitVersion = splitVersion;
     this.totalSplitCount = totalSplitCount;
   }
 
-  protected NamespaceService getNamespaceService() {
+  protected SplitNamespaceService getNamespaceService() {
     return namespaceService;
   }
 

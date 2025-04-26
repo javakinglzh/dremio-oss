@@ -23,7 +23,6 @@ import static com.dremio.plugins.elastic.ElasticsearchType.INTEGER;
 import static com.dremio.plugins.elastic.ElasticsearchType.TEXT;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeFalse;
 import static org.junit.Assume.assumeTrue;
 
 import com.dremio.common.util.TestTools;
@@ -40,11 +39,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testAlias() throws Exception {
-    // DX-12162: upstream typo when processing contains
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {
@@ -79,10 +73,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testAliasDifferentIndexes() throws Exception {
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {
@@ -121,11 +111,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testAliasAggregation() throws Exception {
-    // DX-12162: upstream typo when processing contains
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {
@@ -336,11 +321,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testAliasWithFilterAndWhereClause() throws Exception {
-    // DX-12162: upstream typo when processing contains
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {
@@ -438,11 +418,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testMultipleIndex() throws Exception {
-    // DX-12162: upstream typo when processing contains
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {
@@ -488,11 +463,6 @@ public class ITTestAliases extends ElasticBaseTestQuery {
 
   @Test
   public void testMultipleIndexAggregation() throws Exception {
-    // DX-12162: upstream typo when processing contains
-    if (elastic.getMinVersionInCluster().getMajor() == 5) {
-      assumeFalse(elastic.getMinVersionInCluster().getMinor() <= 2);
-    }
-
     String schema1 = schema;
     ElasticsearchCluster.ColumnData[] data =
         new ElasticsearchCluster.ColumnData[] {

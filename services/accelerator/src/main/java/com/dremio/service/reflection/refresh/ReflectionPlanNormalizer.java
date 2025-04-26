@@ -49,8 +49,10 @@ import com.dremio.service.reflection.proto.ReflectionEntry;
 import com.dremio.service.reflection.proto.ReflectionGoal;
 import com.dremio.service.reflection.proto.ReflectionType;
 import com.dremio.service.reflection.proto.RefreshDecision;
+import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.HashGeneratedEventHandler;
 import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.NonIncrementalRefreshFunctionDetectedEventHandler;
 import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.RefreshDecisionWrapper;
+import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.SerializedMatchingInfo;
 import com.dremio.service.reflection.store.DependenciesStore;
 import com.dremio.service.reflection.store.MaterializationStore;
 import com.google.common.base.Preconditions;
@@ -60,6 +62,7 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttle;
 
 class ReflectionPlanNormalizer implements RelTransformer {
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ReflectionPlanNormalizer.class);
 
@@ -75,10 +78,11 @@ class ReflectionPlanNormalizer implements RelTransformer {
   private final OptionManager optionManager;
   private final boolean forceFullUpdate;
   private final boolean matchingPlanOnly;
-  private ByteString matchingPlanBytes;
+  private SerializedMatchingInfo serializedMatchingInfo;
   private RefreshDecisionWrapper refreshDecisionWrapper;
   private final NonIncrementalRefreshFunctionDetectedEventHandler
       nonIncrementalRefreshFunctionDetectedEventHandler;
+  private final HashGeneratedEventHandler hashGeneratedEventHandler;
 
   public ReflectionPlanNormalizer(
       SqlHandlerConfig sqlHandlerConfig,
@@ -94,7 +98,8 @@ class ReflectionPlanNormalizer implements RelTransformer {
       boolean matchingPlanOnly,
       RefreshDecisionWrapper noDefaultReflectionDecisionWrapper,
       NonIncrementalRefreshFunctionDetectedEventHandler
-          nonIncrementalRefreshFunctionDetectedEventHandler) {
+          nonIncrementalRefreshFunctionDetectedEventHandler,
+      HashGeneratedEventHandler hashGeneratedEventHandler) {
     this.sqlHandlerConfig = sqlHandlerConfig;
     this.goal = goal;
     this.entry = entry;
@@ -110,6 +115,7 @@ class ReflectionPlanNormalizer implements RelTransformer {
     this.refreshDecisionWrapper = noDefaultReflectionDecisionWrapper;
     this.nonIncrementalRefreshFunctionDetectedEventHandler =
         nonIncrementalRefreshFunctionDetectedEventHandler;
+    this.hashGeneratedEventHandler = hashGeneratedEventHandler;
   }
 
   public RefreshDecisionWrapper getRefreshDecisionWrapper() {
@@ -156,7 +162,22 @@ class ReflectionPlanNormalizer implements RelTransformer {
             expandedPlan.getCluster(),
             DremioCompositeSqlOperatorTable.create(
                 sqlHandlerConfig.getContext().getFunctionRegistry(), optionManager));
-    matchingPlanBytes = ByteString.copyFrom(serializer.serializeToBytes(expandedPlan));
+
+    if (hashGeneratedEventHandler.getHash() != null) {
+      final ReflectionExpander hashExpander =
+          new ReflectionExpander(hashGeneratedEventHandler.getQuery(), datasetConfig);
+      final RelNode hashExpandedPlan = hashExpander.expand(goal);
+      serializedMatchingInfo =
+          new SerializedMatchingInfo(
+              ByteString.copyFrom(serializer.serializeToBytes(expandedPlan)),
+              hashGeneratedEventHandler.getHash(),
+              ByteString.copyFrom(serializer.serializeToBytes(hashExpandedPlan)));
+
+    } else {
+      serializedMatchingInfo =
+          new SerializedMatchingInfo(
+              ByteString.copyFrom(serializer.serializeToBytes(expandedPlan)), null, null);
+    }
     if (matchingPlanOnly) {
       return new EmptyRel(
           expandedPlan.getCluster(),
@@ -178,7 +199,8 @@ class ReflectionPlanNormalizer implements RelTransformer {
                 false,
                 StrippingFactory.LATEST_STRIP_VERSION)
             .getNormalized();
-    if (sqlHandlerConfig.getResultMode().equals(ResultMode.LOGICAL)) {
+    if (sqlHandlerConfig.getResultMode().equals(ResultMode.LOGICAL)
+        || sqlHandlerConfig.getResultMode().equals(ResultMode.CONVERT_ONLY)) {
       RefreshDecision refreshDecision = new RefreshDecision();
       AccelerationSettings accelerationSettings =
           new AccelerationSettings().setMethod(RefreshMethod.FULL);
@@ -225,7 +247,6 @@ class ReflectionPlanNormalizer implements RelTransformer {
               catalogService,
               materializationStore,
               dependenciesStore,
-              matchingPlanBytes,
               expandedPlan,
               strippedPlan,
               requestedTables,
@@ -283,7 +304,7 @@ class ReflectionPlanNormalizer implements RelTransformer {
         updateId);
   }
 
-  public ByteString getMatchingPlanBytes() {
-    return matchingPlanBytes;
+  public SerializedMatchingInfo getSerializedMatchingInfo() {
+    return serializedMatchingInfo;
   }
 }

@@ -90,15 +90,16 @@
   }
 
   .tab-list__tab-menu button {
-    visibility: hidden;
-    &[aria-expanded="true"] {
-      visibility: visible;
+    opacity: 0;
+    &[aria-expanded="true"],
+    &:focus {
+      opacity: 1;
     }
   }
 
   &:hover {
     .tab-list__tab-menu button {
-      visibility: visible;
+      opacity: 1;
     }
   }
 }

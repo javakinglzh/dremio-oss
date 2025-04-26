@@ -54,7 +54,7 @@ public class ByteBufToStreamCopier {
    */
   public static boolean add(ByteBuf buf, OutputStream stream) throws IOException {
     if (BUF_CHAIN_OUT == null || !stream.getClass().equals(BUF_CHAIN_OUT)) {
-      LOGGER.warn(
+      LOGGER.debug(
           "Entered non optimal write path {} number of times", NON_OPTIMAL_WRITE.incrementAndGet());
       return false;
     } else {

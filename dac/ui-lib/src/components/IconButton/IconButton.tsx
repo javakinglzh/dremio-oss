@@ -47,6 +47,9 @@ function validateProps(props: IconButtonProps) {
   );
 }
 
+/**
+ * @deprecated import from `@dremio/design-system/components` instead
+ */
 export const IconButton: React.FC<IconButtonProps> = (props) => {
   const id = React.useId();
   const {

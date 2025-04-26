@@ -43,13 +43,12 @@ public class TestGandivaFunctionRegistry extends ExecTest {
 
   private static int totalFuncs = 0, unSupportedFn = 0;
 
-  private static final OptionManager optionManager = Mockito.mock(OptionManager.class);
-
   /*
    * Test that function lookups on the gandiva repository works.
    */
   @Test
   public void testGandivaRegistry() throws Exception {
+    OptionManager optionManager = Mockito.mock(OptionManager.class);
     GandivaFunctionRegistry fnRegistry = new GandivaFunctionRegistry(true, optionManager);
 
     FunctionCall fnCall = getGandivaOnlyFn();
@@ -94,6 +93,7 @@ public class TestGandivaFunctionRegistry extends ExecTest {
    */
   @Test
   public void testNonDecimalGandivaRegistry() {
+    OptionManager optionManager = Mockito.mock(OptionManager.class);
     GandivaFunctionRegistry fnRegistry = new GandivaFunctionRegistry(false, optionManager);
     FunctionCall fnCall = getDecimalAddFn();
     FunctionResolver resolver = FunctionResolverFactory.getExactResolver(fnCall);

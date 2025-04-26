@@ -13,10 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type {
-  Project as ProjectInterface,
-  ProjectProperties,
-} from "../../interfaces/Project.js";
+
+import type { Result } from "ts-results-es";
 
 export class Project implements ProjectInterface {
   readonly cloudId: ProjectInterface["cloudId"];
@@ -68,3 +66,39 @@ export class Project implements ProjectInterface {
     );
   }
 }
+
+export type ProjectProperties = {
+  readonly cloudId: string;
+  readonly cloudType: "AWS" | "AZURE" | "UNKNOWN";
+  readonly createdAt: Date;
+  readonly createdBy: string;
+  readonly credentials: Record<string, any>;
+  readonly id: string;
+  readonly lastStateError: {
+    error: string;
+    timestamp: Date;
+  } | null;
+  readonly modifiedAt: Date;
+  readonly modifiedBy: string;
+  readonly name: string;
+  readonly numberOfEngines: number;
+  readonly primaryCatalog: string;
+  readonly projectStore: string;
+  readonly state:
+    | "ACTIVATING"
+    | "ACTIVE"
+    | "ARCHIVED"
+    | "ARCHIVING"
+    | "CREATING"
+    | "DEACTIVATING"
+    | "INACTIVE"
+    | "RESTORING";
+  readonly type: "QUERY_ENGINE";
+};
+
+export type ProjectMethods = {
+  delete(): Promise<Result<undefined, unknown>>;
+  get settled(): boolean;
+};
+
+export type ProjectInterface = ProjectProperties & ProjectMethods;

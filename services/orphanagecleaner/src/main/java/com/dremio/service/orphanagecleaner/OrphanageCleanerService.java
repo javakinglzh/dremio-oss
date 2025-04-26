@@ -19,7 +19,7 @@ import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
 
 import com.dremio.datastore.api.Document;
 import com.dremio.exec.ExecConstants;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SimpleJobRunner;
 import com.dremio.options.OptionManager;
 import com.dremio.service.Service;
 import com.dremio.service.namespace.NamespaceService;
@@ -46,7 +46,7 @@ public class OrphanageCleanerService implements Service {
   private final boolean isDistributedMaster;
   private final Provider<Orphanage.Factory> orphanageFactoryProvider;
   private final Provider<NamespaceService.Factory> namespaceServiceProvider;
-  private final Provider<SabotContext> sabotContextProvider;
+  private final Provider<SimpleJobRunner> simpleJobRunnerProvider;
 
   private Orphanage orphanage;
   private OrphanageManager orphanEntryManager;
@@ -56,14 +56,14 @@ public class OrphanageCleanerService implements Service {
       final Provider<OptionManager> optionManagerProvider,
       final Provider<Orphanage.Factory> orphanageFactoryProvider,
       final Provider<NamespaceService.Factory> namespaceServiceProvider,
-      final Provider<SabotContext> sabotContextProvider,
+      final Provider<SimpleJobRunner> simpleJobRunnerProvider,
       boolean isDistributedMaster) {
     this.schedulerService = schedulerService;
     this.optionManager = optionManagerProvider;
     this.isDistributedMaster = isDistributedMaster;
     this.orphanageFactoryProvider = orphanageFactoryProvider;
     this.namespaceServiceProvider = namespaceServiceProvider;
-    this.sabotContextProvider = sabotContextProvider;
+    this.simpleJobRunnerProvider = simpleJobRunnerProvider;
   }
 
   @Override
@@ -71,9 +71,9 @@ public class OrphanageCleanerService implements Service {
     logger.info("Starting Orphanage Clean up Service");
     orphanage = orphanageFactoryProvider.get().get();
     NamespaceService namespaceService = namespaceServiceProvider.get().get(SYSTEM_USERNAME);
-    SabotContext sabotContext = sabotContextProvider.get();
+    SimpleJobRunner jobRunner = simpleJobRunnerProvider.get();
     orphanEntryManager =
-        new OrphanageManager(orphanage, namespaceService, sabotContext, optionManager.get());
+        new OrphanageManager(orphanage, namespaceService, jobRunner, optionManager.get());
     schedulerService
         .get()
         .schedule(

@@ -28,13 +28,13 @@ import com.dremio.common.exceptions.InvalidMetadataErrorContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.connector.metadata.options.TimeTravelOption;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.physical.base.AbstractWriter;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.proto.UserBitShared;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.EmptyRecordReader;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.dfs.FileCountTooLargeException;
@@ -53,12 +53,12 @@ import com.dremio.exec.store.dfs.implicit.AdditionalColumnsRecordReader;
 import com.dremio.exec.store.dfs.implicit.ConstantColumnPopulators;
 import com.dremio.exec.store.easy.json.JSONRecordReader;
 import com.dremio.exec.store.file.proto.FileProtobuf;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet.BulkInputStream;
 import com.dremio.exec.store.parquet.ParquetFormatConfig;
 import com.dremio.exec.store.parquet.ParquetFormatPlugin;
 import com.dremio.exec.store.parquet.RecordReaderIterator;
 import com.dremio.exec.store.parquet.Streams;
-import com.dremio.io.CompressionCodecFactory;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -91,39 +91,31 @@ public class DeltaLakeFormatPlugin extends EasyFormatPlugin<DeltaLakeFormatConfi
   private static final String NOT_SUPPORT_METASTORE_TABLE_MSG =
       "This folder does not contain a filesystem-based Delta Lake table.";
 
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final String name;
   private final DeltaLakeFormatMatcher formatMatcher;
   private final DeltaLakeFormatConfig config;
-  private FormatPlugin dataFormatPlugin;
+  private final FormatPlugin dataFormatPlugin;
 
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
   public DeltaLakeFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       DeltaLakeFormatConfig formatConfig,
-      FileSystemPlugin<?> fsPlugin) {
+      SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         formatConfig,
-        true,
-        false,
         false,
         IS_COMPRESSIBLE,
         formatConfig.getExtensions(),
-        DEFAULT_NAME,
-        fsPlugin);
+        DEFAULT_NAME);
     this.context = context;
     this.config = formatConfig;
     this.name = name == null ? DEFAULT_NAME : name;
     this.formatMatcher = new DeltaLakeFormatMatcher(this);
-    this.dataFormatPlugin =
-        new ParquetFormatPlugin(name, context, new ParquetFormatConfig(), fsPlugin);
-  }
-
-  @Override
-  public boolean supportsAutoPartitioning() {
-    return false;
+    this.dataFormatPlugin = new ParquetFormatPlugin(name, context, new ParquetFormatConfig(), null);
   }
 
   @Override
@@ -244,28 +236,8 @@ public class DeltaLakeFormatPlugin extends EasyFormatPlugin<DeltaLakeFormatConfi
   }
 
   @Override
-  public boolean supportsRead() {
-    return true;
-  }
-
-  @Override
   public boolean isLayered() {
     return true;
-  }
-
-  @Override
-  public boolean supportsWrite() {
-    return false;
-  }
-
-  @Override
-  public SabotContext getContext() {
-    return context;
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return false;
   }
 
   @Override
@@ -366,7 +338,12 @@ public class DeltaLakeFormatPlugin extends EasyFormatPlugin<DeltaLakeFormatConfi
     }
     final JSONRecordReader jsonRecordReader =
         new JSONRecordReader(
-            opCtx, path, easyXAttr.getLength(), getCodecFactory(), fs, innerFields);
+            opCtx,
+            path,
+            easyXAttr.getLength(),
+            HadoopCompressionCodecFactory.DEFAULT,
+            fs,
+            innerFields);
     jsonRecordReader.resetSpecialSchemaOptions();
 
     if (addWithPartitionCols) {
@@ -393,12 +370,6 @@ public class DeltaLakeFormatPlugin extends EasyFormatPlugin<DeltaLakeFormatConfi
     } else {
       return jsonRecordReader;
     }
-  }
-
-  private CompressionCodecFactory getCodecFactory() {
-    return getFsPlugin() != null
-        ? getFsPlugin().getCompressionCodecFactory()
-        : HadoopCompressionCodecFactory.DEFAULT;
   }
 
   @Override

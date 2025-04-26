@@ -31,6 +31,21 @@
         }
       }
     }
+
+    &__btn {
+      border-radius: 0;
+      &:hover {
+        background: none;
+      }
+      &:focus-visible {
+        outline: -webkit-focus-ring-color auto 1px;
+        svg {
+          path {
+            fill: var(--icon--hover);
+          }
+        }
+      }
+    }
   }
   &__content {
     display: flex;

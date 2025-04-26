@@ -60,9 +60,9 @@ public class DistributionTraitDef extends RelTraitDef<DistributionTrait> {
       DistributionTrait toDist,
       boolean allowInfiniteCostConverters) {
     switch (toDist.getType()) {
-        // UnionExchange, HashToRandomExchange, OrderedPartitionExchange and BroadcastExchange
-        // destroy the ordering property,
-        // therefore RelCollation is set to default, which is EMPTY.
+      // UnionExchange, HashToRandomExchange, OrderedPartitionExchange and BroadcastExchange
+      // destroy the ordering property,
+      // therefore RelCollation is set to default, which is EMPTY.
       case SINGLETON:
         return new UnionExchangePrel(
             rel.getCluster(), planner.emptyTraitSet().plus(Prel.PHYSICAL).plus(toDist), rel);

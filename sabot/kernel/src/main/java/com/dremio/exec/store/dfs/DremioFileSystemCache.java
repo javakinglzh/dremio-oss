@@ -15,39 +15,28 @@
  */
 package com.dremio.exec.store.dfs;
 
-import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_AUTOMATIC_CLOSE_DEFAULT;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_AUTOMATIC_CLOSE_KEY;
-import static org.apache.hadoop.fs.FileSystem.SHUTDOWN_HOOK_PRIORITY;
 
 import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.io.MultipleIOException;
 import org.apache.hadoop.security.UserGroupInformation;
-import org.apache.hadoop.util.ShutdownHookManager;
 import org.apache.hadoop.util.StringUtils;
 
 /**
  * Similar to the cache in {@link FileSystem} with addition of unique set of properties to cache
- * key.
+ * key. Users of this are expected to handle shutdown/closure by calling closeAll.
  */
 public class DremioFileSystemCache {
-  private static final org.slf4j.Logger logger =
-      org.slf4j.LoggerFactory.getLogger(DremioFileSystemCache.class);
   private static final String disableDremioCacheName = "fs.impl.disable.dremio.cache";
-
-  private final ClientFinalizer clientFinalizer = new ClientFinalizer();
-
   private final Map<Key, FileSystem> map = new HashMap<>();
-  private final Set<Key> toAutoClose = new HashSet<>();
 
   public FileSystem get(URI uri, Configuration conf, List<String> uniqueConnectionProps)
       throws IOException {
@@ -62,18 +51,23 @@ public class DremioFileSystemCache {
     }
 
     final String disableCacheName = String.format("fs.%s.impl.disable.cache", uri.getScheme());
+    final boolean disableDremioCache = conf.getBoolean(disableDremioCacheName, false);
 
     // Clone the conf and set cache to disable, so that a new instance is created rather than
-    // returning an existing
-    // one in Hadoop's FileSystem cache. TODO: worry if cloning conf blows up heap memory. We could
-    // use the existing
-    // conf object but it is shared by muliple threads
+    // returning an existing one in Hadoop's FileSystem cache.
+    // TODO: worry if cloning conf blows up heap memory. We could use the existing conf object but
+    //  it is shared by multiple threads
     final Configuration cloneConf = new Configuration(conf);
     cloneConf.set(disableCacheName, "true");
+
+    // Associated Plugin should handle closing of dremio-cached FS - disable the hadoop shutdown
+    // hook for this scenario to avoid race conditions during shutdown/close.
+    if (!disableDremioCache) {
+      cloneConf.set(FS_AUTOMATIC_CLOSE_KEY, "false");
+    }
     fs = FileSystem.get(uri, cloneConf);
 
-    /** Check if user does not want to cache in Dremio cache */
-    final boolean disableDremioCache = conf.getBoolean(disableDremioCacheName, false);
+    // Check if user does not want to cache in Dremio cache
     if (disableDremioCache
         || key.uniqueConnectionPropValues == null
         || key.uniqueConnectionPropValues.isEmpty()) {
@@ -88,23 +82,13 @@ public class DremioFileSystemCache {
       }
 
       // now insert the new file system into the map
-      if (map.isEmpty() && !ShutdownHookManager.get().isShutdownInProgress()) {
-        ShutdownHookManager.get().addShutdownHook(clientFinalizer, SHUTDOWN_HOOK_PRIORITY);
-      }
       map.put(key, fs);
-      if (conf.getBoolean(FS_AUTOMATIC_CLOSE_KEY, FS_AUTOMATIC_CLOSE_DEFAULT)) {
-        toAutoClose.add(key);
-      }
       return fs;
     }
   }
 
-  /**
-   * Close all FileSystem instances in the Cache.
-   *
-   * @param onlyAutomatic only close those that are marked for automatic closing
-   */
-  public synchronized void closeAll(boolean onlyAutomatic) throws IOException {
+  /** Close all FileSystem instances in the Cache. */
+  public synchronized void closeAll() throws IOException {
     List<IOException> exceptions = new ArrayList<>();
 
     // Make a copy of the keys in the map since we'll be modifying
@@ -115,13 +99,8 @@ public class DremioFileSystemCache {
     for (Key key : keys) {
       final FileSystem fs = map.get(key);
 
-      if (onlyAutomatic && !toAutoClose.contains(key)) {
-        continue;
-      }
-
       // remove from cache
       map.remove(key);
-      toAutoClose.remove(key);
 
       if (fs != null) {
         try {
@@ -134,17 +113,6 @@ public class DremioFileSystemCache {
 
     if (!exceptions.isEmpty()) {
       throw MultipleIOException.createIOException(exceptions);
-    }
-  }
-
-  private class ClientFinalizer implements Runnable {
-    @Override
-    public synchronized void run() {
-      try {
-        closeAll(true);
-      } catch (IOException e) {
-        logger.info("DremioFileSystemCache.closeAll() threw an exception\n", e);
-      }
     }
   }
 

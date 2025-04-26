@@ -15,7 +15,6 @@
  */
 package com.dremio.dac.service;
 
-import static com.dremio.exec.ExecConstants.VERSIONED_VIEW_ENABLED;
 import static com.dremio.exec.catalog.CatalogOptions.SUPPORT_UDF_API;
 import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.UNSUPPORTED_OPERATION;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.PHYSICAL_DATASET;
@@ -43,6 +42,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.BaseTestQuery;
+import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
@@ -75,6 +76,7 @@ import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.DatasetMetadataState;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.ImmutableVersionedListResponsePage;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.VersionedListOptions;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.planner.logical.ViewTable;
@@ -135,6 +137,7 @@ import javax.inject.Provider;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -159,7 +162,7 @@ public class TestCatalogServiceHelper {
 
   @BeforeEach
   public void setup() throws Exception {
-    SabotContext sabotContext = mock(SabotContext.class); // getSabotContext();
+    SabotContext sabotContext = mock(SabotContext.class);
     CatalogService catalogService = mock(CatalogService.class);
     SecurityContext securityContext = mock(SecurityContext.class);
     DatasetVersionMutator datasetVersionMutator = mock(DatasetVersionMutator.class);
@@ -250,8 +253,8 @@ public class TestCatalogServiceHelper {
     functionConfig.setId(new EntityId("function-id"));
     namespaceService.addOrUpdateFunction(new NamespaceKey("myFunction"), functionConfig);
 
-    List<CatalogItem> topLevelCatalogItems =
-        catalogServiceHelper.getTopLevelCatalogItems(Collections.EMPTY_LIST);
+    List<? extends CatalogItem> topLevelCatalogItems =
+        catalogServiceHelper.getTopLevelCatalogItems(Collections.emptyList());
     assertEquals(4, topLevelCatalogItems.size());
 
     int homeCount = 0;
@@ -299,7 +302,12 @@ public class TestCatalogServiceHelper {
 
     Optional<CatalogEntity> entity =
         catalogServiceHelper.getCatalogEntityById(
-            datasetConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            datasetConfig.getId().getId(),
+            ImmutableList.of(),
+            ImmutableList.of(),
+            null,
+            null,
+            false);
 
     assertTrue(entity.isPresent());
 
@@ -312,7 +320,7 @@ public class TestCatalogServiceHelper {
     assertFalse(dataset.getIsMetadataExpired());
     assertNull(dataset.getLastMetadataRefreshAtMillis());
 
-    List<Field> fields = dataset.getFields();
+    List<Field> fields = dataset.getFields().getFields();
     assertNotNull(fields);
     assertEquals(schema.getFields(), fields);
   }
@@ -331,7 +339,12 @@ public class TestCatalogServiceHelper {
 
     Optional<CatalogEntity> entity =
         catalogServiceHelper.getCatalogEntityById(
-            datasetConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            datasetConfig.getId().getId(),
+            ImmutableList.of(),
+            ImmutableList.of(),
+            null,
+            null,
+            false);
 
     Dataset dataset = (Dataset) entity.get();
     assertTrue(dataset.getIsMetadataExpired());
@@ -358,7 +371,7 @@ public class TestCatalogServiceHelper {
     Dataset dataset = (Dataset) catalogEntity;
     assertEquals(datasetConfig.getFullPathList(), dataset.getPath());
 
-    List<Field> fields = dataset.getFields();
+    List<Field> fields = dataset.getFields().getFields();
     assertNotNull(fields);
     assertEquals(schema.getFields(), fields);
   }
@@ -423,7 +436,7 @@ public class TestCatalogServiceHelper {
 
     Optional<CatalogEntity> catalogEntityById =
         catalogServiceHelper.getCatalogEntityById(
-            spaceConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            spaceConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null, false);
 
     assertTrue(catalogEntityById.isPresent());
 
@@ -440,7 +453,7 @@ public class TestCatalogServiceHelper {
    * Tests {@link CatalogServiceHelper#getCatalogEntityById} with children from {@link
    * FileSystemPlugin}.
    *
-   * <p>Call to {@link NamespaceService#exists} takes a lot of time when called sequentially on many
+   * <p>Call to {@link Catalog#exists} takes a lot of time when called sequentially on many
    * sub-folders, make sure it's not called.
    */
   @Test
@@ -513,7 +526,12 @@ public class TestCatalogServiceHelper {
 
     Optional<CatalogEntity> catalogEntityById =
         catalogServiceHelperWithMockNs.getCatalogEntityById(
-            sourceConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            sourceConfig.getId().getId(),
+            ImmutableList.of(),
+            ImmutableList.of(),
+            null,
+            null,
+            false);
 
     // Verify exists was not called.
     verify(mockNamespaceService, times(0)).exists(any());
@@ -591,7 +609,12 @@ public class TestCatalogServiceHelper {
 
     Optional<CatalogEntity> catalogEntityById =
         catalogServiceHelper.getCatalogEntityById(
-            functionConfig.getId().getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            functionConfig.getId().getId(),
+            ImmutableList.of(),
+            ImmutableList.of(),
+            null,
+            null,
+            false);
 
     assertTrue(catalogEntityById.isPresent());
 
@@ -657,7 +680,8 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -677,7 +701,8 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -697,7 +722,8 @@ public class TestCatalogServiceHelper {
             "CREATE VIEW foo AS SELECT 1",
             null,
             null,
-            null);
+            null,
+            false);
     UserExceptionAssert.assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .hasErrorType(UNSUPPORTED_OPERATION)
         .hasMessage("Cannot create view on statement of this type");
@@ -718,7 +744,8 @@ public class TestCatalogServiceHelper {
             "sql",
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -729,7 +756,7 @@ public class TestCatalogServiceHelper {
         new Dataset(
             null,
             Dataset.DatasetType.VIRTUAL_DATASET,
-            Collections.EMPTY_LIST,
+            Collections.emptyList(),
             null,
             null,
             null,
@@ -737,7 +764,8 @@ public class TestCatalogServiceHelper {
             "SELECT 1",
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -756,7 +784,8 @@ public class TestCatalogServiceHelper {
             "SELECT 1",
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -775,70 +804,10 @@ public class TestCatalogServiceHelper {
             "SELECT 1",
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
-  }
-
-  @Test
-  public void testCreateVDSInNonVersionedSourceShouldFail() throws Exception {
-    SourceConfig sourceConfig = new SourceConfig();
-    sourceConfig.setName("source");
-    sourceConfig.setId(new EntityId("source-id"));
-    sourceConfig.setType("");
-    NameSpaceContainer namespaceContainer = new NameSpaceContainer();
-    namespaceContainer.setSource(sourceConfig);
-    namespaceContainer.setType(NameSpaceContainer.Type.SOURCE);
-    namespaceService.addOrUpdateSource(new NamespaceKey(sourceConfig.getName()), sourceConfig);
-
-    // VDS needs sql
-    Dataset dataset =
-        new Dataset(
-            null,
-            Dataset.DatasetType.VIRTUAL_DATASET,
-            Arrays.asList("source", "path"),
-            null,
-            null,
-            null,
-            null,
-            "sql",
-            null,
-            null,
-            null);
-    assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage(
-            "Virtual datasets can only be saved into spaces, home space or versioned sources.");
-  }
-
-  @Test
-  public void testCreateVDSInVersionedSourceWithVersionedViewDisabledShouldFail() throws Exception {
-    // versioned source meanwhile versioned view is disabled
-    when(optionManager.getOption(VERSIONED_VIEW_ENABLED)).thenReturn(false);
-    try (MockedStatic<CatalogUtil> mockedCatalogUtil = mockStatic(CatalogUtil.class)) {
-      final List<String> tableKey = Arrays.asList("source", "path");
-      final NamespaceKey namespaceKey = new NamespaceKey(tableKey);
-      mockedCatalogUtil
-          .when(() -> CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, catalog))
-          .thenReturn(true);
-
-      Dataset dataset =
-          new Dataset(
-              null,
-              Dataset.DatasetType.VIRTUAL_DATASET,
-              tableKey,
-              null,
-              null,
-              null,
-              null,
-              "sql",
-              null,
-              null,
-              null);
-      UserExceptionAssert.assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
-          .hasErrorType(UNSUPPORTED_OPERATION)
-          .hasMessage("Versioned view is not enabled");
-    }
   }
 
   @Test
@@ -890,14 +859,14 @@ public class TestCatalogServiceHelper {
 
   @Test
   public void testCreateFolderWithEmptyPathShouldFail() {
-    Folder folder = new Folder("id", Collections.EMPTY_LIST, "1", null);
+    Folder folder = new Folder("id", Collections.emptyList(), "1", null, null, null);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(folder))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
   @Test
   public void testCreateFolderWithInvalidPathShouldFail() {
-    Folder folder = new Folder("id", Arrays.asList("space"), "1", null);
+    Folder folder = new Folder("id", Arrays.asList("space"), "1", null, null, null);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(folder))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -907,7 +876,7 @@ public class TestCatalogServiceHelper {
     when(optionManager.getOption(SUPPORT_UDF_API)).thenReturn(true);
 
     Function function =
-        new Function(null, Collections.EMPTY_LIST, "", null, null, true, null, null, null);
+        new Function(null, Collections.emptyList(), "", null, null, true, null, null, null);
 
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(function))
         .isInstanceOf(IllegalArgumentException.class);
@@ -1018,7 +987,8 @@ public class TestCatalogServiceHelper {
     CatalogEntity spaceItem = catalogServiceHelper.createCatalogItem(space);
     assertTrue(spaceItem instanceof Space);
 
-    Folder folder = new Folder(null, ImmutableList.of("mySpace", "myFolder"), null, null);
+    Folder folder =
+        new Folder(null, ImmutableList.of("mySpace", "myFolder"), null, null, null, null);
     CatalogEntity folderItem = catalogServiceHelper.createCatalogItem(folder);
     assertTrue(folderItem instanceof Folder);
 
@@ -1086,7 +1056,8 @@ public class TestCatalogServiceHelper {
             "sql",
             null,
             null,
-            null);
+            null,
+            false);
 
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, "bad-id"))
         .isInstanceOf(IllegalArgumentException.class);
@@ -1114,7 +1085,8 @@ public class TestCatalogServiceHelper {
             "sql",
             null,
             null,
-            null);
+            null,
+            false);
 
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, "bad-id"))
         .isInstanceOf(IllegalArgumentException.class);
@@ -1137,7 +1109,6 @@ public class TestCatalogServiceHelper {
     config.setId(new EntityId(id));
     config.setFullPathList(path);
     config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
     VirtualDataset virtualDataset = new VirtualDataset();
     virtualDataset.setSql("sql");
     virtualDataset.setContextList(null);
@@ -1162,7 +1133,8 @@ public class TestCatalogServiceHelper {
             "sql",
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, dataset.getId()))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -1184,7 +1156,6 @@ public class TestCatalogServiceHelper {
     config.setId(new EntityId(id));
     config.setFullPathList(path);
     config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
     VirtualDataset virtualDataset = new VirtualDataset();
     virtualDataset.setSql("sql");
     virtualDataset.setContextList(null);
@@ -1209,7 +1180,8 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
-            null);
+            null,
+            false);
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, dataset.getId()))
         .isInstanceOf(IllegalArgumentException.class);
   }
@@ -1228,61 +1200,11 @@ public class TestCatalogServiceHelper {
             "SELECT 1",
             null,
             null,
-            null);
+            null,
+            false);
 
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, "dataset-id"))
         .isInstanceOf(IllegalArgumentException.class);
-  }
-
-  @Test
-  public void testUpdateVDS() throws Exception {
-    SourceConfig sourceConfig = new SourceConfig();
-    sourceConfig.setName("source");
-    sourceConfig.setId(new EntityId("source-id"));
-    sourceConfig.setType("");
-    NameSpaceContainer namespaceContainer = new NameSpaceContainer();
-    namespaceContainer.setSource(sourceConfig);
-    namespaceContainer.setType(NameSpaceContainer.Type.SOURCE);
-    namespaceService.addOrUpdateSource(new NamespaceKey(sourceConfig.getName()), sourceConfig);
-
-    List<String> path = Arrays.asList("source", "path");
-    String id = "dataset-id";
-    DatasetConfig config = new DatasetConfig();
-    config.setId(new EntityId(id));
-    config.setFullPathList(path);
-    config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
-    VirtualDataset virtualDataset = new VirtualDataset();
-    virtualDataset.setSql("sql");
-    virtualDataset.setContextList(null);
-    config.setType(VIRTUAL_DATASET);
-    config.setVirtualDataset(virtualDataset);
-    namespaceService.addOrUpdateDataset(new NamespaceKey(path), config);
-
-    Dataset dataset =
-        new Dataset(
-            id,
-            Dataset.DatasetType.VIRTUAL_DATASET,
-            path,
-            null,
-            0L,
-            namespaceService.getEntityById(new EntityId(id)).get().getDataset().getTag(),
-            null,
-            "sql",
-            null,
-            null,
-            null);
-
-    ReflectionSettings reflectionSettings = mock(ReflectionSettings.class);
-    when(reflectionSettings.getStoredReflectionSettings(any(NamespaceKey.class)))
-        .thenReturn(Optional.empty());
-    when(reflectionServiceHelper.getReflectionSettings()).thenReturn(reflectionSettings);
-
-    DremioTable dremioTable = mock(DremioTable.class);
-    when(dremioTable.getDatasetConfig()).thenReturn(config);
-    when(catalog.getTable(any(String.class))).thenReturn(dremioTable);
-
-    catalogServiceHelper.updateCatalogItem(dataset, dataset.getId());
   }
 
   @Test
@@ -1303,7 +1225,6 @@ public class TestCatalogServiceHelper {
     config.setId(new EntityId(id));
     config.setFullPathList(path);
     config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
     VirtualDataset virtualDataset = new VirtualDataset();
     virtualDataset.setSql("sql");
     config.setType(VIRTUAL_DATASET);
@@ -1325,7 +1246,8 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
-            null);
+            null,
+            false);
 
     assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, dataset.getId()))
         .isInstanceOf(IllegalArgumentException.class);
@@ -1349,7 +1271,6 @@ public class TestCatalogServiceHelper {
     config.setId(new EntityId(id));
     config.setFullPathList(path);
     config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
     config.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
     PhysicalDataset physicalDataset = new PhysicalDataset();
     physicalDataset.setFormatSettings(new ParquetFileConfig().asFileConfig());
@@ -1383,7 +1304,8 @@ public class TestCatalogServiceHelper {
             null,
             null,
             new JsonFileConfig(),
-            null);
+            null,
+            false);
 
     catalogServiceHelper.updateCatalogItem(dataset, dataset.getId());
 
@@ -1438,7 +1360,8 @@ public class TestCatalogServiceHelper {
     CatalogEntity spaceItem = catalogServiceHelper.createCatalogItem(space);
     assertTrue(spaceItem instanceof Space);
 
-    Folder folder = new Folder(null, ImmutableList.of("mySpace", "myFolder"), null, null);
+    Folder folder =
+        new Folder(null, ImmutableList.of("mySpace", "myFolder"), null, null, null, null);
     CatalogEntity folderItem = catalogServiceHelper.createCatalogItem(folder);
     assertTrue(folderItem instanceof Folder);
 
@@ -1596,7 +1519,7 @@ public class TestCatalogServiceHelper {
     FunctionDefinition functionDefinition =
         new FunctionDefinition()
             .setFunctionBody(new FunctionBody().setRawBody("SELECT 1").setSerializedPlan(null))
-            .setFunctionArgList(Collections.EMPTY_LIST);
+            .setFunctionArgList(Collections.emptyList());
     FunctionConfig functionConfig =
         new FunctionConfig()
             .setId(id)
@@ -1641,7 +1564,7 @@ public class TestCatalogServiceHelper {
     FunctionDefinition functionDefinition =
         new FunctionDefinition()
             .setFunctionBody(new FunctionBody().setRawBody("SELECT 1").setSerializedPlan(null))
-            .setFunctionArgList(Collections.EMPTY_LIST);
+            .setFunctionArgList(Collections.emptyList());
     FunctionConfig functionConfig =
         new FunctionConfig()
             .setId(id)
@@ -1696,7 +1619,6 @@ public class TestCatalogServiceHelper {
     config.setId(new EntityId(id));
     config.setFullPathList(path);
     config.setName(path.get(path.size() - 1));
-    config.setCreatedAt(100L);
     config.setType(VIRTUAL_DATASET);
     config.setVirtualDataset(new VirtualDataset());
     namespaceService.addOrUpdateDataset(new NamespaceKey(path), config);
@@ -1725,7 +1647,8 @@ public class TestCatalogServiceHelper {
         sourceConfig.getId().getId(), optionalContainer.get().getSource().getTag());
 
     sourceConfig.setTag(optionalContainer.get().getSource().getTag());
-    verify(sourceService, times(1)).deleteSource(sourceConfig);
+    verify(sourceService, times(1))
+        .deleteSource(sourceConfig, SourceRefreshOption.BACKGROUND_DATASETS_CREATION);
   }
 
   @Test
@@ -1747,19 +1670,19 @@ public class TestCatalogServiceHelper {
 
   @Test
   public void testDeleteFolder() throws Exception {
-    Folder folder = new Folder("folder-id", Arrays.asList("folder"), null, null);
+    Folder folder = new Folder("folder-id", Arrays.asList("folder"), null, null, null, null);
 
     namespaceService.addOrUpdateFolder(
         new NamespaceKey(folder.getPath()), CatalogServiceHelper.getFolderConfig(folder));
     Optional<CatalogEntity> optionalEntity =
         catalogServiceHelper.getCatalogEntityById(
-            folder.getId(), ImmutableList.of(), ImmutableList.of(), null, null);
+            folder.getId(), ImmutableList.of(), ImmutableList.of(), null, null, false);
     assertTrue(optionalEntity.isPresent());
 
     catalogServiceHelper.deleteCatalogItem(
         folder.getId(), ((Folder) optionalEntity.get()).getTag());
 
-    assertTrue(namespaceService.getEntityById(new EntityId(folder.getId())).isEmpty());
+    verify(catalog, times(1)).deleteFolder(any(CatalogEntityKey.class), any());
   }
 
   @Test
@@ -1909,49 +1832,12 @@ public class TestCatalogServiceHelper {
               "sql",
               null,
               null,
-              null);
+              null,
+              false);
 
       assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, "id"))
           .isInstanceOf(IllegalArgumentException.class)
           .hasMessage("Versioned Dataset Id must be provided for updating versioned dataset.");
-    }
-  }
-
-  @Test
-  public void testUpdateVersionedDatasetWithVersionedViewDisabledShouldFail() throws Exception {
-    try (MockedStatic<CatalogUtil> mockedCatalogUtil = mockStatic(CatalogUtil.class)) {
-      final List<String> tableKey = Arrays.asList("source", "path");
-      final NamespaceKey namespaceKey = new NamespaceKey(tableKey);
-      mockedCatalogUtil
-          .when(() -> CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, catalog))
-          .thenReturn(true);
-
-      final VersionedDatasetId id =
-          VersionedDatasetId.newBuilder()
-              .setTableVersionContext(TableVersionContext.of(VersionContext.ofBranch("main")))
-              .setContentId(UUID.randomUUID().toString())
-              .setTableKey(tableKey)
-              .build();
-
-      Dataset dataset =
-          new Dataset(
-              id.asString(),
-              Dataset.DatasetType.VIRTUAL_DATASET,
-              tableKey,
-              null,
-              null,
-              null,
-              null,
-              "sql",
-              null,
-              null,
-              null);
-
-      when(optionManager.getOption(VERSIONED_VIEW_ENABLED)).thenReturn(false);
-      UserExceptionAssert.assertThatThrownBy(
-              () -> catalogServiceHelper.updateCatalogItem(dataset, id.asString()))
-          .hasErrorType(UNSUPPORTED_OPERATION)
-          .hasMessage("Versioned view is not enabled");
     }
   }
 
@@ -1983,9 +1869,9 @@ public class TestCatalogServiceHelper {
               "SELECT * FROM foo AT SNAPSHOT '1'",
               null,
               null,
-              null);
+              null,
+              false);
 
-      when(optionManager.getOption(VERSIONED_VIEW_ENABLED)).thenReturn(true);
       UserExceptionAssert.assertThatThrownBy(
               () -> catalogServiceHelper.updateCatalogItem(dataset, id.asString()))
           .hasErrorType(UNSUPPORTED_OPERATION)
@@ -2022,9 +1908,9 @@ public class TestCatalogServiceHelper {
               "SELECT 1",
               null,
               null,
-              null);
+              null,
+              false);
 
-      when(optionManager.getOption(VERSIONED_VIEW_ENABLED)).thenReturn(true);
       when(catalog.getTable(dataset.getId())).thenReturn(null);
       assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(dataset, id.asString()))
           .isInstanceOf(IllegalArgumentException.class)
@@ -2060,9 +1946,8 @@ public class TestCatalogServiceHelper {
               "SELECT 1",
               null,
               null,
-              null);
-
-      when(optionManager.getOption(VERSIONED_VIEW_ENABLED)).thenReturn(true);
+              null,
+              false);
 
       NamespaceKey currentViewPath = new NamespaceKey(Arrays.asList("source", "foo"));
       DremioTable dremioTable = mock(ViewTable.class);
@@ -2169,14 +2054,19 @@ public class TestCatalogServiceHelper {
     String refType = "BRANCH";
     String refValue = "main";
     VersionContext versionContext = VersionContext.ofBranch(refValue);
+    ResolvedVersionContext resolvedVersionContext =
+        ResolvedVersionContext.ofBranch(
+            refValue, DigestUtils.sha256Hex(UUID.randomUUID().toString()));
+    when(versionedPluginMock.resolveVersionContext(versionContext))
+        .thenReturn(resolvedVersionContext);
     doAnswer(
             (args) -> {
               List<String> argPath = args.getArgument(0);
-              VersionContext argVersionContext = args.getArgument(1);
-              VersionedListOptions listOptions = args.getArgument(2);
+              ResolvedVersionContext argResolvedVersionContext = args.getArgument(1);
+              VersionedListOptions listOptions = args.getArgument(4);
               ImmutableVersionedListResponsePage.Builder responseBuilder =
                   new ImmutableVersionedListResponsePage.Builder();
-              if (argPath.isEmpty() && argVersionContext.equals(versionContext)) {
+              if (argPath.isEmpty() && argResolvedVersionContext.equals(resolvedVersionContext)) {
                 int startIndex =
                     listOptions.pageToken() == null ? 0 : Integer.parseInt(listOptions.pageToken());
                 responseBuilder.addAllEntries(
@@ -2189,7 +2079,7 @@ public class TestCatalogServiceHelper {
               return responseBuilder.build();
             })
         .when(versionedPluginMock)
-        .listEntriesPage(any(), any(), any());
+        .listEntriesPage(any(), any(), any(), any(), any());
 
     // Paginate over the first source.
     CatalogPageToken pageToken = null;
@@ -2234,14 +2124,24 @@ public class TestCatalogServiceHelper {
 
     // Mock catalog.getSource.
     VersionedPlugin versionedPluginMock = mock(VersionedPlugin.class);
+    String refType = "BRANCH";
+    String refValue = "main";
+    ResolvedVersionContext resolveVersion =
+        ResolvedVersionContext.ofBranch(
+            refValue, DigestUtils.sha256Hex(UUID.randomUUID().toString()));
+    when(versionedPluginMock.resolveVersionContext(VersionContext.ofBranch(refValue)))
+        .thenReturn(resolveVersion);
+    when(versionedPluginMock.listEntries(
+            ImmutableList.of(),
+            resolveVersion,
+            VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+            VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY))
+        .thenReturn(allEntities.stream());
+
     StoragePlugin storagePluginMock = mock(StoragePlugin.class);
     when(storagePluginMock.isWrapperFor(eq(VersionedPlugin.class))).thenReturn(true);
     when(storagePluginMock.unwrap(eq(VersionedPlugin.class))).thenReturn(versionedPluginMock);
     when(catalog.getSource(sourceKey.getName())).thenReturn(storagePluginMock);
-    String refType = "BRANCH";
-    String refValue = "main";
-    when(versionedPluginMock.listEntries(ImmutableList.of(), VersionContext.ofBranch(refValue)))
-        .thenReturn(allEntities.stream());
 
     // Verify returned paths.
     CatalogListingResult listingResult =
@@ -2272,7 +2172,7 @@ public class TestCatalogServiceHelper {
   }
 
   private static SourceConfig newTestSource(String sourceName) {
-    return new SourceConfig().setName(sourceName).setType("NAS").setCtime(1000L);
+    return new SourceConfig().setName(sourceName).setType("NAS");
   }
 
   private static SpaceConfig newTestSpace(String spaceName) {

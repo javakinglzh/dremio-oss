@@ -31,6 +31,7 @@ public interface DatasetIndexKeys {
           .build();
   IndexKey DATASET_UUID =
       IndexKey.newBuilder("uuid", "DATASET_UUID", String.class)
+          .setSortedValueType(SearchFieldSorting.FieldType.STRING)
           .setIncludeInSearchAllFields(true)
           .build();
   IndexKey DATASET_SQL =
@@ -38,7 +39,7 @@ public interface DatasetIndexKeys {
   IndexKey DATASET_PARENTS =
       IndexKey.newBuilder("par", "PARENTS", String.class)
           .setCanContainMultipleValues(true)
-          .build(); // to get immidiate children
+          .build(); // to get immediate children
   IndexKey DATASET_COLUMNS_NAMES =
       IndexKey.newBuilder("col", "COLUMNS", String.class)
           .setIncludeInSearchAllFields(true)
@@ -48,10 +49,6 @@ public interface DatasetIndexKeys {
       IndexKey.newBuilder("usr", "OWNER", String.class).setIncludeInSearchAllFields(true).build();
   IndexKey DATASET_SOURCES =
       IndexKey.newBuilder("src", "SOURCE", String.class).setCanContainMultipleValues(true).build();
-  IndexKey DATASET_ALLPARENTS =
-      IndexKey.newBuilder("apar", "ALL_PARENTS", String.class)
-          .setCanContainMultipleValues(true)
-          .build(); // get all descendants
 
   // name and schema without escaping for use in jdbc/odbc and information metadata probes. (for
   // case sensitive matching)
@@ -78,6 +75,5 @@ public interface DatasetIndexKeys {
           DATASET_PARENTS,
           DATASET_COLUMNS_NAMES,
           DATASET_OWNER,
-          DATASET_SOURCES,
-          DATASET_ALLPARENTS);
+          DATASET_SOURCES);
 }

@@ -129,7 +129,6 @@
           <execution>
             <id>npm install</id>
             <goals>
-              <goal>install-node-and-npm</goal>
               <goal>install-node-and-pnpm</goal>
               <goal>pnpm</goal>
             </goals>
@@ -217,22 +216,6 @@
               <excludes combine.children="append">
                 <exclude>**/sourcemaps/**</exclude>
               </excludes>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>com.github.eirslett</groupId>
-            <artifactId>frontend-maven-plugin</artifactId>
-            <configuration>
-              <environmentVariables>
-                <EDITION_TYPE>mapr-ce</EDITION_TYPE>
-              </environmentVariables>
             </configuration>
           </plugin>
         </plugins>

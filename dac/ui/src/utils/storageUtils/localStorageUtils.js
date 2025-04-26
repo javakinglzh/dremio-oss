@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { bootIntercom } from "#oss/intercom/bootIntercom";
+
 const APP_KEY = "globalApp";
 const WIKI_SIZE_KEY = "WIKI_SIZE";
 
@@ -68,10 +70,16 @@ export class LocalStorageUtils {
   }
 
   setUserData(user) {
-    return localStorage.setItem("user", JSON.stringify(user));
+    localStorage.setItem("user", JSON.stringify(user));
+    try {
+      bootIntercom();
+    } catch (e) {
+      //
+    }
   }
 
   clearUserData() {
+    localStorage.removeItem("rs");
     return localStorage.removeItem("user");
   }
 
@@ -261,18 +269,6 @@ export class LocalStorageUtils {
 
   setSideNavWide(isWide) {
     localStorage.setItem("sideNavWide", isWide);
-  }
-
-  setIsQVJobs(isQVJob) {
-    localStorage.setItem("isQVJob", isQVJob);
-  }
-
-  getIsQVJobs() {
-    return (
-      localStorage.getItem("isQVJob") &&
-      localStorage.getItem("isQVJob") !== "undefined" &&
-      JSON.parse(localStorage.getItem("isQVJob"))
-    );
   }
 
   isQueryEngine() {

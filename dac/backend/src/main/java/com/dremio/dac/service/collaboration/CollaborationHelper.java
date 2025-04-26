@@ -70,7 +70,7 @@ public class CollaborationHelper {
   private static final String DEFAULT_HOME_WIKI_TEXT =
       "#  Wikis & Labels\n"
           + "\n"
-          + "![Gnarly Catalog](https://d33wubrfki0l68.cloudfront.net/c1a54376c45a9276c080f3d10ed25ce61c17bcd2/2b946/img/home/open-source-for-everyone.svg)\n"
+          + "![Gnarly Catalog](/static/img/open-source-for-everyone.svg)\n"
           + "\n"
           + "You are reading the wiki for your home space! You can create and edit this information for any source, space, or folder."
           + "\n"
@@ -141,7 +141,7 @@ public class CollaborationHelper {
 
     tagsStore.save(collaborationTag);
     getSearchService().wakeupManager("Labels changed");
-    publishCatalogEvent(key);
+    publishCatalogEvent(key, entityId);
   }
 
   public Optional<Wiki> getWiki(String entityId) throws NamespaceException {
@@ -239,7 +239,7 @@ public class CollaborationHelper {
     collaborationWiki.setEntityId(entityId);
 
     getWikiStore().save(collaborationWiki);
-    publishCatalogEvent(key);
+    publishCatalogEvent(key, entityId);
   }
 
   private CatalogEntityKey validateEntity(String entityId, CollaborationEntityType type) {
@@ -406,7 +406,7 @@ public class CollaborationHelper {
     }
   }
 
-  private void publishCatalogEvent(CatalogEntityKey key) {
+  private void publishCatalogEvent(CatalogEntityKey key, String entityId) {
     // All published events are updates, as setting/unsetting tags and wikis can only implicitly
     // "modify" namespace entries, not create or delete them
     catalogEventMessagePublisherProvider
@@ -418,7 +418,8 @@ public class CollaborationHelper {
                         .addAllPath(key.getKeyComponents())
                         .setEventType(
                             CatalogEventProto.CatalogEventMessage.CatalogEventType
-                                .CATALOG_EVENT_TYPE_UPDATED))
+                                .CATALOG_EVENT_TYPE_UPDATED)
+                        .setEntityId(entityId))
                 .build());
   }
 

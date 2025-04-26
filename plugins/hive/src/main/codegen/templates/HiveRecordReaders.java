@@ -250,9 +250,8 @@ public class Hive${entry.hiveReader}Reader extends HiveAbstractReader {
       }
       recordCount++;
     }
-    for (int i = 0; i < selectedStructFieldRefs.length; i++) {
-      vectors[i].setValueCount(recordCount);
-    }
+    outputMutator.getContainer().setAllCount(recordCount);
+    checkForRowSizeOverLimit(recordCount);
 
     return recordCount;
   }

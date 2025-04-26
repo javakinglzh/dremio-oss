@@ -96,7 +96,8 @@ public class IcebergExpiryAction {
       FileIO fileIO,
       boolean commitExpiry,
       String schemeVariate,
-      String fsScheme) {
+      String fsScheme,
+      String userId) {
     this.icebergMutablePlugin = icebergMutablePlugin;
     this.props = props;
     this.context = context;
@@ -116,7 +117,7 @@ public class IcebergExpiryAction {
       IcebergTableProps tableProps = getTableProps();
       IcebergModel icebergModel =
           icebergMutablePlugin.getIcebergModel(
-              tableProps, props.getUserName(), this.context, fileIO, null);
+              tableProps, props.getUserName(), this.context, fileIO, userId);
       IcebergTableIdentifier tableId = getTableIdentifier(icebergModel);
       this.allSnapshots = ImmutableList.copyOf(tableMetadata.snapshots());
       if (!commitExpiry) {
@@ -271,7 +272,11 @@ public class IcebergExpiryAction {
   }
 
   public String getTableName() {
-    return String.join(".", dbName, tableName);
+    if (dbName != null && !dbName.isEmpty()) {
+      return String.join(".", dbName, tableName);
+    } else {
+      return tableName;
+    }
   }
 
   public long getTimeElapsedForExpiry() {

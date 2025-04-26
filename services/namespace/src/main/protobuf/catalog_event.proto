@@ -29,6 +29,10 @@ message CatalogEventMessage {
     CATALOG_EVENT_TYPE_UPDATED = 2;
 
     CATALOG_EVENT_TYPE_DELETED = 3;
+
+    CATALOG_EVENT_TYPE_RECONCILIATION = 4;
+
+    CATALOG_EVENT_TYPE_VERSIONED_ENTITY_INGESTED = 5;
   }
 
   message VersionContext {
@@ -46,6 +50,14 @@ message CatalogEventMessage {
 
     // For versioned entities, it's a reference to a branch, tag, commit.
     optional VersionContext version_context = 3;
+
+    optional string versioned_entity_type = 4;
+
+    // Set for catalog events other than CATALOG_EVENT_TYPE_DELETED
+    // For Nessie, this is a VersionedDatasetId, otherwise it is a namespace entity id
+    optional string entity_id = 5;
+
+    optional string versioned_entity_metadata_location = 6;
   }
 
   repeated CatalogEvent events = 1;

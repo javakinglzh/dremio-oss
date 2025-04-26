@@ -21,6 +21,8 @@ import static com.dremio.sabot.Fixtures.th;
 import static com.dremio.sabot.Fixtures.toUnionCell;
 import static com.dremio.sabot.Fixtures.tr;
 import static com.dremio.sabot.Fixtures.tuple;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.dremio.common.logical.data.JoinCondition;
 import com.dremio.exec.ExecConstants;
@@ -125,6 +127,39 @@ public class TestVHashJoinSpillBuildAndReplay extends TestVHashJoinSpill {
   }
 
   @Test
+  public void testRowSizeLimitInnerJoinListType() throws Exception {
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 57); ) {
+      final JoinInfo joinInfo =
+          getJoinInfo(
+              Collections.singletonList(new JoinCondition("EQUALS", f("id_left"), f("id_right"))),
+              JoinRelType.INNER);
+
+      // header of expected joined table
+      final Fixtures.HeaderRow joinedHeader =
+          th("id_right", "ints_right", "strings_right", "id_left", "ints_left", "strings_left");
+
+      final int numberOfRows = 1;
+      final Fixtures.DataRow[] joinedData = getDataWithListVector(numberOfRows);
+
+      // expected joined table.
+      final Fixtures.Table expected = t(joinedHeader, false, joinedData);
+
+      // validate joined data against expected table
+      validateDual(
+          joinInfo.operator,
+          joinInfo.clazz,
+          new ListColumnsGenerator<>(getTestAllocator(), numberOfRows, 0, "left"),
+          new ListColumnsGenerator<>(getTestAllocator(), numberOfRows, 0, "right"),
+          50,
+          expected);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size"));
+    }
+  }
+
+  @Test
   public void testUnionColumns() throws Exception {
 
     final JoinInfo joinInfo =
@@ -197,6 +232,16 @@ public class TestVHashJoinSpillBuildAndReplay extends TestVHashJoinSpill {
         new MixedColumnGenerator<>(getTestAllocator(), numberOfRows, 0, "right"),
         50,
         expected);
+  }
+
+  @Override
+  public void testPivotSubBatches() throws Exception {
+    super.testPivotSubBatches();
+  }
+
+  @Override
+  public void hugeBatch() throws Exception {
+    super.hugeBatch();
   }
 
   /**

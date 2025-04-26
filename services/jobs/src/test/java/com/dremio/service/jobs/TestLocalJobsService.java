@@ -15,7 +15,6 @@
  */
 package com.dremio.service.jobs;
 
-import static com.dremio.exec.ExecConstants.ENABLE_DEPRECATED_JOBS_USER_STATS_API;
 import static com.dremio.service.job.proto.QueryType.METADATA_REFRESH;
 import static com.dremio.service.users.SystemUser.SYSTEM_USERNAME;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -73,12 +72,9 @@ import com.dremio.service.job.proto.JobSubmission;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.job.proto.SessionId;
 import com.dremio.service.jobcounts.JobCountsClient;
-import com.dremio.service.jobs.cleanup.JobsAndDependenciesCleaner;
-import com.dremio.service.jobs.cleanup.JobsAndDependenciesCleanerImpl;
 import com.dremio.service.jobtelemetry.GetQueryProfileResponse;
 import com.dremio.service.jobtelemetry.JobTelemetryClient;
 import com.dremio.service.jobtelemetry.JobTelemetryServiceGrpc;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.scheduler.Cancellable;
 import com.dremio.service.scheduler.Schedule;
 import com.dremio.service.scheduler.SchedulerService;
@@ -130,7 +126,6 @@ public class TestLocalJobsService {
   @Mock private ForemenTool foremenTool;
   @Mock private ClusterCoordinator clusterCoordinator;
   private CoordinationProtos.NodeEndpoint nodeEndpoint;
-  @Mock private NamespaceService namespaceService;
   @Mock private OptionManager optionManager;
   @Mock private AccelerationManager accelerationManager;
   @Mock private SchedulerService schedulerService;
@@ -143,6 +138,7 @@ public class TestLocalJobsService {
   @Mock private CatalogService catalogServiceProvider;
   @Mock private LegacyIndexedStore<JobId, JobResult> legacyIndexedStore;
   @Mock private JobCountsClient jobCountsClient;
+  @Mock private JobSubmissionListener jobSubmissionListener;
   @Mock private JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub jobTelemetryServiceStub;
 
   @Before
@@ -161,13 +157,6 @@ public class TestLocalJobsService {
       LocalQueryExecutor localQueryExecutor,
       CommandPool commandPool,
       LegacyKVStoreProvider kvStoreProvider) {
-    JobsAndDependenciesCleaner jobsAndDependenciesCleaner =
-        new JobsAndDependenciesCleanerImpl(
-            () -> kvStoreProvider,
-            () -> optionManager,
-            () -> schedulerService,
-            () -> jobTelemetryClient,
-            Collections.emptyList());
 
     return new LocalJobsService(
         () -> kvStoreProvider,
@@ -179,7 +168,6 @@ public class TestLocalJobsService {
         () -> foremenTool,
         () -> nodeEndpoint,
         () -> clusterCoordinator,
-        () -> namespaceService,
         () -> optionManager,
         () -> accelerationManager,
         () -> schedulerService,
@@ -192,7 +180,7 @@ public class TestLocalJobsService {
         () -> optionValidatorProvider,
         () -> catalogServiceProvider,
         () -> jobCountsClient,
-        () -> jobsAndDependenciesCleaner,
+        () -> jobSubmissionListener,
         dremioConfig);
   }
 
@@ -269,11 +257,9 @@ public class TestLocalJobsService {
     jobResultsStoreConfig = new JobResultsStoreConfig("dummy", Path.of("UNKNOWN"), null);
     Cancellable mockTask = mock(Cancellable.class);
     when(schedulerService.schedule(any(Schedule.class), any(Runnable.class))).thenReturn(mockTask);
-    when(optionManager.getOption(ENABLE_DEPRECATED_JOBS_USER_STATS_API))
-        .thenReturn(ENABLE_DEPRECATED_JOBS_USER_STATS_API.getDefault().getBoolVal());
     localJobsService.start();
 
-    verify(schedulerService, times(5)).schedule(any(Schedule.class), any(Runnable.class));
+    verify(schedulerService, times(2)).schedule(any(Schedule.class), any(Runnable.class));
   }
 
   @Test

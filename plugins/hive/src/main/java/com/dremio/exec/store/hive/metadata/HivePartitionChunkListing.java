@@ -125,12 +125,12 @@ public final class HivePartitionChunkListing implements PartitionChunkListing {
       currentPartitionMetadata = PartitionMetadata.newBuilder().partition(null)
         .partitionXattr(HiveMetadataUtils.getPartitionXattr(tableMetadata.getTable(),
           HiveMetadataUtils.fromProperties(tableMetadata.getTableProperties())))
-        .partitionValues(Collections.EMPTY_LIST)
+        .partitionValues(Collections.emptyList())
         .inputSplitBatchIterator(
           InputSplitBatchIterator.newBuilder()
             .partition(null)
             .tableMetadata(tableMetadata)
-            .inputSplits(Collections.EMPTY_LIST)
+            .inputSplits(Collections.emptyList())
             .maxInputSplitsPerPartition(maxInputSplitsPerPartition)
             .build())
         .build();
@@ -153,12 +153,12 @@ public final class HivePartitionChunkListing implements PartitionChunkListing {
       currentPartitionMetadata = PartitionMetadata.newBuilder().partition(null)
         .partitionXattr(HiveMetadataUtils.getPartitionXattr(tableMetadata.getTable(),
           HiveMetadataUtils.fromProperties(tableMetadata.getTableProperties())))
-        .partitionValues(Collections.EMPTY_LIST)
+        .partitionValues(Collections.emptyList())
         .inputSplitBatchIterator(
           InputSplitBatchIterator.newBuilder()
             .partition(null)
             .tableMetadata(tableMetadata)
-            .inputSplits(Collections.EMPTY_LIST)
+            .inputSplits(Collections.emptyList())
             .maxInputSplitsPerPartition(maxInputSplitsPerPartition)
             .build())
         .build();
@@ -190,13 +190,13 @@ public final class HivePartitionChunkListing implements PartitionChunkListing {
         .partitionId(currentPartitionIndex)
         .partitionXattr(HiveMetadataUtils.getPartitionXattr(tableMetadata.getTable(),
           HiveMetadataUtils.fromProperties(tableMetadata.getTableProperties())))
-        .partitionValues(Collections.EMPTY_LIST)
+        .partitionValues(Collections.emptyList())
         .datasetSplitBuildConf(null)
         .inputSplitBatchIterator(
           InputSplitBatchIterator.newBuilder()
             .partition(null)
             .tableMetadata(tableMetadata)
-            .inputSplits(Collections.EMPTY_LIST)
+            .inputSplits(Collections.emptyList())
             .maxInputSplitsPerPartition(maxInputSplitsPerPartition)
             .build())
         .dirListInputSplit(null)

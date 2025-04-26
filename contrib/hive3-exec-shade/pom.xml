@@ -117,6 +117,26 @@
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.amazonaws.glue</groupId>
+      <artifactId>aws-glue-datacatalog-hive3-client</artifactId>
+      <version>${plugin.hive3.aws.glue.version}</version>
+      <exclusions>
+        <exclusion>
+          <!-- The JAR is shading all glue dependencies but pom doesn't reflect it -->
+          <groupId>com.amazonaws.glue</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>commons-logging</groupId>
+          <artifactId>commons-logging-api</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>commons-logging</groupId>
+          <artifactId>commons-logging</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
   </dependencies>
 
   <build>
@@ -141,6 +161,7 @@
                   <include>com.fasterxml.jackson.core:jackson-core</include>
                   <include>com.fasterxml.jackson.core:jackson-databind</include>
                   <include>com.google.protobuf:protobuf-java</include>
+                  <include>com.amazonaws.glue:aws-glue-datacatalog-hive3-client</include>
                 </includes>
               </artifactSet>
               <createDependencyReducedPom>false</createDependencyReducedPom>
@@ -276,76 +297,4 @@
       </plugin>
     </plugins>
   </build>
-
-  <profiles>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>com.amazonaws.glue</groupId>
-          <artifactId>aws-glue-datacatalog-hive3-client</artifactId>
-          <version>${plugin.hive3.aws.glue.version}</version>
-          <exclusions>
-            <exclusion>
-              <!-- The JAR is shading all glue dependencies but pom doesn't reflect it -->
-              <groupId>com.amazonaws.glue</groupId>
-              <artifactId>*</artifactId>
-            </exclusion>
-            <exclusion>
-              <groupId>commons-logging</groupId>
-              <artifactId>commons-logging-api</artifactId>
-            </exclusion>
-            <exclusion>
-              <groupId>commons-logging</groupId>
-              <artifactId>commons-logging</artifactId>
-            </exclusion>
-          </exclusions>
-        </dependency>
-      </dependencies>
-      <build>
-        <plugins>
-          <plugin>
-            <!-- Enable compilation -->
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-compiler-plugin</artifactId>
-            <configuration>
-              <skipMain>false</skipMain>
-            </configuration>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-shade-plugin</artifactId>
-            <executions>
-              <execution>
-                <goals>
-                  <goal>shade</goal>
-                </goals>
-                <phase>package</phase>
-                <configuration>
-                  <artifactSet>
-                    <includes combine.children="append">
-                      <include>com.amazonaws.glue:aws-glue-datacatalog-hive3-client</include>
-                    </includes>
-                  </artifactSet>
-                  <filters>
-                    <filter>
-                      <artifact>org.apache.hive:hive-exec</artifact>
-                      <excludes>
-                        <exclude>org/apache/hadoop/hive/ql/udf/generic/GenericUDTFGetSplits.class</exclude>
-                      </excludes>
-                    </filter>
-                  </filters>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-  </profiles>
 </project>

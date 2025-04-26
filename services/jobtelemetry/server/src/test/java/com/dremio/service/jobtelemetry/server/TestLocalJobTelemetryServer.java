@@ -17,7 +17,10 @@ package com.dremio.service.jobtelemetry.server;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableThreadPool;
@@ -38,6 +41,7 @@ import com.dremio.service.jobtelemetry.GetQueryProfileRequest;
 import com.dremio.service.jobtelemetry.JobTelemetryClient;
 import com.dremio.service.jobtelemetry.PutPlanningProfileRequest;
 import com.dremio.service.jobtelemetry.PutTailProfileRequest;
+import com.dremio.service.jobtelemetry.server.store.ProfileDistStoreConfig;
 import com.dremio.telemetry.utils.GrpcTracerFacade;
 import com.dremio.telemetry.utils.TracerFacade;
 import org.junit.After;
@@ -57,6 +61,7 @@ public class TestLocalJobTelemetryServer {
   private LocalJobTelemetryServer server;
   private JobTelemetryClient client;
   private OptionManager optionManager;
+  private ProfileDistStoreConfig profileDistStoreConfig;
 
   @Before
   public void setUp() throws Exception {
@@ -66,6 +71,7 @@ public class TestLocalJobTelemetryServer {
     kvStoreProvider = TempLocalKVStoreProviderCreator.create();
     legacyKVStoreProvider = TempLegacyKVStoreProviderCreator.create();
     optionManager = mock(OptionManager.class);
+    profileDistStoreConfig = mock(ProfileDistStoreConfig.class);
     server =
         new LocalJobTelemetryServer(
             () -> optionManager,
@@ -73,6 +79,7 @@ public class TestLocalJobTelemetryServer {
             DirectProvider.wrap(kvStoreProvider),
             DirectProvider.wrap(legacyKVStoreProvider),
             DirectProvider.wrap(node),
+            () -> profileDistStoreConfig,
             tracer,
             CloseableThreadPool::newCachedThreadPool);
     server.start();
@@ -155,5 +162,32 @@ public class TestLocalJobTelemetryServer {
         .isInstanceOf(io.grpc.StatusRuntimeException.class)
         .hasMessageContaining(
             "Unable to get query profile. Profile not found for the given queryId.");
+  }
+
+  @Test
+  public void testCloudBasedDistStore() {
+    when(profileDistStoreConfig.getConnection()).thenReturn("dremioS3:///");
+    assertTrue(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("dremioAzureStorage:///");
+    assertTrue(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("dremiogcs:///");
+    assertTrue(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("file:///");
+    assertFalse(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("hdfs:///");
+    assertFalse(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("maprfs:///");
+    assertFalse(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn("");
+    assertFalse(server.verifyCloudBasedDistStore());
+
+    when(profileDistStoreConfig.getConnection()).thenReturn(null);
+    assertFalse(server.verifyCloudBasedDistStore());
   }
 }

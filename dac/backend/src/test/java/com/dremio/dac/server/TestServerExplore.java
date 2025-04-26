@@ -77,7 +77,6 @@ import com.dremio.dac.explore.model.InitialDataPreviewResponse;
 import com.dremio.dac.explore.model.InitialPendingTransformResponse;
 import com.dremio.dac.explore.model.InitialPreviewResponse;
 import com.dremio.dac.explore.model.InitialRunResponse;
-import com.dremio.dac.explore.model.JoinRecommendation;
 import com.dremio.dac.explore.model.JoinRecommendations;
 import com.dremio.dac.explore.model.PreviewReq;
 import com.dremio.dac.explore.model.ReplacePreviewReq;
@@ -160,12 +159,12 @@ import com.dremio.dac.proto.model.dataset.TransformTrim;
 import com.dremio.dac.proto.model.dataset.TransformUpdateSQL;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.resource.SystemResource;
-import com.dremio.dac.service.datasets.DatasetVersionMutator;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.dac.util.DatasetsUtil.ExtractRuleVisitor;
 import com.dremio.dac.util.JSONUtil;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.options.OptionManager;
@@ -175,8 +174,6 @@ import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.dataset.proto.FieldOrigin;
-import com.dremio.service.namespace.dataset.proto.Origin;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.dremio.service.namespace.space.proto.HomeConfig;
 import com.dremio.test.TemporarySystemProperties;
@@ -187,7 +184,6 @@ import com.google.common.collect.Lists;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -358,61 +354,6 @@ public class TestServerExplore extends BaseTestServer {
   }
 
   @Test
-  public void testFieldOrigins() throws Exception {
-    setSpace();
-    final DatasetVersionMutator datasetService = getDatasetVersionMutator();
-
-    final DatasetPath datasetPath = new DatasetPath("spacefoo.folderbar.folderbaz.datasetbuzz");
-    DatasetUI datasetUI =
-        getHttpClient()
-            .getDatasetApi()
-            .createDatasetFromSQLAndSave(
-                datasetPath,
-                "select s_suppkey, s_name from cp.\"tpch/supplier.parquet\"",
-                Collections.<String>emptyList());
-
-    datasetUI =
-        getHttpClient()
-            .getDatasetApi()
-            .transform(datasetUI, new TransformConvertCase("s_name", UPPER_CASE, "foo", true))
-            .getDataset();
-
-    // Get the versioned dataset and verify that the field origins are set correctly.
-    VirtualDatasetUI virtualDatasetUI =
-        datasetService.getVersion(datasetPath, datasetUI.getDatasetVersion());
-    List<FieldOrigin> fieldOrigins = virtualDatasetUI.getFieldOriginsList();
-    validateFieldOrigin(
-        fieldOrigins.get(0),
-        "s_suppkey",
-        asList("cp", "tpch/supplier.parquet"),
-        false,
-        "s_suppkey");
-    validateFieldOrigin(
-        fieldOrigins.get(1), "foo", asList("cp", "tpch/supplier.parquet"), true, "s_name");
-
-    // Get the last saved dataset and verify that the field origins are set correctly
-    virtualDatasetUI = datasetService.get(datasetPath);
-    fieldOrigins = virtualDatasetUI.getFieldOriginsList();
-    validateFieldOrigin(
-        fieldOrigins.get(0),
-        "s_suppkey",
-        asList("cp", "tpch/supplier.parquet"),
-        false,
-        "s_suppkey");
-    validateFieldOrigin(
-        fieldOrigins.get(1), "s_name", asList("cp", "tpch/supplier.parquet"), false, "s_name");
-  }
-
-  private void validateFieldOrigin(
-      FieldOrigin fieldOrigin, String name, List<String> table, boolean derived, String col) {
-    assertEquals(name, fieldOrigin.getName());
-    Origin oi = fieldOrigin.getOriginsList().iterator().next();
-    assertEquals(col, oi.getColumnName());
-    assertEquals(derived, oi.getDerived());
-    assertEquals(table, oi.getTableList());
-  }
-
-  @Test
   public void previewDataForPhysicalDataset() throws Exception {
     final NASConf nas = new NASConf();
     nas.path = new File("src/test/resources/datasets").getAbsolutePath();
@@ -423,7 +364,7 @@ public class TestServerExplore extends BaseTestServer {
         UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
 
     final SourceService sourceService = getSourceService();
-    sourceService.registerSourceWithRuntime(source);
+    sourceService.registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     InitialDataPreviewResponse resp =
         getHttpClient()
@@ -2320,12 +2261,12 @@ public class TestServerExplore extends BaseTestServer {
                 .buildGet(),
             JoinRecommendations.class);
 
-    assertEquals(2, recommendations.getRecommendations().size());
-    JoinRecommendation r0 = recommendations.getRecommendations().get(0);
-    JoinRecommendation r1 = recommendations.getRecommendations().get(1);
-
-    assertEquals(asList("cp", "json/join/c.json"), r0.getRightTableFullPathList());
-    assertEquals(asList("cp", "json/join/b.json"), r1.getRightTableFullPathList());
+    // TODO DX-101113: Join Recommendations are disabled, expect none
+    assertEquals(0, recommendations.getRecommendations().size());
+    // JoinRecommendation r0 = recommendations.getRecommendations().get(0);
+    // JoinRecommendation r1 = recommendations.getRecommendations().get(1);
+    // assertEquals(asList("cp", "json/join/c.json"), r0.getRightTableFullPathList());
+    // assertEquals(asList("cp", "json/join/b.json"), r1.getRightTableFullPathList());
   }
 
   @Test
@@ -2945,7 +2886,7 @@ public class TestServerExplore extends BaseTestServer {
         UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
 
     final SourceService sourceService = getSourceService();
-    sourceService.registerSourceWithRuntime(source);
+    sourceService.registerSourceWithRuntime(source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     InitialDataPreviewResponse resp =
         getHttpClient()

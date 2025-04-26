@@ -38,6 +38,7 @@ type DatasetSummaryItemLabelProps = {
   queryLink?: string;
   hideSqlEditorIcon?: boolean;
   versionContext?: VersionContextType;
+  hideAllActions?: boolean;
 };
 
 const SummaryItemLabel = (props: DatasetSummaryItemLabelProps) => {
@@ -55,6 +56,7 @@ const SummaryItemLabel = (props: DatasetSummaryItemLabelProps) => {
     hideSqlEditorIcon,
     hasReflection,
     versionContext,
+    hideAllActions,
   } = props;
 
   const titleRef = useRef(null);
@@ -102,7 +104,7 @@ const SummaryItemLabel = (props: DatasetSummaryItemLabelProps) => {
       <div
         className={`${classes["dataset-item-header-action-container"]} ${disable}`}
       >
-        {!hideSqlEditorIcon && (
+        {!hideSqlEditorIcon && !hideAllActions && (
           <span className="mx-1">
             <QueryDataset
               resourceId={resourceId}
@@ -113,7 +115,7 @@ const SummaryItemLabel = (props: DatasetSummaryItemLabelProps) => {
             />
           </span>
         )}
-        {iconName && (
+        {iconName && !hideAllActions && (
           <SummaryAction
             canAlter={canAlter}
             canSelect={canSelect}

@@ -114,6 +114,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeID;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -127,6 +128,7 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.arrow.vector.types.pojo.FieldType;
 
@@ -186,10 +188,12 @@ public class CompleteType {
   }
 
   public static CompleteType fromMajorType(TypeProtos.MajorType type) {
-    if (type.getMinorType().equals(MinorType.DECIMAL)) {
-      return CompleteType.fromDecimalPrecisionScale(type.getPrecision(), type.getScale());
+    switch (type.getMinorType()) {
+      case DECIMAL:
+        return CompleteType.fromDecimalPrecisionScale(type.getPrecision(), type.getScale());
+      default:
+        return fromMinorType(type.getMinorType());
     }
-    return fromMinorType(type.getMinorType());
   }
 
   public Field toField(String name) {
@@ -200,8 +204,13 @@ public class CompleteType {
     return new Field(name, new FieldType(isNullable, type, null), children);
   }
 
+  // TODO: remove this function once we have nullability information in CompleteType
+  public Field toField(ProvidesUnescapedPath ref, boolean isNullable) {
+    return new Field(ref.getAsUnescapedPath(), new FieldType(isNullable, type, null), children);
+  }
+
   public Field toField(ProvidesUnescapedPath ref) {
-    return new Field(ref.getAsUnescapedPath(), new FieldType(true, type, null), children);
+    return toField(ref, true);
   }
 
   private Field toInternalList() {
@@ -274,7 +283,7 @@ public class CompleteType {
   public static CompleteType fromMinorType(MinorType type) {
     switch (type) {
 
-        // simple types.
+      // simple types.
       case BIGINT:
         return BIGINT;
       case BIT:
@@ -293,7 +302,7 @@ public class CompleteType {
         return INTERVAL_YEAR_MONTHS;
       case TIME:
         return TIME;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return TIMESTAMP;
       case VARBINARY:
         return VARBINARY;
@@ -307,7 +316,7 @@ public class CompleteType {
 
       case DECIMAL:
         return DECIMAL;
-        // types that need additional information
+      // types that need additional information
       case LIST:
         return LIST;
       case STRUCT:
@@ -319,7 +328,7 @@ public class CompleteType {
             "You can't create a complete type from a minor type when working with type of "
                 + type.name());
 
-        // unsupported types.
+      // unsupported types.
       case INTERVAL:
       case MONEY:
       case NULL:
@@ -446,6 +455,19 @@ public class CompleteType {
     }
   }
 
+  public boolean isFixedWidthType() {
+    if (type.isComplex()) {
+      return false;
+    }
+    if (type.getTypeID() == ArrowTypeID.Utf8
+        || type.getTypeID() == ArrowTypeID.Binary
+        || type.getTypeID() == ArrowTypeID.LargeBinary
+        || type.getTypeID() == ArrowTypeID.LargeUtf8) {
+      return false;
+    }
+    return true;
+  }
+
   public boolean isVariableWidthScalar() {
     switch (type.getTypeID()) {
       case Utf8:
@@ -558,6 +580,12 @@ public class CompleteType {
           }
 
           @Override
+          public Class<? extends ValueHolder> visit(
+              org.apache.arrow.vector.types.pojo.ArrowType.ListView type) {
+            return ComplexHolder.class;
+          }
+
+          @Override
           public Class<? extends ValueHolder> visit(Union type) {
             return UnionHolder.class;
           }
@@ -596,8 +624,18 @@ public class CompleteType {
           }
 
           @Override
+          public Class<? extends ValueHolder> visit(Utf8View type) {
+            throw new UnsupportedOperationException("Utf8View is not supported.");
+          }
+
+          @Override
           public Class<? extends ValueHolder> visit(Binary type) {
             return NullableVarBinaryHolder.class;
+          }
+
+          @Override
+          public Class<? extends ValueHolder> visit(BinaryView type) {
+            throw new UnsupportedOperationException("BinaryView is not supported.");
           }
 
           @Override
@@ -666,6 +704,16 @@ public class CompleteType {
           @Override
           public Class<? extends ValueHolder> visit(ArrowType.Duration type) {
             throw new UnsupportedOperationException("Dremio does not support duration yet.");
+          }
+
+          @Override
+          public Class<? extends ValueHolder> visit(ArrowType.RunEndEncoded type) {
+            throw new UnsupportedOperationException("Dremio does not support RunEndEncoded yet.");
+          }
+
+          @Override
+          public Class<? extends ValueHolder> visit(ArrowType.LargeListView type) {
+            throw new UnsupportedOperationException("Dremio does not support LargeListView yet.");
           }
 
           @Override
@@ -948,7 +996,8 @@ public class CompleteType {
   }
 
   @VisibleForTesting
-  static CompleteType removeUnions(CompleteType type, SupportsTypeCoercionsAndUpPromotions rules) {
+  public static CompleteType removeUnions(
+      CompleteType type, SupportsTypeCoercionsAndUpPromotions rules) {
     List<Field> fieldList = type.getChildren();
     type = new CompleteType(fieldList.get(0).getType(), fieldList.get(0).getChildren());
     for (Field currentField : fieldList) {
@@ -1225,6 +1274,11 @@ public class CompleteType {
 
           @Override
           public Boolean visit(org.apache.arrow.vector.types.pojo.ArrowType.List type) {
+            return false;
+          }
+
+          @Override
+          public Boolean visit(org.apache.arrow.vector.types.pojo.ArrowType.ListView type) {
             return false;
           }
 

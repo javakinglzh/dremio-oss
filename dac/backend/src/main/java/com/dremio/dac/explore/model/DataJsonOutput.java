@@ -199,7 +199,7 @@ public class DataJsonOutput {
                 }
               })
           .put(
-              MinorType.TIMESTAMP,
+              MinorType.TIMESTAMPMILLI,
               new UnionFieldWriter() {
                 @Override
                 public void write(
@@ -640,7 +640,7 @@ public class DataJsonOutput {
         return keyReader.readLocalDateTime().toLocalDate().toString();
       case TIME:
         return keyReader.readLocalDateTime().toLocalTime().toString();
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return keyReader.readLocalDateTime().toString();
       case DECIMAL:
         return keyReader.readBigDecimal().toPlainString();

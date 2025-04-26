@@ -18,6 +18,7 @@ package com.dremio.service.namespace.space;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.space.proto.SpaceConfig;
 import java.util.List;
 
@@ -27,6 +28,13 @@ public interface SpaceNamespaceService {
       NamespaceKey spacePath, SpaceConfig spaceConfig, NamespaceAttribute... attributes)
       throws NamespaceException;
 
+  /**
+   * Get a space by its path.
+   *
+   * @param spacePath the path of the space to get
+   * @return The space if it exists.
+   * @throws NamespaceNotFoundException if the space does not exist.
+   */
   SpaceConfig getSpace(NamespaceKey spacePath) throws NamespaceException;
 
   List<SpaceConfig> getSpaces();

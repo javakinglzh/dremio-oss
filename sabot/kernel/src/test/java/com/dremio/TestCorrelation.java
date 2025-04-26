@@ -144,8 +144,8 @@ public class TestCorrelation extends PlanTestBase {
             .sqlQuery(query)
             .unOrdered()
             .baselineColumns("c")
-            .baselineValues(1L)
-            .baselineValues(2L)
+            .baselineValues(1)
+            .baselineValues(2)
             .build();
     try (AutoCloseable c = withOption(PlannerSettings.USE_SQL_TO_REL_SUB_QUERY_EXPANSION, true)) {
       testWrapper.run();
@@ -181,10 +181,10 @@ public class TestCorrelation extends PlanTestBase {
         .sqlQuery(query)
         .unOrdered()
         .baselineColumns("t1_id", "m1", "m2")
-        .baselineValues("a", 2L, 1L)
-        .baselineValues("a", 2L, 2L)
-        .baselineValues("b", 4L, null)
-        .baselineValues("c", 6L, null)
+        .baselineValues("a", 2, 1)
+        .baselineValues("a", 2, 2)
+        .baselineValues("b", 4, null)
+        .baselineValues("c", 6, null)
         .build()
         .run();
   }

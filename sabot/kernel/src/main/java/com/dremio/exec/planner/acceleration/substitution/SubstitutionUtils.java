@@ -21,6 +21,7 @@ import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
+import com.dremio.exec.planner.logical.PushProjectIntoScanRule;
 import com.dremio.exec.tablefunctions.ExternalQueryScanCrel;
 import com.dremio.reflection.rules.ReplacementPointer;
 import com.dremio.service.Pointer;
@@ -29,6 +30,7 @@ import com.google.common.collect.Sets;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.Writer;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -40,6 +42,7 @@ import org.apache.calcite.rel.RelShuttle;
 import org.apache.calcite.rel.RelVisitor;
 import org.apache.calcite.rel.core.TableScan;
 import org.apache.calcite.rel.externalize.RelWriterImpl;
+import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.sql.SqlExplainLevel;
 import org.apache.calcite.util.Pair;
 
@@ -113,6 +116,7 @@ public final class SubstitutionUtils {
   }
 
   private static class Hasher extends Writer {
+
     private int hash = 0;
 
     @Override
@@ -186,6 +190,7 @@ public final class SubstitutionUtils {
   }
 
   public static class ExternalQueryDescriptor {
+
     private final String source;
     private final String query;
 
@@ -252,6 +257,7 @@ public final class SubstitutionUtils {
    * various Java collections.
    */
   public static final class VersionedPath extends Pair<List<String>, TableVersionContext> {
+
     /**
      * Creates a Pair.
      *
@@ -278,5 +284,38 @@ public final class SubstitutionUtils {
   public static TableVersionContext getVersionContext(RelOptTable table) {
     DremioTable dremioTable = Preconditions.checkNotNull(table.unwrap(DremioTable.class));
     return dremioTable.getDataset().getVersionContext();
+  }
+
+  /*
+   Visitor class to push complex field access from the top project into the scan.
+  */
+  public static class PushProjectIntoScanVisitor extends StatelessRelShuttleImpl {
+    final PushProjectIntoScanRule rule;
+
+    public PushProjectIntoScanVisitor(boolean pushAllComplexFieldAccess) {
+      if (pushAllComplexFieldAccess) {
+        this.rule = PushProjectIntoScanRule.INSTANCE;
+      } else {
+        this.rule = PushProjectIntoScanRule.PUSH_ONLY_FIELD_ACCESS_INSTANCE;
+      }
+    }
+
+    @Override
+    protected RelNode visitChild(RelNode parent, int i, RelNode child) {
+      if (parent instanceof LogicalProject && child instanceof ScanCrel) {
+        RelNode newRel = rule.pushProjectIntoScan((LogicalProject) parent, (ScanCrel) child);
+        if (newRel != null) {
+          return newRel;
+        }
+        return parent;
+      }
+      RelNode child2 = child.accept(this);
+      if (child2 != child) {
+        final List<RelNode> newInputs = new ArrayList<>(parent.getInputs());
+        newInputs.set(i, child2);
+        return parent.copy(parent.getTraitSet(), newInputs);
+      }
+      return parent;
+    }
   }
 }

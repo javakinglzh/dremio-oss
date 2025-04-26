@@ -33,4 +33,14 @@ public interface RoundUtil {
       return val - rem + 64;
     }
   }
+
+  static int nextPower2(int value) {
+    if (value <= 0) {
+      return 1;
+    }
+    if (Integer.bitCount(value) == 1) {
+      return value;
+    }
+    return Integer.highestOneBit(value) << 1;
+  }
 }

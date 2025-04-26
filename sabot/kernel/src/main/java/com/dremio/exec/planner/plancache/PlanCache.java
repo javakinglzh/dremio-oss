@@ -17,32 +17,25 @@ package com.dremio.exec.planner.plancache;
 
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
+import javax.annotation.Nullable;
 
 public interface PlanCache {
   PlanCache EMPTY_CACHE =
       new PlanCache() {
         @Override
-        public void putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel) {}
-
-        @Override
-        public CachedPlan getIfPresentAndValid(
-            SqlHandlerConfig sqlHandlerConfig, PlanCacheKey planCacheKey) {
-          return null;
+        public boolean putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel) {
+          return false;
         }
 
         @Override
-        public void invalidateCacheOnDataset(String datasetId) {}
-
-        @Override
-        public void invalidateAll() {}
+        public @Nullable PlanCacheEntry getIfPresentAndValid(
+            SqlHandlerConfig sqlHandlerConfig, PlanCacheKey planCacheKey) {
+          return null;
+        }
       };
 
-  void putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel);
+  boolean putCachedPlan(SqlHandlerConfig config, PlanCacheKey cachedKey, Prel prel);
 
-  CachedPlan getIfPresentAndValid(SqlHandlerConfig sqlHandlerConfig, PlanCacheKey planCacheKey);
-
-  @Deprecated
-  void invalidateCacheOnDataset(String datasetId);
-
-  void invalidateAll();
+  @Nullable
+  PlanCacheEntry getIfPresentAndValid(SqlHandlerConfig sqlHandlerConfig, PlanCacheKey planCacheKey);
 }

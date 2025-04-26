@@ -15,26 +15,14 @@
  */
 package com.dremio.exec.planner.sql.handlers;
 
-import static com.dremio.exec.planner.physical.PlannerSettings.QUERY_RESULTS_STORE_TABLE;
-import static com.dremio.exec.planner.physical.PlannerSettings.STORE_QUERY_RESULTS;
-
 import com.dremio.common.exceptions.UserException;
-import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogOptions;
-import com.dremio.exec.catalog.CatalogUser;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.ops.QueryContext;
-import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.StarColumnHelper;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
-import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.planner.logical.Rel;
-import com.dremio.exec.planner.logical.WriterRel;
-import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.planner.physical.PlannerSettings.StoreQueryResultsPolicy;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
 import com.dremio.exec.planner.sql.handlers.direct.SimpleCommandResult;
@@ -49,12 +37,9 @@ import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.dremio.exec.planner.types.RelDataTypeSystemImpl;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.SchemaBuilder;
-import com.dremio.exec.store.easy.arrow.ArrowFormatPlugin;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.users.SystemUser;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.text.SimpleDateFormat;
@@ -64,14 +49,11 @@ import java.util.Calendar;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.plan.RelOptUtil;
-import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -90,14 +72,12 @@ import org.apache.calcite.sql.SqlRowTypeNameSpec;
 import org.apache.calcite.sql.SqlTimestampLiteral;
 import org.apache.calcite.sql.SqlWriter;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
-import org.apache.calcite.sql.parser.SqlParser;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.sql.util.SqlShuttle;
 import org.apache.calcite.tools.ValidationException;
 import org.apache.calcite.util.TimestampString;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.lang3.text.StrTokenizer;
 
 public class SqlHandlerUtil {
   private static final org.slf4j.Logger logger =
@@ -303,77 +283,6 @@ public class SqlHandlerUtil {
       fieldList.get(i).unparse(writer, leftPrec, rightPrec);
     }
     writer.keyword(")");
-  }
-
-  /**
-   * When enabled, add a writer rel on top of the given rel to catch the output and write to
-   * configured store table.
-   *
-   * @param inputRel
-   * @return
-   */
-  public static Rel storeQueryResultsIfNeeded(
-      final SqlParser.Config config, final QueryContext context, final Rel inputRel) {
-    final OptionManager options = context.getOptions();
-    final StoreQueryResultsPolicy storeQueryResultsPolicy =
-        Optional.ofNullable(options.getOption(STORE_QUERY_RESULTS.getOptionName()))
-            .map(o -> StoreQueryResultsPolicy.valueOf(o.getStringVal().toUpperCase(Locale.ROOT)))
-            .orElse(StoreQueryResultsPolicy.NO);
-
-    switch (storeQueryResultsPolicy) {
-      case NO:
-        return inputRel;
-
-      case DIRECT_PATH:
-      case PATH_AND_ATTEMPT_ID:
-        // supported cases
-        break;
-
-      default:
-        logger.warn(
-            "Unknown query result store policy {}. Query results won't be saved",
-            storeQueryResultsPolicy);
-        return inputRel;
-    }
-
-    final String storeTablePath =
-        options.getOption(QUERY_RESULTS_STORE_TABLE.getOptionName()).getStringVal();
-    final List<String> storeTable =
-        new StrTokenizer(storeTablePath, '.', config.quoting().string.charAt(0))
-            .setIgnoreEmptyTokens(true)
-            .getTokenList();
-
-    if (storeQueryResultsPolicy == StoreQueryResultsPolicy.PATH_AND_ATTEMPT_ID) {
-      // QueryId is same as attempt id. Using its string form for the table name
-      storeTable.add(QueryIdHelper.getQueryId(context.getQueryId()));
-    }
-
-    // Query results are stored in arrow format. If need arises, we can change this to a
-    // configuration option.
-    final Map<String, Object> storageOptions =
-        ImmutableMap.<String, Object>of("type", ArrowFormatPlugin.ARROW_DEFAULT_NAME);
-
-    WriterOptions writerOptions = WriterOptions.DEFAULT;
-    if (options.getOption(PlannerSettings.ENABLE_OUTPUT_LIMITS)) {
-      writerOptions =
-          WriterOptions.DEFAULT
-              .withOutputLimitEnabled(options.getOption(PlannerSettings.ENABLE_OUTPUT_LIMITS))
-              .withOutputLimitSize(options.getOption(PlannerSettings.OUTPUT_LIMIT_SIZE));
-    }
-
-    // store table as system user.
-    final CreateTableEntry createTableEntry =
-        context
-            .getCatalog()
-            .resolveCatalog(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
-            .createNewTable(
-                new NamespaceKey(storeTable), null, writerOptions, storageOptions, true
-                /** results table */
-                );
-
-    final RelTraitSet traits = inputRel.getCluster().traitSet().plus(Rel.LOGICAL);
-    return new WriterRel(
-        inputRel.getCluster(), traits, inputRel, createTableEntry, inputRel.getRowType());
   }
 
   /**
@@ -670,7 +579,7 @@ public class SqlHandlerUtil {
     }
   }
 
-  private static String removeEndingZeros(String timestamp) {
+  public static String removeEndingZeros(String timestamp) {
     // Remove ending '0' after '.' in the timestamp string, because TimestampString does not accept
     // timestamp string
     // with ending of '0'. For instance, convert "2022-10-23 18:05:30.252000" to be "2022-10-23

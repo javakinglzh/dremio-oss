@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql.handlers.direct;
 
 import static com.dremio.exec.store.iceberg.IcebergSerDe.serializedSchemaAsJson;
+import static com.dremio.exec.store.iceberg.IcebergUtils.DEFAULT_TABLE_PROPERTIES;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.ResolvedVersionContext;
@@ -44,8 +45,8 @@ import com.dremio.exec.planner.sql.parser.DremioSqlColumnDeclaration;
 import com.dremio.exec.planner.sql.parser.ReferenceTypeUtils;
 import com.dremio.exec.planner.sql.parser.SqlCreateEmptyTable;
 import com.dremio.exec.planner.sql.parser.SqlGrant;
+import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.store.SystemSchemas;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
@@ -80,7 +81,7 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
   private final OptionManager optionManager;
   private final UserSession userSession;
   private final boolean ifNotExists;
-  private Map<String, String> tableProperties = new HashMap<>();
+  private Map<String, String> tableProperties = new HashMap<>(DEFAULT_TABLE_PROPERTIES);
 
   public CreateEmptyTableHandler(
       Catalog catalog, SqlHandlerConfig config, UserSession userSession, boolean ifNotExists) {
@@ -128,6 +129,21 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
     return createTableResult;
   }
 
+  protected SortOrder getSortOrder(
+      PartitionSpec partitionSpec,
+      BatchSchema batchSchema,
+      Map<String, String> tableProperties,
+      SqlHandlerConfig config,
+      String sql,
+      SqlCreateEmptyTable sqlCreateEmptyTable)
+      throws Exception {
+    return IcebergUtils.getIcebergSortOrder(
+        batchSchema,
+        sqlCreateEmptyTable.getSortColumns(),
+        partitionSpec.schema(),
+        config.getContext().getOptions());
+  }
+
   protected SqlHandlerConfig getConfig() {
     return config;
   }
@@ -137,6 +153,10 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
   }
 
   protected boolean isPolicyAllowed() {
+    return false;
+  }
+
+  protected boolean isAutoClusteringAllowed() {
     return false;
   }
 
@@ -184,47 +204,18 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
     }
 
     BatchSchema batchSchema = SqlHandlerUtil.batchSchemaFromSqlSchemaSpec(columnDeclarations, sql);
-    PartitionSpec partitionSpec;
-    SortOrder sortOrder;
-    // If there are clustering keys
-    if (sqlCreateEmptyTable.getClusterKeys() != null
+    PartitionSpec partitionSpec =
+        IcebergUtils.getIcebergPartitionSpecFromTransforms(
+            batchSchema, sqlCreateEmptyTable.getPartitionTransforms(null), null);
+    if (!isAutoClusteringAllowed()
+        && sqlCreateEmptyTable.getClusterKeys() != null
         && !sqlCreateEmptyTable.getClusterKeys().isEmpty()) {
-      // Cannot add clustering key together with partition keys or sort orders
-      if (sqlCreateEmptyTable.getSortColumns() != null
-          && !sqlCreateEmptyTable.getSortColumns().isEmpty()) {
-        throw UserException.unsupportedError()
-            .message("Dremio doesn't support creating table with both CLUSTER and LOCALSORT")
-            .buildSilently();
-      } else if (sqlCreateEmptyTable.getPartitionTransforms(null) != null
-          && !sqlCreateEmptyTable.getPartitionTransforms(null).isEmpty()) {
-        throw UserException.unsupportedError()
-            .message("Dremio doesn't support creating table with both CLUSTER and PARTITION")
-            .buildSilently();
-      } else {
-        // convert clustering keys to SortOrder object
-        partitionSpec =
-            IcebergUtils.getIcebergPartitionSpecFromTransforms(
-                batchSchema, sqlCreateEmptyTable.getPartitionTransforms(null), null);
-        sortOrder =
-            IcebergUtils.getIcebergSortOrder(
-                batchSchema,
-                sqlCreateEmptyTable.getClusterKeys(),
-                partitionSpec.schema(),
-                config.getContext().getOptions());
-        // set CLUSTERING_TABLE_PROPERTY to true
-        tableProperties.put(SystemSchemas.CLUSTERING_TABLE_PROPERTY, "true");
-      }
-    } else {
-      partitionSpec =
-          IcebergUtils.getIcebergPartitionSpecFromTransforms(
-              batchSchema, sqlCreateEmptyTable.getPartitionTransforms(null), null);
-      sortOrder =
-          IcebergUtils.getIcebergSortOrder(
-              batchSchema,
-              sqlCreateEmptyTable.getSortColumns(),
-              partitionSpec.schema(),
-              config.getContext().getOptions());
+      throw UserException.unsupportedError()
+          .message("This Dremio edition doesn't support CLUSTER BY option")
+          .buildSilently();
     }
+    SortOrder sortOrder =
+        getSortOrder(partitionSpec, batchSchema, tableProperties, config, sql, sqlCreateEmptyTable);
     IcebergTableProps icebergTableProps =
         new IcebergTableProps(
             ByteString.copyFrom(IcebergSerDe.serializePartitionSpec(partitionSpec)),
@@ -255,7 +246,20 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
             tableProperties,
             WriterOptions.DEFAULT.isMergeOnReadRowSplitterMode());
 
-    DremioTable table = catalog.getTableNoResolve(key);
+    DremioTable table = null;
+    try {
+      table = catalog.getTableNoResolve(key);
+    } catch (UserException ex) {
+      if (ex.getErrorType() == UserBitShared.DremioPBError.ErrorType.PERMISSION) {
+        throw UserException.permissionError(ex.getCause())
+            .message(
+                "You do not have [CREATE] privilege on [%s]; the table may already exist.",
+                key.toNamespaceKey())
+            .build(logger);
+      }
+      throw ex;
+    }
+
     if (table != null) {
       if (ifNotExists) {
         return Collections.singletonList(
@@ -319,8 +323,7 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
       throw UserException.unsupportedError()
           .message(
               String.format(
-                  "Source [%s] does not support CREATE TABLE. Please use correct catalog",
-                  catalogEntityKey.getRootEntity()))
+                  "Source [%s] does not support CREATE TABLE.", catalogEntityKey.getRootEntity()))
           .buildSilently();
     }
 
@@ -331,9 +334,14 @@ public class CreateEmptyTableHandler extends SimpleDirectHandlerWithValidator {
           .buildSilently();
     }
 
-    IcebergUtils.validateIcebergLocalSortIfDeclared(sql, config.getContext().getOptions());
+    // auto-clustering is not allowed
+    if (!isAutoClusteringAllowed() && !sqlCreateEmptyTable.getClusterKeys().isEmpty()) {
+      throw UserException.unsupportedError()
+          .message("This Dremio edition doesn't support CLUSTER BY option")
+          .buildSilently();
+    }
 
-    IcebergUtils.validateIcebergAutoClusteringIfDeclared(sql, config.getContext().getOptions());
+    IcebergUtils.validateIcebergLocalSortIfDeclared(sql, config.getContext().getOptions());
 
     if (!(sqlCreateEmptyTable.getTablePropertyNameList() == null
         || sqlCreateEmptyTable.getTablePropertyNameList().isEmpty())) {

@@ -170,14 +170,14 @@ public class HashAggStats {
         return Metric.UNPIVOT_TIME.ordinal();
       case 9:
         return Metric.VECTORIZED.ordinal();
-        /* 10 to 20 are skipped as they were earlier join related stats and
-         * were never set by HashAggOperator. So serialized profiles
-         * never carried their ordinals/ids. The caller of this method
-         * first determines if we are working with old v/s new profiles
-         * and this method is used specifically for old profiles that
-         * will not be carrying ids [10 - 20]
-         */
-        /* 22 is skipped as it was join related stat */
+      /* 10 to 20 are skipped as they were earlier join related stats and
+       * were never set by HashAggOperator. So serialized profiles
+       * never carried their ordinals/ids. The caller of this method
+       * first determines if we are working with old v/s new profiles
+       * and this method is used specifically for old profiles that
+       * will not be carrying ids [10 - 20]
+       */
+      /* 22 is skipped as it was join related stat */
       case 23:
         return Metric.NUM_HASH_PARTITIONS.ordinal();
       case 24:

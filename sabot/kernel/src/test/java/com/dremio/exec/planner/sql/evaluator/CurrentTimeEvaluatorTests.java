@@ -73,6 +73,7 @@ public class CurrentTimeEvaluatorTests {
           calendar.get(Calendar.HOUR_OF_DAY), (current.get(Calendar.HOUR_OF_DAY) + 3) % 24);
       Assert.assertEquals(calendar.get(Calendar.MINUTE), current.get(Calendar.MINUTE));
       Assert.assertEquals(calendar.get(Calendar.SECOND), current.get(Calendar.SECOND));
+      Assert.assertEquals(calendar.get(Calendar.MILLISECOND), current.get(Calendar.MILLISECOND));
     } finally {
       properties.clear("user.timezone");
     }
@@ -99,5 +100,6 @@ public class CurrentTimeEvaluatorTests {
     Assert.assertEquals(calendar.get(Calendar.HOUR_OF_DAY), current.get(Calendar.HOUR_OF_DAY));
     Assert.assertEquals(calendar.get(Calendar.MINUTE), current.get(Calendar.MINUTE));
     Assert.assertEquals(calendar.get(Calendar.SECOND), current.get(Calendar.SECOND));
+    Assert.assertEquals(calendar.get(Calendar.MILLISECOND), current.get(Calendar.MILLISECOND));
   }
 }

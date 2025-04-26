@@ -29,10 +29,11 @@ import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
 import com.dremio.exec.catalog.CatalogUser;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SupportsReadingViews;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.server.JobResultInfoProvider;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
@@ -53,7 +54,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class SystemStoragePlugin
-    implements StoragePlugin, SupportsReadSignature, SupportsListingDatasets {
+    implements StoragePlugin, SupportsReadSignature, SupportsListingDatasets, SupportsReadingViews {
   public static final String NAME = "sys";
 
   private static final ImmutableMap<EntityPath, SystemTable> DATASET_MAP =
@@ -66,16 +67,16 @@ public class SystemStoragePlugin
 
   private static final String JOBS_STORAGE_PLUGIN_NAME = "__jobResultsStore";
 
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final JobResultInfoProvider jobResultInfoProvider;
 
-  SystemStoragePlugin(SabotContext context, String name) {
+  SystemStoragePlugin(PluginSabotContext context, String name) {
     Preconditions.checkArgument(NAME.equals(name));
     this.context = context;
     this.jobResultInfoProvider = context.getJobResultInfoProvider();
   }
 
-  SabotContext getSabotContext() {
+  PluginSabotContext getSabotContext() {
     return context;
   }
 
@@ -90,32 +91,33 @@ public class SystemStoragePlugin
   }
 
   @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
+  public Optional<ViewTable> getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
     if (!JobResultInfoProvider.isJobResultsTable(tableSchemaPath)) {
-      return null;
+      return Optional.empty();
     }
 
     final String jobId = Iterables.getLast(tableSchemaPath);
     final Optional<JobResultInfoProvider.JobResultInfo> jobResultInfo =
         jobResultInfoProvider.getJobResultInfo(jobId, schemaConfig.getUserName());
 
-    return jobResultInfo
-        .map(
-            info -> {
-              final View view =
-                  Views.fieldTypesToView(
-                      jobId,
-                      getJobResultsQuery(info.getResultDatasetPath()),
-                      ViewFieldsHelper.getBatchSchemaFields(info.getBatchSchema()),
-                      null);
+    return Optional.ofNullable(
+        jobResultInfo
+            .map(
+                info -> {
+                  final View view =
+                      Views.fieldTypesToView(
+                          jobId,
+                          getJobResultsQuery(info.getResultDatasetPath()),
+                          ViewFieldsHelper.getBatchSchemaFields(info.getBatchSchema()),
+                          null);
 
-              return new ViewTable(
-                  new NamespaceKey(tableSchemaPath),
-                  view,
-                  CatalogUser.from(SystemUser.SYSTEM_USERNAME),
-                  info.getBatchSchema());
-            })
-        .orElse(null);
+                  return new ViewTable(
+                      new NamespaceKey(tableSchemaPath),
+                      view,
+                      CatalogUser.from(SystemUser.SYSTEM_USERNAME),
+                      info.getBatchSchema());
+                })
+            .orElse(null));
   }
 
   private static String getJobResultsQuery(List<String> resultDatasetPath) {

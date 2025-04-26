@@ -15,6 +15,7 @@
  */
 package com.dremio.dac.explore;
 
+import static com.dremio.common.util.DateTimes.parseIsoLocalTimestampWithSpaces;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -30,20 +31,18 @@ import com.dremio.dac.model.job.JobData;
 import com.dremio.dac.model.job.JobDataFragment;
 import com.dremio.dac.model.job.JobDataWrapper;
 import com.dremio.dac.proto.model.dataset.DataType;
-import com.dremio.exec.expr.fn.impl.DateFunctionsUtils;
 import com.dremio.service.job.proto.QueryType;
 import com.dremio.service.jobs.JobStatusListener;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.google.common.collect.ImmutableSet;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import org.apache.arrow.memory.BufferAllocator;
-import org.joda.time.LocalDateTime;
-import org.joda.time.format.DateTimeFormatter;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -69,10 +68,8 @@ public class TestHistogramGenerator {
     HistogramGenerator hg = new HistogramGenerator(null);
 
     String myTimeStr = "2016-02-29 13:59:01";
-    DateTimeFormatter dtf =
-        DateFunctionsUtils.getISOFormatterForFormatString("YYYY-MM-DD HH24:MI:SS");
-    LocalDateTime myTime = dtf.parseLocalDateTime(myTimeStr);
-    System.out.println("Exact time: " + myTime + ", Month: " + myTime.getMonthOfYear());
+    LocalDateTime myTime = parseIsoLocalTimestampWithSpaces(myTimeStr);
+    System.out.println("Exact time: " + myTime + ", Month: " + myTime.getMonthValue());
     for (HistogramGenerator.TruncEvalEnum value :
         HistogramGenerator.TruncEvalEnum.getSortedAscValues()) {
       LocalDateTime roundedDown = hg.roundTime(myTime, value, true);
@@ -83,44 +80,44 @@ public class TestHistogramGenerator {
           assertEquals(myTime, roundedUp);
           break;
         case MINUTE:
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 13:59:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 14:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 13:59:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 14:00:00"), roundedUp);
           break;
         case HOUR:
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 13:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 14:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 13:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 14:00:00"), roundedUp);
           break;
         case DAY:
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-03-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-03-01 00:00:00"), roundedUp);
           break;
         case WEEK:
-          assertEquals(dtf.parseLocalDateTime("2016-02-29 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-03-07 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-29 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-03-07 00:00:00"), roundedUp);
           break;
         case MONTH:
-          assertEquals(dtf.parseLocalDateTime("2016-02-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-03-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-02-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-03-01 00:00:00"), roundedUp);
           break;
         case QUARTER:
-          assertEquals(dtf.parseLocalDateTime("2016-01-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2016-04-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-01-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-04-01 00:00:00"), roundedUp);
           break;
         case YEAR:
-          assertEquals(dtf.parseLocalDateTime("2016-01-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2017-01-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2016-01-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2017-01-01 00:00:00"), roundedUp);
           break;
         case DECADE:
-          assertEquals(dtf.parseLocalDateTime("2010-01-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2020-01-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2010-01-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2020-01-01 00:00:00"), roundedUp);
           break;
         case CENTURY:
-          assertEquals(dtf.parseLocalDateTime("2000-01-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("2100-01-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2000-01-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2100-01-01 00:00:00"), roundedUp);
           break;
         case MILLENNIUM:
-          assertEquals(dtf.parseLocalDateTime("2000-01-01 00:00:00"), roundedDown);
-          assertEquals(dtf.parseLocalDateTime("3000-01-01 00:00:00"), roundedUp);
+          assertEquals(parseIsoLocalTimestampWithSpaces("2000-01-01 00:00:00"), roundedDown);
+          assertEquals(parseIsoLocalTimestampWithSpaces("3000-01-01 00:00:00"), roundedUp);
           break;
         default:
           fail();
@@ -133,8 +130,8 @@ public class TestHistogramGenerator {
     List<Number> ranges = new ArrayList<>();
     HistogramGenerator.produceRanges(
         ranges,
-        new LocalDateTime(1970, 1, 1, 1, 0, 0),
-        new LocalDateTime(1970, 1, 1, 11, 59, 0),
+        LocalDateTime.of(1970, 1, 1, 1, 0, 0),
+        LocalDateTime.of(1970, 1, 1, 11, 59, 0),
         TruncEvalEnum.HOUR);
     List<Number> expected = new ArrayList<>();
     for (int i = 0; i < 13; i++) {

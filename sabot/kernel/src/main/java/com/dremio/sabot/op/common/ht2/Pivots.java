@@ -53,6 +53,7 @@ public class Pivots {
     long targetFixedAddress = targetFixed.getMemoryAddress();
 
     int i = 0;
+    int maxVariableBlockSize = HashTable.getMaxVariableBlockSize(targetFixed.getBlockWidth());
     long totalData = 0;
     for (VectorPivotDef vpd : fields) {
 
@@ -115,6 +116,12 @@ public class Pivots {
 
         // update length.
         final int copyLength = (int) (bitVal * len);
+        if (copyLength > maxVariableBlockSize) {
+          throw new UnsupportedOperationException(
+              String.format(
+                  "Pivoted variable keys length of %d bytes can't be more than the maximum allowed variable block size of %d bytes",
+                  copyLength, maxVariableBlockSize));
+        }
         PlatformDependent.putInt(targetVariableAddr, copyLength);
         targetVariableAddr += 4;
         varLen += 4;

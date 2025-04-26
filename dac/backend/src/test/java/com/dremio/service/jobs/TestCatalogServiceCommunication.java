@@ -20,17 +20,17 @@ import static org.junit.Assert.assertTrue;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.dac.server.BaseTestServer;
 import com.dremio.exec.catalog.Catalog;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.TestCatalogServiceImpl;
 import com.dremio.exec.catalog.TestCatalogServiceImpl.MockUpPlugin;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
-import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
@@ -56,19 +56,25 @@ public class TestCatalogServiceCommunication extends BaseTestServer {
       return;
     }
 
+    Long lastModifiedTime = null;
     Catalog systemUserCatalog = getCatalogService().getSystemUserCatalog();
     {
       final SourceConfig mockUpConfig =
           new SourceConfig()
               .setName(MOCK_UP)
               .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY)
-              .setId(new EntityId("source-id"))
-              .setCtime(100L)
               .setConnectionConf(new MockUpConfig());
 
       doMockDatasets(mockUpPlugin, ImmutableList.of());
 
-      systemUserCatalog.createSource(mockUpConfig);
+      systemUserCatalog.createSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+
+      lastModifiedTime =
+          getExecutorDaemon()
+              .getInstance(CatalogService.class)
+              .getManagedSource(MOCK_UP)
+              .getConfig()
+              .getLastModifiedAt();
 
       assertTrue(
           getExecutorDaemon()
@@ -82,14 +88,20 @@ public class TestCatalogServiceCommunication extends BaseTestServer {
       final SourceConfig mockUpConfig =
           new SourceConfig()
               .setName(MOCK_UP)
+              .setId(source.getId())
               .setMetadataPolicy(CatalogService.DEFAULT_METADATA_POLICY)
-              .setCtime(100L)
-              .setId(new EntityId("source-id"))
               .setTag(source.getTag())
               .setConfigOrdinal(source.getConfigOrdinal())
               .setConnectionConf(new MockUpConfig());
 
-      systemUserCatalog.updateSource(mockUpConfig);
+      systemUserCatalog.updateSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+
+      Long newLastModifiedTime =
+          getExecutorDaemon()
+              .getInstance(CatalogService.class)
+              .getManagedSource(MOCK_UP)
+              .getConfig()
+              .getLastModifiedAt();
 
       assertTrue(
           getExecutorDaemon()
@@ -97,7 +109,9 @@ public class TestCatalogServiceCommunication extends BaseTestServer {
               .getManagedSource(MOCK_UP)
               .matches(mockUpConfig));
 
-      systemUserCatalog.deleteSource(mockUpConfig);
+      assertTrue(newLastModifiedTime > lastModifiedTime);
+
+      systemUserCatalog.deleteSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 
@@ -110,7 +124,9 @@ public class TestCatalogServiceCommunication extends BaseTestServer {
 
     @Override
     public MockUpPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return mockUpPlugin;
     }
   }

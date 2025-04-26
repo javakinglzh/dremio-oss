@@ -15,8 +15,6 @@
  */
 package com.dremio.exec.impersonation.hive;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
-import static com.dremio.common.TestProfileHelper.isMaprProfile;
 import static com.dremio.exec.hive.HiveTestUtilities.executeQuery;
 import static org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_AUTHENTICATOR_MANAGER;
@@ -82,7 +80,6 @@ public class ITSqlStdBasedAuthorization extends BaseTestHiveImpersonation {
   @BeforeClass
   public static void setup() throws Exception {
     properties.set(DremioConfig.LEGACY_STORE_VIEWS_ENABLED, "true");
-    assumeNonMaprProfile();
     startMiniDfsCluster(ITSqlStdBasedAuthorization.class.getSimpleName());
     prepHiveConfAndData();
     setSqlStdBasedAuthorizationInHiveConf();
@@ -95,15 +92,6 @@ public class ITSqlStdBasedAuthorization extends BaseTestHiveImpersonation {
 
   @AfterClass
   public static void shutdown() throws Exception {
-    /*
-    JUnit assume() call results in AssumptionViolatedException, which is handled by JUnit with a goal to ignore
-    the test having the assume() call. Multiple assume() calls, or other exceptions coupled with a single assume()
-    call, result in multiple exceptions, which aren't handled by JUnit, leading to test deemed to be failed.
-    We thus use isMaprProfile() check instead of assumeNonMaprProfile() here.
-    */
-    if (isMaprProfile()) {
-      return;
-    }
     stopMiniDfsCluster();
     stopHiveMetaStore();
   }

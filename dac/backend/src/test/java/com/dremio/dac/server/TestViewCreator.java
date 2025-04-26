@@ -18,7 +18,7 @@ package com.dremio.dac.server;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.service.job.JobSummary;
 import com.dremio.service.job.JobSummaryRequest;
 import com.dremio.service.job.proto.JobId;
@@ -54,7 +54,7 @@ public class TestViewCreator extends BaseTestServer {
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/mySpace/folder/"))
             .buildPost(Entity.json("{\"name\": \"myFolder\"}")),
-        Folder.class);
+        FolderModel.class);
 
     submitJobAndWaitUntilCompletion(
         JobRequest.newBuilder()
@@ -106,7 +106,7 @@ public class TestViewCreator extends BaseTestServer {
     expectSuccess(
         getBuilder(getHttpClient().getAPIv2().path("space/mySpace/folder/"))
             .buildPost(Entity.json("{\"name\": \"myFolder\"}")),
-        Folder.class);
+        FolderModel.class);
 
     SqlQuery ctas = getQueryFromSQL("CREATE TABLE \"$scratch\".\"ctas\" AS select 1");
     submitJobAndWaitUntilCompletion(

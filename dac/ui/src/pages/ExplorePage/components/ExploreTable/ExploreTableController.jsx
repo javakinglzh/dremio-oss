@@ -16,18 +16,13 @@
 import { PureComponent } from "react";
 import Immutable from "immutable";
 import { connect } from "react-redux";
-import { FormattedMessage } from "react-intl";
-import { intl } from "#oss/utils/intl";
 import PropTypes from "prop-types";
 import { Spinner } from "dremio-ui-lib/components";
 
 import exploreUtils from "utils/explore/exploreUtils";
 import exploreTransforms from "utils/exploreTransforms";
-import jobsUtils from "#oss/utils/jobsUtils";
 
 import { LIST, MAP, STRUCT } from "#oss/constants/DataTypes";
-import * as jobPaths from "dremio-ui-common/paths/jobs.js";
-import { getSonarContext } from "dremio-ui-common/contexts/SonarContext.js";
 
 import {
   getPeekData,
@@ -37,7 +32,6 @@ import {
   getColumnFilter,
 } from "#oss/selectors/explore";
 import { getViewState } from "selectors/resources";
-import { resetViewState } from "actions/resources";
 import { accessEntity } from "actions/resources/lru";
 
 import {
@@ -53,24 +47,8 @@ import { LOAD_TRANSFORM_CARDS_VIEW_ID } from "actions/explore/recommended";
 
 import { constructFullPath } from "utils/pathUtils";
 import { PageTypes } from "#oss/pages/ExplorePage/pageTypes";
-import {
-  sqlEditorTableColumns,
-  pendingSQLJobs,
-} from "#oss/constants/Constants";
-import {
-  renderJobStatus,
-  getJobIdsList,
-  getSqlList,
-  getFilteredSqlList,
-} from "#oss/utils/jobsUtils";
-import StatefulTableViewer from "#oss/components/StatefulTableViewer";
-import { Button, IconButton } from "dremio-ui-lib/components";
-
-import JobListingPage from "#oss/pages/JobPageNew/JobListingPage";
-import { parseQueryState } from "utils/jobsQueryState";
-import { updateQueryState } from "actions/jobs/jobs";
-import { Tooltip } from "dremio-ui-lib";
-import { cancelJobAndShowNotification } from "#oss/actions/jobs/jobs";
+import { renderJobStatus } from "#oss/utils/jobsUtils";
+import { Button } from "dremio-ui-lib/components";
 
 import Message from "#oss/components/Message";
 import apiUtils from "#oss/utils/apiUtils/apiUtils";
@@ -84,7 +62,6 @@ export class ExploreTableController extends PureComponent {
     pageType: PropTypes.string,
     dataset: PropTypes.instanceOf(Immutable.Map),
     tableData: PropTypes.instanceOf(Immutable.Map).isRequired,
-    previewVersion: PropTypes.string,
     paginationUrl: PropTypes.string,
     isDumbTable: PropTypes.bool,
     exploreViewState: PropTypes.instanceOf(Immutable.Map).isRequired,
@@ -105,25 +82,15 @@ export class ExploreTableController extends PureComponent {
     columnFilter: PropTypes.string,
     isMultiQueryRunning: PropTypes.bool,
     // Actions
-    resetViewState: PropTypes.func,
     transformHistoryCheck: PropTypes.func,
     performTransform: PropTypes.func,
-    confirmTransform: PropTypes.func,
     accessEntity: PropTypes.func.isRequired,
     canSelect: PropTypes.any,
-    showJobsTable: PropTypes.bool,
-    handleTabChange: PropTypes.func,
     currentJobsMap: PropTypes.array,
-    cancelPendingSql: PropTypes.func,
     tabStatusArr: PropTypes.array,
-    sqlList: PropTypes.array,
     queryTabNumber: PropTypes.number,
-    jobIdList: PropTypes.array,
-    queryState: PropTypes.object,
-    cancelJob: PropTypes.func,
     previousMultiSql: PropTypes.string,
     queryStatuses: PropTypes.array,
-    queryFilter: PropTypes.string,
   };
 
   static contextTypes = {
@@ -144,17 +111,11 @@ export class ExploreTableController extends PureComponent {
     this.handleCellShowMore = this.handleCellShowMore.bind(this);
     this.selectAll = this.selectAll.bind(this);
     this.selectItemsOfList = this.selectItemsOfList.bind(this);
-    this.processPendingJobs = this.processPendingJobs.bind(this);
-    this.renderButtonsForJobsList = this.renderButtonsForJobsList.bind(this);
-    this.renderButtonsForSqlList = this.renderButtonsForSqlList.bind(this);
 
     this.state = {
       activeTextSelect: null,
       openPopover: false,
       activeCell: null,
-      pendingJobs: Immutable.List(),
-      jobsTableHeight: 0,
-      pendingSQLJobsTableHeight: 0,
     };
   }
 
@@ -178,46 +139,11 @@ export class ExploreTableController extends PureComponent {
     }
   }
 
-  componentDidMount() {
-    const { currentJobsMap } = this.props;
-    currentJobsMap && this.getUpdatedTableHeights(true, true);
-  }
-
   componentDidUpdate(prevProps) {
-    const { jobIdList, sqlList, currentJobsMap, isMultiQueryRunning } =
-      this.props;
-    if (
-      currentJobsMap &&
-      (prevProps.jobIdList.length !== jobIdList.length ||
-        prevProps.sqlList.length !== sqlList.length)
-    ) {
-      this.getUpdatedTableHeights(
-        prevProps.jobIdList.length !== jobIdList.length,
-        prevProps.sqlList.length !== sqlList.length,
-      );
-    }
+    const { isMultiQueryRunning } = this.props;
 
     if (isMultiQueryRunning && !prevProps.isMultiQueryRunning) {
       this.hideDrop();
-    }
-  }
-
-  getUpdatedTableHeights(recalcJobs, recalcSqls) {
-    const { jobIdList, sqlList } = this.props;
-
-    if (recalcJobs) {
-      const newSize =
-        sqlList.length === 0 ? "100%" : `${(jobIdList.length + 1) * 40}px`;
-      this.setState({
-        jobsTableHeight: newSize,
-      });
-    }
-    if (recalcSqls) {
-      const newSize =
-        jobIdList.length === 0 ? "100%" : `${(sqlList.length + 1) * 40}px`;
-      this.setState({
-        pendingSQLJobsTableHeight: newSize,
-      });
     }
   }
 
@@ -485,121 +411,6 @@ export class ExploreTableController extends PureComponent {
     ) : null;
   }
 
-  renderButtonsForJobsList(status, jobId, jobAttempts) {
-    const { cancelJob } = this.props;
-    const projectId = getSonarContext().getSelectedProjectId?.();
-
-    return (
-      <div className="sqlEditor__jobsTable__actionButtonContainer">
-        {exploreUtils.getCancellable(status) ? (
-          <IconButton
-            tooltip={intl.formatMessage({ id: "Query.Table.Cancel" })}
-            tooltipPortal
-            tooltipPlacement="top"
-            onClick={() => cancelJob(jobId)}
-            className="sqlEditor__jobsTable__buttons"
-          >
-            <dremio-icon name="sql-editor/stop" />
-          </IconButton>
-        ) : (
-          <div className={"sqlEditor__jobsTable__buttons"}></div>
-        )}
-        <IconButton
-          tooltip={intl.formatMessage({ id: "Job.Open.External" })}
-          tooltipPortal
-          tooltipPlacement="top"
-          onClick={() => {
-            const jobTabPath = jobsUtils.isNewJobsPage()
-              ? `${jobPaths.job.link({ jobId, projectId })}${
-                  jobAttempts ? `?attempts=${jobAttempts || 1}` : ""
-                }`
-              : `/jobs#${jobId}`;
-            window.open(jobTabPath, "_blank");
-          }}
-          className="sqlEditor__jobsTable__buttons"
-        >
-          <dremio-icon name="interface/external-link" />
-        </IconButton>
-      </div>
-    );
-  }
-
-  renderButtonsForSqlList(index) {
-    const { cancelPendingSql } = this.props;
-    return (
-      <div className="sqlEditor__jobsTable__actionButtonContainer">
-        <IconButton
-          tooltip={intl.formatMessage({ id: "NewQuery.Remove" })}
-          tooltipPortal
-          tooltipPlacement="top"
-          onClick={() => cancelPendingSql(index)}
-          className={"sqlEditor__jobsTable__buttons"}
-        >
-          <dremio-icon name="interface/delete" />
-        </IconButton>
-      </div>
-    );
-  }
-
-  processPendingJobs(jobs) {
-    const { queryFilter } = this.props;
-    const curJobs = queryFilter ? getFilteredSqlList(jobs, queryFilter) : jobs;
-    return curJobs.map((sql) => {
-      return {
-        data: {
-          jobStatus: { node: () => {} },
-          sql: {
-            tabIndex: sql[1],
-            node: () => (
-              <div className="dremio-typography-monospace">{sql[0]}</div>
-            ),
-          },
-          buttons: {
-            rowIndex: sql[1] - 1,
-            node: () => this.renderButtonsForSqlList(sql[1] - 1),
-          },
-        },
-      };
-    });
-  }
-
-  renderJobsListingTable(show) {
-    const {
-      location,
-      queryState,
-      handleTabChange,
-      jobIdList,
-      pageType,
-      queryStatuses,
-    } = this.props;
-    const { jobsTableHeight } = this.state;
-    const isShown = show && pageType === PageTypes.default;
-    const jobsTableStyles = isShown
-      ? { height: jobsTableHeight }
-      : { height: "0px", width: "0px", visibility: "hidden" };
-
-    // quick fix is show/hide = rendering the jobs table since it forces the jobList to refresh and update statusArray
-    // return and fix- figure out how to refresh with jobs table not rendered (using listeners, etc..)
-    if (!queryStatuses || !queryStatuses.length) {
-      return null;
-    }
-
-    return (
-      <div style={jobsTableStyles} className="jobListPage-wrapper">
-        <JobListingPage
-          location={location}
-          queryState={queryState}
-          updateQueryState={updateQueryState}
-          jobsColumns={sqlEditorTableColumns}
-          renderButtons={this.renderButtonsForJobsList}
-          handleTabChange={handleTabChange}
-          isFromExplorePage
-          jobIdList={jobIdList}
-        />
-      </div>
-    );
-  }
-
   render() {
     const tableData = this.decorateTable(this.props.tableData);
     const rows = tableData.get("rows");
@@ -609,10 +420,6 @@ export class ExploreTableController extends PureComponent {
     );
     const {
       canSelect,
-      showJobsTable,
-      handleTabChange,
-      sqlList,
-      jobIdList,
       tabStatusArr,
       queryTabNumber,
       currentJobsMap,
@@ -621,7 +428,6 @@ export class ExploreTableController extends PureComponent {
       shouldRenderInvisibles,
       isExploreTableLoading,
     } = this.props;
-    const { pendingSQLJobsTableHeight } = this.state;
 
     const currentTab = tabStatusArr && tabStatusArr[queryTabNumber - 1];
 
@@ -722,47 +528,7 @@ export class ExploreTableController extends PureComponent {
       );
     }
 
-    return (
-      <>
-        <div
-          className={
-            !showJobsTable
-              ? "sqlEditor__jobsTable--hidden"
-              : sqlList.length === 0
-                ? "sqlEditor__jobsTable--solo"
-                : "sqlEditor__jobsTable--withPendingTable"
-          }
-        >
-          {jobIdList.length > 0 && this.renderJobsListingTable(showJobsTable)}
-          {sqlList.length > 0 && showJobsTable && (
-            <>
-              <div className="sqlEditor__strikeThroughContainer">
-                <div className="sqlEditor__strikeThroughHeader">
-                  <Tooltip title="These queries have not yet been submitted to the engine. They will be submitted once the current job has completed.">
-                    <span className="sqlEditor__strikeThroughHeaderContent">
-                      <FormattedMessage id="NewQuery.Waiting" />
-                    </span>
-                  </Tooltip>
-                  <div className="sqlEditor__lineForStrikethrough"></div>
-                </div>
-              </div>
-              <div style={{ height: pendingSQLJobsTableHeight }}>
-                <StatefulTableViewer
-                  virtualized
-                  rowHeight={40}
-                  columns={pendingSQLJobs}
-                  tableData={this.processPendingJobs(sqlList)}
-                  enableHorizontalScroll
-                  disableZebraStripes
-                  onClick={handleTabChange}
-                />
-              </div>
-            </>
-          )}
-        </div>
-        {showJobsTable ? null : jobTableContent}
-      </>
-    );
+    return jobTableContent;
   }
 }
 
@@ -780,20 +546,15 @@ function mapStateToProps(state, ownProps) {
     explorePageProps = {
       currentSql: exploreState.view.currentSql,
       queryContext: exploreState.view.queryContext,
-      queryState: parseQueryState(location.query),
       isResizeInProgress: exploreState.ui.get("isResizeInProgress"),
       previousMultiSql: exploreState.view.previousMultiSql,
       queryStatuses: exploreState.view.queryStatuses,
-      queryFilter: exploreState.view.queryFilter,
       isMultiQueryRunning: exploreState.view.isMultiQueryRunning,
       isExploreTableLoading: exploreState.view.isExploreTableLoading,
     };
     queryStatuses = exploreState.view.queryStatuses;
     waitingForJobResults = exploreState.view.waitingForJobResults;
   }
-
-  const SqlList = queryStatuses && getSqlList(queryStatuses);
-  const JobIdList = queryStatuses && getJobIdsList(queryStatuses);
 
   let tableData = ownProps.tableData;
   const previewVersion = location.state && location.state.previewVersion;
@@ -836,11 +597,8 @@ function mapStateToProps(state, ownProps) {
         ? tableData
         : Immutable.fromJS({ rows: null, columns: [] }),
     columnFilter: getColumnFilter(state, curDatasetVersion),
-    previewVersion,
     paginationUrl,
     location,
-    jobIdList: JobIdList || [],
-    sqlList: SqlList || [],
     exploreViewState: ownProps.exploreViewState,
     fullCellViewState: ownProps.isDumbTable
       ? ownProps.exploreViewState
@@ -853,9 +611,7 @@ function mapStateToProps(state, ownProps) {
 }
 
 export default connect(mapStateToProps, {
-  resetViewState,
   transformHistoryCheck,
   performTransform,
-  cancelJob: cancelJobAndShowNotification,
   accessEntity,
 })(ExploreTableController);

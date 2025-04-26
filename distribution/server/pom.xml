@@ -34,7 +34,6 @@
     <dremio.distribution.resources.directory>${project.build.directory}/distribution-resources</dremio.distribution.resources.directory>
     <dremio.hive.plugin-group-id>com.dremio.plugins</dremio.hive.plugin-group-id>
     <dremio.hive.plugin-artifact-id-prefix>dremio</dremio.hive.plugin-artifact-id-prefix>
-    <!-- You will also need to increase the maxSize for the MapR version, under a profile in this file  -->
     <dremio.distribution.tar.maxSize>980000000</dremio.distribution.tar.maxSize>
     <dremio.distribution.rpm.maxSize>970000000</dremio.distribution.rpm.maxSize>
   </properties>
@@ -198,12 +197,54 @@
       <artifactId>hadoop-common-native</artifactId>
       <classifier>linux</classifier>
     </dependency>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-common-native</artifactId>
+      <classifier>linux-aarch64</classifier>
+    </dependency>
 
     <!-- companion native libraries -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-native-libraries</artifactId>
       <classifier>linux</classifier>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-native-libraries</artifactId>
+      <classifier>linux-aarch64</classifier>
+    </dependency>
+    <dependency>
+      <groupId>${dremio.hive.plugin-group-id}</groupId>
+      <artifactId>${dremio.hive.plugin-artifact-id-prefix}-hive3-plugin</artifactId>
+      <version>${project.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-hive3-plugin-launcher</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>${dremio.hive.plugin-group-id}</groupId>
+      <artifactId>${dremio.hive.plugin-artifact-id-prefix}-hive3-plugin-launcher</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.plugins</groupId>
+      <artifactId>dremio-awsglue-plugin</artifactId>
+      <version>${project.version}</version>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
   </dependencies>
 
@@ -336,6 +377,9 @@
                   <defineStatements>
                     <!-- Allow platform dependent binaries (libs) to be packaged in noarch RPMs. -->
                     <defineStatement>_binaries_in_noarch_packages_terminate_build 0</defineStatement>
+                    <!-- https://www.mojohaus.org/rpm-maven-plugin/faq.html#speed_up_build -->
+                    <defineStatement>_source_payload w2.gzdio</defineStatement>
+                    <defineStatement>_binary_payload w2.gzdio</defineStatement>
                   </defineStatements>
                   <mappings>
                     <mapping>
@@ -529,99 +573,6 @@ exit 0</script>
           </plugin>
         </plugins>
       </build>
-    </profile>
-    <profile>
-      <id>default</id>
-    </profile>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <properties>
-        <dremio.distribution.tar.maxSize>1210000000</dremio.distribution.tar.maxSize>
-        <dremio.distribution.rpm.maxSize>1210000000</dremio.distribution.rpm.maxSize>
-      </properties>
-      <dependencies>
-        <dependency>
-          <groupId>com.dremio.provision</groupId>
-          <artifactId>dremio-shimloader</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <!-- This jar is a dependency of com.mapr.hadoop:maprfs jar.
-             For some reason it is not packaged by the assembly plugin. Include it explicitly. -->
-        <dependency>
-          <groupId>org.json</groupId>
-          <artifactId>json</artifactId>
-          <version>${org.json.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>${dremio.hive.plugin-group-id}</groupId>
-          <artifactId>${dremio.hive.plugin-artifact-id-prefix}-hive2-plugin</artifactId>
-          <version>${project.version}</version>
-          <exclusions>
-            <exclusion>
-              <groupId>*</groupId>
-              <artifactId>*</artifactId>
-            </exclusion>
-          </exclusions>
-        </dependency>
-      </dependencies>
-    </profile>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>${dremio.hive.plugin-group-id}</groupId>
-          <artifactId>${dremio.hive.plugin-artifact-id-prefix}-hive3-plugin</artifactId>
-          <version>${project.version}</version>
-          <exclusions>
-            <exclusion>
-              <groupId>*</groupId>
-              <artifactId>*</artifactId>
-            </exclusion>
-          </exclusions>
-        </dependency>
-        <dependency>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-native-libraries</artifactId>
-          <classifier>linux-aarch64</classifier>
-        </dependency>
-        <dependency>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-common-native</artifactId>
-          <classifier>linux-aarch64</classifier>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-hive3-plugin-launcher</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>${dremio.hive.plugin-group-id}</groupId>
-          <artifactId>${dremio.hive.plugin-artifact-id-prefix}-hive3-plugin-launcher</artifactId>
-          <version>${project.version}</version>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.plugins</groupId>
-          <artifactId>dremio-awsglue-plugin</artifactId>
-          <version>${project.version}</version>
-          <exclusions>
-            <exclusion>
-              <groupId>*</groupId>
-              <artifactId>*</artifactId>
-            </exclusion>
-          </exclusions>
-        </dependency>
-
-      </dependencies>
     </profile>
     <profile>
       <id>community-build</id>

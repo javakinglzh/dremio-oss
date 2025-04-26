@@ -22,13 +22,13 @@ import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.PlannerPhase;
 import com.dremio.exec.planner.acceleration.MaterializationList;
 import com.dremio.exec.planner.events.PlannerEventBus;
-import com.dremio.exec.planner.events.PlannerEventBusImpl;
 import com.dremio.exec.planner.normalizer.PlannerBaseComponentImpl;
 import com.dremio.exec.planner.normalizer.PlannerBaseModule;
 import com.dremio.exec.planner.normalizer.PlannerNormalizerComponent;
 import com.dremio.exec.planner.normalizer.RelNormalizerTransformer;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObservers;
+import com.dremio.exec.planner.plancache.PlanCache;
 import com.dremio.exec.planner.sql.SqlConverter;
 import java.util.Optional;
 import org.apache.calcite.tools.RuleSet;
@@ -40,7 +40,7 @@ public class SqlHandlerConfig {
   private final AttemptObservers observer;
   private final MaterializationList materializations;
   private final RelNormalizerTransformer relNormalizerTransformer;
-  private final PlannerEventBus plannerEventBus;
+  private final PlanCache planCache;
   private ResultMode resultMode;
 
   public SqlHandlerConfig(
@@ -48,13 +48,7 @@ public class SqlHandlerConfig {
       SqlConverter converter,
       AttemptObserver observer,
       MaterializationList materializations) {
-    this(
-        context,
-        converter,
-        toAttemptObservers(observer),
-        materializations,
-        new PlannerEventBusImpl(),
-        ResultMode.EXEC);
+    this(context, converter, toAttemptObservers(observer), materializations, ResultMode.EXEC);
   }
 
   private SqlHandlerConfig(
@@ -62,15 +56,15 @@ public class SqlHandlerConfig {
       SqlConverter converter,
       AttemptObservers observer,
       MaterializationList materializations,
-      PlannerEventBus plannerEventBus,
       ResultMode resultMode) {
     super();
     this.context = context;
     this.converter = converter;
     this.observer = observer;
     this.materializations = materializations;
-    this.plannerEventBus = plannerEventBus;
     this.resultMode = resultMode;
+    this.planCache =
+        context.getPlanCacheCreator().resolve(converter, observer, converter.getSettings());
 
     PlannerNormalizerComponent plannerNormalizerComponent =
         context.createPlannerNormalizerComponent(
@@ -82,7 +76,7 @@ public class SqlHandlerConfig {
                 converter.getOpTab(),
                 converter,
                 observer,
-                plannerEventBus));
+                converter.getPlannerEventBus()));
     this.relNormalizerTransformer = plannerNormalizerComponent.getRelNormalizerTransformer();
   }
 
@@ -96,6 +90,10 @@ public class SqlHandlerConfig {
 
   public Optional<MaterializationList> getMaterializations() {
     return Optional.ofNullable(materializations);
+  }
+
+  public PlanCache getPlanCache() {
+    return planCache;
   }
 
   public RuleSet getRules(PlannerPhase phase) {
@@ -112,12 +110,7 @@ public class SqlHandlerConfig {
   public SqlHandlerConfig cloneWithNewObserver(AttemptObserver replacementObserver) {
     AttemptObservers observer = toAttemptObservers(replacementObserver);
     return new SqlHandlerConfig(
-        this.context,
-        this.converter,
-        observer,
-        this.materializations,
-        this.plannerEventBus,
-        this.resultMode);
+        this.context, this.converter, observer, this.materializations, this.resultMode);
   }
 
   public SqlConverter getConverter() {
@@ -141,7 +134,7 @@ public class SqlHandlerConfig {
   }
 
   public PlannerEventBus getPlannerEventBus() {
-    return plannerEventBus;
+    return converter.getPlannerEventBus();
   }
 
   private static AttemptObservers toAttemptObservers(AttemptObserver observer) {

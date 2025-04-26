@@ -271,11 +271,13 @@ public class ITDataplanePluginDrop extends ITDataplanePluginTestSetup {
     // Assert
     assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
     assertNessieHasNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+    assertCommitLogTail(String.format("CREATE FOLDER %s", folderName));
 
     runSQL(dropFolderQuery(DATAPLANE_PLUGIN_NAME, folderPath));
 
     assertLastCommitMadeBySpecifiedAuthor(DEFAULT_BRANCH_NAME, this);
     assertNessieDoesNotHaveNamespace(folderPath, DEFAULT_BRANCH_NAME, this);
+    assertCommitLogTail(String.format("DROP FOLDER %s", folderName));
   }
 
   @Test

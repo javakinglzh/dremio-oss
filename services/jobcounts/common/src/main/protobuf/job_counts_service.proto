@@ -34,10 +34,18 @@ service JobCountsService {
 
   rpc GetJobCounts (GetJobCountsRequest) returns (JobCounts) {}
 
+  rpc GetJobCountsDaily (GetJobCountsRequestDaily) returns (JobCounts) {}
+
   rpc DeleteJobCounts (DeleteJobCountsRequest) returns (google.protobuf.Empty) {}
 }
 
 message GetJobCountsRequest {
+  JobCountType type = 1;
+  repeated string ids = 2;
+  int32 job_counts_age_in_days = 3;
+}
+
+message GetJobCountsRequestDaily {
   JobCountType type = 1;
   repeated string ids = 2;
   int32 job_counts_age_in_days = 3;

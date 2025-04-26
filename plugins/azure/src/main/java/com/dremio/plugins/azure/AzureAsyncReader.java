@@ -165,18 +165,22 @@ public class AzureAsyncReader extends ReusableAsyncByteReader implements AutoClo
             unused -> {
               long rangeEnd = offset + len - 1L;
               boolean requestChecksum = this.requireChecksum(len);
+              String sasSig = authProvider.getSasSignature(false);
               RequestBuilder requestBuilder =
                   AzureAsyncHttpClientUtils.newDefaultRequestBuilder()
                       .addHeader("Range", String.format("bytes=%d-%d", offset, rangeEnd))
                       .addHeader("x-ms-range-get-content-md5", requestChecksum ? "true" : "false")
-                      .setUrl(url);
+                      .setUrl(url + sasSig);
               if (version != null) {
                 requestBuilder.addHeader("If-Unmodified-Since", version);
               }
+
               Request req = requestBuilder.build();
 
               metrics.startTimer("get-authz-header");
-              req.getHeaders().add("Authorization", authProvider.getAuthzHeaderValue(req));
+              if (sasSig.isEmpty()) {
+                req.getHeaders().add("Authorization", authProvider.getAuthorizationHeader(req));
+              }
               metrics.endTimer("get-authz-header");
 
               logger.debug(

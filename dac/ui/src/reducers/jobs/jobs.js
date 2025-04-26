@@ -103,29 +103,10 @@ export default function jobs(state = initialState, action) {
     }
     case ActionTypes.JOBS_DATA_REQUEST:
     case ActionTypes.SORT_JOBS_REQUEST:
-    case ActionTypes.FILTER_JOBS_REQUEST:
-    case ActionTypes.REFLECTION_JOBS_REQUEST:
       return StateUtils.request(state, ["jobs"]);
-
-    case ActionTypes.LOAD_NEXT_JOBS_REQUEST:
-      return state.set("isNextJobsInProgress", true);
-
-    case ActionTypes.LOAD_NEXT_JOBS_SUCCESS:
-      return state
-        .set("isNextJobsInProgress", false)
-        .set(
-          "jobs",
-          state
-            .get("jobs")
-            .concat(Immutable.fromJS(jobsMapper.mapJobs(action.payload))),
-        )
-        .set("next", action.payload.next);
-    case ActionTypes.LOAD_NEXT_JOBS_FAILURE:
-      return state.set("isNextJobsInProgress", false);
 
     case ActionTypes.JOBS_DATA_FAILURE:
     case ActionTypes.SORT_JOBS_FAILURE:
-    case ActionTypes.FILTER_JOBS_FAILURE:
     case ActionTypes.REFLECTION_JOB_DETAILS_FAILURE:
       return StateUtils.failed(state, ["jobs"]).set("isFailed", true);
 
@@ -151,15 +132,6 @@ export default function jobs(state = initialState, action) {
         jobsMapper.mapJobs,
       ).set("orderedColumn", action.meta.config);
 
-    case ActionTypes.FILTER_JOBS_SUCCESS:
-    case ActionTypes.REFLECTION_JOBS_SUCCESS:
-      return StateUtils.success(
-        state,
-        ["jobs"],
-        action.payload,
-        jobsMapper.mapJobs,
-      ).set("next", action.payload.next);
-
     case ActionTypes.JOBS_DATASET_DATA_SUCCESS:
       return StateUtils.success(
         state,
@@ -168,54 +140,10 @@ export default function jobs(state = initialState, action) {
         jobsMapper.mapDatasetsJobs,
       );
 
-    case ActionTypes.ITEMS_FOR_FILTER_JOBS_SUCCESS:
-      return state.setIn(
-        ["dataForFilter", action.meta.tag],
-        action.payload.items,
-      );
-
     case ActionTypes.SET_CLUSTER_TYPE:
       return state
         .set("clusterType", action.payload.clusterType)
         .set("isSupport", action.payload.isSupport);
-    case JobListActionTypes.FETCH_JOBS_LIST_SUCCESS:
-      if (action.meta?.isExplorePage) {
-        const curJobList = state.get("jobList") || new Immutable.List();
-        const jobResult = action.payload.jobs[0];
-        const replaceIndex =
-          action.meta?.replaceIndex ||
-          curJobList.findIndex((job) => jobResult.id === job.get("id"));
-
-        if (replaceIndex != null && replaceIndex > -1) {
-          return state.set(
-            "jobList",
-            curJobList.set(
-              replaceIndex,
-              Immutable.fromJS(jobsMapper.mapJobs(action.payload)[0]),
-            ),
-          );
-        } else {
-          return state.set(
-            "jobList",
-            curJobList.concat(
-              Immutable.fromJS(jobsMapper.mapJobs(action.payload)),
-            ),
-          );
-        }
-      } else {
-        return StateUtils.success(
-          state,
-          ["jobList"],
-          action.payload,
-          jobsMapper.mapJobs,
-        )
-          .set("next", action.payload.next)
-          .set("filters", new Immutable.Map())
-          .set(
-            "orderedColumn",
-            new Immutable.Map({ columnName: null, order: "desc" }),
-          );
-      }
 
     case JobListActionTypes.JOBS_LIST_RESET:
       return state.set("jobList", action.payload);
@@ -228,21 +156,6 @@ export default function jobs(state = initialState, action) {
         ["dataForFilter", action.meta.tag],
         action.payload.items,
       );
-
-    case JobListActionTypes.LOAD_NEXT_JOBS_LIST_REQUEST:
-      return state.set("isNextJobsInProgress", true);
-    case JobListActionTypes.LOAD_NEXT_JOBS_LIST_SUCCESS:
-      return state
-        .set("isNextJobsInProgress", false)
-        .set(
-          "jobList",
-          state
-            .get("jobList")
-            .concat(Immutable.fromJS(jobsMapper.mapJobs(action.payload))),
-        )
-        .set("next", action.payload.next);
-    case JobListActionTypes.LOAD_NEXT_JOBS_LIST_FAILURE:
-      return state.set("isNextJobsInProgress", false);
 
     case JobListActionTypes.FETCH_JOB_EXECUTION_DETAILS_BY_ID_SUCCESS:
       return state.set("jobExecutionDetails", Immutable.fromJS(action.payload));

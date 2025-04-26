@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.catalog;
 
-import static com.dremio.exec.ExecConstants.VERSIONED_INFOSCHEMA_ENABLED;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -55,7 +54,6 @@ public class TestInformationSchemaCatalogWithUserContext {
   @BeforeEach
   public void setUp() throws Exception {
     when(pluginRetriever.getAllVersionedPlugins()).thenReturn(Stream.of(versionedPlugin));
-    when(optionManager.getOption(VERSIONED_INFOSCHEMA_ENABLED)).thenReturn(true);
     when(identity.getId()).thenReturn(expectedUserId);
 
     when(versionedPlugin.getName()).thenReturn("SomeSource");

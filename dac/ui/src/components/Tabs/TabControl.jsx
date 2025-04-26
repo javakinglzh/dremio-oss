@@ -16,6 +16,7 @@
 import { PureComponent } from "react";
 import Immutable from "immutable";
 import PropTypes from "prop-types";
+import { isNotSoftware } from "dyn-load/utils/versionUtils";
 
 import * as classes from "./TabControl.module.less";
 import clsx from "clsx";
@@ -66,6 +67,8 @@ class TabControl extends PureComponent {
         </div>
       );
     });
+    if (!isNotSoftware() && tabsView.size < 2) return null;
+
     return <div className={clsx(classes["tabsWrap"])}>{tabsView}</div>;
   }
 

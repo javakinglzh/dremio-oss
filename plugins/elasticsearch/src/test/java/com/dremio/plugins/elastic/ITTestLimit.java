@@ -16,6 +16,7 @@
 package com.dremio.plugins.elastic;
 
 import static com.dremio.TestBuilder.mapOf;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
 
@@ -75,7 +76,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
           DirectProvider.wrap(
               RequestContext.current()
                   .with(TenantContext.CTX_KEY, TenantContext.DEFAULT_SERVICE_CONTEXT)
-                  .with(UserContext.CTX_KEY, new UserContext("dremio"))),
+                  .with(UserContext.CTX_KEY, UserContext.of("dremio"))),
           () -> Maps.newHashMap());
 
   private JobTelemetryClient jobTelemetryClient;
@@ -133,11 +134,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"query\" : {\n"
               + "    \"range\" : {\n"
               + "      \"stars\" : {\n"
-              + "        \"from\" : 4,\n"
-              + "        \"to\" : null,\n"
-              + "        \"include_lower\" : true,\n"
-              + "        \"include_upper\" : true,\n"
-              + "        \"boost\" : 1.0\n"
+              + "        \"gte\" : 4\n"
               + "      }\n"
               + "    }\n"
               + "  },\n"
@@ -147,8 +144,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "      \"review_count\",\n"
               + "      \"stars\",\n"
               + "      \"state\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -178,11 +174,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"query\" : {\n"
               + "    \"range\" : {\n"
               + "      \"stars\" : {\n"
-              + "        \"from\" : 4,\n"
-              + "        \"to\" : null,\n"
-              + "        \"include_lower\" : true,\n"
-              + "        \"include_upper\" : true,\n"
-              + "        \"boost\" : 1.0\n"
+              + "        \"gte\" : 4\n"
               + "      }\n"
               + "    }\n"
               + "  },\n"
@@ -192,8 +184,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "      \"review_count\",\n"
               + "      \"stars\",\n"
               + "      \"state\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -225,11 +216,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"query\" : {\n"
               + "    \"range\" : {\n"
               + "      \"stars\" : {\n"
-              + "        \"from\" : 4,\n"
-              + "        \"to\" : null,\n"
-              + "        \"include_lower\" : true,\n"
-              + "        \"include_upper\" : true,\n"
-              + "        \"boost\" : 1.0\n"
+              + "        \"gte\" : 4\n"
               + "      }\n"
               + "    }\n"
               + "  },\n"
@@ -239,8 +226,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "      \"review_count\",\n"
               + "      \"stars\",\n"
               + "      \"state\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -271,14 +257,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"size\" : 3,\n"
               + "  \"query\" : {\n"
               + "    \"match_all\" : {\n"
-              + "      \"boost\" : 1.0\n"
               + "    }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
               + "    \"includes\" : [\n"
               + "      \"location_field\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -308,14 +292,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"size\" : 2,\n"
               + "  \"query\" : {\n"
               + "    \"match_all\" : {\n"
-              + "      \"boost\" : 1.0\n"
               + "    }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
               + "    \"includes\" : [\n"
               + "      \"location_field\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -346,14 +328,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"size\" : 100,\n"
               + "  \"query\" : {\n"
               + "    \"match_all\" : {\n"
-              + "      \"boost\" : 1.0\n"
               + "    }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
               + "    \"includes\" : [\n"
               + "      \"location_field\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -387,14 +367,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"size\" : 2,\n"
               + "  \"query\" : {\n"
               + "    \"match_all\" : {\n"
-              + "      \"boost\" : 1.0\n"
               + "    }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
               + "    \"includes\" : [\n"
               + "      \"city\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -424,14 +402,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
               + "  \"size\" : 100,\n"
               + "  \"query\" : {\n"
               + "    \"match_all\" : {\n"
-              + "      \"boost\" : 1.0\n"
               + "    }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
               + "    \"includes\" : [\n"
               + "      \"city\"\n"
-              + "    ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    ]\n"
               + "  }\n"
               + "}]"
         },
@@ -472,14 +448,12 @@ public class ITTestLimit extends ElasticBaseTestQuery {
                 + "  \"size\" : 3,\n"
                 + "  \"query\" : {\n"
                 + "    \"match_all\" : {\n"
-                + "      \"boost\" : 1.0\n"
                 + "    }\n"
                 + "  },\n"
                 + "  \"_source\" : {\n"
                 + "    \"includes\" : [\n"
                 + "      \"location_field\"\n"
-                + "    ],\n"
-                + "    \"excludes\" : [ ]\n"
+                + "    ]\n"
                 + "  }\n"
                 + "}]"
           },
@@ -514,11 +488,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
                 + "  \"query\" : {\n"
                 + "    \"range\" : {\n"
                 + "      \"stars\" : {\n"
-                + "        \"from\" : 4,\n"
-                + "        \"to\" : null,\n"
-                + "        \"include_lower\" : true,\n"
-                + "        \"include_upper\" : true,\n"
-                + "        \"boost\" : 1.0\n"
+                + "        \"gte\" : 4\n"
                 + "      }\n"
                 + "    }\n"
                 + "  },\n"
@@ -528,8 +498,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
                 + "      \"review_count\",\n"
                 + "      \"stars\",\n"
                 + "      \"state\"\n"
-                + "    ],\n"
-                + "    \"excludes\" : [ ]\n"
+                + "    ]\n"
                 + "  }\n"
                 + "}]"
           },
@@ -568,11 +537,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
                 + "  \"query\" : {\n"
                 + "    \"range\" : {\n"
                 + "      \"stars\" : {\n"
-                + "        \"from\" : 4,\n"
-                + "        \"to\" : null,\n"
-                + "        \"include_lower\" : true,\n"
-                + "        \"include_upper\" : true,\n"
-                + "        \"boost\" : 1.0\n"
+                + "        \"gte\" : 4\n"
                 + "      }\n"
                 + "    }\n"
                 + "  },\n"
@@ -582,8 +547,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
                 + "      \"review_count\",\n"
                 + "      \"stars\",\n"
                 + "      \"state\"\n"
-                + "    ],\n"
-                + "    \"excludes\" : [ ]\n"
+                + "    ]\n"
                 + "  }\n"
                 + "}]"
           },
@@ -615,6 +579,7 @@ public class ITTestLimit extends ElasticBaseTestQuery {
             .setAllowPartitionPruning(true)
             .setExposeInternalSources(false)
             .setSubstitutionSettings(SubstitutionSettings.of())
+            .setReflectionMode(MANUAL_REFLECTION_MODE)
             .build();
 
     RunQuery queryCmd =
@@ -683,6 +648,15 @@ public class ITTestLimit extends ElasticBaseTestQuery {
       profile = result.getProfile();
       latch.countDown();
     }
+
+    @Override
+    public void putExecutorProfile(String nodeEndpoint) {}
+
+    @Override
+    public void removeExecutorProfile(String nodeEndpoint) {}
+
+    @Override
+    public void queryClosed() {}
 
     public QueryProfile getProfile() throws InterruptedException {
       await();

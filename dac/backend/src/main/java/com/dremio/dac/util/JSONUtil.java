@@ -57,6 +57,7 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.SerializerProvider;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.ser.impl.SimpleFilterProvider;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -110,7 +111,10 @@ public class JSONUtil {
       m.addMixIn(TransformSorts.class, TransformSortsMixin.class);
       // m.addMixIn(UnknownConfig.class, UnknownConfigMixIn.class);
       m.registerModule(new JavaTimeModule());
+      m.registerModule(new Jdk8Module());
       m.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+      // Write durations in ISO-8601 format
+      m.disable(SerializationFeature.WRITE_DURATIONS_AS_TIMESTAMPS);
       // DateTime is expected to be serialised to Date format instead of timestamp
       Acceptor<?, ?, ?>[] acceptors = {
         ExpressionBase.acceptor,

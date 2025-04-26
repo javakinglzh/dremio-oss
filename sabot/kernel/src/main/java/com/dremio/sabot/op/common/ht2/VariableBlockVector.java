@@ -43,6 +43,13 @@ public class VariableBlockVector implements AutoCloseable {
     reset();
   }
 
+  public VariableBlockVector(ArrowBuf arrowBuffer, int fieldCount) {
+    this.allocator = arrowBuffer.getReferenceManager().getAllocator();
+    this.fieldCount = fieldCount;
+    this.allowExpansion = false;
+    this.buf = arrowBuffer;
+  }
+
   public ArrowBuf getBuf() {
     return buf;
   }
@@ -80,7 +87,11 @@ public class VariableBlockVector implements AutoCloseable {
 
   // compute direct memory required for a single variable block.
   public static int computeSizeForSingleBlock(final int maxVariableBlockLength) {
-    return Numbers.nextPowerOfTwo(maxVariableBlockLength);
+    int estimatedBlockSize = Numbers.nextPowerOfTwo(maxVariableBlockLength);
+    if (estimatedBlockSize < HashTable.PAGE_SIZE) {
+      estimatedBlockSize = HashTable.PAGE_SIZE;
+    }
+    return estimatedBlockSize;
   }
 
   private void resizeBuffer(int sizeInBytes) {

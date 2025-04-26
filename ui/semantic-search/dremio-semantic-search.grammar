@@ -26,17 +26,18 @@ UnquotedString { word+ }
 
 QuotedString { quotedString }
 
-@tokens {
+@tokens { 
   FilterKeyword { word ":"}
 
-  word { @asciiLetter (@asciiLetter|@digit)*}
-
+  word { unquotedChar+ }
   quotedString { '"' char* '"' }
+
+  unquotedChar { @asciiLetter | @digit | $[\u{21}\u{23}-\u{26}\u{3f}-\u{40}] | $[_$\u{a1}-\u{10ffff}] }
   char { $[\u{20}\u{21}\u{23}-\u{5b}\u{5d}-\u{10ffff}] | "\\" esc }
   esc  { $["\\\/bfnrt] | "u" hex hex hex hex }
   hex  { $[0-9a-fA-F] }
 
   space { @whitespace+ }
 
-  @precedence { FilterKeyword, word }
+  @precedence { space, FilterKeyword, word }
 }

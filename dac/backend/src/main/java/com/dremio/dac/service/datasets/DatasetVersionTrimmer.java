@@ -22,8 +22,11 @@ import com.dremio.dac.proto.model.dataset.VirtualDatasetVersion;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.ImmutableFindByRange;
 import com.dremio.datastore.api.KVStore;
+import com.dremio.exec.ExecConstants;
+import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.NamespaceOptions;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -39,7 +42,6 @@ import com.google.common.collect.Multimap;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -59,8 +61,9 @@ public final class DatasetVersionTrimmer {
   /// Maximum number of versions to delete in a single call to KVStore.bulkDelete.
   private static final int MAX_VERSIONS_TO_DELETE = 10000;
   private static final int MAX_DELETE_VERSIONS_TO_LOG = 100;
-  // Maximum number of versions to load via range query in memory for analysis.
-  private static final int MAX_VERSIONS_IN_RANGE = 100000;
+  // Maximum number of versions to load via range query in memory for analysis. Views can be large
+  // keep this on the smaller side.
+  private static final int MAX_VERSIONS_IN_RANGE = 500;
   // Versions not attached to any dataset can be deleted if they are older than this duration.
   private static final Duration ORPHAN_VERSION_TO_DELETE_AGE = Duration.ofDays(7);
 
@@ -74,6 +77,7 @@ public final class DatasetVersionTrimmer {
   private final KVStore<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>
       datasetVersionsStore;
   private final NamespaceService namespaceService;
+  private final OptionManager optionManager;
 
   @WithSpan
   public static void trimHistory(
@@ -81,21 +85,23 @@ public final class DatasetVersionTrimmer {
       KVStore<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> datasetVersionsStore,
       NamespaceService namespaceService,
       ImmutableSet<String> versionedSourceTypes,
-      int maxVersionsToKeep,
-      int minAgeDays) {
-    new DatasetVersionTrimmer(clock, datasetVersionsStore, namespaceService, versionedSourceTypes)
-        .trimHistory(maxVersionsToKeep, minAgeDays);
+      OptionManager optionManager) {
+    new DatasetVersionTrimmer(
+            clock, datasetVersionsStore, namespaceService, versionedSourceTypes, optionManager)
+        .trimHistory();
   }
 
   private DatasetVersionTrimmer(
       Clock clock,
       KVStore<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> datasetVersionsStore,
       NamespaceService namespaceService,
-      ImmutableSet<String> versionedSourceTypes) {
+      ImmutableSet<String> versionedSourceTypes,
+      OptionManager optionManager) {
     this.clock = clock;
     this.datasetVersionsStore = datasetVersionsStore;
     this.namespaceService = namespaceService;
     this.versionedSourceTypes = versionedSourceTypes;
+    this.optionManager = optionManager;
   }
 
   /**
@@ -106,9 +112,23 @@ public final class DatasetVersionTrimmer {
    * <li>Deletes version lists with loops if they are not attached to dataset.
    */
   @WithSpan
-  private void trimHistory(int maxVersionsToKeep, int minAgeInDays) {
+  private void trimHistory() {
+    if (!optionManager.getOption(NamespaceOptions.DATASET_VERSION_TRIMMER_ENABLED)) {
+      logger.warn("Trimming of dataset versions history is disabled.");
+      return;
+    }
+
+    int maxVersionsToKeep = (int) optionManager.getOption(NamespaceOptions.DATASET_VERSIONS_LIMIT);
     Preconditions.checkArgument(maxVersionsToKeep > 0, "maxVersionsToKeep must be positive");
-    Preconditions.checkArgument(minAgeInDays > 0, "minAgeInDays must be positive");
+
+    Duration minAge =
+        Duration.ofDays(1 + (int) optionManager.getOption(ExecConstants.JOB_MAX_AGE_IN_DAYS));
+    long overrideSeconds =
+        optionManager.getOption(NamespaceOptions.DATASET_VERSIONS_MIN_AGE_OVERRIDE_SECONDS);
+    if (overrideSeconds > 0) {
+      minAge = Duration.ofSeconds(overrideSeconds);
+    }
+    Preconditions.checkArgument(minAge.toSeconds() > 0, "minAge must be positive");
 
     // Get all dataset "states", assume the size is somewhat limited, collect only keys to reduce
     // memory footprint. Datasets needing update are rare and are read/written one by one.
@@ -202,7 +222,7 @@ public final class DatasetVersionTrimmer {
             pathsSet,
             datasetStates,
             maxVersionsToKeep,
-            minAgeInDays,
+            minAge,
             keysToDelete,
             versionsToUpdate,
             datasetsToUpdate);
@@ -315,8 +335,8 @@ public final class DatasetVersionTrimmer {
    * @param datasetStates Dataset states with booleans for existence of the dataset version pointer
    *     in the dataset and existence of dataset itself.
    * @param maxVersionsToKeep Maximum number of versions to keep for a dataset.
-   * @param minAgeInDays If number of versions is greater than maxVersionsToKeep, the versions older
-   *     than this threshold past the maxVersionsToKeep are deleted (trimmed).
+   * @param minAge If number of versions is greater than maxVersionsToKeep, the versions older than
+   *     this threshold past the maxVersionsToKeep are deleted (trimmed).
    * @param keysToDelete Version keys to delete are added to this list.
    * @param versionsToUpdate The new tails of the linked list (with null previous version) are added
    *     to this list.
@@ -330,7 +350,7 @@ public final class DatasetVersionTrimmer {
       ImmutableSet<DatasetPath> pathsSet,
       Map<DatasetPath, DatasetState> datasetStates,
       int maxVersionsToKeep,
-      int minAgeInDays,
+      Duration minAge,
       List<DatasetVersionMutator.VersionDatasetKey> keysToDelete,
       Map<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> versionsToUpdate,
       List<DatasetState> datasetsToUpdate) {
@@ -348,6 +368,7 @@ public final class DatasetVersionTrimmer {
         datasetVersionsStore.find(findByRangeBuilder.build())) {
       // Range search may include paths that don't require any processing, exclude those.
       if (pathsSet.contains(entry.getKey().getPath())) {
+        clearUnusedFields(entry.getValue());
         allVersions.put(entry.getKey().getPath(), entry);
       }
     }
@@ -364,7 +385,7 @@ public final class DatasetVersionTrimmer {
           versions.forEach(v -> keysToDelete.add(v.getKey()));
         }
       } else {
-        VersionList versionList = VersionList.build(versions);
+        VersionList versionList = VersionList.build(versions, datasetState.versionKey.getVersion());
         boolean updateDataset = !datasetState.getVersionExists();
         if (datasetState.getVersionExists()) {
           // Normal case: both head version and dataset exist, trimming can be done unless the
@@ -377,7 +398,7 @@ public final class DatasetVersionTrimmer {
             // Linked list is ok, apply trimming.
             ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
                 orderedVersions = orderedVersionsOptional.get();
-            int trimIndex = findIndexToTrimAt(orderedVersions, maxVersionsToKeep, minAgeInDays);
+            int trimIndex = findIndexToTrimAt(orderedVersions, maxVersionsToKeep, minAge);
             if (trimIndex >= 0 && trimIndex < orderedVersions.size()) {
               // Stop history at the last kept entry.
               Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>
@@ -386,6 +407,11 @@ public final class DatasetVersionTrimmer {
                   versionToKeep.getKey(), versionToKeep.getValue().setPreviousVersion(null));
 
               // Collect keys to delete.
+              // TODO: this logic only removes versions in the linked list that originates
+              //   from the DatasetConfig. 1. this does not address setting previousVersion
+              //   to null for versions that reference the ones being deleted. 2. Versions
+              //   outside of this linked list are never deleted.
+              //   The TODO is to delete versions outside of the main list if they are old enough.
               if (trimIndex + 1 < orderedVersions.size()) {
                 for (Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>
                     entry : orderedVersions.subList(trimIndex + 1, orderedVersions.size())) {
@@ -405,6 +431,11 @@ public final class DatasetVersionTrimmer {
           // cannot be that the non-existing version is not yet created. Or, the version will be
           // deleted because it points to a list with loop.
           // In these cases, the dataset config needs to point to a valid linked list.
+          //
+          // TODO: consider creation of a new version here with SQL text/context from the
+          // DatasetConfig. The challenge here is that version creation is coupled with
+          // DatasetVersionResource now.
+          //
           Optional<
                   ImmutableList<
                       Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
@@ -425,6 +456,15 @@ public final class DatasetVersionTrimmer {
           // Add keys that are part of broken linked lists.
           keysToDelete.addAll(versionList.getUnusableKeys());
         }
+      }
+    }
+  }
+
+  private static void clearUnusedFields(VirtualDatasetVersion virtualDatasetVersion) {
+    var datasetConfig = virtualDatasetVersion.getDataset();
+    if (datasetConfig != null) {
+      if (datasetConfig.getVirtualDataset() != null) {
+        datasetConfig.getVirtualDataset().setFieldOriginsList(null);
       }
     }
   }
@@ -451,7 +491,7 @@ public final class DatasetVersionTrimmer {
       List<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
           orderedVersions,
       int maxVersionsToKeep,
-      int minAgeInDays) {
+      Duration minAge) {
     int index = maxVersionsToKeep - 1;
     if (orderedVersions.size() <= index) {
       // No need to trim.
@@ -462,7 +502,7 @@ public final class DatasetVersionTrimmer {
     // The orderedVersions list is sorted by last modified in descending order as it is constructed
     // from the linked list, the last modified may not be set. Look for first index
     // at or after (maxVersionsToKeep - 1) where timestamp is smaller than the cutoff time.
-    long minEpochMillis = clock.instant().minus(minAgeInDays, ChronoUnit.DAYS).toEpochMilli();
+    long minEpochMillis = clock.instant().minus(minAge).toEpochMilli();
     while (index < orderedVersions.size()) {
       Long lastModified = orderedVersions.get(index).getValue().getDataset().getLastModified();
       if (lastModified == null || lastModified < minEpochMillis) {

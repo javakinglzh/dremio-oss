@@ -37,7 +37,23 @@ message PRelTraitSet {
 message PRelTrait {
   oneof implementation {
     PRelCollation collation = 1;
+    PConvention convention = 2;
+    PDistributionTrait distribution_trait = 3;
+    PRelCompositeTrait composite_trait = 4;
   }
+}
+
+enum PRelTraitDef {
+  COLLATION = 0;
+}
+
+message PRelCompositeTrait {
+  repeated PRelTrait traits = 1;
+}
+
+enum PConvention {
+  PHYSICAL = 0;
+  LOGICAL = 1;
 }
 
 message PRelCollation {
@@ -72,3 +88,23 @@ message PRelFieldCollation {
   PDirection direction = 2;
   PNullDirection null_direction = 3;
 }
+
+message PDistributionTrait {
+  PDistributionType type = 1;
+  repeated PDistributionField fields = 2;
+}
+
+message PDistributionField {
+  int32  field_id = 1;
+  bool not_null = 2;
+}
+
+enum PDistributionType {
+  SINGLETON = 0;
+  HASH_DISTRIBUTED = 1;
+  ADAPTIVE_HASH_DISTRIBUTED = 2;
+  RANGE_DISTRIBUTED = 3;
+  ROUND_ROBIN_DISTRIBUTED = 4;
+  BROADCAST_DISTRIBUTED = 5;
+  ANY_ = 6; //There is a collision with ANY and the proto will not compile
+};

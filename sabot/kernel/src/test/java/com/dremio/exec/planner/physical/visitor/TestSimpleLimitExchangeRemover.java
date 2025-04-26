@@ -220,7 +220,7 @@ public class TestSimpleLimitExchangeRemover {
   }
 
   private void addRels(List<String> list, Prel input) {
-    String descr = input.getDescription();
+    String descr = input.getDigest();
     list.add(descr.substring(0, descr.lastIndexOf("Prel")));
     for (Prel child : input) {
       addRels(list, child);

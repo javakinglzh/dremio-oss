@@ -150,7 +150,9 @@ export const reflectionJobsPageTableColumns = (
         if (!row.data) {
           return <Skeleton width="17ch" />;
         }
-        const duration = Math.abs(row.data.startTime - row.data.endTime);
+        const duration = Math.abs(
+          row.data.startTime - (row.data?.endTime || Date.now()),
+        );
         return (
           <>
             <DurationCell duration={duration} />

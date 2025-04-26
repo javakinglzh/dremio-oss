@@ -127,6 +127,7 @@ public class TestAPI extends DremioTest {
     doReturn(new ClusterEnriched()).when(provServiceDelegate).startCluster(any(Cluster.class));
     doReturn(new ClusterEnriched()).when(provServiceDelegate).startCluster(any(Cluster.class));
     doNothing().when(provServiceDelegate).stopCluster(any(Cluster.class));
+    doReturn(ClusterType.YARN).when(provServiceDelegate).getType();
 
     LegacyKVStore<ClusterId, Cluster> store =
         registry
@@ -603,7 +604,7 @@ public class TestAPI extends DremioTest {
             .setYarnProps(
                 YarnPropsApi.builder()
                     .setVirtualCoreCount(2)
-                    .setDistroType(DistroType.MAPR)
+                    .setDistroType(DistroType.APACHE)
                     .setIsSecure(true)
                     .setMemoryMB(32767)
                     .build())
@@ -624,7 +625,7 @@ public class TestAPI extends DremioTest {
                 YarnPropsApi.builder()
                     .setMemoryMB(32768)
                     .setVirtualCoreCount(2)
-                    .setDistroType(DistroType.MAPR)
+                    .setDistroType(DistroType.APACHE)
                     .setIsSecure(true)
                     .build())
             .setClusterType(ClusterType.YARN)
@@ -647,7 +648,7 @@ public class TestAPI extends DremioTest {
                 YarnPropsApi.builder()
                     .setMemoryMB(32768)
                     .setVirtualCoreCount(2)
-                    .setDistroType(DistroType.MAPR)
+                    .setDistroType(DistroType.APACHE)
                     .setIsSecure(true)
                     .setSubPropertyList(newList)
                     .build())
@@ -668,7 +669,7 @@ public class TestAPI extends DremioTest {
                 YarnPropsApi.builder()
                     .setMemoryMB(32767)
                     .setVirtualCoreCount(2)
-                    .setDistroType(DistroType.MAPR)
+                    .setDistroType(DistroType.APACHE)
                     .setIsSecure(true)
                     .build())
             .setClusterType(ClusterType.YARN)
@@ -725,7 +726,7 @@ public class TestAPI extends DremioTest {
                 YarnPropsApi.builder()
                     .setMemoryMB(32768)
                     .setVirtualCoreCount(2)
-                    .setDistroType(DistroType.MAPR)
+                    .setDistroType(DistroType.APACHE)
                     .setIsSecure(true)
                     .build())
             .build();
@@ -866,7 +867,7 @@ public class TestAPI extends DremioTest {
             .setMemoryMBOffHeap(4096)
             .setMemoryMBOnHeap(4096)
             .setVirtualCoreCount(2));
-    clusterConfig.setDistroType(DistroType.MAPR).setIsSecure(true);
+    clusterConfig.setDistroType(DistroType.APACHE).setIsSecure(true);
     List<Property> propertyList = new ArrayList<>();
     propertyList.add(new Property(FS_DEFAULT_NAME_KEY, "hdfs://name-node:8020"));
     propertyList.add(new Property("yarn.resourcemanager.hostname", "resource-manager"));

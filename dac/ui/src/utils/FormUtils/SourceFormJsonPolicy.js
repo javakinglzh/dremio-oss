@@ -43,7 +43,11 @@ import {
 import addAlwaysPresent, {
   LOOSE_ELEMENT_IGNORE_LIST,
 } from "@inject/utils/FormUtils/globalSourceConfigUtil";
-import { isVersionedSource, isArcticSource } from "@inject/utils/sourceUtils";
+import {
+  isVersionedSource,
+  isArcticSource,
+  isLimitedVersionSource,
+} from "@inject/utils/sourceUtils";
 
 export default class SourceFormJsonPolicy {
   static deepCopyConfig(config) {
@@ -404,7 +408,10 @@ export default class SourceFormJsonPolicy {
       );
     }
 
-    if (!isVersionedSource(config.sourceType)) {
+    if (
+      !isVersionedSource(config.sourceType) ||
+      isLimitedVersionSource(config.sourceType)
+    ) {
       // add Reflection Refresh tab based on config.metadataRefresh
       this.addReflectionRefreshTab(config, functionalElements);
     }

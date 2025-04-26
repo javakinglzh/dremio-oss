@@ -15,23 +15,20 @@
  */
 package com.dremio.exec.planner.plancache;
 
+import static com.dremio.exec.catalog.CatalogUtil.getSystemCatalogForPlanCacheInvalidation;
+import static com.dremio.exec.planner.physical.PlannerSettings.QUERY_PLAN_CACHE_ENABLED;
+import static com.dremio.exec.planner.physical.PlannerSettings.QUERY_PLAN_USE_LEGACY_CACHE;
 import static org.slf4j.LoggerFactory.getLogger;
 
-import com.dremio.common.AutoCloseables;
-import com.dremio.common.utils.protos.AttemptId;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.DelegatingCatalog;
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.ops.QueryContext;
-import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.options.OptionResolver;
-import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
-import com.dremio.service.reflection.UserSessionUtils;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.LinkedList;
@@ -42,25 +39,17 @@ import org.slf4j.Logger;
  * Plan cache helper that takes care of releasing the query context when closed. Caller must close
  * the helper when done using the converter
  */
-public class PlanCacheInvalidationHelper implements AutoCloseable {
+public class PlanCacheInvalidationHelper {
   private static final Logger LOGGER = getLogger(PlanCacheInvalidationHelper.class);
 
   private final LegacyPlanCache planCache;
   private final OptionResolver optionResolver;
-  private final QueryContext context;
   private final Catalog catalog;
 
   PlanCacheInvalidationHelper(SabotContext sabotContext, LegacyPlanCache legacyPlanCache) {
-    final UserSession session = UserSessionUtils.systemSession(sabotContext.getOptionManager());
-    this.context = new QueryContext(session, sabotContext, new AttemptId().toQueryId());
-    this.catalog = context.getCatalog();
-    this.optionResolver = context.getOptions();
+    this.catalog = getSystemCatalogForPlanCacheInvalidation(sabotContext.getCatalogService());
+    this.optionResolver = sabotContext.getOptionManager();
     this.planCache = legacyPlanCache;
-  }
-
-  @Override
-  public void close() {
-    AutoCloseables.closeNoChecked(context);
   }
 
   @WithSpan
@@ -109,6 +98,7 @@ public class PlanCacheInvalidationHelper implements AutoCloseable {
   }
 
   public boolean isPlanCacheEnabled() {
-    return optionResolver.getOption(PlannerSettings.QUERY_PLAN_CACHE_ENABLED);
+    return optionResolver.getOption(QUERY_PLAN_CACHE_ENABLED)
+        && optionResolver.getOption(QUERY_PLAN_USE_LEGACY_CACHE);
   }
 }

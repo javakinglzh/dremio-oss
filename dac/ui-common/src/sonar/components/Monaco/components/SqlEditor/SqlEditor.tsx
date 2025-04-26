@@ -20,7 +20,6 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
-  useContext,
   type HTMLProps,
 } from "react";
 import * as monaco from "monaco-editor";
@@ -71,7 +70,10 @@ export const SqlEditor = forwardRef<SqlEditorRef, SqlEditorProps>(
     const theme = colorScheme === "dark" ? SQL_DARK_THEME : SQL_LIGHT_THEME;
 
     const options: monaco.editor.IStandaloneEditorConstructionOptions = useMemo(
-      () => ({ ...getSqlEditorOptions(), value: defaultValue }),
+      () => ({
+        ...getSqlEditorOptions(),
+        value: defaultValue,
+      }),
       [defaultValue],
     );
 
@@ -145,6 +147,16 @@ export const SqlEditor = forwardRef<SqlEditorRef, SqlEditorProps>(
 
       return () => shortcutsDisposers.forEach((disposer) => disposer.dispose());
     }, [getEditorInstance, keyboardShortcuts]);
+
+    useEffect(() => {
+      const editorInstance = getEditorInstance();
+
+      if (!editorInstance) {
+        return;
+      }
+      // TODO: confirm behavior
+      editorInstance.updateOptions({ readOnly: props.readOnly });
+    }, [getEditorInstance, props.readOnly]);
 
     useImperativeHandle(
       ref,

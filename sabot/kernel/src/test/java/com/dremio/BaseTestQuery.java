@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.dremio.common.AutoCloseables;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.exceptions.UserRemoteException;
@@ -79,9 +80,11 @@ import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.coordinator.ClusterCoordinator;
 import com.dremio.service.coordinator.local.LocalClusterCoordinator;
 import com.dremio.service.namespace.source.proto.SourceConfig;
+import com.dremio.services.credentials.Cipher;
 import com.dremio.services.credentials.CredentialsServiceImpl;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
 import com.google.common.io.Files;
 import com.google.common.io.Resources;
@@ -89,6 +92,7 @@ import com.google.inject.AbstractModule;
 import com.google.inject.Injector;
 import com.google.inject.Module;
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
@@ -101,8 +105,11 @@ import java.nio.file.FileSystems;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -112,6 +119,7 @@ import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.VarCharVector;
+import org.apache.commons.io.comparator.LastModifiedFileComparator;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 import org.assertj.core.api.InstanceOfAssertFactories;
@@ -283,9 +291,15 @@ public class BaseTestQuery extends ExecTest {
     SABOT_NODE_RULE.register(newDefaultModule());
 
     DremioCredentialProviderFactory.configure(
-        () -> CredentialsServiceImpl.newInstance(DEFAULT_DREMIO_CONFIG, CLASSPATH_SCAN_RESULT));
+        () ->
+            CredentialsServiceImpl.newInstance(
+                DEFAULT_DREMIO_CONFIG,
+                CLASSPATH_SCAN_RESULT,
+                null,
+                () -> getInstance(Cipher.class),
+                () -> null));
 
-    openClient();
+    startCluster();
     localFs = HadoopFileSystem.getLocal(new Configuration());
 
     // turns on the verbose errors in tests
@@ -300,7 +314,7 @@ public class BaseTestQuery extends ExecTest {
       // one with the given
       // SabotNode count. Revisit later to avoid stopping the cluster.
       try {
-        closeClient();
+        closeCluster();
         nodeCount = newNodeCount;
         if (newConfig != null) {
           // For next test class, updated SabotConfig will be replaced by default SabotConfig in
@@ -308,7 +322,7 @@ public class BaseTestQuery extends ExecTest {
           // of the @BeforeClass method of test class.
           config = newConfig;
         }
-        openClient();
+        startCluster();
       } catch (Exception e) {
         throw new RuntimeException("Failure while updating the test SabotNode cluster.", e);
       }
@@ -371,7 +385,6 @@ public class BaseTestQuery extends ExecTest {
     for (String propName : TEST_CONFIGURATIONS.stringPropertyNames()) {
       props.put(propName, TEST_CONFIGURATIONS.getProperty(propName));
     }
-
     return props;
   }
 
@@ -379,17 +392,12 @@ public class BaseTestQuery extends ExecTest {
     return dfsTestTmpSchemaLocation;
   }
 
-  protected static void openClient() throws Exception {
-
-    /*
-    TODO: enable preconditions and fix all failing tests
+  protected static void startCluster() throws Exception {
     Preconditions.checkState(
         clusterCoordinator == null, "Old cluster not stopped properly (by previous Test?)");
-    Preconditions.checkState(
-        nodes == null, "Old cluster not stopped properly (by previous Test?)");
+    Preconditions.checkState(nodes == null, "Old cluster not stopped properly (by previous Test?)");
     Preconditions.checkState(
         client == null, "Old cluster not stopped properly (by previous Test?)");
-    */
 
     clusterCoordinator = LocalClusterCoordinator.newRunningCoordinator();
 
@@ -434,8 +442,9 @@ public class BaseTestQuery extends ExecTest {
 
   private static void closeCurrentClient() {
     Preconditions.checkState(nodes != null && nodes[0] != null, "Nodes are not setup.");
-    if (client != null) {
-      client.close();
+    try {
+      AutoCloseables.closeNoChecked(client);
+    } finally {
       client = null;
     }
   }
@@ -495,23 +504,18 @@ public class BaseTestQuery extends ExecTest {
   }
 
   @AfterClass
-  public static void closeClient() throws Exception {
-    if (client != null) {
-      client.close();
-      client = null;
-    }
-
-    if (nodes != null) {
-      for (final SabotNode bit : nodes) {
-        if (bit != null) {
-          bit.close();
-        }
+  public static void closeCluster() throws Exception {
+    try {
+      List<AutoCloseable> closeables = new ArrayList<>();
+      closeables.add(client);
+      if (nodes != null) {
+        closeables.addAll(Arrays.asList(nodes));
       }
+      closeables.add(clusterCoordinator);
+      AutoCloseables.close(closeables);
+    } finally {
+      client = null;
       nodes = null;
-    }
-
-    if (clusterCoordinator != null) {
-      clusterCoordinator.close();
       clusterCoordinator = null;
     }
   }
@@ -1064,10 +1068,6 @@ public class BaseTestQuery extends ExecTest {
     return withSystemOption(PlannerSettings.SARGABLE_FILTER_TRANSFORM, true);
   }
 
-  protected static AutoCloseable enableIcebergAutoCluster() {
-    return withSystemOption(ExecConstants.ENABLE_ICEBERG_AUTO_CLUSTERING, true);
-  }
-
   public static class SilentListener implements UserResultsListener {
     private final AtomicInteger count = new AtomicInteger();
 
@@ -1277,19 +1277,36 @@ public class BaseTestQuery extends ExecTest {
     File metadataFolder = new File(metadataLoc);
     String metadataJson = "";
 
-    Assert.assertNotNull(metadataFolder.listFiles());
-    for (File currFile : metadataFolder.listFiles()) {
-      if (currFile.getName().endsWith("metadata.json")) {
-        // We'll only have one metadata.json file as this is the first transaction for table
-        // temp_table0
-        metadataJson =
-            new String(
-                java.nio.file.Files.readAllBytes(Paths.get(currFile.getPath())),
-                StandardCharsets.US_ASCII);
-        break;
-      }
-    }
-    Assert.assertNotNull(metadataJson);
+    FileFilter metadataJsonFilter =
+        pathname -> pathname.getName().toUpperCase().endsWith("metadata.json".toUpperCase());
+    File[] metadataJsonFiles = metadataFolder.listFiles(metadataJsonFilter);
+    Assert.assertNotNull(metadataJsonFiles);
+    Assert.assertTrue(metadataJsonFiles.length > 0);
+    // always read from the newest metadata.json
+    Arrays.sort(metadataJsonFiles, LastModifiedFileComparator.LASTMODIFIED_REVERSE);
+    File theNewestFile = metadataJsonFiles[0];
+    metadataJson =
+        new String(
+            java.nio.file.Files.readAllBytes(Paths.get(theNewestFile.getPath())),
+            StandardCharsets.US_ASCII);
+
+    Assert.assertTrue(!metadataJson.isBlank());
     return metadataJson;
+  }
+
+  protected List<Map<String, Object>> prepareBaselineRecords(
+      String[] baselineCols, Object[][] baselineValues) {
+    ImmutableList.Builder<Map<String, Object>> recordBuilder = ImmutableList.builder();
+    for (Object[] baselineValue : baselineValues) {
+      recordBuilder.add(
+          new HashMap<>() {
+            {
+              for (int i = 0; i < baselineCols.length; i++) {
+                put(baselineCols[i], baselineValue[i]);
+              }
+            }
+          });
+    }
+    return recordBuilder.build();
   }
 }

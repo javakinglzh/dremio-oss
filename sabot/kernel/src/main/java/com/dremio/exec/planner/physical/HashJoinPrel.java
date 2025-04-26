@@ -89,7 +89,7 @@ public class HashJoinPrel extends JoinPrel {
   private final RexNode extraCondition;
   private RuntimeFilterId runtimeFilterId;
 
-  private HashJoinPrel(
+  public HashJoinPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode left,
@@ -352,7 +352,7 @@ public class HashJoinPrel extends JoinPrel {
       case INT:
       case INTERVAL:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case VARBINARY:
       case VARCHAR:
       case DECIMAL:

@@ -273,7 +273,7 @@ public final class ConvertFromOperators {
                         typeFactory.createSqlType(sqlTypeName), true);
                 }
               })
-          .operandTypes(SqlOperand.union(SqlOperands.CHAR_TYPES, SqlOperands.BINARY_TYPES))
+          .operandTypes(UnionedSqlOperand.create(SqlOperands.CHAR_TYPES, SqlOperands.BINARY_TYPES))
           .build();
 
   private static SqlTypeName getJsonTypeName(SqlOperatorBinding opBinding) {

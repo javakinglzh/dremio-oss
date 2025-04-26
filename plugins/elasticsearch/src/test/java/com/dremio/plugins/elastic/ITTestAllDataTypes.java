@@ -41,9 +41,9 @@ import java.time.format.DateTimeFormatter;
 import java.time.temporal.TemporalQueries;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import javax.xml.bind.DatatypeConverter;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Rule;
@@ -119,9 +119,7 @@ public class ITTestAllDataTypes extends ElasticBaseTestQuery {
           new ElasticsearchCluster.ColumnData(
               "colBinary",
               BINARY,
-              new Object[][] {
-                {DatatypeConverter.parseBase64Binary("U29tZSBiaW5hcnkgYmxvYg==")}, {null}
-              }),
+              new Object[][] {{Base64.getDecoder().decode("U29tZSBiaW5hcnkgYmxvYg==")}, {null}}),
           new ElasticsearchCluster.ColumnData(
               "colArrayString",
               TEXT,

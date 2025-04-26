@@ -18,6 +18,7 @@ package com.dremio.plugins.s3.store;
 import static com.dremio.common.utils.PathUtils.removeLeadingSlash;
 import static com.dremio.exec.ExecConstants.ENABLE_STORE_PARQUET_ASYNC_TIMESTAMP_CHECK;
 import static com.dremio.exec.ExecConstants.S3_NATIVE_ASYNC_CLIENT;
+import static com.dremio.plugins.Constants.DREMIO_ENABLE_BUCKET_DISCOVERY;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.NONE_PROVIDER;
 import static org.apache.hadoop.fs.s3a.Constants.ALLOW_REQUESTER_PAYS;
 import static org.apache.hadoop.fs.s3a.Constants.AWS_REGION;
@@ -75,6 +76,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -90,12 +92,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.awscore.client.builder.AwsAsyncClientBuilder;
-import software.amazon.awssdk.awscore.client.builder.AwsClientBuilder;
 import software.amazon.awssdk.core.client.builder.SdkSyncClientBuilder;
 import software.amazon.awssdk.core.client.config.SdkAdvancedAsyncClientOption;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.S3BaseClientBuilder;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.sts.StsClient;
@@ -162,9 +164,9 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
               });
 
   /** Get (or create if one doesn't already exist) an async client for accessing a given bucket */
-  private S3AsyncClient getAsyncClient(String bucket) throws IOException {
+  private CloseableRef<S3AsyncClient> getAsyncClient(String bucket) throws IOException {
     try {
-      return asyncClientCache.get(bucket).acquireRef();
+      return asyncClientCache.get(bucket);
     } catch (ExecutionException | SdkClientException e) {
       if (e.getCause() != null && e.getCause() instanceof IOException) {
         throw (IOException) e.getCause();
@@ -195,6 +197,7 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
   private S3ClientKey clientKey;
   private final DremioFileSystemCache fsCache = new DremioFileSystemCache();
   private boolean useWhitelistedBuckets;
+  private boolean useBucketDiscovery = true;
 
   public S3FileSystem() {
     super(
@@ -225,11 +228,8 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
     S3ClientFactory.S3ClientCreationParameters parameters =
         new S3ClientFactory.S3ClientCreationParameters()
             .withCredentialSet(credentialsProvider)
-            .withPathStyleAccess(s3Config.getBoolean(Constants.PATH_STYLE_ACCESS, false))
-            .withEndpoint(
-                s3Config.get(
-                    ENDPOINT,
-                    CENTRAL_ENDPOINT)); // If endpoint is not given use s3.amazonaws.com for s3
+            .withPathStyleAccess(isPathStyleAccessEnabled(s3Config))
+            .withEndpoint(buildEndpoint(s3Config));
     final AmazonS3 s3Client = clientFactory.createS3Client(S3_URI, parameters);
 
     final AutoCloseable closeableCredProvider =
@@ -242,10 +242,25 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
     return closeableS3;
   }
 
+  private static String buildEndpoint(Configuration s3Config) {
+    String endpointOverride = s3Config.get(ENDPOINT);
+    if (StringUtils.isNotEmpty(endpointOverride)) {
+      return endpointOverride;
+    }
+
+    String regionStr = s3Config.getTrimmed(REGION_OVERRIDE);
+    if (StringUtils.isNotEmpty(regionStr)) {
+      return buildRegionEndpoint(CENTRAL_ENDPOINT, regionStr);
+    }
+
+    return CENTRAL_ENDPOINT;
+  }
+
   @Override
   protected void setup(Configuration conf) throws IOException {
     clientKey = S3ClientKey.create(conf);
     useWhitelistedBuckets = !conf.get(S3StoragePlugin.WHITELISTED_BUCKETS, "").isEmpty();
+    useBucketDiscovery = conf.getBoolean(DREMIO_ENABLE_BUCKET_DISCOVERY, true);
     if (!NONE_PROVIDER.equals(conf.get(Constants.AWS_CREDENTIALS_PROVIDER))
         && !conf.getBoolean(COMPATIBILITY_MODE, false)) {
       verifyCredentials(conf);
@@ -287,11 +302,11 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
   @Override
   protected Stream<ContainerCreator> getContainerCreators() throws IOException {
     try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
-      s3Ref.incrementRef();
       final AmazonS3 s3 = s3Ref.getResource();
       Stream<String> buckets =
           getBucketNamesFromConfigurationProperty(S3StoragePlugin.EXTERNAL_BUCKETS);
-      if (!NONE_PROVIDER.equals(getConf().get(Constants.AWS_CREDENTIALS_PROVIDER))) {
+      if (!NONE_PROVIDER.equals(getConf().get(Constants.AWS_CREDENTIALS_PROVIDER))
+          && useBucketDiscovery) {
         if (!useWhitelistedBuckets) {
           // if we have authentication to access S3, add in owner buckets.
           buckets = Stream.concat(buckets, s3.listBuckets().stream().map(Bucket::getName));
@@ -329,36 +344,40 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
 
     // Coordinator node gets the new bucket information by overall refresh in the containerMap
     // This method is implemented only for the cases when executor is falling behind.
-    boolean containerFound = false;
-    try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
-      s3Ref.incrementRef();
-      final AmazonS3 s3 = s3Ref.getResource();
-      // getBucketLocation ensures that given user account has permissions for the bucket.
-      if (s3.doesBucketExistV2(containerName)) {
-        // Listing one object to ascertain read permissions on the bucket.
-        final ListObjectsV2Request req =
-            new ListObjectsV2Request()
-                .withMaxKeys(1)
-                .withRequesterPays(isRequesterPays())
-                .withEncodingType("url")
-                .withBucketName(containerName);
-        containerFound =
-            s3.listObjectsV2(req)
-                .getBucketName()
-                .equals(containerName); // Exception if this account doesn't have access.
+
+    // In case useBucketDiscovery is turned off, we avoid doing is check as we can't expect
+    // to have permissions to carry out listings in or existence checks of buckets.
+    if (useBucketDiscovery) {
+      boolean containerFound = false;
+      try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
+        final AmazonS3 s3 = s3Ref.getResource();
+        // getBucketLocation ensures that given user account has permissions for the bucket.
+        if (s3.doesBucketExistV2(containerName)) {
+          // Listing one object to ascertain read permissions on the bucket.
+          final ListObjectsV2Request req =
+              new ListObjectsV2Request()
+                  .withMaxKeys(1)
+                  .withRequesterPays(isRequesterPays())
+                  .withEncodingType("url")
+                  .withBucketName(containerName);
+          containerFound =
+              s3.listObjectsV2(req)
+                  .getBucketName()
+                  .equals(containerName); // Exception if this account doesn't have access.
+        }
+      } catch (AmazonS3Exception e) {
+        if (e.getMessage().contains("Access Denied")) {
+          // Ignorable because user doesn't have permissions. We'll omit this case.
+          throw new ContainerAccessDeniedException("aws-bucket", containerName, e);
+        }
+        throw new ContainerNotFoundException("Error while looking up bucket " + containerName, e);
+      } catch (Exception e) {
+        logger.error("Error while looking up bucket " + containerName, e);
       }
-    } catch (AmazonS3Exception e) {
-      if (e.getMessage().contains("Access Denied")) {
-        // Ignorable because user doesn't have permissions. We'll omit this case.
-        throw new ContainerAccessDeniedException("aws-bucket", containerName, e);
+      logger.debug("Unknown container '{}' found ? {}", containerName, containerFound);
+      if (!containerFound) {
+        throw new ContainerNotFoundException("Bucket [" + containerName + "] not found.");
       }
-      throw new ContainerNotFoundException("Error while looking up bucket " + containerName, e);
-    } catch (Exception e) {
-      logger.error("Error while looking up bucket " + containerName, e);
-    }
-    logger.debug("Unknown container '{}' found ? {}", containerName, containerFound);
-    if (!containerFound) {
-      throw new ContainerNotFoundException("Bucket [" + containerName + "] not found.");
     }
     return new BucketCreator(getConf(), containerName).toContainerHolder();
   }
@@ -366,7 +385,6 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
   private software.amazon.awssdk.regions.Region getAWSBucketRegion(String bucketName)
       throws SdkClientException {
     try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
-      s3Ref.incrementRef();
       final AmazonS3 s3 = s3Ref.getResource();
       final String awsRegionName =
           Region.fromValue(s3.getBucketLocation(bucketName)).toAWSRegion().getName();
@@ -431,16 +449,16 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
 
     final HeadObjectResponse[] respHeadObject = new HeadObjectResponse[1];
     try (FSOutputStream fos = fileSystem.create(fileSystem.canonicalizePath(path), true);
-        S3AsyncClient asyncClient = getAsyncClient(bucket)) {
+        CloseableRef<S3AsyncClient> asyncClient = getAsyncClient(bucket)) {
       fos.close();
 
       retryer.call(
           () -> {
-            respHeadObject[0] = asyncClient.headObject(reqHeadObject).get();
+            respHeadObject[0] = asyncClient.acquireRef().headObject(reqHeadObject).get();
             return true;
           });
       fileSystem.delete(path, false);
-    } catch (Retryer.OperationFailedAfterRetriesException | IOException ex) {
+    } catch (Exception ex) {
       logger.info("Failed to get head object for {}", path, ex);
       return -1;
     }
@@ -493,8 +511,8 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
     // all clients (including this.s3) will be closed just before being evicted by GC.
     AutoCloseables.close(
         IOException.class,
-        () -> super.close(),
-        () -> fsCache.closeAll(true),
+        super::close,
+        fsCache::closeAll,
         () -> invalidateCache(syncClientCache),
         () -> invalidateCache(asyncClientCache),
         () -> invalidateCache(clientCache));
@@ -541,9 +559,10 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
               if (endpoint.isPresent() && (isCompatMode() || getConf().get(AWS_REGION) != null)) {
                 // if this is compatibility mode and we have an endpoint, just use that.
                 targetEndpoint = endpoint.get();
+              } else if (!useBucketDiscovery) {
+                targetEndpoint = null;
               } else {
                 try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
-                  s3Ref.incrementRef();
                   final AmazonS3 s3 = s3Ref.getResource();
                   final String bucketRegion = s3.getBucketLocation(bucketName);
                   final String fallbackEndpoint =
@@ -552,13 +571,9 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
                               String.format(
                                   "%ss3.%s.amazonaws.com", getHttpScheme(getConf()), bucketRegion));
 
-                  String regionEndpoint = fallbackEndpoint;
+                  String regionEndpoint;
                   try {
-                    Region region = Region.fromValue(bucketRegion);
-                    com.amazonaws.regions.Region awsRegion = region.toAWSRegion();
-                    if (awsRegion != null) {
-                      regionEndpoint = awsRegion.getServiceEndpoint("s3");
-                    }
+                    regionEndpoint = buildRegionEndpoint(fallbackEndpoint, bucketRegion);
                   } catch (IllegalArgumentException iae) {
                     // try heuristic mapping if not found
                     regionEndpoint = fallbackEndpoint;
@@ -591,11 +606,23 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
 
               String location = S3_URI_SCHEMA + bucketName + "/";
               final Configuration bucketConf = new Configuration(parentConf);
-              bucketConf.set(ENDPOINT, targetEndpoint);
+              if (targetEndpoint != null) {
+                bucketConf.set(ENDPOINT, targetEndpoint);
+              }
               return fsCache.get(new Path(location).toUri(), bucketConf, S3ClientKey.UNIQUE_PROPS);
             }
           });
     }
+  }
+
+  private static String buildRegionEndpoint(String fallbackEndpoint, String regionString) {
+    String regionEndpoint = fallbackEndpoint;
+    Region region = Region.fromValue(regionString);
+    com.amazonaws.regions.Region awsRegion = region.toAWSRegion();
+    if (awsRegion != null) {
+      regionEndpoint = awsRegion.getServiceEndpoint("s3");
+    }
+    return regionEndpoint;
   }
 
   /** Convert 403 Forbidden HTTP status with user-actionable messages. */
@@ -709,7 +736,7 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
     } catch (IOException e) {
       throw UserException.dataReadError(e).build(logger);
     }
-    if (!isCompatMode()) {
+    if (!isCompatMode() && useBucketDiscovery) {
       // normal s3/govcloud mode.
       builder.region(getAWSBucketRegion(bucket));
     } else {
@@ -725,11 +752,17 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
             throw UserException.sourceInBadState(use).build(logger);
           }
         });
+
+    builder.serviceConfiguration(
+        S3Configuration.builder()
+            .pathStyleAccessEnabled(isPathStyleAccessEnabled(getConf()))
+            .build());
+
     return builder;
   }
 
-  private <T extends SdkSyncClientBuilder<T, ?> & AwsClientBuilder<T, ?>> T syncConfigClientBuilder(
-      T builder, String bucket) {
+  private <T extends SdkSyncClientBuilder<T, ?> & S3BaseClientBuilder<T, ?>>
+      T syncConfigClientBuilder(T builder, String bucket) {
     final Configuration conf = getConf();
 
     // Note that AWS SDKv2 client will close the credentials provider if needed when the client is
@@ -752,12 +785,18 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
           }
         });
 
-    if (!isCompatMode()) {
+    if (!isCompatMode() && useBucketDiscovery) {
       // normal s3/govcloud mode.
       builder.region(getAWSBucketRegion(bucket));
     } else {
       builder.region(getAWSRegionFromConfigurationOrDefault(conf));
     }
+
+    builder.serviceConfiguration(
+        S3Configuration.builder()
+            .pathStyleAccessEnabled(isPathStyleAccessEnabled(getConf()))
+            .build());
+
     return builder;
   }
 
@@ -814,6 +853,11 @@ public class S3FileSystem extends ContainerFileSystem implements MayProvideAsync
 
   private boolean isCompatMode() {
     return getConf().getBoolean(COMPATIBILITY_MODE, false);
+  }
+
+  @VisibleForTesting
+  static boolean isPathStyleAccessEnabled(Configuration conf) {
+    return conf.getBoolean(Constants.PATH_STYLE_ACCESS, false);
   }
 
   private boolean isSsecUsed() {

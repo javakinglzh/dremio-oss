@@ -15,9 +15,9 @@
  */
 package com.dremio.nessiemetadata.cache;
 
-import org.checkerframework.checker.nullness.qual.NonNull;
-import org.checkerframework.checker.nullness.qual.Nullable;
+import javax.annotation.Nullable;
 
 public interface NessieDataplaneCache<K extends String, V> extends AutoCloseable {
-  @Nullable V get(@NonNull K var1);
+  @Nullable
+  V get(K key);
 }

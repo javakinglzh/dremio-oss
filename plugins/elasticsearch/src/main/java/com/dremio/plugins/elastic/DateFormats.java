@@ -1497,8 +1497,8 @@ public final class DateFormats {
             MonthDay::from);
     final String temporalAccessorClass = temporalAccessor.getClass().getSimpleName();
     switch (temporalAccessorClass) {
-        // ZonedDateTime case will handle temporal datetime formats like OffsetDateTime, Instant,
-        // ChronoZonedDateTime. So no need to handle its seperately in parseBest.
+      // ZonedDateTime case will handle temporal datetime formats like OffsetDateTime, Instant,
+      // ChronoZonedDateTime. So no need to handle its seperately in parseBest.
       case "ZonedDateTime":
         {
           final ZonedDateTime zonedDateTime = ZonedDateTime.parse(value, dateTimeFormatter);
@@ -1509,8 +1509,8 @@ public final class DateFormats {
                   + zoneOffset.getTotalSeconds() * ElasticsearchConstants.MILLIS_PER_SECOND;
           break;
         }
-        // LocalDateTime case will handle temporal datetime formats like ChronoLocalDateTime. So no
-        // need to handle its separately in parseBest.
+      // LocalDateTime case will handle temporal datetime formats like ChronoLocalDateTime. So no
+      // need to handle its separately in parseBest.
       case "LocalDateTime":
         {
           final java.time.LocalDateTime localDateTime =
@@ -1520,9 +1520,9 @@ public final class DateFormats {
                   + localDateTime.getNano() / ElasticsearchConstants.NANOS_PER_MILLISECOND_LONG;
           break;
         }
-        // LocalDate case will handle temporal datetime formats like ChronoLocalDate. So no need to
-        // handle its separately in parseBest.
-        // Other temporal formats like JapneseDate/MinguoDate will be handled through this case.
+      // LocalDate case will handle temporal datetime formats like ChronoLocalDate. So no need to
+      // handle its separately in parseBest.
+      // Other temporal formats like JapneseDate/MinguoDate will be handled through this case.
       case "LocalDate":
         {
           final LocalDate localDate = LocalDate.parse(value, dateTimeFormatter);
@@ -1571,9 +1571,9 @@ public final class DateFormats {
           parsedValue = parsedvalueLocalTime + parsedValueWithNano + parsedValueOffset;
           break;
         }
-        // MonthDay case handled to support format without year like "--MM-dd" which may represent
-        // birthday/Anniversary.
-        // To align with behaviour of elasticsearch 6, using 2000 as year while selecting data.
+      // MonthDay case handled to support format without year like "--MM-dd" which may represent
+      // birthday/Anniversary.
+      // To align with behaviour of elasticsearch 6, using 2000 as year while selecting data.
       case "MonthDay":
         {
           final MonthDay monthDay = MonthDay.parse(value, dateTimeFormatter);

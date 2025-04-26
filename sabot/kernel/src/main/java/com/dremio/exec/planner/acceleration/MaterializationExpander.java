@@ -20,20 +20,26 @@ import static com.dremio.exec.planner.acceleration.IncrementalUpdateUtils.UPDATE
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.calcite.logical.ScanCrel;
 import com.dremio.exec.ops.DremioCatalogReader;
+import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.acceleration.StrippingFactory.StripResult;
 import com.dremio.exec.planner.acceleration.descriptor.UnexpandedMaterializationDescriptor;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer.Options;
+import com.dremio.exec.planner.observer.AttemptObservers;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.serialization.LogicalPlanDeserializer;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.sql.DremioCompositeSqlOperatorTable;
 import com.dremio.exec.planner.sql.DremioToRelContext;
 import com.dremio.exec.planner.sql.SqlConverter;
+import com.dremio.exec.planner.sql.handlers.DrelTransformer;
 import com.dremio.exec.planner.sql.handlers.RelTransformer;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.NamespaceTable;
+import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.util.List;
@@ -68,6 +74,29 @@ public final class MaterializationExpander {
 
   public DremioMaterialization expand(UnexpandedMaterializationDescriptor descriptor) {
     RelNode queryRel = deserializePlan(descriptor.getPlan(), parent, catalogService);
+    RelNode hashFragment = null;
+    if (descriptor.getMatchingHash() != null) {
+      hashFragment = deserializePlan(descriptor.getHashFragementBytes(), parent, catalogService);
+    }
+
+    if (parent.getSettings().getOptions().getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
+      try {
+        queryRel =
+            DrelTransformer.computeMaterializationPlan(
+                new SqlHandlerConfig(
+                    (QueryContext) parent.getFunctionContext(),
+                    parent,
+                    AttemptObservers.of(),
+                    null),
+                queryRel);
+      } catch (SqlUnsupportedException sqlUnsupportedException) {
+        throw new ExpansionException(
+            String.format(
+                "Failed to push filters for materialization %s:%s",
+                descriptor.getMaterializationId(), sqlUnsupportedException.getMessage()),
+            sqlUnsupportedException);
+      }
+    }
 
     final StrippingFactory factory =
         new StrippingFactory(parent.getSettings().getOptions(), parent.getConfig());
@@ -144,9 +173,9 @@ public final class MaterializationExpander {
         schema,
         descriptor.getExpirationTimestamp(),
         false,
-        descriptor.getStripVersion() // Should use the strip version of the materialization we are
+        descriptor.getStripVersion(), // Should use the strip version of the materialization we are
         // expanding
-        );
+        hashFragment);
   }
 
   public static com.dremio.exec.planner.sql.handlers.RelTransformer getPostStripNormalizer(

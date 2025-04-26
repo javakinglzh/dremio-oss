@@ -21,6 +21,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.util.MajorTypeHelper;
 import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.memory.util.ByteFunctionHelpers;
 
 public class ValueListWithBloomFilter extends ValueListFilter {
   protected ArrowBuf bloomFilterSlice;
@@ -55,6 +56,13 @@ public class ValueListWithBloomFilter extends ValueListFilter {
   }
 
   @Override
+  public boolean mightBePresent(ArrowBuf buf, int start, int length) {
+    length = Math.min(blockSize - 1, length);
+    int hash = ByteFunctionHelpers.hash(buf, start, start + length) & 0xFFFF;
+    return getBit(hash);
+  }
+
+  @Override
   public void buildBloomFilter() {
     long elements = 0, buffIndex = 0;
     Object value;
@@ -65,7 +73,7 @@ public class ValueListWithBloomFilter extends ValueListFilter {
     while (elements < valueCount) {
       switch (type.toMinorType()) {
         case DATE:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case BIGINT:
           value = valueListSlice.getLong(buffIndex);
           insertIntoBloomFilter((long) value);
@@ -76,6 +84,11 @@ public class ValueListWithBloomFilter extends ValueListFilter {
           value = valueListSlice.getInt(buffIndex);
           insertIntoBloomFilter((int) value);
           buffIndex = buffIndex + 4;
+          break;
+        case VARCHAR:
+          int len = valueListSlice.getByte(buffIndex);
+          insertIntoBloomFilter(valueListSlice, (int) buffIndex, len);
+          buffIndex = buffIndex + blockSize;
           break;
       }
       elements++;
@@ -90,6 +103,10 @@ public class ValueListWithBloomFilter extends ValueListFilter {
   private void insertIntoBloomFilter(int val) {
     int hashValue = hashInt(val);
     setBit(hashValue);
+  }
+
+  private void insertIntoBloomFilter(ArrowBuf buf, int start, int length) {
+    setBit(ByteFunctionHelpers.hash(buf, start + blockSize - length, start + blockSize) & 0xFFFF);
   }
 
   private int hashInt(int val) {

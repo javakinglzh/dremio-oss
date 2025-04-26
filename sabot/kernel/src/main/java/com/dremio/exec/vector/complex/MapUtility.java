@@ -80,7 +80,7 @@ public class MapUtility {
           ComplexCopier.copy(
               fieldReader, (FieldWriter) structWriter.timeMilli(MappifyUtility.fieldValue));
           break;
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
           ComplexCopier.copy(
               fieldReader, (FieldWriter) structWriter.timeStampMilli(MappifyUtility.fieldValue));
           break;

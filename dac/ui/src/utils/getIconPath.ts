@@ -30,13 +30,22 @@ export const getSpritePath = () => {
 };
 
 export { dremioLightSpritePath, dremioDarkSpritePath };
-export const iconBasePath = "/static/icons/dremio";
+export const iconBasePath = (colorScheme: "light" | "dark") =>
+  colorScheme === "light"
+    ? "/static/icons/dremio"
+    : "/static/icons/dremio-dark";
 
 type SourceTypes = "svg" | "png";
-export const getSrcPath = (name: string, src: SourceTypes = "svg") => {
-  if (src === "svg") return getIconPath(name);
+export const getSrcPath = (
+  name: string,
+  src: SourceTypes = "svg",
+  colorScheme: "light" | "dark" = "light",
+) => {
+  if (src === "svg") return getIconPath(name, colorScheme);
   else return `${dremioLightSpritePath as unknown as string}/${name}.${src}`;
 };
 
-export const getIconPath = (name: string) =>
-  `${iconBasePath}/${name}.svg` as const;
+export const getIconPath = (
+  name: string,
+  colorScheme: "light" | "dark" = "light",
+) => `${iconBasePath(colorScheme)}/${name}.svg` as const;

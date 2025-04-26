@@ -54,7 +54,11 @@ public class TableFunctionConfig {
     DELTALAKE_HISTORY_SCAN,
     TRIGGER_PIPE_EASY_DATA_SCAN,
     MERGE_ON_READ_ROW_SPLITTER,
-    MANIFEST_FILE_DUPLICATE_REMOVE
+    MANIFEST_FILE_DUPLICATE_REMOVE,
+    DATA_FILE_GROUPING,
+    CLUSTERING_INDEXING,
+    DATA_FILE_DATA_RANGE_CONVERTER,
+    CLUSTERING_INFORMATION
   }
 
   private final FunctionType type;
@@ -70,6 +74,23 @@ public class TableFunctionConfig {
     this.type = type;
     this.functionContext = functionContext;
     this.fillBatch = fillBatch;
+  }
+
+  private TableFunctionConfig(
+      FunctionType type,
+      boolean fillBatch,
+      TableFunctionContext functionContext,
+      long minWidth,
+      long maxWidth) {
+    this.type = type;
+    this.functionContext = functionContext;
+    this.fillBatch = fillBatch;
+    this.minWidth = minWidth;
+    this.maxWidth = maxWidth;
+  }
+
+  public TableFunctionConfig getNewWithContext(TableFunctionContext newContext) {
+    return new TableFunctionConfig(type, fillBatch, newContext, minWidth, maxWidth);
   }
 
   public FunctionType getType() {

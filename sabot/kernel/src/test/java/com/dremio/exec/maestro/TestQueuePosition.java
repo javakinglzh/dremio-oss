@@ -19,7 +19,6 @@ import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.proto.CoordExecRPC;
 import com.dremio.exec.proto.CoordinationProtos;
-import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.testing.ExecutionControls;
 import com.dremio.options.OptionManager;
 import com.dremio.resource.ResourceSchedulingDecisionInfo;
@@ -58,7 +57,6 @@ public class TestQueuePosition {
                 .setFabricPort(10000)
                 .build());
 
-    Mockito.when(context.getWorkloadType()).thenReturn(UserBitShared.WorkloadType.JDBC);
     Mockito.when(context.getOptions()).thenReturn(optionsManager);
     Mockito.when(context.getSession()).thenReturn(session);
     Mockito.when(context.getQueryContextInfo())

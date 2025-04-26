@@ -17,15 +17,14 @@ package com.dremio.service.reflection;
 
 import com.dremio.context.RequestContext;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
-import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.options.OptionManager;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.reflection.ReflectionManager.WakeUpCallback;
-import com.dremio.service.reflection.ReflectionServiceImpl.DescriptorCache;
-import com.dremio.service.reflection.ReflectionServiceImpl.ExpansionHelper;
+import com.dremio.service.reflection.descriptor.DescriptorHelper;
+import com.dremio.service.reflection.descriptor.MaterializationCache;
 import com.dremio.service.reflection.refresh.RefreshStartHandler;
 import com.dremio.service.reflection.store.DependenciesStore;
 import com.dremio.service.reflection.store.ExternalReflectionStore;
@@ -34,8 +33,6 @@ import com.dremio.service.reflection.store.MaterializationStore;
 import com.dremio.service.reflection.store.ReflectionEntriesStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.dremio.service.reflection.store.RefreshRequestsStore;
-import com.google.common.base.Function;
-import com.google.common.base.Supplier;
 import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
@@ -60,12 +57,12 @@ public class ReflectionManagerFactory {
   private final MaterializationStore materializationStore;
   private final MaterializationPlanStore materializationPlanStore;
   private final WakeUpCallback wakeUpCallback;
-  private final Function<Catalog, ExpansionHelper> expansionHelper;
+  private final DescriptorHelper provider;
   private final DatasetEventHub datasetEventHub;
   private final RefreshRequestsStore requestsStore;
   private final DependenciesStore dependenciesStore;
   private final BufferAllocator allocator;
-  private final Supplier<DescriptorCache> descriptorCache;
+  private final Provider<MaterializationCache> materializationCache;
   private final WakeUpCallback wakeUpCacheRefresherCallback;
 
   ReflectionManagerFactory(ReflectionManagerFactory that) {
@@ -81,12 +78,12 @@ public class ReflectionManagerFactory {
     this.materializationStore = that.materializationStore;
     this.materializationPlanStore = that.materializationPlanStore;
     this.wakeUpCallback = that.wakeUpCallback;
-    this.expansionHelper = that.expansionHelper;
+    this.provider = that.provider;
     this.datasetEventHub = that.datasetEventHub;
     this.requestsStore = that.requestsStore;
     this.dependenciesStore = that.dependenciesStore;
     this.allocator = that.allocator;
-    this.descriptorCache = that.descriptorCache;
+    this.materializationCache = that.materializationCache;
     this.wakeUpCacheRefresherCallback = that.wakeUpCacheRefresherCallback;
   }
 
@@ -103,12 +100,12 @@ public class ReflectionManagerFactory {
       MaterializationStore materializationStore,
       MaterializationPlanStore materializationPlanStore,
       WakeUpCallback wakeUpCallback,
-      Function<Catalog, ExpansionHelper> expansionHelper,
+      DescriptorHelper provider,
       DatasetEventHub datasetEventHub,
       RefreshRequestsStore requestsStore,
       DependenciesStore dependenciesStore,
       BufferAllocator allocator,
-      Supplier<DescriptorCache> descriptorCache,
+      Provider<MaterializationCache> materializationCache,
       WakeUpCallback wakeUpCacheRefresherCallback) {
     this.sabotContext = sabotContext;
     this.storeProvider = storeProvider;
@@ -122,18 +119,22 @@ public class ReflectionManagerFactory {
     this.materializationStore = materializationStore;
     this.materializationPlanStore = materializationPlanStore;
     this.wakeUpCallback = wakeUpCallback;
-    this.expansionHelper = expansionHelper;
+    this.provider = provider;
     this.datasetEventHub = datasetEventHub;
     this.requestsStore = requestsStore;
     this.dependenciesStore = dependenciesStore;
     this.allocator = allocator;
-    this.descriptorCache = descriptorCache;
+    this.materializationCache = materializationCache;
     this.wakeUpCacheRefresherCallback = wakeUpCacheRefresherCallback;
   }
 
   ReflectionSettings newReflectionSettings() {
     return new ReflectionSettingsImpl(
         namespaceService, catalogService, storeProvider, this::getOptionManager);
+  }
+
+  ReflectionValidator newReflectionValidator() {
+    return new ReflectionValidator(catalogService, this::getOptionManager);
   }
 
   DependencyManager newDependencyManager(Provider<RequestContext> requestContextProvider) {
@@ -150,7 +151,6 @@ public class ReflectionManagerFactory {
     dependencyManager.start();
 
     return new ReflectionManager(
-        sabotContext.get(),
         jobsService.get(),
         catalogService.get(),
         namespaceService.get(),
@@ -161,21 +161,26 @@ public class ReflectionManagerFactory {
         materializationStore,
         materializationPlanStore,
         dependencyManager,
-        descriptorCache.get(),
+        materializationCache.get(),
         wakeUpCallback,
-        expansionHelper,
+        provider,
         allocator,
         ReflectionGoalChecker.Instance,
-        new RefreshStartHandler(
+        newRefreshStartHandler(
             catalogService.get(),
             jobsService.get(),
+            userStore,
             materializationStore,
             wakeUpCallback,
             getOptionManager()),
         new DependencyResolutionContextFactory(
             reflectionSettings, requestsStore, getOptionManager()),
         datasetEventHub,
-        wakeUpCacheRefresherCallback);
+        wakeUpCacheRefresherCallback,
+        sabotContext.get().getEndpoint(),
+        sabotContext.get().getClusterCoordinator(),
+        sabotContext.get().getCoordinatorModeInfoProvider(),
+        sabotContext.get().getConfig());
   }
 
   ReflectionManagerWakeupHandler newWakeupHandler(
@@ -185,12 +190,32 @@ public class ReflectionManagerFactory {
     return new ReflectionManagerWakeupHandler(executor, reflectionManager, requestContextProvider);
   }
 
+  RefreshStartHandler newRefreshStartHandler(
+      CatalogService catalogService,
+      JobsService jobsService,
+      ReflectionGoalsStore userStore,
+      MaterializationStore materializationStore,
+      WakeUpCallback wakeUpCallback,
+      OptionManager optionManager) {
+    return new RefreshStartHandler(
+        catalogService,
+        jobsService,
+        userStore,
+        materializationStore,
+        wakeUpCallback,
+        optionManager);
+  }
+
   OptionManager getOptionManager() {
     return sabotContext.get().getOptionManager();
   }
 
   Provider<CatalogService> getCatalogService() {
     return catalogService;
+  }
+
+  public ReflectionGoalsStore getUserStore() {
+    return userStore;
   }
 
   ReflectionEntriesStore getInternalStore() {

@@ -23,7 +23,7 @@ export const alias = {
   "@mui": resolve(__dirname, "../node_modules/@mui"),
   "@root": resolve(__dirname, "../"),
   react: resolve(__dirname, "../node_modules/react"),
-
+  "monaco-editor": resolve(__dirname, "../node_modules/monaco-editor"),
   "leantable/react": resolve(
     __dirname,
     "../node_modules/leantable/dist-cjs/react",

@@ -31,7 +31,6 @@ export const createReflectionFormValues = (opts, siblingNames = []) => {
     type: "",
     name: "",
     enabled: true,
-    arrowCachingEnabled: false,
     distributionFields: [],
     partitionFields: [],
     sortFields: [],
@@ -90,7 +89,7 @@ export const areReflectionFormValuesUnconfigured = (reflectionFormValues) => {
   const unconfiguredReflection = createReflectionFormValues({
     type: reflectionFormValues.type,
 
-    // we consider the reflection id, tag, name, and arrowCachingEnabled inconsequential
+    // we consider the reflection id, tag, name inconsequential
     id: reflectionFormValues.id,
     tag: reflectionFormValues.tag,
     name: reflectionFormValues.name,
@@ -114,7 +113,6 @@ export const areReflectionFormValuesBasic = (
     tag: reflectionFormValues.tag,
     name: reflectionFormValues.name,
     enabled: reflectionFormValues.enabled,
-    arrowCachingEnabled: reflectionFormValues.arrowCachingEnabled,
   });
 
   if (reflectionFormValues.type === "RAW") {

@@ -83,7 +83,6 @@ interface WikiWrapperProps {
   wikiSummary?: boolean;
   addTag?: (tagName: string) => void;
   removeTag?: (tagName: string) => void;
-  overlay?: boolean;
   searchTerm?: string;
   isPanel?: boolean;
   hideSqlEditorIcon?: boolean;
@@ -125,7 +124,6 @@ const WikiWrapper = ({
   isReadMode = false,
   dataset,
   wikiSummary = false,
-  overlay = false,
   searchTerm,
   isPanel = false,
   hideSqlEditorIcon = false,
@@ -137,7 +135,7 @@ const WikiWrapper = ({
   const { t } = getIntlContext();
   const versionContext = getVersionContextFromId(entityId);
   const shouldShowWikiSection = hideForNonDefaultBranch(versionContext);
-  const isSmallerView = isPanel || overlay;
+  const isSmallerView = isPanel;
   let fullPath = dataset?.get("fullPath") || dataset.get("fullPathList");
   if (dataset?.getIn(["fullPath", "0"]) === "tmp") {
     fullPath = dataset?.get("displayFullPath");
@@ -201,6 +199,7 @@ const WikiWrapper = ({
   const dataColumnsComponent = () => {
     return (
       <Collapsible
+        className="collapsible-column-list"
         title={`${intl.formatMessage({ id: "Common.Columns" })} (${
           columnDetails?.size
         })`}
@@ -318,12 +317,13 @@ const WikiWrapper = ({
       ) : (
         <ViewStateWrapper
           viewState={getLoadViewState(showLoadMask)}
+          className="wiki-wrapper-viewstate"
           style={{
             height: "100%",
             display: "flex",
             flexDirection: "column",
             minHeight: 0,
-            width: isPanel ? 320 : 400,
+            width: "100%",
             overflowY: "auto",
           }} //todo
         >

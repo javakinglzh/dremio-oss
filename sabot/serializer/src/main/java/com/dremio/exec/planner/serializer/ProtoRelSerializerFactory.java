@@ -64,7 +64,7 @@ public class ProtoRelSerializerFactory extends RelSerializerFactory {
 
   public ProtoRelSerializerFactory(ScanResult scanResult) {
     super();
-    this.serdeRegistry = new RelSerdeRegistry(scanResult);
+    this.serdeRegistry = RelSerdeRegistry.create(scanResult);
   }
 
   @Override

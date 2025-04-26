@@ -18,6 +18,7 @@ package com.dremio.exec.planner.acceleration.descriptor;
 
 import com.dremio.exec.planner.acceleration.IncrementalUpdateSettings;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.ReflectionType;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -38,32 +39,32 @@ public abstract class BaseMaterializationDescriptor implements MaterializationDe
   private final long expirationTimestamp;
   private final double originalCost;
   private final long jobStart;
-  private final List<String> partition;
   private final IncrementalUpdateSettings incrementalUpdateSettings;
   private final boolean isStale;
+  private final String matchingHash;
 
   public BaseMaterializationDescriptor(
       final ReflectionInfo reflection,
       final String materializationId,
       final String version,
-      final long expirationTimestamp,
+      final Long expirationTimestamp,
       final List<String> path,
       final @Nullable Double originalCost,
       final long jobStart,
-      final List<String> partition,
       final IncrementalUpdateSettings incrementalUpdateSettings,
-      final boolean isStale) {
+      final boolean isStale,
+      final @Nullable String matchingHash) {
     this.reflection = Preconditions.checkNotNull(reflection, "reflection info required");
     this.materializationId =
         Preconditions.checkNotNull(materializationId, "materialization id is required");
     this.version = version;
-    this.expirationTimestamp = expirationTimestamp;
+    this.expirationTimestamp = expirationTimestamp == null ? 0 : expirationTimestamp;
     this.path = ImmutableList.copyOf(Preconditions.checkNotNull(path, "path is required"));
     this.originalCost = originalCost == null ? 0 : originalCost;
     this.jobStart = jobStart;
-    this.partition = partition;
     this.incrementalUpdateSettings = incrementalUpdateSettings;
     this.isStale = isStale;
+    this.matchingHash = matchingHash;
   }
 
   @Override
@@ -118,8 +119,8 @@ public abstract class BaseMaterializationDescriptor implements MaterializationDe
   }
 
   @Override
-  public List<String> getPartition() {
-    return partition;
+  public String getMatchingHash() {
+    return matchingHash;
   }
 
   @Override
@@ -133,5 +134,24 @@ public abstract class BaseMaterializationDescriptor implements MaterializationDe
   @Override
   public boolean isStale() {
     return isStale;
+  }
+
+  @Override
+  public LayoutMaterializedViewProfile getLayoutMaterializedViewProfile(boolean verbose) {
+    return LayoutMaterializedViewProfile.newBuilder()
+        .setLayoutId(getLayoutId())
+        .setName(reflection.getName())
+        .setType(reflection.getType())
+        .setMaterializationId(getMaterializationId())
+        .setMaterializationExpirationTimestamp(getExpirationTimestamp())
+        .addAllDimensions(reflection.getDimensions())
+        .addAllMeasureColumns(reflection.getMeasures())
+        .addAllSortedColumns(reflection.getSortColumns())
+        .addAllPartitionedColumns(reflection.getPartitionColumns())
+        .addAllDistributionColumns(reflection.getDistributionColumns())
+        .addAllDisplayColumns(reflection.getDisplayColumns())
+        .setReflectionMode(reflection.getReflectionMode())
+        .setIsStale(isStale)
+        .build();
   }
 }

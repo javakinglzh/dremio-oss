@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.store.hive.exec;
 
-import static com.dremio.io.file.UriSchemes.AZURE_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_AZURE_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_GCS_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_S3_SCHEME;
@@ -57,7 +56,7 @@ import com.google.common.collect.ImmutableSet;
 /**
  * Wrapper file system used to work around class loader issues in Hive.
  *
- * The solution is to redirect S3/ADLS/Azure tables to this file system
+ * The solution is to redirect S3/Azure tables to this file system
  * and to create the actual fs(S3FileSystem etc) from here.
  *
  * Delegates all operations to the actual fs impl.
@@ -74,7 +73,7 @@ public class DremioFileSystem extends FileSystem implements ContextClassLoaderAw
   private static final Map<String, Set<String>> SUPPORTED_SCHEME_MAP = ImmutableMap.of(
     DREMIO_S3_SCHEME, ImmutableSet.of("s3a", S3_SCHEME,"s3n", DREMIO_S3_SCHEME),
     DREMIO_GCS_SCHEME, ImmutableSet.of(GCS_SCHEME, DREMIO_GCS_SCHEME),
-    DREMIO_AZURE_SCHEME, ImmutableSet.of(AZURE_SCHEME, "wasb", "abfs", "abfss"));
+    DREMIO_AZURE_SCHEME, com.dremio.io.file.Path.AZURE_FILE_SYSTEM);
 
   @Override
   public void initialize(URI name, Configuration conf) throws IOException {

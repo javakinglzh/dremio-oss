@@ -26,7 +26,7 @@ import { overlay } from "#oss/uiTheme/radium/overlay";
 
 import { typeToIconType, BINARY, MIXED } from "#oss/constants/DataTypes";
 import Keys from "#oss/constants/Keys.json";
-import { IconButton } from "dremio-ui-lib/components";
+import { IconButton, Popover } from "dremio-ui-lib/components";
 
 const MAX_COLUMN_NAME_LENTH = 62;
 const ACTION_MENU_WIDTH = 24;
@@ -241,33 +241,34 @@ export class ColumnHeader extends PureComponent {
     }
 
     return (
-      <SelectView
-        content={
-          <dremio-icon
-            {...dremioIconProps}
-            style={{
-              ...dremioIconProps.style,
-              margin: "var(--dremio--spacing--05)",
-            }}
-          ></dremio-icon>
-        }
-        hideExpandIcon
-        useLayerForClickAway={false}
-        listStyle={styles.popoverAnimation}
-        style={{ cursor: "pointer" }}
-      >
-        {({ closeDD }) => (
-          <div style={styles.popover}>
-            <ColumnTypeMenu
-              columnType={column.type}
-              columnName={column.name}
-              hideDropdown={closeDD}
-              openDetailsWizard={openDetailsWizard}
-              makeTransform={this.props.makeTransform}
-            />
-          </div>
+      <Popover
+        mode="click"
+        role="menu"
+        content={({ close }) => (
+          <ColumnTypeMenu
+            columnType={column.type}
+            columnName={column.name}
+            hideDropdown={close}
+            openDetailsWizard={openDetailsWizard}
+            makeTransform={this.props.makeTransform}
+          />
         )}
-      </SelectView>
+        placement="bottom"
+        portal
+        className="drop-shadow-lg"
+        dismissable
+      >
+        <dremio-icon
+          {...dremioIconProps}
+          style={{
+            ...dremioIconProps.style,
+            margin: "var(--dremio--spacing--05)",
+          }}
+          tabIndex={0}
+          class="datatype-menu-icon"
+          aria-label="column datatype menu"
+        />
+      </Popover>
     );
   }
 
@@ -275,28 +276,36 @@ export class ColumnHeader extends PureComponent {
     if (this.isActionsPrevented()) return null;
 
     return (
-      <SelectView
-        content={<dremio-icon name="interface/more" class="action-menu-icon" />}
-        hideExpandIcon
-        listRightAligned
-        useLayerForClickAway={false}
-        listStyle={styles.popoverAnimation}
-      >
-        {({ closeDD }) => (
-          <div style={styles.popover}>
-            <ColumnActionMenu
-              columnType={column.type}
-              columnName={column.name}
-              hideDropdown={closeDD}
-              columnsCount={this.props.columnsCount}
-              openDetailsWizard={this.props.openDetailsWizard}
-              makeTransform={this.props.makeTransform}
-              disabledButtons={[]}
-              onRename={this.handleRenameAction}
-            />
-          </div>
+      <Popover
+        mode="click"
+        role="menu"
+        content={({ close }) => (
+          <ColumnActionMenu
+            columnType={column.type}
+            columnName={column.name}
+            hideDropdown={close}
+            columnsCount={this.props.columnsCount}
+            openDetailsWizard={this.props.openDetailsWizard}
+            makeTransform={this.props.makeTransform}
+            disabledButtons={[]}
+            onRename={this.handleRenameAction}
+          />
         )}
-      </SelectView>
+        placement="bottom"
+        portal
+        className="drop-shadow-lg"
+        dismissable
+      >
+        <dremio-icon
+          style={{
+            margin: "var(--dremio--spacing--05)",
+          }}
+          aria-label="more column actions"
+          name="interface/more"
+          tabIndex={0}
+          class="action-menu-icon"
+        />
+      </Popover>
     );
   }
 

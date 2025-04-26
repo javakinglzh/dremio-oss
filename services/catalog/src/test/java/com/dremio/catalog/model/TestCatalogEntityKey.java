@@ -29,6 +29,7 @@ import com.dremio.service.namespace.NamespaceKey;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableList;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
@@ -409,6 +410,22 @@ public class TestCatalogEntityKey {
             .keyComponents(keyComponents)
             .tableVersionContext(TableVersionContext.NOT_SPECIFIED)
             .build());
+
+    Instant time = Instant.now();
+    assertStringRoundTrip(
+        "catalog.schema.folder.table\u001F{\"type\":\"BRANCH\",\"value\":\"testBranch\",\"refTimestamp\":"
+            + time.toEpochMilli()
+            + "}",
+        CatalogEntityKey.newBuilder()
+            .keyComponents(keyComponents)
+            .tableVersionContext(
+                new TableVersionContext(TableVersionType.BRANCH, "testBranch", time))
+            .build());
+
+    String deserializedCatalogEntityKey =
+        "catalog.schema.folder.table\u001F{\"type\":\"BRANCH\",\"value\":\"testBranch\"}";
+    assertThat(CatalogEntityKey.fromString(deserializedCatalogEntityKey).getTableVersionContext())
+        .isEqualTo(new TableVersionContext(TableVersionType.BRANCH, "testBranch", (Long) null));
   }
 
   @Test
@@ -429,7 +446,7 @@ public class TestCatalogEntityKey {
   @Test
   public void testDeserialize() {
     TableVersionContext tableVersionContext =
-        new TableVersionContext(TableVersionType.BRANCH, "testBranch");
+        new TableVersionContext(TableVersionType.BRANCH, "testBranch", Instant.now());
     List<String> keyComponents = Arrays.asList("catalog", "schema", "folder", "tname");
     String serializedKeyComponents = PathUtils.constructFullPath(keyComponents);
     String serializedTableVersionContext = tableVersionContext.serialize();

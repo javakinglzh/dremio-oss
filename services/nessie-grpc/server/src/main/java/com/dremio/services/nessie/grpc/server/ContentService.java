@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Supplier;
 import org.projectnessie.model.ContentKey;
+import org.projectnessie.versioned.ImmutableRequestMeta;
 
 /** The gRPC service implementation for the Content-API. */
 public class ContentService extends ContentServiceGrpc.ContentServiceImplBase {
@@ -52,7 +53,7 @@ public class ContentService extends ContentServiceGrpc.ContentServiceImplBase {
                       getHashOnRefFromProtoRequest(request.getHashOnRef()),
                       requestedKeys,
                       false, // TODO: support withDocumentation
-                      request.getForWrite()));
+                      ImmutableRequestMeta.builder().forWrite(request.getForWrite()).build()));
         },
         observer);
   }

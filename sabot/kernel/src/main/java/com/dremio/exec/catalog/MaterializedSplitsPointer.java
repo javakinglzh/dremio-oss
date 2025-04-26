@@ -36,7 +36,7 @@ public final class MaterializedSplitsPointer extends AbstractSplitsPointer {
   // Caching hashcode because computation might be expensive
   private volatile Integer computedHashcode = null;
 
-  MaterializedSplitsPointer(
+  public MaterializedSplitsPointer(
       long splitVersion, Iterable<PartitionChunkMetadata> partitionChunks, int totalSplitCount) {
     this.splitVersion = splitVersion;
     this.materializedPartitionChunks = ImmutableList.copyOf(partitionChunks);

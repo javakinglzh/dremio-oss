@@ -44,6 +44,7 @@ import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.api.CatalogEntity;
+import com.dremio.dac.api.Dataset;
 import com.dremio.dac.api.Space;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.DatasetSummary;
@@ -344,7 +345,8 @@ public class ITTestVersionedViews extends ITBaseTestVersioned {
             viewQuery,
             null,
             null,
-            null);
+            null,
+            false);
 
     UserExceptionMapper.ErrorMessageWithContext errorMessage =
         createViewFromPublicAPIExpectError(dataset);
@@ -391,7 +393,8 @@ public class ITTestVersionedViews extends ITBaseTestVersioned {
             viewQuery,
             null,
             null,
-            null);
+            null,
+            false);
 
     CatalogEntity catalogEntity = createViewFromPublicAPI(dataset);
 
@@ -415,7 +418,8 @@ public class ITTestVersionedViews extends ITBaseTestVersioned {
             updatedViewQuery,
             null,
             null,
-            null);
+            null,
+            false);
 
     UserExceptionMapper.ErrorMessageWithContext errorMessage =
         updateViewFromPublicAPIExpectError(updatedDataset);
@@ -424,6 +428,50 @@ public class ITTestVersionedViews extends ITBaseTestVersioned {
             + fullyQualifiedTableName(DATAPLANE_PLUGIN_NAME, table2Path)
             + " must be specified using AT SQL syntax";
     assertThat(errorMessage.getErrorMessage()).contains(expectedContains);
+  }
+
+  @Test
+  public void testGetViewFromPublicAPIShowCreatedAt() throws Exception {
+    final String table1 = generateUniqueTableName();
+    final List<String> table1Path = tablePathWithFolders(table1);
+
+    final String table2 = generateUniqueTableName();
+    final List<String> table2Path = tablePathWithFolders(table2);
+
+    createFoldersForTablePath(
+        DATAPLANE_PLUGIN_NAME, table1Path, VersionContext.ofBranch(DEFAULT_BRANCH_NAME), null);
+    runQuery(createEmptyTableQuery(table1Path));
+    runQuery(insertTableQuery(table1Path));
+
+    createFoldersForTablePath(
+        DATAPLANE_PLUGIN_NAME, table2Path, VersionContext.ofBranch(DEFAULT_BRANCH_NAME), null);
+    runQuery(createEmptyTableQuery(table2Path));
+    runQuery(insertTableQuery(table2Path));
+
+    final String viewName = generateUniqueViewName();
+    String viewQuery =
+        String.format(
+            "Select * from %s.%s AT BRANCH \"main\"",
+            DATAPLANE_PLUGIN_NAME, joinedTableKey(table1Path));
+
+    com.dremio.dac.api.Dataset dataset =
+        new com.dremio.dac.api.Dataset(
+            null,
+            VIRTUAL_DATASET,
+            ImmutableList.of(DATAPLANE_PLUGIN_NAME_FOR_REFLECTION_TEST, viewName),
+            null,
+            null,
+            null,
+            null,
+            viewQuery,
+            null,
+            null,
+            null,
+            false);
+
+    CatalogEntity catalogEntity = createViewFromPublicAPI(dataset);
+    CatalogEntity getEntity = getViewFromPublicAPI(catalogEntity.getId());
+    assertThat(((Dataset) catalogEntity).getCreatedAt()).isNotNull();
   }
 
   @Test
@@ -621,6 +669,15 @@ public class ITTestVersionedViews extends ITBaseTestVersioned {
                     .getCatalogApi()
                     .path(URLEncoder.encode(dataset.getId(), StandardCharsets.UTF_8)))
             .buildPut(Entity.json(dataset));
+
+    return expectSuccess(invocation, CatalogEntity.class);
+  }
+
+  private CatalogEntity getViewFromPublicAPI(String id) {
+    final Invocation invocation =
+        getBuilder(
+                getHttpClient().getCatalogApi().path(URLEncoder.encode(id, StandardCharsets.UTF_8)))
+            .buildGet();
 
     return expectSuccess(invocation, CatalogEntity.class);
   }

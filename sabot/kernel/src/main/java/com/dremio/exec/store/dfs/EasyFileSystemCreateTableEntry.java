@@ -51,7 +51,6 @@ public class EasyFileSystemCreateTableEntry
   private final WriterOptions options;
   private final IcebergTableProps icebergTableProps;
   private final NamespaceKey datasetPath;
-  private final StoragePluginId sourceTablePluginId;
   private StoragePluginId systemIcebergTablesPluginId;
   private SystemIcebergTablesStoragePlugin systemIcebergTablesPlugin;
   private StoragePluginResolver storagePluginResolver;
@@ -65,7 +64,6 @@ public class EasyFileSystemCreateTableEntry
       @JsonProperty("icebergTableProps") IcebergTableProps icebergTableProps,
       @JsonProperty("options") WriterOptions options,
       @JsonProperty("datasetPath") NamespaceKey datasetPath,
-      @JsonProperty("sourceTablePluginId") StoragePluginId sourceTablePluginId,
       @JacksonInject StoragePluginResolver storagePluginResolver) {
     this.userName = userName;
     this.plugin = storagePluginResolver.getSource(pluginId);
@@ -74,7 +72,6 @@ public class EasyFileSystemCreateTableEntry
     this.options = options;
     this.icebergTableProps = icebergTableProps;
     this.datasetPath = datasetPath;
-    this.sourceTablePluginId = sourceTablePluginId;
     this.storagePluginResolver = storagePluginResolver;
   }
 
@@ -94,18 +91,6 @@ public class EasyFileSystemCreateTableEntry
       IcebergTableProps icebergTableProps,
       WriterOptions options,
       NamespaceKey datasetPath) {
-    this(userName, plugin, formatPlugin, location, icebergTableProps, options, datasetPath, null);
-  }
-
-  public EasyFileSystemCreateTableEntry(
-      String userName,
-      FileSystemPlugin<?> plugin,
-      FormatPlugin formatPlugin,
-      String location,
-      IcebergTableProps icebergTableProps,
-      WriterOptions options,
-      NamespaceKey datasetPath,
-      StoragePluginId sourceTablePluginId) {
     this.userName = userName;
     this.plugin = plugin;
     this.formatPlugin = formatPlugin;
@@ -113,16 +98,11 @@ public class EasyFileSystemCreateTableEntry
     this.options = options;
     this.icebergTableProps = icebergTableProps;
     this.datasetPath = datasetPath;
-    this.sourceTablePluginId = sourceTablePluginId;
   }
 
   @JsonProperty("pluginId")
   public StoragePluginId getId() {
     return plugin.getId();
-  }
-
-  public StoragePluginId getSourceTablePluginId() {
-    return sourceTablePluginId;
   }
 
   @JsonProperty("formatConfig")

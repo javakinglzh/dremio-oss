@@ -24,6 +24,7 @@ import static com.dremio.service.reflection.store.ReflectionIndexKeys.DATASET_ID
 import static com.dremio.service.reflection.store.ReflectionIndexKeys.REFLECTION_GOAL_MODIFIED_AT;
 import static com.dremio.service.reflection.store.ReflectionIndexKeys.REFLECTION_GOAL_STATE;
 import static com.dremio.service.reflection.store.ReflectionIndexKeys.REFLECTION_ID;
+import static com.dremio.service.reflection.store.ReflectionIndexKeys.REFLECTION_IS_DREMIO_MANAGED;
 import static com.dremio.service.reflection.store.ReflectionIndexKeys.REFLECTION_NAME;
 import static com.google.common.base.Predicates.notNull;
 
@@ -65,8 +66,11 @@ public class ReflectionGoalsStore {
       };
 
   private final Supplier<LegacyIndexedStore<ReflectionId, ReflectionGoal>> store;
+  private final Provider<ReflectionChangeNotificationHandler> changeNotificationHandlerProvider;
 
-  public ReflectionGoalsStore(final Provider<LegacyKVStoreProvider> provider) {
+  public ReflectionGoalsStore(
+      final Provider<LegacyKVStoreProvider> provider,
+      Provider<ReflectionChangeNotificationHandler> changeNotificationHandlerProvider) {
     Preconditions.checkNotNull(provider, "kvstore provider cannot be null");
     this.store =
         Suppliers.memoize(
@@ -76,6 +80,7 @@ public class ReflectionGoalsStore {
                 return provider.get().getStore(StoreCreator.class);
               }
             });
+    this.changeNotificationHandlerProvider = changeNotificationHandlerProvider;
   }
 
   public void save(ReflectionGoal goal) {
@@ -88,6 +93,7 @@ public class ReflectionGoalsStore {
     // before the KVStore interface revisions (pre 4.2.0).
     goal.setVersion(null);
     store.get().put(goal.getId(), goal);
+    changeNotificationHandlerProvider.get().onChange(goal);
   }
 
   public Iterable<ReflectionGoal> getAll() {
@@ -218,6 +224,7 @@ public class ReflectionGoalsStore {
       writer.write(REFLECTION_GOAL_MODIFIED_AT, document.getModifiedAt());
       writer.write(REFLECTION_GOAL_STATE, document.getState().name());
       writer.write(REFLECTION_NAME, document.getName());
+      writer.write(REFLECTION_IS_DREMIO_MANAGED, document.getIsDremioManaged().toString());
     }
   }
 

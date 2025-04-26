@@ -16,7 +16,6 @@
 package com.dremio.exec.planner.sql.parser;
 
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.parser.SqlParserPos;
@@ -38,12 +37,6 @@ public final class SqlMapTypeSpec extends SqlTypeNameSpec implements Validatable
     super(SqlTypeName.MAP.name(), pos);
     this.specKey = specKey;
     this.specValue = specValue;
-  }
-
-  @Override
-  public RelDataType deriveType(RelDataTypeFactory typeFactory) {
-    return typeFactory.createMapType(
-        specKey.getDataTypeForComplex(typeFactory), specValue.getDataTypeForComplex(typeFactory));
   }
 
   @Override

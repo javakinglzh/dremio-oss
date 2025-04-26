@@ -78,41 +78,4 @@
       <artifactId>logback-classic</artifactId>
     </dependency>
   </dependencies>
-
-  <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <!-- Not needed to compile but MapR-FS require those jars
-             to be configured specifically in the Yarn app classpath -->
-        <dependency>
-          <groupId>com.dremio.contrib</groupId>
-          <artifactId>dremio-maprfs-shaded</artifactId>
-          <version>${project.version}</version>
-          <scope>runtime</scope>
-          <exclusions>
-            <exclusion>
-              <groupId>com.mapr.hadoop</groupId>
-              <artifactId>maprfs</artifactId>
-            </exclusion>
-            <exclusion>
-              <groupId>com.google.protobuf</groupId>
-              <artifactId>protobuf-java</artifactId>
-            </exclusion>
-          </exclusions>
-        </dependency>
-        <dependency>
-          <groupId>com.dremio.provision</groupId>
-          <artifactId>dremio-shimloader</artifactId>
-          <version>${project.version}</version>
-          <scope>runtime</scope>
-        </dependency>
-      </dependencies>
-    </profile>
-  </profiles>
 </project>

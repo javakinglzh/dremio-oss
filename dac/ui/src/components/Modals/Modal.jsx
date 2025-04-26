@@ -65,6 +65,7 @@ export default class Modal extends Component {
     headerClassName: PropTypes.string,
     headerEndChildren: PropTypes.node,
     headerIcon: PropTypes.node,
+    containerSelector: PropTypes.string,
   };
 
   static defaultProps = {
@@ -90,6 +91,7 @@ export default class Modal extends Component {
       headerEndChildren,
       headerIcon,
       iconDisabled,
+      containerSelector,
     } = this.props;
     const content = {
       ...smallModal.content,
@@ -146,6 +148,12 @@ export default class Modal extends Component {
         style={styles[size]}
         closeTimeoutMS={MODAL_CLOSE_ANIMATION_DURATION}
         className={className}
+        {...(containerSelector
+          ? {
+              parentSelector: () =>
+                document.querySelector(containerSelector) || document.body,
+            }
+          : {})}
       >
         {stringTitle && (
           <ModalHeader

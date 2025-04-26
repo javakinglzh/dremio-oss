@@ -15,15 +15,19 @@
  */
 package com.dremio.exec.planner.sql.parser;
 
+import static com.dremio.exec.calcite.SqlNodes.DREMIO_DIALECT;
 import static com.dremio.exec.planner.sql.parser.TestParserUtil.parse;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
+import org.apache.calcite.sql.pretty.SqlPrettyWriter;
 import org.junit.Test;
 
 /** Validates VACUUM CATALOG sql syntax */
 public class TestSqlVacuumCatalog {
+  private SqlPrettyWriter writer = new SqlPrettyWriter(DREMIO_DIALECT);
+
   @Test
   public void testDefaultCatalogOptions() throws SqlParseException {
     SqlNode parsed = parse("VACUUM CATALOG versionedCatalog");
@@ -31,5 +35,18 @@ public class TestSqlVacuumCatalog {
 
     SqlVacuumCatalog sqlVacuumCatalog = (SqlVacuumCatalog) parsed;
     assertThat(sqlVacuumCatalog.getCatalogSource().getSimple()).isEqualTo("versionedCatalog");
+  }
+
+  @Test
+  public void testExcludeTables() throws SqlParseException {
+    SqlNode parsed = parse("VACUUM CATALOG src EXCLUDE (t1, src.fldr1.t2, t3 AT BRANCH dev)");
+    assertThat(parsed).isInstanceOf(SqlVacuumCatalog.class);
+
+    SqlVacuumCatalog sqlVacuumCatalog = (SqlVacuumCatalog) parsed;
+    assertThat(sqlVacuumCatalog.getCatalogSource().getSimple()).isEqualTo("src");
+    sqlVacuumCatalog.unparse(writer, 0, 0);
+    assertThat(writer.toString())
+        .isEqualTo(
+            "VACUUM CATALOG \"src\" EXCLUDE (\"t1\", \"src\".\"fldr1\".\"t2\", \"t3\" AT BRANCH dev)");
   }
 }

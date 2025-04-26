@@ -15,6 +15,8 @@
  */
 package com.dremio.dac.resource;
 
+import static com.dremio.service.namespace.dataset.proto.DatasetType.PHYSICAL_DATASET_HOME_FILE;
+
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.annotations.RestResource;
@@ -22,11 +24,12 @@ import com.dremio.dac.annotations.Secured;
 import com.dremio.dac.explore.QueryExecutor;
 import com.dremio.dac.explore.model.FileFormatUI;
 import com.dremio.dac.model.common.NamespacePath;
-import com.dremio.dac.model.folder.Folder;
-import com.dremio.dac.model.folder.FolderName;
+import com.dremio.dac.model.folder.FolderBody;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.job.JobDataFragment;
 import com.dremio.dac.model.sources.FormatTools;
+import com.dremio.dac.model.sources.PhysicalDataset;
 import com.dremio.dac.model.sources.PhysicalDatasetPath;
 import com.dremio.dac.model.sources.SourceName;
 import com.dremio.dac.model.sources.SourcePath;
@@ -43,11 +46,13 @@ import com.dremio.dac.util.ResourceUtil;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.SourceCatalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.ops.ReflectionContext;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.NamespaceNotEmptyException;
 import com.dremio.file.File;
 import com.dremio.file.SourceFilePath;
+import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.BoundedDatasetCount;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
@@ -60,14 +65,17 @@ import com.dremio.service.namespace.file.FileFormat;
 import com.dremio.service.namespace.file.proto.UnknownFileConfig;
 import com.dremio.service.namespace.physicaldataset.proto.PhysicalDatasetConfig;
 import com.dremio.service.namespace.source.proto.SourceConfig;
+import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.reflection.ReflectionAdministrationService;
 import java.io.IOException;
 import java.security.AccessControlException;
 import java.util.Arrays;
 import java.util.ConcurrentModificationException;
 import java.util.Objects;
+import java.util.Optional;
 import javax.annotation.security.RolesAllowed;
 import javax.inject.Inject;
+import javax.inject.Provider;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.DefaultValue;
@@ -98,7 +106,9 @@ public class SourceResource extends BaseResourceWithAllocator {
   private final ConnectionReader connectionReader;
   private final SourceCatalog sourceCatalog;
   private final FormatTools formatTools;
-  private final SabotContext sabotContext;
+  private final OptionManager optionManager;
+  private final Provider<Orphanage.Factory> orphanageFactoryProvider;
+  private final CatalogService catalogService;
 
   @Inject
   public SourceResource(
@@ -111,8 +121,10 @@ public class SourceResource extends BaseResourceWithAllocator {
       ConnectionReader connectionReader,
       SourceCatalog sourceCatalog,
       FormatTools formatTools,
-      SabotContext sabotContext,
-      BufferAllocatorFactory allocatorFactory)
+      BufferAllocatorFactory allocatorFactory,
+      OptionManager optionManager,
+      Provider<Orphanage.Factory> orphanageFactoryProvider,
+      CatalogService catalogService)
       throws SourceNotFoundException {
     super(allocatorFactory);
     this.namespaceService = namespaceService;
@@ -125,7 +137,9 @@ public class SourceResource extends BaseResourceWithAllocator {
     this.connectionReader = connectionReader;
     this.sourceCatalog = sourceCatalog;
     this.formatTools = formatTools;
-    this.sabotContext = sabotContext;
+    this.optionManager = optionManager;
+    this.orphanageFactoryProvider = orphanageFactoryProvider;
+    this.catalogService = catalogService;
   }
 
   protected SourceUI newSource(SourceConfig config) throws Exception {
@@ -144,7 +158,7 @@ public class SourceResource extends BaseResourceWithAllocator {
     try {
       final SourceConfig sourceConfig = namespaceService.getSource(sourcePath.toNamespaceKey());
       final SourceState sourceState =
-          sourceService.getSourceState(sourcePath.getSourceName().getName());
+          catalogService.getSourceState(sourcePath.getSourceName().getName());
       if (sourceState == null) {
         throw new SourceNotFoundException(sourcePath.getSourceName().getName());
       }
@@ -158,7 +172,6 @@ public class SourceResource extends BaseResourceWithAllocator {
       source.setDatasetCountBounded(datasetCount.isCountBound() || datasetCount.isTimeBound());
 
       source.setState(sourceState);
-      source.setSourceChangeState(sourceConfig.getSourceChangeState());
 
       final AccelerationSettings settings =
           reflectionService
@@ -203,7 +216,7 @@ public class SourceResource extends BaseResourceWithAllocator {
                 "Cannot delete source \"%s\", version provided \"%s\" is different from version found \"%s\"",
                 sourceName, version, config.getTag()));
       }
-      sourceCatalog.deleteSource(config);
+      sourceCatalog.deleteSource(config, SourceRefreshOption.BACKGROUND_DATASETS_CREATION);
     } catch (NamespaceNotFoundException nfe) {
       throw new SourceNotFoundException(sourcePath.getSourceName().getName(), nfe);
     } catch (ConcurrentModificationException e) {
@@ -215,7 +228,7 @@ public class SourceResource extends BaseResourceWithAllocator {
   @GET
   @Path("/folder/{path: .*}")
   @Produces(MediaType.APPLICATION_JSON)
-  public Folder getFolder(
+  public FolderModel getFolder(
       @PathParam("path") String path,
       @QueryParam("includeContents") @DefaultValue("true") boolean includeContents,
       @QueryParam("includeUDFChildren") @DefaultValue("false") boolean includeUDFChildren,
@@ -257,20 +270,38 @@ public class SourceResource extends BaseResourceWithAllocator {
   @Path("/folder/{path: .*}")
   @Produces(MediaType.APPLICATION_JSON)
   @Consumes(MediaType.APPLICATION_JSON)
-  public Folder createFolder(
+  public FolderModel createFolder(
       @PathParam("path") String path,
       @QueryParam("refType") String refType,
       @QueryParam("refValue") String refValue,
-      /* body */ FolderName name) {
-    final String fullPath = PathUtils.toFSPathString(Arrays.asList(path, name.toString()));
+      /* body */ FolderBody body) {
+    final String fullPath = PathUtils.toFSPathString(Arrays.asList(path, body.toString()));
     final SourceFolderPath folderPath = SourceFolderPath.fromURLPath(sourceName, fullPath);
 
-    return sourceService.createFolder(
-        sourceName, folderPath, securityContext.getUserPrincipal().getName(), refType, refValue);
+    Optional<FolderModel> returnedFolder =
+        sourceService.createFolder(
+            sourceName,
+            folderPath,
+            securityContext.getUserPrincipal().getName(),
+            refType,
+            refValue,
+            body.getStorageUri());
+    return returnedFolder.orElseThrow(
+        () -> UserException.validationError().message(("Folder creation failed")).buildSilently());
+  }
+
+  @GET
+  @Path("/dataset/{path: .*}")
+  @Produces(MediaType.APPLICATION_JSON)
+  public PhysicalDataset getPhysicalDataset(@PathParam("path") String path)
+      throws SourceNotFoundException, NamespaceException {
+    sourceService.checkSourceExists(sourceName);
+    PhysicalDatasetPath datasetPath = PhysicalDatasetPath.fromURLPath(sourceName, path);
+    return sourceService.getPhysicalDataset(datasetPath);
   }
 
   private boolean useFastPreview() {
-    return sabotContext.getOptionManager().getOption(FormatTools.FAST_PREVIEW);
+    return optionManager.getOption(FormatTools.FAST_PREVIEW);
   }
 
   @GET
@@ -326,12 +357,13 @@ public class SourceResource extends BaseResourceWithAllocator {
     SourceFilePath filePath = SourceFilePath.fromURLPath(sourceName, path);
     FileFormat fileFormat;
     try {
+      // TODO: DX-101924 - Investigate why PHYSICAL_DATASET_HOME_FILE is being used here.
       final PhysicalDatasetConfig physicalDatasetConfig =
-          sourceService.getFilesystemPhysicalDataset(filePath);
+          sourceService.getFilesystemPhysicalDataset(filePath, PHYSICAL_DATASET_HOME_FILE);
       fileFormat = FileFormat.getForFile(physicalDatasetConfig.getFormatSettings());
       fileFormat.setVersion(physicalDatasetConfig.getTag());
     } catch (PhysicalDatasetNotFoundException nfe) {
-      fileFormat = sourceService.getDefaultFileFormat(sourceName, filePath);
+      fileFormat = sourceService.getDefaultFileFormat(filePath);
     }
     return new FileFormatUI(fileFormat, filePath);
   }
@@ -404,7 +436,7 @@ public class SourceResource extends BaseResourceWithAllocator {
           sourceName,
           new PhysicalDatasetPath(filePath),
           version,
-          CatalogUtil.getDeleteCallback(sabotContext.getOrphanageFactory().get()));
+          CatalogUtil.getDeleteCallback(orphanageFactoryProvider.get().get()));
     } catch (ConcurrentModificationException e) {
       throw ResourceUtil.correctBadVersionErrorMessage(e, "file format", path);
     }
@@ -431,8 +463,10 @@ public class SourceResource extends BaseResourceWithAllocator {
 
     FileFormat fileFormat;
     try {
+      // TODO: DX-101924 - Investigate why PHYSICAL_DATASET_HOME_FOLDER is being used here.
       final PhysicalDatasetConfig physicalDatasetConfig =
-          sourceService.getFilesystemPhysicalDataset(folderPath);
+          sourceService.getFilesystemPhysicalDataset(
+              folderPath, DatasetType.PHYSICAL_DATASET_HOME_FOLDER);
       fileFormat = FileFormat.getForFolder(physicalDatasetConfig.getFormatSettings());
       fileFormat.setVersion(physicalDatasetConfig.getTag());
     } catch (PhysicalDatasetNotFoundException nfe) {
@@ -481,7 +515,7 @@ public class SourceResource extends BaseResourceWithAllocator {
           sourceName,
           new PhysicalDatasetPath(folderPath),
           version,
-          CatalogUtil.getDeleteCallback(sabotContext.getOrphanageFactory().get()));
+          CatalogUtil.getDeleteCallback(orphanageFactoryProvider.get().get()));
     } catch (ConcurrentModificationException e) {
       throw ResourceUtil.correctBadVersionErrorMessage(e, "folder format", path);
     }

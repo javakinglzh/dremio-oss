@@ -619,6 +619,14 @@ public class OperatorStats {
     doubleMetrics.put(metric.metricId(), value);
   }
 
+  public double getDoubleStat(MetricDef metric) {
+    return doubleMetrics.get(metric.metricId());
+  }
+
+  public void clearDoubleStat(MetricDef metric) {
+    doubleMetrics.remove(metric.metricId());
+  }
+
   private long getNanos(State state) {
     return stateNanos[state.ordinal()];
   }

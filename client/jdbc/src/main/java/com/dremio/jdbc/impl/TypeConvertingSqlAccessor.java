@@ -267,12 +267,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public byte getByte(int rowOffset) throws InvalidAccessException {
     final byte result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case TINYINT:
         result = innerAccessor.getByte(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case SMALLINT:
         result =
             getByteValueOrThrow(innerAccessor.getShort(rowOffset), "Java short / SQL SMALLINT");
@@ -298,7 +298,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
                 innerAccessor.getBigDecimal(rowOffset).doubleValue(),
                 "Java decimal / SQL DECIMAL PRECISION");
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getByte(rowOffset);
         break;
@@ -336,12 +336,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public short getShort(int rowOffset) throws InvalidAccessException {
     final short result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case SMALLINT:
         result = innerAccessor.getShort(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case TINYINT:
         result = innerAccessor.getByte(rowOffset);
         break;
@@ -366,7 +366,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
                 innerAccessor.getBigDecimal(rowOffset).doubleValue(),
                 "Java decimal / SQL DECIMAL PRECISION");
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getByte(rowOffset);
         break;
@@ -404,12 +404,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public int getInt(int rowOffset) throws InvalidAccessException {
     final int result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case INT:
         result = innerAccessor.getInt(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case TINYINT:
         result = innerAccessor.getByte(rowOffset);
         break;
@@ -434,7 +434,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
                 innerAccessor.getBigDecimal(rowOffset).doubleValue(),
                 "Java decimal / SQL DECIMAL PRECISION");
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getInt(rowOffset);
         break;
@@ -463,12 +463,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public long getLong(int rowOffset) throws InvalidAccessException {
     final long result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case BIGINT:
         result = innerAccessor.getLong(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case TINYINT:
         result = innerAccessor.getByte(rowOffset);
         break;
@@ -493,7 +493,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
                 innerAccessor.getBigDecimal(rowOffset).doubleValue(),
                 "Java decimal / SQL DECIMAL PRECISION");
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getLong(rowOffset);
         break;
@@ -513,12 +513,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public float getFloat(int rowOffset) throws InvalidAccessException {
     final float result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case FLOAT4:
         result = innerAccessor.getFloat(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case INT:
         result = innerAccessor.getInt(rowOffset);
         break;
@@ -543,7 +543,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
           result = tempFloat;
         }
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getInt(rowOffset);
         break;
@@ -563,12 +563,12 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public double getDouble(int rowOffset) throws InvalidAccessException {
     final double result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case FLOAT8:
         result = innerAccessor.getDouble(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case INT:
         result = innerAccessor.getInt(rowOffset);
         break;
@@ -581,7 +581,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
       case DECIMAL:
         result = innerAccessor.getBigDecimal(rowOffset).doubleValue();
         break;
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getLong(rowOffset);
         // break;
@@ -601,7 +601,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
   public BigDecimal getBigDecimal(int rowOffset) throws InvalidAccessException {
     final BigDecimal result;
     switch (getType().getMinorType()) {
-        // 1. Regular type:
+      // 1. Regular type:
       case DECIMAL9:
       case DECIMAL18:
       case DECIMAL28SPARSE:
@@ -609,7 +609,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
         result = innerAccessor.getBigDecimal(rowOffset);
         break;
 
-        // 2. Converted-from types:
+      // 2. Converted-from types:
       case TINYINT:
         result = new BigDecimal(innerAccessor.getByte(rowOffset));
         break;
@@ -629,7 +629,7 @@ class TypeConvertingSqlAccessor implements SqlAccessor {
         result = BigDecimal.valueOf(innerAccessor.getDouble(rowOffset));
         break;
 
-        // 3. Not-yet-converted and unconvertible types:
+      // 3. Not-yet-converted and unconvertible types:
       default:
         result = innerAccessor.getBigDecimal(rowOffset);
         // break;

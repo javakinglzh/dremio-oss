@@ -39,19 +39,27 @@ import { useIsArsEnabled } from "@inject/utils/arsUtils";
 import { clearResourceTree } from "#oss/actions/resources/tree";
 import { getViewState } from "#oss/selectors/resources";
 import { useFilterTreeArs } from "#oss/utils/datasetTreeUtils";
+import {
+  isLimitedVersionSource,
+  useSourceTypeFromState,
+} from "@inject/utils/sourceUtils";
 
 type ContextPickerProps = {
   value: any;
   className?: string;
   onChange: (newValue: any) => void;
+  disabled?: boolean;
 };
 
 export const ContextPicker = ({
   value: context,
   onChange,
   className,
+  disabled,
 }: ContextPickerProps) => {
   const sourceName = context?.get(0);
+  const sourceType = useSourceTypeFromState(sourceName);
+
   useInitializeNessieState(sourceName); //Fetch default reference if required
   const [isArsLoading, isArsEnabled] = useIsArsEnabled();
   const filterTree = useFilterTreeArs();
@@ -96,7 +104,8 @@ export const ContextPicker = ({
         {refLoading ? (
           <Spinner />
         ) : (
-          refState?.reference && (
+          refState?.reference &&
+          !isLimitedVersionSource(sourceType) && (
             <div {...(!!title && { title })} className={classes["contextTag"]}>
               <TagContent reference={refState.reference} hash={refState.hash} />
             </div>
@@ -126,8 +135,16 @@ export const ContextPicker = ({
           <span className={classes["offset"]}>{laDeprecated("Context:")}</span>
           <span
             ref={ref}
+            tabIndex={disabled ? -1 : 0}
             className={clsx(className, refLoading && classes["loadingWrapper"])}
+            disabled={disabled}
             onClick={open}
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                open();
+              }
+            }}
+            aria-label={"Context " + textValue}
           >
             {Content}
           </span>

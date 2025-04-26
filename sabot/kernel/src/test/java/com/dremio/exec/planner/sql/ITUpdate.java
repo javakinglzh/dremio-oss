@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql;
 
 import com.dremio.exec.planner.sql.DmlQueryTestUtils.DmlRowwiseOperationWriteMode;
+import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import org.junit.Test;
 
 /**
@@ -220,7 +221,8 @@ public class ITUpdate extends ITDmlQueryBase {
 
   @Test
   public void testUpdateWithPartitionTransformation() throws Exception {
-    UpdateTests.testUpdateWithPartitionTransformation(allocator, SOURCE, dmlWriteMode);
+    UpdateTests.testUpdateWithPartitionTransformationTruncateBucket(
+        allocator, SOURCE, dmlWriteMode, IcebergCatalogType.HADOOP);
   }
 
   @Test

@@ -16,7 +16,6 @@
 package com.dremio.exec.store.iceberg.model;
 
 import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.planner.common.ImmutableDremioFileAttrs;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.IcebergUtils;
@@ -38,7 +37,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Snapshot;
@@ -53,12 +51,9 @@ public class FullMetadataRefreshCommitter extends IcebergTableCreationCommitter 
       org.slf4j.LoggerFactory.getLogger(FullMetadataRefreshCommitter.class);
   private final DatasetCatalogGrpcClient client;
   private final DatasetCatalogRequestBuilder datasetCatalogRequestBuilder;
-  private final Configuration conf;
-  private final boolean isPartitioned;
   private final String tableUuid;
   private final String tableLocation;
   private final List<String> datasetPath;
-  private final MutablePlugin plugin;
   private final FileType fileType;
 
   public static final Map<String, String> internalIcebergTableProperties =
@@ -79,14 +74,12 @@ public class FullMetadataRefreshCommitter extends IcebergTableCreationCommitter 
       String tableLocation,
       String tableUuid,
       BatchSchema batchSchema,
-      Configuration configuration,
       List<String> partitionColumnNames,
       IcebergCommand icebergCommand,
       DatasetCatalogGrpcClient client,
       DatasetConfig datasetConfig,
       OperatorStats operatorStats,
       PartitionSpec partitionSpec,
-      MutablePlugin plugin,
       FileType fileType) {
     super(
         tableName,
@@ -100,16 +93,13 @@ public class FullMetadataRefreshCommitter extends IcebergTableCreationCommitter 
 
     Preconditions.checkNotNull(client, "Metadata requires DatasetCatalog service client");
     this.client = client;
-    this.conf = configuration;
     this.tableUuid = tableUuid;
     this.tableLocation = tableLocation;
-    this.isPartitioned = partitionColumnNames != null && !partitionColumnNames.isEmpty();
     this.datasetPath = datasetPath;
     this.fileType = fileType;
     datasetCatalogRequestBuilder =
         DatasetCatalogRequestBuilder.forFullMetadataRefresh(
             datasetPath, tableLocation, batchSchema, partitionColumnNames, datasetConfig);
-    this.plugin = plugin;
   }
 
   @Override

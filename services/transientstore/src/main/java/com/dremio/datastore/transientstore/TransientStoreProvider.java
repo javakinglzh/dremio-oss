@@ -20,24 +20,26 @@ import com.dremio.service.Service;
 
 /** interface for creating TransientStores */
 public interface TransientStoreProvider extends Service {
-
   /**
    * returns a TransientStore implementation for given parameters
    *
    * @param keyFormat Format of key in the transient store
    * @param valueFormat Format of value in the transient store
+   * @param tags Tags to be associated with the transient store (e.g., for metrics)
    * @param <K> Key type
    * @param <V> Value type
    * @param <T> return type
    * @return TransientStore object
    */
-  <K, V, T extends TransientStore<K, V>> T getStore(Format<K> keyFormat, Format<V> valueFormat);
+  <K, V, T extends TransientStore<K, V>> T getStore(
+      Format<K> keyFormat, Format<V> valueFormat, String... tags);
 
   /**
    * returns a TransientStore implementation for given parameters
    *
    * @param keyFormat Format of key in the transient store
    * @param valueFormat Format of value in the transient store
+   * @param tags Tags to be associated with the transient store (e.g., for metrics)
    * @param <K> Key type
    * @param <V> Value type
    * @param ttl time to live, in seconds, after which entries will be expired if there has been no
@@ -46,5 +48,5 @@ public interface TransientStoreProvider extends Service {
    * @return TransientStore object
    */
   <K, V, T extends TransientStore<K, V>> T getStore(
-      Format<K> keyFormat, Format<V> valueFormat, int ttl);
+      Format<K> keyFormat, Format<V> valueFormat, int ttl, String... tags);
 }

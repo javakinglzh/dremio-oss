@@ -78,4 +78,8 @@ interface QueryTracker extends AutoCloseable {
   void putProfileFailed();
 
   ExecutionControls getExecutionControls();
+
+  void putExecutorProfile(String nodeEndpoint);
+
+  void removeExecutorProfile(String nodeEndpoint);
 }

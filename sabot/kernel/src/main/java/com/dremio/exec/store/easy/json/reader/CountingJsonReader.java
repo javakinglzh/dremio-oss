@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.easy.json.reader;
 
+import com.dremio.sabot.exec.context.OperatorContext;
 import com.fasterxml.jackson.core.JsonToken;
 import java.io.IOException;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
@@ -26,6 +27,10 @@ import org.apache.arrow.vector.complex.writer.BaseWriter;
 public class CountingJsonReader extends BaseJsonProcessor {
 
   private boolean inOuterList = false;
+
+  public CountingJsonReader(OperatorContext context) {
+    super(context);
+  }
 
   @Override
   public ReadState write(BaseWriter.ComplexWriter writer) throws IOException {

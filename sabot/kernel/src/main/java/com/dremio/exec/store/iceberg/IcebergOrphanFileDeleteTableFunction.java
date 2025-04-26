@@ -178,15 +178,20 @@ public class IcebergOrphanFileDeleteTableFunction extends AbstractTableFunction 
                       tableLocation != null ? tableLocation : containerRelativePath;
                   try {
                     fs =
-                        icebergMutablePlugin.createFSWithAsyncOptions(
-                            usedFilePath, props.getUserName(), context);
+                        icebergMutablePlugin.createFS(
+                            SupportsFsCreation.builder()
+                                .filePath(usedFilePath)
+                                .userName(props.getUserName())
+                                .operatorContext(context)
+                                .withAsyncOptions(true)
+                                .datasetFromTableFunctionConfig(functionConfig));
                   } catch (Exception e) {
                     vacuumLogger.error(
                         createDeleteOrphanFileLog(
                             queryId,
                             orphanFilePath,
                             UNKNOWN,
-                            "Can't create file system from path." + e),
+                            "Can't create file system from path." + e.toString()),
                         "");
                   }
                 }

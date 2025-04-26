@@ -21,5 +21,11 @@ export default function (input) {
     checkForPermissionToAlter() {
       return true;
     },
+    shouldDisablePopover() {
+      return false;
+    },
+    shouldHideUpdates() {
+      return false;
+    },
   });
 }

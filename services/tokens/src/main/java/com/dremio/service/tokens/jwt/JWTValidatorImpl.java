@@ -30,6 +30,7 @@ import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.JWTParser;
 import com.nimbusds.jwt.proc.JWTProcessor;
 import java.text.ParseException;
+import java.util.List;
 import javax.inject.Provider;
 
 public class JWTValidatorImpl implements JWTValidator {
@@ -62,6 +63,11 @@ public class JWTValidatorImpl implements JWTValidator {
     }
 
     return TokenDetails.of(
-        jwtString, user.getUserName(), jwtClaimsSet.getExpirationTime().getTime());
+        jwtString,
+        user.getUserName(),
+        jwtClaimsSet.getExpirationTime().getTime(),
+        // "dremio.all" is a required requested scope to obtain a JWT, so we can always include it
+        // in the validated token's scopes without storing it as a JWT claim.
+        List.of("dremio.all"));
   }
 }

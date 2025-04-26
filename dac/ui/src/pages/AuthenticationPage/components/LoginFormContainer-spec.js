@@ -36,10 +36,4 @@ describe("LoginFormContainer", () => {
     const wrapper = shallow(<LoginFormContainer {...minimalProps} />);
     expect(wrapper).to.have.length(1);
   });
-
-  it("should render LoginTitle and LoginForm", () => {
-    const wrapper = shallow(<LoginFormContainer {...commonProps} />);
-    expect(wrapper.find("LoginTitle")).to.have.length(1);
-    expect(wrapper.find(LoginForm)).to.have.length(1);
-  });
 });

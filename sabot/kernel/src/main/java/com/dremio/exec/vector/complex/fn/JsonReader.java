@@ -22,6 +22,7 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.dremio.common.exceptions.FieldSizeLimitExceptionHelper;
 import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.PathSegment;
@@ -32,7 +33,6 @@ import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.physical.config.ExtendedFormatOptions;
 import com.dremio.exec.physical.config.SimpleQueryContext;
 import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo;
-import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo.Builder;
 import com.dremio.exec.physical.config.copyinto.CopyIntoFileLoadInfo.CopyIntoFileState;
 import com.dremio.exec.physical.config.copyinto.CopyIntoQueryProperties;
 import com.dremio.exec.physical.config.copyinto.IngestionProperties;
@@ -43,7 +43,6 @@ import com.dremio.exec.store.easy.EasyFormatUtils;
 import com.dremio.exec.store.easy.json.reader.BaseJsonProcessor;
 import com.dremio.exec.tablefunctions.copyerrors.ValidationErrorRowWriter;
 import com.dremio.exec.util.ColumnUtils;
-import com.dremio.exec.util.RowSizeUtil;
 import com.dremio.exec.vector.complex.fn.VectorOutput.ListVectorOutput;
 import com.dremio.exec.vector.complex.fn.VectorOutput.MapVectorOutput;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -60,17 +59,17 @@ import java.math.BigDecimal;
 import java.util.BitSet;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.arrow.memory.ArrowBuf;
-import org.apache.arrow.vector.complex.impl.PromotableWriter;
+import org.apache.arrow.vector.complex.impl.UnionListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ComplexWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.StructWriter;
 import org.apache.arrow.vector.complex.writer.FieldWriter;
-import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.Types.MinorType;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -87,10 +86,10 @@ public class JsonReader extends BaseJsonProcessor {
   private final boolean extended = true;
   private final boolean readNumbersAsDouble;
   private final int maxFieldSize;
-  private final int maxRowSize;
   private final int maxLeafLimit;
   private int currentLeafCount;
   private long dataSizeReadSoFar;
+  private int fixedDataLenPerRow;
 
   /**
    * Describes whether or not this reader can unwrap a single root array record and treat it like a
@@ -100,6 +99,9 @@ public class JsonReader extends BaseJsonProcessor {
 
   /** Whether the reader is currently in a situation where we are unwrapping an outer list. */
   private boolean inOuterList;
+
+  /** Allows individual records to be lists instead of structs. */
+  private final boolean allowRootList;
 
   /** The name of the current field being parsed. For Error messages. */
   private String currentFieldName;
@@ -112,7 +114,7 @@ public class JsonReader extends BaseJsonProcessor {
   private final SimpleQueryContext queryContext;
   private final IngestionProperties ingestionProperties;
   private final BatchSchema targetSchema;
-  private boolean validCopyIntoFile = false;
+  private boolean isValidRootRecordType = false;
   private final boolean trimSpace;
   private final String filePath;
   private long recordsLoadedCount;
@@ -123,14 +125,10 @@ public class JsonReader extends BaseJsonProcessor {
   private final long processingStartTime;
   private final long fileSize;
   private FieldWrapper rootFieldWrapper;
-  private int currentRowSize;
-  private boolean rowSizeLimitEnabled;
 
   public JsonReader(
       ArrowBuf managedBuf,
       int maxFieldSize,
-      boolean rowSizeLimitEnabled,
-      int maxRowSize,
       int maxLeafLimit,
       boolean allTextMode,
       boolean skipOuterList,
@@ -140,11 +138,10 @@ public class JsonReader extends BaseJsonProcessor {
         managedBuf,
         GroupScan.ALL_COLUMNS,
         maxFieldSize,
-        rowSizeLimitEnabled,
-        maxRowSize,
         maxLeafLimit,
         allTextMode,
         skipOuterList,
+        false,
         readNumbersAsDouble,
         false,
         null,
@@ -158,15 +155,16 @@ public class JsonReader extends BaseJsonProcessor {
         0L,
         false,
         null,
-        0L);
+        0L,
+        null,
+        false,
+        0);
   }
 
   public JsonReader(
       ArrowBuf managedBuf,
       List<SchemaPath> columns,
       int maxFieldSize,
-      boolean rowSizeLimitEnabled,
-      int maxRowSize,
       int maxLeafLimit,
       boolean allTextMode,
       boolean skipOuterList,
@@ -183,7 +181,63 @@ public class JsonReader extends BaseJsonProcessor {
       long fileSize,
       boolean isValidationMode,
       ValidationErrorRowWriter validationErrorWriter,
-      long processingStartTime) {
+      long processingStartTime,
+      Map<String, Field> fieldDecimalMap,
+      boolean rowSizeLimitEnabled,
+      int fixedDataLenPerRow) {
+    this(
+        managedBuf,
+        columns,
+        maxFieldSize,
+        maxLeafLimit,
+        allTextMode,
+        skipOuterList,
+        false,
+        readNumbersAsDouble,
+        schemaImposedMode,
+        extendedFormatOptions,
+        copyIntoQueryProperties,
+        queryContext,
+        ingestionProperties,
+        context,
+        targetSchema,
+        enforceValidJsonDateFormat,
+        filePath,
+        fileSize,
+        isValidationMode,
+        validationErrorWriter,
+        processingStartTime,
+        fieldDecimalMap,
+        rowSizeLimitEnabled,
+        fixedDataLenPerRow);
+  }
+
+  private JsonReader(
+      ArrowBuf managedBuf,
+      List<SchemaPath> columns,
+      int maxFieldSize,
+      int maxLeafLimit,
+      boolean allTextMode,
+      boolean skipOuterList,
+      boolean allowRootList,
+      boolean readNumbersAsDouble,
+      boolean schemaImposedMode,
+      ExtendedFormatOptions extendedFormatOptions,
+      CopyIntoQueryProperties copyIntoQueryProperties,
+      SimpleQueryContext queryContext,
+      IngestionProperties ingestionProperties,
+      OperatorContext context,
+      BatchSchema targetSchema,
+      boolean enforceValidJsonDateFormat,
+      String filePath,
+      long fileSize,
+      boolean isValidationMode,
+      ValidationErrorRowWriter validationErrorWriter,
+      long processingStartTime,
+      Map<String, Field> fieldDecimalMap,
+      boolean rowSizeLimitEnabled,
+      int fixedDataLenPerRow) {
+    super(context);
     assert Preconditions.checkNotNull(columns).size() > 0
         : "JSON record reader requires at least one column";
     this.targetSchema = targetSchema;
@@ -200,15 +254,16 @@ public class JsonReader extends BaseJsonProcessor {
     this.selection = FieldSelection.getFieldSelection(columns);
     this.workingBuffer = new WorkingBuffer(managedBuf);
     this.skipOuterList = skipOuterList;
+    this.allowRootList = allowRootList;
     this.allTextMode = allTextMode;
     this.columns = columns;
-    this.mapOutput = new MapVectorOutput(workingBuffer, enforceValidJsonDateFormat);
-    this.listOutput = new ListVectorOutput(workingBuffer, enforceValidJsonDateFormat);
+    this.mapOutput =
+        new MapVectorOutput(workingBuffer, enforceValidJsonDateFormat, fieldDecimalMap);
+    this.listOutput =
+        new ListVectorOutput(workingBuffer, enforceValidJsonDateFormat, fieldDecimalMap);
     this.currentFieldName = "<none>";
     this.readNumbersAsDouble = readNumbersAsDouble;
     this.maxFieldSize = maxFieldSize;
-    this.rowSizeLimitEnabled = rowSizeLimitEnabled;
-    this.maxRowSize = maxRowSize;
     this.maxLeafLimit = maxLeafLimit;
     this.dataSizeReadSoFar = 0;
     this.currentLeafCount = 0;
@@ -224,6 +279,8 @@ public class JsonReader extends BaseJsonProcessor {
     this.isValidationMode = isValidationMode;
     this.validationErrorWriter = validationErrorWriter;
     this.processingStartTime = processingStartTime;
+    this.rowSizeLimitEnabled = rowSizeLimitEnabled;
+    this.fixedDataLenPerRow = fixedDataLenPerRow;
   }
 
   @Override
@@ -234,10 +291,6 @@ public class JsonReader extends BaseJsonProcessor {
   @Override
   public long getDataSizeCounter() {
     return dataSizeReadSoFar;
-  }
-
-  public void resetRowSize() {
-    currentRowSize = 0;
   }
 
   @Override
@@ -326,6 +379,7 @@ public class JsonReader extends BaseJsonProcessor {
     if (parser.isClosed()) {
       return ReadState.END_OF_STREAM;
     }
+    dataSizeReadSoFar += fixedDataLenPerRow;
 
     JsonToken t = null;
     try {
@@ -347,8 +401,13 @@ public class JsonReader extends BaseJsonProcessor {
     ReadState readState;
     try {
       readState = writeToVector(writer, t);
+      dataSizeReadSoFar += currentRowSize;
       if (rowSizeLimitEnabled) {
-        RowSizeLimitExceptionHelper.checkSizeLimit(currentRowSize, maxRowSize, logger);
+        RowSizeLimitExceptionHelper.checkSizeLimit(
+            currentRowSize,
+            rowSizeLimit - fixedDataLenPerRow,
+            RowSizeLimitExceptionType.READ,
+            logger);
         resetRowSize();
       }
       switch (readState) {
@@ -356,13 +415,13 @@ public class JsonReader extends BaseJsonProcessor {
           break;
         case WRITE_SUCCEED:
           if (schemaImposedMode) {
-            if (!validCopyIntoFile) {
+            if (!isValidRootRecordType) {
               throw new TransformationException(
                   String.format("No column name matches target %s", targetSchema),
                   parser.getCurrentLocation().getLineNr());
             }
             recordsLoadedCount++;
-            validCopyIntoFile = false;
+            isValidRootRecordType = false;
           }
           break;
         default:
@@ -423,7 +482,16 @@ public class JsonReader extends BaseJsonProcessor {
           }
 
         } else {
-          writeDataSwitch(writer.rootAsList());
+          // workaround bug in Arrow's ComplexWriterImpl where it will return null instead of
+          // throwing if the writer is not in LIST mode when rootAsList is called
+          ListWriter listWriter = writer.rootAsList();
+          if (listWriter == null) {
+            throw new TransformationException(
+                "Root element having List datatype cannot be coerced into Struct datatype",
+                parser.getCurrentLocation().getLineNr());
+          }
+
+          writeDataSwitch(listWriter);
         }
         break;
       case END_ARRAY:
@@ -443,7 +511,7 @@ public class JsonReader extends BaseJsonProcessor {
           addNullValueForStruct(writer);
           break;
         }
-        // fall through
+      // fall through
       default:
         resetWriterPosition = false;
         throw getExceptionWithContext(UserException.dataReadError(), currentFieldName)
@@ -458,7 +526,7 @@ public class JsonReader extends BaseJsonProcessor {
 
   private void addNullValueForStruct(ComplexWriter writer) {
     BaseWriter.StructWriter structWriter = writer.rootAsStruct();
-    validCopyIntoFile = true;
+    isValidRootRecordType = true;
     structWriter.start();
     structWriter.end();
   }
@@ -487,12 +555,15 @@ public class JsonReader extends BaseJsonProcessor {
     try {
       if (this.allTextMode || this.schemaImposedMode) {
         if (schemaImposedMode && !isValidationMode) {
-          Field rootField = ((PromotableWriter) w).getField();
+          Field rootField = ((UnionListWriter) w).getField();
           if (rootFieldWrapper == FieldWrapper.EMPTY || rootFieldWrapper.getField() != rootField) {
             rootFieldWrapper = new FieldWrapper(rootField);
           }
+          if (allowRootList) {
+            isValidRootRecordType = true;
+          }
         }
-        writeListDataAllText(rootFieldWrapper, w, this.selection);
+        writeListDataAllText(rootFieldWrapper.getListElement(), w, this.selection);
       } else {
         writeListData(w, this.selection);
       }
@@ -568,14 +639,12 @@ public class JsonReader extends BaseJsonProcessor {
           case VALUE_FALSE:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.BIT, null);
               map.bit(fieldName).writeBit(0);
               break;
             }
           case VALUE_TRUE:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.BIT, null);
               map.bit(fieldName).writeBit(1);
               break;
             }
@@ -585,7 +654,6 @@ public class JsonReader extends BaseJsonProcessor {
           case VALUE_NUMBER_FLOAT:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.FLOAT8, null);
               map.float8(fieldName).writeFloat8(parser.getDoubleValue());
               break;
             }
@@ -593,10 +661,8 @@ public class JsonReader extends BaseJsonProcessor {
             {
               incrementLeafCount();
               if (this.readNumbersAsDouble) {
-                incrementCurrentRowSize(MinorType.FLOAT8, null);
                 map.float8(fieldName).writeFloat8(parser.getDoubleValue());
               } else {
-                incrementCurrentRowSize(MinorType.BIGINT, null);
                 map.bigInt(fieldName).writeBigInt(parser.getLongValue());
               }
               break;
@@ -658,7 +724,7 @@ public class JsonReader extends BaseJsonProcessor {
       FieldWrapper originalField = structField.getChild(fieldName);
       if (schemaImposedMode) {
         if (rootStruct) {
-          validCopyIntoFile = true;
+          isValidRootRecordType = true;
         }
 
         String originalName = originalField.getField().getName();
@@ -957,12 +1023,6 @@ public class JsonReader extends BaseJsonProcessor {
       writeNull(type, writer);
       return;
     }
-    if (CompleteType.DECIMAL.getType().equals(type)) {
-      incrementCurrentRowSize(MinorType.DECIMAL, ((BigDecimal) value).toBigInteger().toByteArray());
-    } else if (!CompleteType.VARCHAR.getType().equals(type)) {
-      // VARCHAR type will be checked in writeString method
-      incrementCurrentRowSize(Types.getMinorTypeForArrowType(type), null);
-    }
     if (CompleteType.BIT.getType().equals(type)) {
       writer.bit().writeBit((Integer) value);
     } else if (CompleteType.INT.getType().equals(type)) {
@@ -1174,8 +1234,8 @@ public class JsonReader extends BaseJsonProcessor {
       long recordsLoadedCount,
       long recordsRejectedCount,
       String firstErrorMessage) {
-    Builder builder =
-        new Builder(
+    CopyIntoFileLoadInfo.Builder builder =
+        new CopyIntoFileLoadInfo.Builder(
                 queryContext.getQueryId(),
                 queryContext.getUserName(),
                 queryContext.getTableNamespace(),
@@ -1271,7 +1331,6 @@ public class JsonReader extends BaseJsonProcessor {
           case VALUE_FALSE:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.BIT, null);
               list.bit().writeBit(0);
               // dataSizeReadSoFar += 1; - not counting as it takes 1-bit per value
               break;
@@ -1279,7 +1338,6 @@ public class JsonReader extends BaseJsonProcessor {
           case VALUE_TRUE:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.BIT, null);
               list.bit().writeBit(1);
               // dataSizeReadSoFar += 1; - not counting as it takes 1-bit per value
               break;
@@ -1294,20 +1352,15 @@ public class JsonReader extends BaseJsonProcessor {
           case VALUE_NUMBER_FLOAT:
             {
               incrementLeafCount();
-              incrementCurrentRowSize(MinorType.FLOAT8, null);
               list.float8().writeFloat8(parser.getDoubleValue());
-              dataSizeReadSoFar += 8;
               break;
             }
           case VALUE_NUMBER_INT:
             {
               incrementLeafCount();
-              dataSizeReadSoFar += 8;
               if (this.readNumbersAsDouble) {
-                incrementCurrentRowSize(MinorType.FLOAT8, null);
                 list.float8().writeFloat8(parser.getDoubleValue());
               } else {
-                incrementCurrentRowSize(MinorType.BIGINT, null);
                 list.bigInt().writeBigInt(parser.getLongValue());
               }
               break;
@@ -1461,16 +1514,189 @@ public class JsonReader extends BaseJsonProcessor {
     }
   }
 
-  private void incrementCurrentRowSize(MinorType type, byte[] bytes) {
-    if (!rowSizeLimitEnabled) {
-      return;
+  public static Builder builder() {
+    return new Builder();
+  }
+
+  public static class Builder {
+
+    private ArrowBuf managedBuf;
+    private List<SchemaPath> columns;
+    private int maxFieldSize;
+    private boolean rowSizeLimitEnabled;
+    private int rowSizeLimit;
+    private int maxLeafLimit;
+    private boolean allTextMode;
+    private boolean skipOuterList;
+    private boolean allowRootList;
+    private boolean readNumbersAsDouble;
+    private boolean schemaImposedMode;
+    private ExtendedFormatOptions extendedFormatOptions;
+    private CopyIntoQueryProperties copyIntoQueryProperties;
+    private SimpleQueryContext queryContext;
+    private IngestionProperties ingestionProperties;
+    private OperatorContext context;
+    private BatchSchema targetSchema;
+    private boolean enforceValidJsonDateFormat;
+    private String filePath;
+    private long fileSize;
+    private boolean isValidationMode;
+    private ValidationErrorRowWriter validationErrorWriter;
+    private long processingStartTime;
+    private Map<String, Field> fieldDecimalMap;
+    private int fixedDataLenPerRow;
+
+    public Builder setManagedBuf(ArrowBuf managedBuf) {
+      this.managedBuf = managedBuf;
+      return this;
     }
-    if (type == MinorType.VARCHAR || type == MinorType.VARBINARY) {
-      currentRowSize += RowSizeUtil.getFieldSizeForVariableWidthType(bytes);
-    } else if (type == MinorType.DECIMAL) {
-      currentRowSize += RowSizeUtil.getFieldSizeForDecimalType(bytes.length);
-    } else {
-      currentRowSize += RowSizeUtil.getFixedLengthTypeSize(type);
+
+    public Builder setColumns(List<SchemaPath> columns) {
+      this.columns = columns;
+      return this;
+    }
+
+    public Builder setMaxFieldSize(int maxFieldSize) {
+      this.maxFieldSize = maxFieldSize;
+      return this;
+    }
+
+    public Builder setMaxLeafLimit(int maxLeafLimit) {
+      this.maxLeafLimit = maxLeafLimit;
+      return this;
+    }
+
+    public Builder setAllTextMode(boolean allTextMode) {
+      this.allTextMode = allTextMode;
+      return this;
+    }
+
+    public Builder setSkipOuterList(boolean skipOuterList) {
+      this.skipOuterList = skipOuterList;
+      return this;
+    }
+
+    public Builder setAllowRootList(boolean allowRootList) {
+      this.allowRootList = allowRootList;
+      return this;
+    }
+
+    public Builder setReadNumbersAsDouble(boolean readNumbersAsDouble) {
+      this.readNumbersAsDouble = readNumbersAsDouble;
+      return this;
+    }
+
+    public Builder setSchemaImposedMode(boolean schemaImposedMode) {
+      this.schemaImposedMode = schemaImposedMode;
+      return this;
+    }
+
+    public Builder setExtendedFormatOptions(ExtendedFormatOptions extendedFormatOptions) {
+      this.extendedFormatOptions = extendedFormatOptions;
+      return this;
+    }
+
+    public Builder setCopyIntoQueryProperties(CopyIntoQueryProperties copyIntoQueryProperties) {
+      this.copyIntoQueryProperties = copyIntoQueryProperties;
+      return this;
+    }
+
+    public Builder setQueryContext(SimpleQueryContext queryContext) {
+      this.queryContext = queryContext;
+      return this;
+    }
+
+    public Builder setIngestionProperties(IngestionProperties ingestionProperties) {
+      this.ingestionProperties = ingestionProperties;
+      return this;
+    }
+
+    public Builder setContext(OperatorContext context) {
+      this.context = context;
+      return this;
+    }
+
+    public Builder setTargetSchema(BatchSchema targetSchema) {
+      this.targetSchema = targetSchema;
+      return this;
+    }
+
+    public Builder setEnforceValidJsonDateFormat(boolean enforceValidJsonDateFormat) {
+      this.enforceValidJsonDateFormat = enforceValidJsonDateFormat;
+      return this;
+    }
+
+    public Builder setFilePath(String filePath) {
+      this.filePath = filePath;
+      return this;
+    }
+
+    public Builder setFileSize(long fileSize) {
+      this.fileSize = fileSize;
+      return this;
+    }
+
+    public Builder setIsValidationMode(boolean isValidationMode) {
+      this.isValidationMode = isValidationMode;
+      return this;
+    }
+
+    public Builder setValidationErrorWriter(ValidationErrorRowWriter validationErrorWriter) {
+      this.validationErrorWriter = validationErrorWriter;
+      return this;
+    }
+
+    public Builder setProcessingStartTime(long processingStartTime) {
+      this.processingStartTime = processingStartTime;
+      return this;
+    }
+
+    public Builder setFieldDecimalMap(Map<String, Field> fieldDecimalMap) {
+      this.fieldDecimalMap = fieldDecimalMap;
+      return this;
+    }
+
+    public Builder setRowSizeLimitEnabled(boolean rowSizeLimitEnabled) {
+      this.rowSizeLimitEnabled = rowSizeLimitEnabled;
+      return this;
+    }
+
+    public Builder setRowSizeLimit(int rowSizeLimit) {
+      this.rowSizeLimit = rowSizeLimit;
+      return this;
+    }
+
+    public Builder setFixedDataLenPerRow(int fixedDataLenPerRow) {
+      this.fixedDataLenPerRow = fixedDataLenPerRow;
+      return this;
+    }
+
+    public JsonReader build() {
+      return new JsonReader(
+          managedBuf,
+          columns,
+          maxFieldSize,
+          maxLeafLimit,
+          allTextMode,
+          skipOuterList,
+          allowRootList,
+          readNumbersAsDouble,
+          schemaImposedMode,
+          extendedFormatOptions,
+          copyIntoQueryProperties,
+          queryContext,
+          ingestionProperties,
+          context,
+          targetSchema,
+          enforceValidJsonDateFormat,
+          filePath,
+          fileSize,
+          isValidationMode,
+          validationErrorWriter,
+          processingStartTime,
+          fieldDecimalMap,
+          rowSizeLimitEnabled,
+          fixedDataLenPerRow);
     }
   }
 }

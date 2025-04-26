@@ -54,6 +54,8 @@ interface SchedulerEvents {
 
     void bookingRegained();
 
+    void bookingPaused();
+
     void contractError();
 
     void runStarted();

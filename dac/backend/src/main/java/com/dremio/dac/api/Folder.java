@@ -34,10 +34,7 @@ public class Folder implements CatalogEntity {
   private final String tag;
   private final List<CatalogItem> children;
   private final String nextPageToken;
-
-  public Folder(String id, List<String> path, String tag, List<CatalogItem> children) {
-    this(id, path, tag, children, null);
-  }
+  private final @Nullable String storageUri;
 
   @JsonCreator
   public Folder(
@@ -45,12 +42,14 @@ public class Folder implements CatalogEntity {
       @JsonProperty("path") List<String> path,
       @JsonProperty("tag") String tag,
       @JsonProperty("children") List<CatalogItem> children,
-      @JsonProperty("nextPageToken") @Nullable String nextPageToken) {
+      @JsonProperty("nextPageToken") @Nullable String nextPageToken,
+      @JsonProperty("storageUri") @Nullable String storageUri) {
     this.id = id;
     this.path = path;
     this.tag = tag;
     this.children = children;
     this.nextPageToken = nextPageToken;
+    this.storageUri = storageUri;
   }
 
   @JsonIgnore
@@ -79,5 +78,10 @@ public class Folder implements CatalogEntity {
   @Override
   public String getNextPageToken() {
     return nextPageToken;
+  }
+
+  @Nullable
+  public String getStorageUri() {
+    return storageUri;
   }
 }

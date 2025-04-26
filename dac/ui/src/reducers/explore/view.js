@@ -139,7 +139,7 @@ const updateSqlFromHistory = (state = false, action) => {
   }
 };
 
-const isMultiQueryRunning = (state = null, action) => {
+const isMultiQueryRunning = (state = false, action) => {
   if (hasTabId(action)) return state;
 
   const { type, running } = action;

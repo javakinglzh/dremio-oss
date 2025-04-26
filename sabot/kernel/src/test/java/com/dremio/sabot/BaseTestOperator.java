@@ -89,6 +89,7 @@ import com.dremio.sabot.driver.OperatorCreatorRegistry;
 import com.dremio.sabot.exec.context.CompilationOptions;
 import com.dremio.sabot.exec.context.ContextInformation;
 import com.dremio.sabot.exec.context.ContextInformationImpl;
+import com.dremio.sabot.exec.context.DelegatingOperatorContext;
 import com.dremio.sabot.exec.context.OpProfileDef;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorContextImpl;
@@ -323,6 +324,19 @@ public class BaseTestOperator extends ExecTest {
       TunnelProvider tunnelProvider,
       final RawFragmentBatchProvider[]... batchProviders)
       throws Exception {
+    return newOperatorWithStats(
+        clazz, pop, targetBatchSize, endpointsIndex, tunnelProvider, null, batchProviders);
+  }
+
+  protected <T extends Operator> Pair<T, OperatorStats> newOperatorWithStats(
+      Class<T> clazz,
+      PhysicalOperator pop,
+      int targetBatchSize,
+      final EndpointsIndex endpointsIndex,
+      TunnelProvider tunnelProvider,
+      OperatorTestContext operatorTestContext,
+      final RawFragmentBatchProvider[]... batchProviders)
+      throws Exception {
 
     final BatchStreamProvider provider =
         new BatchStreamProvider() {
@@ -356,9 +370,21 @@ public class BaseTestOperator extends ExecTest {
             pop.getProps().getMemLimit() == 0 ? Long.MAX_VALUE : pop.getProps().getMemLimit());
 
     // we don't close child allocator as the operator context will manage this.
-    final OperatorContextImpl context =
-        testContext.getNewOperatorContext(childAllocator, pop, targetBatchSize, endpointsIndex);
-    testCloseables.add(context);
+    OperatorTestContext testContextToUse =
+        operatorTestContext != null ? operatorTestContext : testContext;
+    final OperatorContext context =
+        testContextToUse.getNewOperatorContext(
+            childAllocator, pop, targetBatchSize, endpointsIndex);
+    OperatorContextImpl contextToClose = null;
+    if (context instanceof OperatorContextImpl) {
+      contextToClose = (OperatorContextImpl) context;
+    } else if (context instanceof DelegatingOperatorContext) {
+      OperatorContext delegate = ((DelegatingOperatorContext) context).getDelegate();
+      if (delegate instanceof OperatorContextImpl) {
+        contextToClose = (OperatorContextImpl) delegate;
+      }
+    }
+    testCloseables.add(contextToClose);
 
     CreatorVisitor visitor = new CreatorVisitor(fec, provider, tunnelProvider);
     Operator o = pop.accept(visitor, context);
@@ -463,7 +489,7 @@ public class BaseTestOperator extends ExecTest {
       return functionLookup;
     }
 
-    public OperatorContextImpl getNewOperatorContext(
+    public OperatorContext getNewOperatorContext(
         BufferAllocator child,
         PhysicalOperator pop,
         int targetBatchSize,
@@ -511,7 +537,7 @@ public class BaseTestOperator extends ExecTest {
           null);
     }
 
-    public OperatorContextImpl getNewOperatorContext(
+    public OperatorContext getNewOperatorContext(
         BufferAllocator child, PhysicalOperator pop, int targetBatchSize) throws Exception {
       return getNewOperatorContext(child, pop, targetBatchSize, new EndpointsIndex());
     }
@@ -913,6 +939,49 @@ public class BaseTestOperator extends ExecTest {
     }
 
     return stats;
+  }
+
+  /** Run operator with single batch input. Return output. The caller should close the output. */
+  protected <T extends SingleInputOperator> List<RecordBatchData> getSingleBatchOutput(
+      PhysicalOperator pop,
+      Class<T> clazz,
+      Generator generator,
+      int inputBatchSize,
+      int outputBatchSize)
+      throws Exception {
+    final List<RecordBatchData> data = new ArrayList<>();
+    try (Pair<T, OperatorStats> pair = newOperatorWithStats(clazz, pop, outputBatchSize); ) {
+      T op = pair.first;
+      final VectorAccessible output = op.setup(generator.getOutput());
+      int count;
+      while (op.getState() != State.DONE && (count = generator.next(inputBatchSize)) != 0) {
+        assertState(op, State.CAN_CONSUME);
+        op.consumeData(count);
+        while (op.getState() == State.CAN_PRODUCE) {
+          int recordsOutput = op.outputData();
+          if (recordsOutput > 0) {
+            data.add(new RecordBatchData(output, getTestAllocator()));
+          }
+        }
+      }
+
+      if (op.getState() == State.CAN_CONSUME) {
+        op.noMoreToConsume();
+      }
+
+      while (op.getState() == State.CAN_PRODUCE) {
+        int recordsOutput = op.outputData();
+        if (recordsOutput > 0) {
+          data.add(new RecordBatchData(output, getTestAllocator()));
+        }
+      }
+
+      if (op.getState() == State.CAN_CONSUME) {
+        op.noMoreToConsume();
+      }
+      assertState(op, State.DONE);
+    }
+    return data;
   }
 
   /**

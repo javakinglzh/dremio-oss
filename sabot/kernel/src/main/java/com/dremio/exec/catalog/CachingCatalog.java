@@ -15,6 +15,9 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
@@ -65,7 +68,6 @@ public class CachingCatalog extends DelegatingCatalog {
   private final ConcurrentMap<TableCacheKey, CompletableFuture<Optional<DremioTable>>> tableCache;
   private final ConcurrentMap<TableCacheKey, DremioTable> canonicalKeyTables;
   private final ConcurrentMap<FunctionCacheKey, Collection<Function>> functionsCache;
-  private final CatalogAccessStats catalogAccessStats;
 
   @VisibleForTesting
   public CachingCatalog(Catalog delegate) {
@@ -74,8 +76,7 @@ public class CachingCatalog extends DelegatingCatalog {
         new ConcurrentHashMap<>(),
         new ConcurrentHashMap<>(),
         new ConcurrentHashMap<>(),
-        new ConcurrentHashMap<>(),
-        new CatalogAccessStats());
+        new ConcurrentHashMap<>());
   }
 
   private CachingCatalog(
@@ -83,14 +84,12 @@ public class CachingCatalog extends DelegatingCatalog {
       ConcurrentMap<TableCacheKey, CompletableFuture<Optional<DremioTable>>> tableCache,
       ConcurrentMap<String, DremioTable> tablesByDatasetId,
       ConcurrentMap<TableCacheKey, DremioTable> canonicalKeyTables,
-      ConcurrentMap<FunctionCacheKey, Collection<Function>> functionsCache,
-      CatalogAccessStats catalogAccessStats) {
+      ConcurrentMap<FunctionCacheKey, Collection<Function>> functionsCache) {
     super(delegate);
     this.tableCache = tableCache;
     this.tablesByDatasetId = tablesByDatasetId;
     this.canonicalKeyTables = canonicalKeyTables;
     this.functionsCache = functionsCache;
-    this.catalogAccessStats = catalogAccessStats;
   }
 
   private CachingCatalog(Catalog delegate, CachingCatalog cache) {
@@ -99,8 +98,7 @@ public class CachingCatalog extends DelegatingCatalog {
         cache.tableCache,
         cache.tablesByDatasetId,
         cache.canonicalKeyTables,
-        cache.functionsCache,
-        cache.catalogAccessStats);
+        cache.functionsCache);
   }
 
   @Override
@@ -122,7 +120,10 @@ public class CachingCatalog extends DelegatingCatalog {
   @Override
   public void updateView(
       final NamespaceKey key, View view, ViewOptions viewOptions, NamespaceAttribute... attributes)
-      throws IOException {
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException {
     clearDatasetCache(key, null);
     super.updateView(key, view, viewOptions, attributes);
   }
@@ -131,11 +132,6 @@ public class CachingCatalog extends DelegatingCatalog {
   public void dropView(final NamespaceKey key, ViewOptions viewOptions) throws IOException {
     clearDatasetCache(key, null);
     super.dropView(key, viewOptions);
-  }
-
-  @Override
-  public CatalogAccessStats getCatalogAccessStats() {
-    return catalogAccessStats;
   }
 
   private NamespaceKey toResolvedKey(NamespaceKey key) {
@@ -353,6 +349,12 @@ public class CachingCatalog extends DelegatingCatalog {
               newKeysBuilder.add(CacheKeyAndProxyFuture.of(key, cacheKey, proxy));
               requestBuilder.add(key);
               cached = proxy;
+
+              getMetadataRequestOptions()
+                  .getSchemaConfig()
+                  .getCatalogAccessListener()
+                  .newDatasetRequested(
+                      cacheKey.getCatalogIdentity(), cacheKey.getCatalogEntityKey());
             }
           }
 
@@ -442,14 +444,18 @@ public class CachingCatalog extends DelegatingCatalog {
             ? 1
             : 2;
 
-    catalogAccessStats.add(
-        canonicalCacheKey.getCatalogEntityKey(),
-        loadTimeMillis,
-        resolutionIncrement,
-        Optional.of(table)
-            .map(DremioTable::getDatasetConfig)
-            .map(DatasetConfig::getType)
-            .orElse(null));
+    getMetadataRequestOptions()
+        .getSchemaConfig()
+        .getCatalogAccessListener()
+        .datasetLoaded(
+            canonicalCacheKey.getCatalogIdentity(),
+            canonicalCacheKey.getCatalogEntityKey(),
+            loadTimeMillis,
+            resolutionIncrement,
+            Optional.of(table)
+                .map(DremioTable::getDatasetConfig)
+                .map(DatasetConfig::getType)
+                .orElse(null));
 
     canonicalKeyTables.put(canonicalCacheKey, table);
 

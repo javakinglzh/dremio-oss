@@ -51,7 +51,7 @@ public class UIMetadataPolicy {
         case PREFETCH:
           return PREFETCH;
         case INLINE: // Note: DX-16127: INLINE is obsolete, and should not be produced by the
-          // backend code
+        // backend code
         case PREFETCH_QUERIED:
         case UNKNOWN:
         default:

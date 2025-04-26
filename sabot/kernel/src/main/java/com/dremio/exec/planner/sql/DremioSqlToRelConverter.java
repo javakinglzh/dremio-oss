@@ -65,7 +65,6 @@ import org.apache.calcite.sql.type.SqlOperandTypeChecker;
 import org.apache.calcite.sql.type.SqlTypeUtil;
 import org.apache.calcite.sql.validate.SqlValidator;
 import org.apache.calcite.sql.validate.SqlValidatorUtil;
-import org.apache.calcite.sql2rel.RelStructuredTypeFlattener;
 import org.apache.calcite.sql2rel.SqlRexConvertletTable;
 import org.apache.calcite.sql2rel.SqlToRelConverter;
 import org.apache.calcite.tools.RelBuilder;
@@ -152,13 +151,6 @@ public class DremioSqlToRelConverter extends SqlToRelConverter {
       return LogicalValues.create(cluster, rowType, literalRows.build());
     }
     return ret;
-  }
-
-  @Override
-  public RelNode flattenTypes(RelNode rootRel, boolean restructure) {
-    RelStructuredTypeFlattener typeFlattener =
-        new RelStructuredTypeFlattener(rexBuilder, toRelContext, restructure);
-    return typeFlattener.rewrite(rootRel);
   }
 
   /**

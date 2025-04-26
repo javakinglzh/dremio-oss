@@ -15,6 +15,8 @@
  */
 package com.dremio.exec.planner.sql.handlers.commands;
 
+import static com.dremio.exec.planner.sql.CalciteArrowHelper.fromCalciteRowType;
+
 import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
@@ -41,6 +43,13 @@ public class HandlerToPrepareArrowPlan
   @Override
   public CreatePreparedStatementArrowResp execute() {
     final QueryContext context = getContext();
+    if (isParameterEnabled()) {
+      return PreparedStatementProvider.buildArrow(
+          fromCalciteRowType(getRowType()),
+          getState(),
+          context.getQueryId(),
+          fromCalciteRowType(getPreparedRowType()));
+    }
     return PreparedStatementProvider.buildArrow(
         getPlan().getRoot().getProps().getSchema(), getState(), context.getQueryId());
   }

@@ -34,14 +34,14 @@ public final class BigDecimalArrayAggAccumulator extends ArrayAggAccumulator<Big
       FieldVector transferVector,
       BaseValueVector tempAccumulatorHolder,
       BufferAllocator allocator,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     super(
         input,
         transferVector,
         tempAccumulatorHolder,
         allocator,
-        maxFieldSizeBytes,
+        maxArrayAggSize,
         initialVectorSize);
   }
 
@@ -57,7 +57,7 @@ public final class BigDecimalArrayAggAccumulator extends ArrayAggAccumulator<Big
 
   @Override
   protected ArrayAggAccumulatorHolder<BigDecimal> getAccumulatorHolder(
-      int maxFieldSizeBytes, BufferAllocator allocator, int initialCapacity) {
+      BufferAllocator allocator, int initialCapacity) {
     return new BigDecimalArrayAggAccumulatorHolder(
         allocator, (DecimalVector) getInput(), initialCapacity);
   }

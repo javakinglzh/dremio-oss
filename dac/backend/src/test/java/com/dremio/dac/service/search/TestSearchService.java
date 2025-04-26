@@ -24,6 +24,7 @@ import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.service.collaboration.CollaborationHelper;
 import com.dremio.dac.service.collaboration.Tags;
 import com.dremio.dac.service.source.SourceService;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.ViewCreatorFactory;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
@@ -190,7 +191,9 @@ public class TestSearchService extends BaseTestServer {
         UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
     final SourceConfig sourceConfig =
         sourceService.registerSourceWithRuntime(
-            source.asSourceConfig(), SystemUser.SYSTEM_USERNAME);
+            source.asSourceConfig(),
+            SystemUser.SYSTEM_USERNAME,
+            SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     // make a query
     final SqlQuery query =
@@ -204,7 +207,7 @@ public class TestSearchService extends BaseTestServer {
     assertEquals(2, results.size());
 
     // delete source
-    sourceService.deleteSource(sourceConfig);
+    sourceService.deleteSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     doWakeup();
 

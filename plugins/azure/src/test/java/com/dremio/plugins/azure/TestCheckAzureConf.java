@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.azure;
 
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.google.common.collect.ImmutableSet;

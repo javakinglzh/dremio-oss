@@ -127,6 +127,10 @@ public interface SubstitutionProvider {
     return ImmutableSet.of();
   }
 
+  default Optional<RelNode> generateHashReplacement(RelNode query) {
+    return Optional.empty();
+  }
+
   void setPostSubstitutionTransformer(RelTransformer transformer);
 
   /**

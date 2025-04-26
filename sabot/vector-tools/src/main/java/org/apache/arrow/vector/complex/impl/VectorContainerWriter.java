@@ -157,6 +157,12 @@ public class VectorContainerWriter extends AbstractFieldWriter implements Comple
   }
 
   @Override
+  public ListWriter rootAsListView() {
+    throw new UnsupportedOperationException(
+        "Dremio doesn't support objects whose first level is a scalar or array view.  Objects must start as maps.");
+  }
+
+  @Override
   public MapWriter rootAsMap(boolean b) {
     throw new UnsupportedOperationException(
         "Dremio doesn't support objects whose first level is map.  Objects must start as struct.");

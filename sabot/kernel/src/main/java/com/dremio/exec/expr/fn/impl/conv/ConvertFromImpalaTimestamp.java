@@ -51,10 +51,8 @@ public class ConvertFromImpalaTimestamp {
           (julianDay
                       - com.dremio.exec.store.parquet.ParquetReaderUtility
                           .JULIAN_DAY_NUMBER_FOR_UNIX_EPOCH)
-                  * org.joda.time.DateTimeConstants.MILLIS_PER_DAY
-              + (nanosOfDay
-                  / com.dremio.exec.store.parquet.ParquetReaderUtility.NanoTimeUtils
-                      .NANOS_PER_MILLISECOND);
+                  * com.dremio.common.util.DateTimes.MILLIS_PER_DAY
+              + (nanosOfDay / com.dremio.common.util.DateTimes.NANOS_PER_MILLISECOND);
       out.value =
           com.dremio.common.util.DateTimes.toMillis(
               new org.joda.time.LocalDateTime(
@@ -86,10 +84,8 @@ public class ConvertFromImpalaTimestamp {
           (julianDay
                       - com.dremio.exec.store.parquet.ParquetReaderUtility
                           .JULIAN_DAY_NUMBER_FOR_UNIX_EPOCH)
-                  * org.joda.time.DateTimeConstants.MILLIS_PER_DAY
-              + (nanosOfDay
-                  / com.dremio.exec.store.parquet.ParquetReaderUtility.NanoTimeUtils
-                      .NANOS_PER_MILLISECOND);
+                  * com.dremio.common.util.DateTimes.MILLIS_PER_DAY
+              + (nanosOfDay / com.dremio.common.util.DateTimes.NANOS_PER_MILLISECOND);
     }
   }
 }

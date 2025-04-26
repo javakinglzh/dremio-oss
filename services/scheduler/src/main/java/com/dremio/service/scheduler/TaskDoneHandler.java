@@ -221,7 +221,7 @@ final class TaskDoneHandler {
       }
     }
 
-    private boolean hasDoneChildren() {
+    boolean hasDoneChildren() {
       boolean hasDoneChildren;
       try {
         List<String> donePaths =

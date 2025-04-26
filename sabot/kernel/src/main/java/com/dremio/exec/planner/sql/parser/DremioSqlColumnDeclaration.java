@@ -72,7 +72,7 @@ public class DremioSqlColumnDeclaration extends SqlCall {
     this.dataType = dataType;
     this.expression = expression;
     this.policy = columnPolicyPair.getPolicy();
-    this.strategy = ColumnStrategy.NULLABLE;
+    this.strategy = dataType.getNullable() ? ColumnStrategy.NULLABLE : ColumnStrategy.NOT_NULLABLE;
   }
 
   @Override

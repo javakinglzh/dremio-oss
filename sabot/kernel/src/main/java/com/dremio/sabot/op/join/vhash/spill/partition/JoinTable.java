@@ -38,7 +38,7 @@ public interface JoinTable extends AutoCloseable {
    * Insert pivoted keys into the hash-table.
    *
    * @param sv2 ordinals of the records to insert
-   * @param shift to be decremented to get to the corresponding record in the pivoted block
+   * @param pivotShift to be decremented to get to the corresponding record in the pivoted block
    * @param records number of records
    * @param tableHash4B hash-values of the records
    * @param fixed fixed block

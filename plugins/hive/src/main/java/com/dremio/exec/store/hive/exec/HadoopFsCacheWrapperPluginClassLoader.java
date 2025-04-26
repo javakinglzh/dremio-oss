@@ -50,7 +50,9 @@ public class HadoopFsCacheWrapperPluginClassLoader implements HadoopFsSupplierPr
       @Override
       public void onRemoval(RemovalNotification<HadoopFsCacheKeyPluginClassLoader, FileSystem> notification) {
         try {
-          notification.getValue().close();
+          if (notification.getValue() != null) {
+            notification.getValue().close();
+          }
         } catch (IOException e) {
           // Ignore
           logger.error("Unable to clean FS from HadoopFsCacheKeyPluginClassLoader", e);

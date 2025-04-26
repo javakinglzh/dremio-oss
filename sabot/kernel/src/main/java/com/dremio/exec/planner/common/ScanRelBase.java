@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.common;
 
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.catalog.StoragePluginId;
@@ -65,6 +66,7 @@ public abstract class ScanRelBase extends TableScan {
   private static final int MAX_COLUMNS = 1000;
 
   public static final double DEFAULT_COST_ADJUSTMENT = 1.0d;
+  public static final String SNAPSHOT = "snapshot";
 
   protected final ImmutableList<SchemaPath> projectedColumns;
   protected final TableMetadata tableMetadata;
@@ -191,11 +193,11 @@ public abstract class ScanRelBase extends TableScan {
         .map(DatasetConfig::getPhysicalDataset)
         .map(PhysicalDataset::getIcebergMetadata)
         .map(IcebergMetadata::getSnapshotId)
-        .ifPresent(snapshotId -> pw.item("snapshot", snapshotId));
+        .ifPresent(snapshotId -> pw.item(SNAPSHOT, snapshotId));
 
     Optional.ofNullable(tableMetadata)
         .map(TableMetadata::getVersionContext)
-        .filter(x -> x != null)
+        .filter(x -> x != null && x != TableVersionContext.NOT_SPECIFIED)
         .ifPresent(versionContext -> pw.item("version", versionContext));
 
     Optional.ofNullable(snapshotDiffContext)
@@ -425,7 +427,8 @@ public abstract class ScanRelBase extends TableScan {
       if (firstLevelPaths.contains(field.getName())) {
         fields.put(
             field.getName(),
-            CalciteArrowHelper.wrap(CompleteType.fromField(field)).toCalciteType(factory, true));
+            CalciteArrowHelper.wrap(CompleteType.fromField(field), field.isNullable())
+                .toCalciteType(factory, true));
       }
     }
 

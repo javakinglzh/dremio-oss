@@ -20,8 +20,10 @@ import com.dremio.common.config.SabotConfig;
 import com.dremio.config.DremioConfig;
 import com.dremio.exec.expr.ClassProducer;
 import com.dremio.exec.expr.ExpressionSplitCache;
+import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.config.MinorFragmentEndpoint;
+import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.planner.fragment.EndpointsIndex;
 import com.dremio.exec.planner.fragment.PlanFragmentFull;
 import com.dremio.exec.proto.CoordExecRPC.FragmentAssignment;
@@ -32,11 +34,14 @@ import com.dremio.exec.proto.UserBitShared.QueryId;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.selection.SelectionVector2;
 import com.dremio.exec.server.NodeDebugContextProvider;
+import com.dremio.exec.store.dfs.EmptyTableFunction;
 import com.dremio.exec.testing.ExecutionControls;
 import com.dremio.options.OptionManager;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.exec.heap.HeapLowMemController;
 import com.dremio.sabot.exec.rpc.TunnelProvider;
 import com.dremio.sabot.op.filter.VectorContainerWithSV;
+import com.dremio.sabot.op.tablefunction.TableFunction;
 import com.dremio.service.spill.SpillService;
 import java.util.Iterator;
 import java.util.List;
@@ -151,5 +156,10 @@ public abstract class OperatorContext {
 
   public interface Creator {
     public OperatorContext newOperatorContext(PhysicalOperator popConfig) throws Exception;
+  }
+
+  public TableFunction getTableFunctionImpl(
+      FragmentExecutionContext fec, OpProps props, TableFunctionConfig functionConfig) {
+    return new EmptyTableFunction(this, functionConfig);
   }
 }

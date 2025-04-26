@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.sql.handlers.query;
 
 import static com.dremio.exec.planner.sql.parser.TestParserUtil.parse;
+import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -25,9 +26,12 @@ import static org.mockito.Mockito.when;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.sql.ParserConfig;
 import com.dremio.exec.planner.sql.parser.SqlOptimize;
+import com.dremio.optimization.api.OptimizeConstants;
 import com.dremio.options.OptionManager;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.apache.calcite.avatica.util.Quoting;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.parser.SqlParser;
@@ -80,30 +84,29 @@ public class TestOptimizeOptions {
     assertThat(optimizeOptions.getMinInputFiles())
         .isEqualTo(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES.getDefault().getNumVal());
 
+    long targetFileSizeBytes =
+        ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB.getDefault().getNumVal() * 1024 * 1024;
     long expectedMin =
         ((long)
-                (ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB.getDefault().getNumVal()
-                    * ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO
-                        .getDefault()
-                        .getFloatVal()))
-            * 1024
-            * 1024;
+            (targetFileSizeBytes
+                * ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO
+                    .getDefault()
+                    .getFloatVal()));
     assertThat(optimizeOptions.getMinFileSizeBytes()).isEqualTo(expectedMin);
 
     long expectedMax =
         ((long)
-                (ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB.getDefault().getNumVal()
-                    * ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO
-                        .getDefault()
-                        .getFloatVal()))
-            * 1024
-            * 1024;
+            (targetFileSizeBytes
+                * ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO
+                    .getDefault()
+                    .getFloatVal()));
     assertThat(optimizeOptions.getMaxFileSizeBytes()).isEqualTo(expectedMax);
   }
 
   @Test
   public void testCreateInstanceUsingSupportOptions() throws SqlParseException {
     SqlOptimize sqlNode = (SqlOptimize) parse("OPTIMIZE TABLE a.b.c");
+    Map<String, String> tableProperties = Collections.emptyMap();
 
     OptionManager optionManager = mock(OptionManager.class);
     when(optionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)).thenReturn(1000L);
@@ -113,7 +116,91 @@ public class TestOptimizeOptions {
         .thenReturn(0.2D);
     when(optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES)).thenReturn(10L);
 
-    OptimizeOptions optimizeOptions = OptimizeOptions.createInstance(optionManager, sqlNode, true);
+    OptimizeOptions optimizeOptions =
+        OptimizeOptions.createInstance(tableProperties, optionManager, sqlNode, true);
+
+    assertThat(optimizeOptions.getMinInputFiles()).isEqualTo(10L);
+    assertThat(optimizeOptions.getMinFileSizeBytes()).isEqualTo(200 * 1024 * 1024);
+    assertThat(optimizeOptions.getMaxFileSizeBytes()).isEqualTo(2000 * 1024 * 1024);
+    assertThat(optimizeOptions.getTargetFileSizeBytes()).isEqualTo(1000 * 1024 * 1024);
+  }
+
+  @Test
+  public void testCreateInstanceUsingSupportOptionsWithTableProperties() throws SqlParseException {
+    SqlOptimize sqlNode = (SqlOptimize) parse("OPTIMIZE TABLE a.b.c");
+    Map<String, String> tableProperties =
+        Map.of(
+            "write.target-file-size-bytes",
+            "115343360",
+            OptimizeConstants.OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY,
+            "110",
+            OptimizeConstants.OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY,
+            "100",
+            "dremio.iceberg.optimize.minimal_input_files",
+            "1");
+
+    OptionManager optionManager = mock(OptionManager.class);
+
+    OptimizeOptions optimizeOptions =
+        OptimizeOptions.createInstance(tableProperties, optionManager, sqlNode, true);
+
+    assertThat(optimizeOptions.getMinInputFiles()).isEqualTo(1L);
+    assertThat(optimizeOptions.getMinFileSizeBytes()).isEqualTo(100 * 1024 * 1024);
+    assertThat(optimizeOptions.getMaxFileSizeBytes()).isEqualTo(110 * 1024 * 1024);
+    assertThat(optimizeOptions.getTargetFileSizeBytes()).isEqualTo(115343360);
+  }
+
+  @Test
+  public void testCreateInstanceUsingSupportOptionsWithTablePropertiesAndCalculatedMinMax()
+      throws SqlParseException {
+    SqlOptimize sqlNode = (SqlOptimize) parse("OPTIMIZE TABLE a.b.c");
+    Map<String, String> tableProperties =
+        Map.of(
+            "write.target-file-size-bytes",
+            "115343360",
+            "dremio.iceberg.optimize.minimal_input_files",
+            "1");
+
+    OptionManager optionManager = mock(OptionManager.class);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO))
+        .thenReturn(2D);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO))
+        .thenReturn(0.2D);
+
+    OptimizeOptions optimizeOptions =
+        OptimizeOptions.createInstance(tableProperties, optionManager, sqlNode, true);
+
+    assertThat(optimizeOptions.getMinInputFiles()).isEqualTo(1L);
+    assertThat(optimizeOptions.getMinFileSizeBytes()).isEqualTo((long) (115343360 * 0.2D));
+    assertThat(optimizeOptions.getMaxFileSizeBytes()).isEqualTo((long) (115343360 * 2D));
+    assertThat(optimizeOptions.getTargetFileSizeBytes()).isEqualTo(115343360);
+  }
+
+  @Test
+  public void testCreateInstanceUsingSupportOptionsWithInvalidTableProperties()
+      throws SqlParseException {
+    SqlOptimize sqlNode = (SqlOptimize) parse("OPTIMIZE TABLE a.b.c");
+    Map<String, String> tableProperties =
+        Map.of(
+            WRITE_TARGET_FILE_SIZE_BYTES,
+            "abcd",
+            OptimizeConstants.OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY,
+            "abcd",
+            OptimizeConstants.OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY,
+            "abcd",
+            OptimizeConstants.OPTIMIZE_MINIMAL_INPUT_FILES,
+            "abcd");
+
+    OptionManager optionManager = mock(OptionManager.class);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)).thenReturn(1000L);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO))
+        .thenReturn(2D);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO))
+        .thenReturn(0.2D);
+    when(optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES)).thenReturn(10L);
+
+    OptimizeOptions optimizeOptions =
+        OptimizeOptions.createInstance(tableProperties, optionManager, sqlNode, true);
 
     assertThat(optimizeOptions.getMinInputFiles()).isEqualTo(10L);
     assertThat(optimizeOptions.getMinFileSizeBytes()).isEqualTo(200 * 1024 * 1024);
@@ -147,25 +234,25 @@ public class TestOptimizeOptions {
     return Arrays.asList(
         Pair.of(
             "OPTIMIZE TABLE a.b.c (target_file_size_mb=2, min_file_size_mb=3)",
-            "Value of TARGET_FILE_SIZE_MB [2] cannot be less than MIN_FILE_SIZE_MB [3]."),
+            "Value of TARGET_FILE_SIZE_BYTES [2097152] cannot be less than MIN_FILE_SIZE_BYTES [3145728]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (max_file_size_mb=270, min_file_size_mb=269)",
-            "Value of TARGET_FILE_SIZE_MB [256] cannot be less than MIN_FILE_SIZE_MB [269]."),
+            "Value of TARGET_FILE_SIZE_BYTES [268435456] cannot be less than MIN_FILE_SIZE_BYTES [282066944]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (target_file_size_mb=2, max_file_size_mb=1)",
-            "Value of TARGET_FILE_SIZE_MB [2] cannot be greater than MAX_FILE_SIZE_MB [1]."),
+            "Value of MIN_FILE_SIZE_BYTES [1572864] cannot be greater than MAX_FILE_SIZE_BYTES [1048576]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (min_file_size_mb=2, max_file_size_mb=26)",
-            "Value of TARGET_FILE_SIZE_MB [256] cannot be greater than MAX_FILE_SIZE_MB [26]."),
+            "Value of TARGET_FILE_SIZE_BYTES [268435456] cannot be greater than MAX_FILE_SIZE_BYTES [27262976]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (max_file_size_mb=2, min_file_size_mb=5)",
-            "Value of MIN_FILE_SIZE_MB [5] cannot be greater than MAX_FILE_SIZE_MB [2]."),
+            "Value of MIN_FILE_SIZE_BYTES [5242880] cannot be greater than MAX_FILE_SIZE_BYTES [2097152]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (target_file_size_mb=2, min_file_size_mb=5)",
-            "Value of MIN_FILE_SIZE_MB [5] cannot be greater than MAX_FILE_SIZE_MB [3]."),
+            "Value of MIN_FILE_SIZE_BYTES [5242880] cannot be greater than MAX_FILE_SIZE_BYTES [3774873]."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (max_file_size_mb=0)",
-            "MAX_FILE_SIZE_MB [0] should be a positive integer value."),
+            "MAX_FILE_SIZE_BYTES [0] should be a positive integer value."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (min_input_files=0)",
             "Value of MIN_INPUT_FILES [0] cannot be less than 1."),
@@ -174,17 +261,19 @@ public class TestOptimizeOptions {
             "Value of MIN_INPUT_FILES [-2] cannot be less than 1."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (max_file_size_mb=-1200)",
-            "MAX_FILE_SIZE_MB [-1200] should be a positive integer value."),
+            "MAX_FILE_SIZE_BYTES [-1258291200] should be a positive integer value."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (min_file_size_mb=-1050)",
-            "MIN_FILE_SIZE_MB [-1050] should be a non-negative integer value."),
+            "MIN_FILE_SIZE_BYTES [-1101004800] should be a non-negative integer value."),
         Pair.of(
             "OPTIMIZE TABLE a.b.c (target_file_size_mb=-256)",
-            "TARGET_FILE_SIZE_MB [-256] should be a positive integer value."));
+            "TARGET_FILE_SIZE_BYTES [-268435456] should be a positive integer value."));
   }
 
   private static OptimizeOptions getValidOptimizeOptions(String toParse) throws Exception {
     SqlOptimize sqlOptimize = parseToSqlOptimizeNode(toParse);
+    Map<String, String> tableProperties = Collections.emptyMap();
+
     // return Optimize Options if all the inputs are valid else throw error.
     mockOptionManager = Mockito.mock(OptionManager.class);
     when(mockOptionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)).thenReturn(256L);
@@ -194,7 +283,7 @@ public class TestOptimizeOptions {
         .thenReturn(1.8);
     when(mockOptionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES)).thenReturn(5L);
 
-    return OptimizeOptions.createInstance(mockOptionManager, sqlOptimize, true);
+    return OptimizeOptions.createInstance(tableProperties, mockOptionManager, sqlOptimize, true);
   }
 
   private static SqlOptimize parseToSqlOptimizeNode(String toParse) throws SqlParseException {

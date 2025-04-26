@@ -28,8 +28,6 @@
   <name>Distribution - All-in-one JDBC JAR</name>
 
   <properties>
-    <!-- You will also need to increase the maxSize for the MapR version, under the mapr profile. -->
-    <!-- Search for "<id>mapr</id>" (without quotes) in this file and change the value of maxSize there. -->
     <dremio.distribution.jar.maxSize>53000000</dremio.distribution.jar.maxSize>
   </properties>
 
@@ -49,7 +47,6 @@
     <dependency>
       <groupId>com.dremio</groupId>
       <artifactId>dremio-common</artifactId>
-      <version>${project.version}</version>
       <exclusions>
         <exclusion>
           <groupId>javassist</groupId>
@@ -65,23 +62,7 @@
         </exclusion>
         <exclusion>
           <groupId>org.apache.lucene</groupId>
-          <artifactId>lucene-core</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.lucene</groupId>
-          <artifactId>lucene-highlighter</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.lucene</groupId>
-          <artifactId>lucene-codecs</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.lucene</groupId>
-          <artifactId>lucene-analyzers-common</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>org.apache.lucene</groupId>
-          <artifactId>lucene-queries</artifactId>
+          <artifactId>*</artifactId>
         </exclusion>
         <exclusion>
           <groupId>com.github.slugify</groupId>
@@ -106,10 +87,6 @@
         <exclusion>
           <groupId>com.google.inject</groupId>
           <artifactId>guice</artifactId>
-        </exclusion>
-        <exclusion>
-          <groupId>software.amazon.awssdk</groupId>
-          <artifactId>*</artifactId>
         </exclusion>
       </exclusions>
     </dependency>
@@ -389,7 +366,6 @@
     <dependency>
       <groupId>org.apache.zookeeper</groupId>
       <artifactId>zookeeper</artifactId>
-      <version>${zookeeper.version}</version>
       <exclusions>
         <exclusion>
           <groupId>jline</groupId>
@@ -398,11 +374,6 @@
         <exclusion>
           <groupId>org.slf4j</groupId>
           <artifactId>slf4j-log4j12</artifactId>
-        </exclusion>
-        <!-- Required for MapR, ZooKeeper 3.5.x -->
-        <exclusion>
-          <groupId>log4j</groupId>
-          <artifactId>log4j</artifactId>
         </exclusion>
         <!-- Required for ZooKeeper 3.8.0+ -->
         <exclusion>
@@ -618,11 +589,9 @@
               <exclude>org.mockito:mockito-core</exclude>
               <exclude>org.objenesis:objenesis</exclude>
               <exclude>org.apache.httpcomponents:*</exclude>
-              <exclude>org.apache.lucene:*</exclude>
               <exclude>com.github.slugify:*</exclude>
               <exclude>com.koloboke:*</exclude>
               <exclude>de.vandermeer:*</exclude>
-              <exclude>com.dremio.contrib:dremio-maprfs-shaded</exclude>
               <exclude>com.dremio.distribution:dremio-distribution-resources</exclude>
               <exclude>org.apache.datasketches:*</exclude>
               <exclude>com.esri.geometry:*</exclude>
@@ -827,6 +796,12 @@
                 <exclude>com/amazonaws/**</exclude>
                 <exclude>META-INF/native/libio_grpc_netty*</exclude>
                 <exclude>META-INF/native/io_grpc_netty_shaded*</exclude>
+                <!-- Requires some resource transformer -->
+                <exclude>META-INF/native-image/</exclude>
+                <exclude>META-INF/proguard/</exclude>
+                <!-- Requires MSHADE-406 -->
+                <exclude>META-INF/versions/</exclude>
+                <exclude>META-INF/micrometer-core.kotlin_module</exclude>
               </excludes>
             </filter>
           </filters>
@@ -870,18 +845,4 @@
       </plugin>
     </plugins>
   </build>
-
-  <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <properties>
-        <dremio.distribution.jar.maxSize>53000000</dremio.distribution.jar.maxSize>
-      </properties>
-    </profile>
-  </profiles>
 </project>

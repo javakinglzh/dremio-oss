@@ -193,7 +193,7 @@ public class TokenManagerImpl implements TokenManager {
     tokenStore.put(token, state);
     tokenCache.put(token, state);
     debugLogForToken("Generated Dremio token with identifier: {} for user: {}", token, username);
-    return TokenDetails.of(token, username, expiresAtEpochMs, null, scopes);
+    return TokenDetails.of(token, username, expiresAtEpochMs, scopes);
   }
 
   @VisibleForTesting
@@ -218,7 +218,7 @@ public class TokenManagerImpl implements TokenManager {
     tokenCache.put(token, state);
     debugLogForToken(
         "Generated third-party token with identifier: {} for user: {}", token, username);
-    return TokenDetails.of(token, username, expiresAt, clientID, scopes);
+    return TokenDetails.of(token, username, expiresAt, scopes);
   }
 
   @Override
@@ -324,11 +324,7 @@ public class TokenManagerImpl implements TokenManager {
           token,
           value.getUsername());
       return TokenDetails.of(
-          token,
-          value.getUsername(),
-          value.getExpiresAt(),
-          value.getClientId(),
-          value.getScopesList());
+          token, value.getUsername(), value.getExpiresAt(), value.getScopesList());
     } finally {
       logger.debug(
           "Token validation elapsed time(ms): {}", stopwatch.elapsed(TimeUnit.MILLISECONDS));

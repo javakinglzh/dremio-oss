@@ -40,6 +40,14 @@ class ConstantExtraSizer implements Sizer {
   }
 
   @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    for (int index = 0; index < recordCount; index++) {
+      rowLengthAccumulator.setInt(
+          index * 4L, rowLengthAccumulator.getInt(index * 4L) + sizeInBytes);
+    }
+  }
+
+  @Override
   public void reset() {
     // no caching.
   }

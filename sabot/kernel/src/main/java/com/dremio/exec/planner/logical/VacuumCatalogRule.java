@@ -37,11 +37,12 @@ public class VacuumCatalogRule extends RelOptRule {
             vacuumCatalogCrel.getCluster(),
             vacuumCatalogCrel.getTraitSet().plus(Rel.LOGICAL),
             vacuumCatalogCrel.getStoragePluginId(),
-            vacuumCatalogCrel.getUser(),
+            vacuumCatalogCrel.getUserName(),
             vacuumCatalogCrel.getSourceName(),
             vacuumCatalogCrel.getCostEstimates(),
             vacuumCatalogCrel.getVacuumOptions(),
             vacuumCatalogCrel.getFsScheme(),
-            vacuumCatalogCrel.getSchemeVariate()));
+            vacuumCatalogCrel.getSchemeVariate(),
+            vacuumCatalogCrel.getExcludedContentIDs()));
   }
 }

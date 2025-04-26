@@ -81,7 +81,9 @@ public class TestAllRowGroupsParquetReader extends BaseTestOperator {
   @Before
   public void before() throws Exception {
     TableFunctionPOP pop = new TableFunctionPOP(PROPS, null, null);
-    context = testContext.getNewOperatorContext(getTestAllocator(), pop, 4000, null);
+    context =
+        (OperatorContextImpl)
+            testContext.getNewOperatorContext(getTestAllocator(), pop, 4000, null);
     testCloseables.add(context);
     fs = HadoopFileSystem.getLocal(new Configuration());
     mutator = new SampleMutator(getTestAllocator());

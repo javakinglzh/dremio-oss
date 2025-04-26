@@ -73,8 +73,9 @@ public class JobsBasedRecommender implements JoinRecommender {
   @Override
   public JoinRecommendations recommendJoins(Dataset dataset) {
     try {
-      final List<FieldOrigin> fieldOriginsList =
-          listNotNull(dataset.getDatasetConfig().getFieldOriginsList());
+      // TODO DX-101113: This is a no-op without fieldOrigins, preventing us from giving join
+      // recommendations
+      final List<FieldOrigin> fieldOriginsList = List.of();
       if (fieldOriginsList.isEmpty()) {
         // we can't help at this point
         logger.warn("Could not find field origins in the provided dataset: " + dataset);

@@ -16,14 +16,11 @@
 package com.dremio.exec.planner.serializer.logical;
 
 import com.dremio.exec.planner.serializer.RelNodeSerde;
-import com.dremio.plan.serialization.PLogicalValueRecord;
 import com.dremio.plan.serialization.PLogicalValues;
-import com.dremio.plan.serialization.PRelDataTypeField;
-import java.util.List;
+import com.dremio.plan.serialization.PLogicalValues.PLogicalValueTuple;
+import com.google.common.collect.ImmutableList;
 import java.util.stream.Collectors;
 import org.apache.calcite.rel.logical.LogicalValues;
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexLiteral;
 
 /** Serde for LogicalValues */
@@ -31,19 +28,15 @@ public final class LogicalValuesSerde implements RelNodeSerde<LogicalValues, PLo
   @Override
   public PLogicalValues serialize(LogicalValues values, RelToProto s) {
     return PLogicalValues.newBuilder()
-        .addAllFields(
-            values.getRowType().getFieldList().stream()
-                .map(f -> toProto(f, s))
-                .collect(Collectors.toList()))
-        .addAllRecord(
+        .addAllFields(s.toProto(values.getRowType().getFieldList()))
+        .addAllTuples(
             values.tuples.stream()
                 .map(
-                    c -> {
-                      return PLogicalValueRecord.newBuilder()
-                          .addAllLiteral(
-                              c.asList().stream().map(s::toProto).collect(Collectors.toList()))
-                          .build();
-                    })
+                    c ->
+                        PLogicalValueTuple.newBuilder()
+                            .addAllLiteral(
+                                c.asList().stream().map(s::toProto).collect(Collectors.toList()))
+                            .build())
                 .collect(Collectors.toList()))
         .build();
   }
@@ -53,33 +46,15 @@ public final class LogicalValuesSerde implements RelNodeSerde<LogicalValues, PLo
     return (LogicalValues)
         s.builder()
             .values(
-                node.getRecordList().stream()
-                    .map(r -> toLiterals(r, s))
-                    .collect(Collectors.toList()),
-                fromProto(node.getFieldsList(), s))
+                node.getTuplesList().stream()
+                    .map(
+                        rec ->
+                            rec.getLiteralList().stream()
+                                .map(s::toRex)
+                                .map(RexLiteral.class::cast)
+                                .collect(ImmutableList.toImmutableList()))
+                    .collect(ImmutableList.toImmutableList()),
+                s.toRowType(node.getFieldsList()))
             .build();
-  }
-
-  private List<RexLiteral> toLiterals(PLogicalValueRecord rec, RelFromProto s) {
-    return rec.getLiteralList().stream()
-        .map(s::toRex)
-        .map(l -> ((RexLiteral) l))
-        .collect(Collectors.toList());
-  }
-
-  private PRelDataTypeField toProto(RelDataTypeField f, RelToProto s) {
-    return PRelDataTypeField.newBuilder()
-        .setName(f.getName())
-        .setIndex(f.getIndex())
-        .setType(s.toProto(f.getType()))
-        .build();
-  }
-
-  private RelDataType fromProto(List<PRelDataTypeField> fields, RelFromProto s) {
-    return s.builder()
-        .getTypeFactory()
-        .createStructType(
-            fields.stream().map(t -> s.toRelDataType(t.getType())).collect(Collectors.toList()),
-            fields.stream().map(PRelDataTypeField::getName).collect(Collectors.toList()));
   }
 }

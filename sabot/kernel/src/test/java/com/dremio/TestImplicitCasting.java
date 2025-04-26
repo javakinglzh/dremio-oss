@@ -28,7 +28,7 @@ public class TestImplicitCasting {
   public void testTimeStampAndTime() {
     final List<MinorType> inputTypes = Lists.newArrayList();
     inputTypes.add(MinorType.TIME);
-    inputTypes.add(MinorType.TIMESTAMP);
+    inputTypes.add(MinorType.TIMESTAMPMILLI);
     final MinorType result = TypeCastRules.getLeastRestrictiveType(inputTypes);
 
     assertEquals(result, MinorType.TIME);

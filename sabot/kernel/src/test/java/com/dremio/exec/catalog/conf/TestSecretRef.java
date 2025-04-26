@@ -23,7 +23,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
@@ -31,8 +30,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.SuppressForbidden;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.CredentialsServiceUtils;
@@ -88,7 +87,9 @@ public class TestSecretRef extends DremioTest {
 
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
   }
@@ -104,7 +105,9 @@ public class TestSecretRef extends DremioTest {
 
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
   }
@@ -121,7 +124,9 @@ public class TestSecretRef extends DremioTest {
 
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
   }
@@ -166,10 +171,9 @@ public class TestSecretRef extends DremioTest {
   @Test
   public void testDoNotEncryptSystemEncryptedSecretAgain() throws Exception {
     when(secretsCreator.encrypt(any())).thenReturn(Optional.of(new URI("system:encryptedSecret")));
-    when(secretsCreator.encrypt(contains("encryptedSecret")))
-        .thenThrow(new RuntimeException("Double encryption should not occur."));
+    when(secretsCreator.encrypt(eq("system:encryptedSecret"))).thenReturn(Optional.empty());
     when(secretsCreator.isEncrypted(anyString())).thenReturn(false);
-    when(secretsCreator.isEncrypted(eq("encryptedSecret"))).thenReturn(true);
+    when(secretsCreator.isEncrypted(eq("system:encryptedSecret"))).thenReturn(true);
 
     final SecretRefImpl systemEncryptedSecretRef = new SecretRefImpl("system:encryptedSecret");
     final SecretRefImpl plainTextSecretRef = new SecretRefImpl("system:@123");

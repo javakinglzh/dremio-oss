@@ -64,7 +64,7 @@ public class TestContextMigratingExecutorService {
     Callable<String> callable = () -> RequestContext.current().get(UserContext.CTX_KEY).getUserId();
     Future<String> future =
         RequestContext.empty()
-            .with(UserContext.CTX_KEY, new UserContext(testUser))
+            .with(UserContext.CTX_KEY, UserContext.of(testUser))
             .call(() -> pool.submit(callable));
     Assert.assertEquals(testUser, future.get());
   }
@@ -78,7 +78,7 @@ public class TestContextMigratingExecutorService {
         () -> foundUser.value = RequestContext.current().get(UserContext.CTX_KEY).getUserId();
     Future<?> future =
         RequestContext.empty()
-            .with(UserContext.CTX_KEY, new UserContext(testUser))
+            .with(UserContext.CTX_KEY, UserContext.of(testUser))
             .call(() -> pool.submit(runnable));
     future.get();
 

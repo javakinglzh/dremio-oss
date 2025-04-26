@@ -16,9 +16,9 @@
 package com.dremio.service.nessie;
 
 import com.dremio.datastore.api.KVStoreProvider;
+import com.dremio.legacy.org.projectnessie.versioned.persist.adapter.DatabaseConnectionConfig;
 import javax.inject.Provider;
 import org.immutables.value.Value;
-import org.projectnessie.versioned.persist.adapter.DatabaseConnectionConfig;
 
 @Value.Immutable
 public interface DatastoreDbConfig extends DatabaseConnectionConfig {

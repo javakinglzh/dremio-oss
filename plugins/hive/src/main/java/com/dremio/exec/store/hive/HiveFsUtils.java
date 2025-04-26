@@ -17,6 +17,7 @@ package com.dremio.exec.store.hive;
 
 import static com.dremio.io.file.UriSchemes.*;
 
+import com.dremio.io.file.Path;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
@@ -30,10 +31,12 @@ import com.google.common.collect.ImmutableList;
  */
 public class HiveFsUtils {
 
-  public static final List<String> SUPPORTED_SCHEME_LIST = ImmutableList.of(
-    "hdfs", DREMIO_S3_SCHEME, "s3a", S3_SCHEME,"s3n", DREMIO_S3_SCHEME,
-    DREMIO_GCS_SCHEME, GCS_SCHEME, DREMIO_GCS_SCHEME,
-    DREMIO_AZURE_SCHEME, AZURE_SCHEME, "wasb", "abfs", "abfss");
+  public static final List<String> SUPPORTED_SCHEME_LIST = ImmutableList.<String>builder()
+      .add("hdfs", DREMIO_S3_SCHEME, "s3a", S3_SCHEME,"s3n", DREMIO_S3_SCHEME,
+          DREMIO_GCS_SCHEME, GCS_SCHEME, DREMIO_GCS_SCHEME,
+          DREMIO_AZURE_SCHEME)
+      .addAll(Path.AZURE_FILE_SYSTEM)
+      .build();
 
   public static final String OLD_FS_CLASS_FORMAT = "fs.%s.impl.dremio.original";
   public static final String UNIQUE_CONF_IDENTIFIER_PROPERTY_NAME = "dremio.store.plugin.conf.uniqueIdentifier";

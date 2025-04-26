@@ -744,7 +744,7 @@ public class ITBackupManager extends BaseTestServer {
     } else {
       backupArgs = new String[] {"backup", tempPath, "false", "false"};
     }
-    final String vmid = VM.getProcessId();
+    final String vmid = Long.toString(VM.getProcessId());
     DremioAttach.main(vmid, backupArgs);
     // verify that repeated backup calls don't cause an exception
     DremioAttach.main(vmid, backupArgs);

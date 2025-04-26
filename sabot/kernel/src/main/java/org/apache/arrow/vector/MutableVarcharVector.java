@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.ReusableBuffer;
 import org.apache.arrow.vector.complex.reader.FieldReader;
 import org.apache.arrow.vector.holders.NullableVarCharHolder;
 import org.apache.arrow.vector.holders.VarCharHolder;
@@ -264,6 +265,7 @@ public class MutableVarcharVector extends BaseVariableWidthVector {
    * @param index position of element to get
    * @return array of bytes for non-null element, null otherwise
    */
+  @Override
   public byte[] get(int index) {
     assert index >= 0;
 
@@ -1025,5 +1027,10 @@ public class MutableVarcharVector extends BaseVariableWidthVector {
       current++;
     }
     Preconditions.checkArgument(validOffsetMap.isEmpty());
+  }
+
+  @Override
+  public void read(int index, ReusableBuffer<?> buffer) {
+    // This method was added for StringView support.
   }
 }

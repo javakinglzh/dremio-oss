@@ -28,7 +28,7 @@ import {
   getIcebergIconTypeFromEntity,
   getIconByEntityType,
 } from "utils/iconUtils";
-import { isArcticSource, isVersionedSource } from "@inject/utils/sourceUtils";
+import { isVersionedSource } from "@inject/utils/sourceUtils";
 
 import DatasetOverviewFormMixin from "dyn-load/pages/HomePage/components/modals/DatasetSettings/DatasetOverviewFormMixin";
 
@@ -47,7 +47,7 @@ export default class DatasetOverviewForm extends PureComponent {
       return null;
     }
 
-    const typeIcon = isArcticSource(source?.type)
+    const typeIcon = isVersionedSource(source?.type)
       ? getIcebergIconTypeFromEntity(entity)
       : getIconDataTypeFromEntity(entity);
 

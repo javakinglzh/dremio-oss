@@ -17,7 +17,10 @@ package com.dremio.sabot.op.join.nlj;
 
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.expression.CompleteType;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.compile.sig.GeneratorMapping;
 import com.dremio.exec.compile.sig.MappingSet;
 import com.dremio.exec.exception.ClassTransformationException;
@@ -32,6 +35,7 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.join.nlje.NLJEOperator;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.DualInputOperator;
 import com.google.common.base.Preconditions;
 import com.sun.codemodel.JExpr;
@@ -39,6 +43,8 @@ import com.sun.codemodel.JExpression;
 import com.sun.codemodel.JVar;
 import java.io.IOException;
 import java.util.LinkedList;
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 
 /*
@@ -47,6 +53,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 public class NLJOperator implements DualInputOperator {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(NLJOperator.class);
+  private static final long INT_SIZE = 4;
 
   // We accumulate all the batches on the right side in a hyper container.
   private ExpandableHyperContainer allRight;
@@ -56,6 +63,8 @@ public class NLJOperator implements DualInputOperator {
 
   private final OperatorContext context;
   private final NestedLoopJoinPOP config;
+  private final int rowSizeLimit;
+  private final boolean rowSizeLimitEnabled;
 
   // Left input to the nested loop join operator
   private VectorAccessible left;
@@ -69,6 +78,11 @@ public class NLJOperator implements DualInputOperator {
 
   // Runtime generated class implementing the NestedLoopJoin interface
   private NLJWorker nljWorker;
+
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private boolean rowSizeLimitEnabledForThisOperator;
 
   private enum LeftState {
     INIT,
@@ -84,6 +98,11 @@ public class NLJOperator implements DualInputOperator {
     this.context = context;
     this.config = config;
     this.outgoing = context.createOutputVectorContainer();
+    this.rowSizeLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
+    this.rowSizeLimit =
+        Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
   }
 
   @Override
@@ -102,6 +121,21 @@ public class NLJOperator implements DualInputOperator {
     outgoing.buildSchema(SelectionVectorMode.NONE);
     outgoing.setInitialCapacity(context.getTargetBatchSize());
     state = State.CAN_CONSUME_R;
+    createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      if (!VectorContainerHelper.isVarLenColumnPresent(outgoing)) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+      }
+    }
     return outgoing;
   }
 
@@ -161,7 +195,9 @@ public class NLJOperator implements DualInputOperator {
     if (leftState == LeftState.COMPLETED && currentOutputPosition >= 0) {
       // the left is completed and we have pending output.
       state = State.DONE;
-      return outgoing.setAllCount(currentOutputPosition);
+      int records = outgoing.setAllCount(currentOutputPosition);
+      checkForRowSizeOverLimit(records);
+      return records;
     }
 
     if (currentOutputPosition == 0) {
@@ -178,7 +214,6 @@ public class NLJOperator implements DualInputOperator {
       currentOutputPosition = 0;
       logger.debug("ran out of room {}", -outputIndex);
       return outgoing.setAllCount(-outputIndex);
-
     } else if (outputIndex > 0) {
       // we output data but didn't hit a boundary.
 
@@ -186,6 +221,7 @@ public class NLJOperator implements DualInputOperator {
         state = State.DONE;
         logger.debug("finished {}", outputIndex);
         outgoing.setAllCount(outputIndex);
+        checkForRowSizeOverLimit(outputIndex);
         return outputIndex;
       } else {
         // need more input, (emitted zero records or less than max).
@@ -314,9 +350,41 @@ public class NLJOperator implements DualInputOperator {
         context.getClassProducer().getFunctionContext(), left, allRight, rightCounts, outgoing);
   }
 
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator || recordCount <= 0) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
+  }
+
   @Override
   public void close() throws Exception {
     AutoCloseables.close((AutoCloseable) allRight, outgoing);
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   public static class Creator implements DualInputOperator.Creator<NestedLoopJoinPOP> {

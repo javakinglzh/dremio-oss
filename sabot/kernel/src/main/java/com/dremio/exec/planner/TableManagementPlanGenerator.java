@@ -162,7 +162,8 @@ public abstract class TableManagementPlanGenerator {
     PlannerSettings plannerSettings = PrelUtil.getPlannerSettings(cluster);
 
     // Union the updating of the deleted data's metadata with the rest
-    return getUnionPrel(plannerSettings, traits, manifestWriterPlan, deletedFilesTableFunctionPrel);
+    return getSingletonUnionPrel(
+        plannerSettings, traits, manifestWriterPlan, deletedFilesTableFunctionPrel);
   }
 
   protected ImmutableList<SchemaPath> getProjectedColumns() {
@@ -187,19 +188,25 @@ public abstract class TableManagementPlanGenerator {
             projectedCols, RecordWriter.SCHEMA, input.getCluster()));
   }
 
-  protected Prel getUnionPrel(
+  protected Prel getSingletonUnionPrel(
       PlannerSettings plannerSettings,
       RelTraitSet traits,
       RelNode manifestWriterPlan,
       RelNode input)
       throws InvalidRelException {
-    return new UnionAllPrel(
-        cluster,
-        traits,
-        ImmutableList.of(
-            fixRoundRobinTraits(manifestWriterPlan, plannerSettings),
-            fixRoundRobinTraits(new UnionExchangePrel(cluster, traits, input), plannerSettings)),
-        false);
+
+    UnionAllPrel union =
+        new UnionAllPrel(
+            cluster,
+            traits,
+            ImmutableList.of(
+                fixRoundRobinTraits(manifestWriterPlan, plannerSettings),
+                fixRoundRobinTraits(
+                    new UnionExchangePrel(cluster, traits, input), plannerSettings)),
+            false);
+
+    // add UnionExchange on top of Union to enforce singleton Union
+    return new UnionExchangePrel(cluster, traits, union);
   }
 
   protected RelNode fixRoundRobinTraits(RelNode input, PlannerSettings plannerSettings) {
@@ -281,5 +288,9 @@ public abstract class TableManagementPlanGenerator {
 
   protected RelNode buildRemoveSideDataFilePlan() {
     return null;
+  }
+
+  protected RelOptCluster getCluster() {
+    return cluster;
   }
 }

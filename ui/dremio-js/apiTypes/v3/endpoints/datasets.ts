@@ -105,8 +105,6 @@ export interface components {
       type?: "RAW" | "AGGREGATION";
       /** @description If the reflection should be available for accelerating queries, set to true. Otherwise, set to false. */
       enabled?: boolean;
-      /** @description If Dremio should convert data from the reflection's Parquet files to Apache Arrow format when copying that data to executor nodes, set to true. Otherwise, set to false (default). */
-      arrowCachingEnabled?: boolean;
       /** @description List of suggested display fields (for RAW reflections). */
       displayFields?: {
           /** @description Field name */

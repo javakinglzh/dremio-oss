@@ -30,7 +30,6 @@ import { compose } from "redux";
 
 import { getQueryStatuses } from "#oss/selectors/jobs";
 
-import DataGraph from "@inject/pages/ExplorePage/subpages/datagraph/DataGraph";
 import DetailsWizard from "components/Wizards/DetailsWizard";
 import { MARGIN_PANEL } from "uiTheme/radium/sizes";
 
@@ -89,7 +88,6 @@ import {
   extractQueries,
   extractSelections,
 } from "#oss/utils/statements/statementParser";
-import HistoryLineController from "../components/Timeline/HistoryLineController";
 import DatasetsPanel from "../components/SqlEditor/Sidebar/DatasetsPanel";
 import ExploreInfoHeader from "../components/ExploreInfoHeader";
 import ExploreHeader from "../components/ExploreHeader";
@@ -186,9 +184,12 @@ import { useScript } from "dremio-ui-common/sonar/scripts/providers/useScript.js
 import { generateNewTabName } from "dremio-ui-common/sonar/SqlRunnerSession/utilities/generateNewTabName.js";
 import { getSelectedSql } from "dremio-ui-common/sonar/components/Monaco/components/SqlEditor/helpers/getSqlSelections.js";
 import { PageTop } from "dremio-ui-common/components/PageTop.js";
-import { SearchTriggerWrapper } from "#oss/exports/searchModal/SearchTriggerWrapper";
+import SearchTriggerWrapper from "@inject/catalogSearch/SearchTriggerWrapper";
 import deepEqual from "deep-equal";
 import { CurrentTabIdProvider } from "#oss/exports/providers/CurrentTabIdProvider";
+import { QueryPageTable } from "../components/QueryPageTable/QueryPageTable";
+import { STORAGE_URI_FOLDER } from "@inject/endpoints/SupportFlags/supportFlagConstants";
+import { GraphRenderer } from "@inject/Lineage/GraphRenderer";
 
 const newQueryLink = newQuery();
 const HISTORY_BAR_WIDTH = 34;
@@ -530,6 +531,7 @@ export class ExplorePageContentWrapper extends PureComponent {
       dataset,
       queryStatuses,
       isMultiTabEnabled,
+      currentSql,
     } = this.props;
     // fetch support flags here for powerbi and tableau only if its not enterprise
     if (!(isEnterprise?.() || isCommunity?.())) {
@@ -538,6 +540,9 @@ export class ExplorePageContentWrapper extends PureComponent {
     }
     if (!isCommunity?.()) {
       this.props.fetchSupportFlags(REFLECTION_ARCTIC_ENABLED);
+    }
+    if (STORAGE_URI_FOLDER) {
+      this.props.fetchSupportFlags(STORAGE_URI_FOLDER);
     }
 
     // If the new_query page is loaded without a scriptId, redirect the user to the most
@@ -550,6 +555,10 @@ export class ExplorePageContentWrapper extends PureComponent {
       !dataset.get("sql")
     ) {
       this.redirectToLastUsedTab(this.props.router);
+    }
+
+    if (currentSql) {
+      this.setState({ currentSqlIsEmpty: false });
     }
 
     // load a script's saved jobs when going to the SQL Runner
@@ -604,8 +613,15 @@ export class ExplorePageContentWrapper extends PureComponent {
       this.handleQueryPath(location.query?.queryPath);
     }
 
-    // executes when opening a table and editing the query
-    if (isTabbableUrl(location) && dataset.get("sql")) {
+    // Creates a new script when opening a table and editing the query
+    // Checks POP to avoid creating a new script when clicking the Back button
+    // ex: create and run a script (dataset now exists) -> navigate to a dataset's wiki
+    // -> go back -> the first two conditions will be true but a new script should not be created
+    if (
+      isTabbableUrl(location) &&
+      dataset.get("sql") &&
+      location.action !== "POP"
+    ) {
       this.handlePureSql(
         dataset.get("sql"),
         queryStatuses,
@@ -688,6 +704,25 @@ export class ExplorePageContentWrapper extends PureComponent {
 
   scriptCreating = false;
 
+  doTabSelect = (tabId) => {
+    const script = ScriptsResource.getResource().value?.find(
+      (script) => script.id === tabId,
+    );
+    if (!script) {
+      return;
+    }
+    if (
+      this.props.isMultiQueryRunning &&
+      exploreUtils.hasUnsubmittedQueries(this.props.queryStatuses)
+    ) {
+      this.onLeaveTabWhileQueriesRunning(() =>
+        handleOpenTabScript(this.props.router)(script),
+      );
+    } else {
+      handleOpenTabScript(this.props.router)(script);
+    }
+  };
+
   componentDidUpdate(prevProps) {
     const {
       jobProgress,
@@ -715,6 +750,17 @@ export class ExplorePageContentWrapper extends PureComponent {
     const statusesArray = getStatusesArray(queryStatuses, jobSummaries);
 
     this.doObserve();
+
+    /**
+     * Handle clicking on script from next-gen search.
+     * This allows keeping the control flow the same otherwise script behavior needs to be refactored
+     * to have the scriptId queryparam actually control selecting the script
+     */
+    const searchScriptId = this.props.location.query?.scriptSearchResultId;
+    const prevSearchScriptId = prevProps.location.query?.scriptSearchResultId;
+    if (searchScriptId && prevSearchScriptId !== searchScriptId) {
+      this.doTabSelect(searchScriptId);
+    }
 
     // Clicking the query button from the ExplorePage search
     const loc = rmProjectBase(location.pathname);
@@ -1104,18 +1150,13 @@ export class ExplorePageContentWrapper extends PureComponent {
   };
 
   getNewEditorWidth = (sideBarWidth) => {
-    const { isArsEnabled, isArsLoading } = this.props;
     const { datasetDetailsCollapsed } = this.state;
     const datasetDetailsWidth = datasetDetailsCollapsed ? 36 : 320;
     if (this.explorePageRef?.current) {
-      const padding =
-        isArsEnabled || isArsLoading
-          ? SQL_EDITOR_PADDING
-          : HISTORY_BAR_WIDTH + SQL_EDITOR_PADDING;
       return (
         this.explorePageRef.current.offsetWidth -
         sideBarWidth -
-        padding -
+        SQL_EDITOR_PADDING -
         datasetDetailsWidth
       );
     }
@@ -1132,30 +1173,41 @@ export class ExplorePageContentWrapper extends PureComponent {
   };
 
   handleDatasetDetailsCollapse = () => {
+    const anchorEl = this.state.panelAnchorEl;
     this.setState(
       {
         datasetDetailsCollapsed: !this.state.datasetDetailsCollapsed,
+        panelAnchorId: undefined,
       },
-      () => this.handleResize(),
+      () => {
+        this.handleResize();
+        if (anchorEl) {
+          anchorEl.closest('[role="treeitem"]')?.focus?.(); // need to focus parent element to present details-icon element
+          anchorEl.focus?.();
+        }
+      },
     );
   };
 
-  handleDatasetDetails = (datasetDetails) => {
+  handleDatasetDetails = (datasetDetails, event) => {
     const stateDetails = this.state.datasetDetails;
-    const argDetails = datasetDetails;
+    const argDetails = datasetDetails.toJS
+      ? datasetDetails
+      : Immutable.fromJS(datasetDetails);
     const dataset = argDetails?.get("error")
       ? stateDetails?.merge(argDetails)
       : argDetails;
     if (
       stateDetails?.get("entityId") !== argDetails?.get("entityId") ||
       stateDetails?.size !== argDetails?.size ||
-      (datasetDetails?.get("fromTreeNode") &&
+      (argDetails?.get("fromTreeNode") &&
         stateDetails?.get("entityId") !== argDetails?.get("entityId"))
     ) {
       this.setState(
         {
           datasetDetails: dataset,
           datasetDetailsCollapsed: false,
+          ...(event?.target && { panelAnchorEl: event.target }),
         },
         () => this.handleResize(),
       );
@@ -1207,13 +1259,11 @@ export class ExplorePageContentWrapper extends PureComponent {
     switch (pageType) {
       case PageTypes.graph:
         return (
-          DataGraph && (
-            <DataGraph
-              dragType={EXPLORE_DRAG_TYPE}
-              dataset={dataset}
-              rightTreeVisible={this.props.rightTreeVisible}
-            />
-          )
+          <GraphRenderer
+            dataset={dataset}
+            rightTreeVisible={this.props.rightTreeVisible}
+            dragType={EXPLORE_DRAG_TYPE}
+          />
         );
       case PageTypes.wiki: {
         // should allow edit a wiki only if we receive a entity id and permissions allow this.
@@ -1235,7 +1285,13 @@ export class ExplorePageContentWrapper extends PureComponent {
       case PageTypes.reflections: {
         return <Reflections datasetId={entityId} />;
       }
-      case PageTypes.default:
+      case PageTypes.default: {
+        if (showJobsTable) {
+          return <QueryPageTable onQueryClick={this.onTabChange} />;
+        }
+      }
+
+      // @ts-expect-error allow fallthrough for PageTypes.default if not rendering queries
       case PageTypes.details:
         return (
           <ExploreTableController
@@ -1246,10 +1302,7 @@ export class ExplorePageContentWrapper extends PureComponent {
             rightTreeVisible={this.props.rightTreeVisible}
             exploreViewState={this.props.exploreViewState}
             canSelect={canSelect}
-            showJobsTable={showJobsTable}
-            handleTabChange={this.onTabChange}
             currentJobsMap={queryStatuses}
-            cancelPendingSql={this.cancelPendingSql}
             tabStatusArr={tabStatusArr}
             queryTabNumber={queryTabNumber}
             shouldRenderInvisibles
@@ -1599,12 +1652,12 @@ export class ExplorePageContentWrapper extends PureComponent {
 
     // Update state because datasetSql prop is not sent with the first component update
     if (prevProps.datasetSql !== datasetSql) {
-      if (datasetSql.length > 0) {
+      if (datasetSql?.length > 0) {
         this.setState({ datasetSqlIsEmpty: false });
       } else {
         this.setState({ datasetSqlIsEmpty: true });
       }
-    } else if (datasetSql.length > 0) {
+    } else if (datasetSql?.length > 0) {
       this.setState({ datasetSqlIsEmpty: false });
     }
   }
@@ -1659,8 +1712,6 @@ export class ExplorePageContentWrapper extends PureComponent {
     const {
       dataset,
       exploreViewState,
-      isArsEnabled,
-      isArsLoading,
       isMultiTabEnabled,
       isMultiQueryRunning,
       pageType,
@@ -1778,6 +1829,7 @@ export class ExplorePageContentWrapper extends PureComponent {
             className={clsx("dremioContent", {
               "--withTabs": isTabbable && isMultiTabEnabled,
             })}
+            {...(!isTabbable ? { id: "main", role: "main" } : {})}
           >
             {!(isTabbable && isMultiTabEnabled) && (
               <div className="dremioContent__header">
@@ -1829,17 +1881,6 @@ export class ExplorePageContentWrapper extends PureComponent {
                     className="dremioContent__content-tabpanel"
                   >
                     {this.getSidebar()}
-
-                    {!isArsLoading && !isArsEnabled ? (
-                      <HistoryLineController
-                        dataset={dataset}
-                        location={this.props.location}
-                        pageType={pageType}
-                      />
-                    ) : (
-                      <div />
-                    )}
-
                     <div
                       ref={this.observeRef}
                       className={clsx("dremioContent__content", {
@@ -1855,6 +1896,7 @@ export class ExplorePageContentWrapper extends PureComponent {
                             : EXPLORE_HEADER_HEIGHT,
                         ),
                       }}
+                      {...(isTabbable ? { id: "main", role: "main" } : {})}
                     >
                       <MultiTabIsEnabledProvider>
                         {isTabbable && (
@@ -1864,31 +1906,7 @@ export class ExplorePageContentWrapper extends PureComponent {
                                 $SqlRunnerSession.$merged.value?.scriptIds
                                   .length > 1
                               }
-                              onTabSelected={(tabId) => {
-                                const script =
-                                  ScriptsResource.getResource().value?.find(
-                                    (script) => script.id === tabId,
-                                  );
-                                if (!script) {
-                                  return;
-                                }
-                                if (
-                                  isMultiQueryRunning &&
-                                  exploreUtils.hasUnsubmittedQueries(
-                                    this.props.queryStatuses,
-                                  )
-                                ) {
-                                  this.onLeaveTabWhileQueriesRunning(() =>
-                                    handleOpenTabScript(this.props.router)(
-                                      script,
-                                    ),
-                                  );
-                                } else {
-                                  handleOpenTabScript(this.props.router)(
-                                    script,
-                                  );
-                                }
-                              }}
+                              onTabSelected={this.doTabSelect}
                               onTabClosed={(scriptId) => {
                                 const script =
                                   ScriptsResource.getResource().value?.find(

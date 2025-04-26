@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.sys;
 
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.work.CacheManagerMountPointInfo;
 import com.dremio.sabot.exec.context.OperatorContext;
 import java.util.Collections;
@@ -25,7 +25,7 @@ import java.util.Iterator;
 public class CacheManagerMountPointIterator implements Iterator<Object> {
   private final Iterator<CacheManagerMountPointInfo> iter;
 
-  CacheManagerMountPointIterator(SabotContext sabotContext, OperatorContext operatorContext) {
+  CacheManagerMountPointIterator(PluginSabotContext sabotContext, OperatorContext operatorContext) {
     iter =
         sabotContext.getFileSystemWrapper().isWrapperFor(CacheManagerStatsProvider.class)
             ? sabotContext
@@ -33,7 +33,7 @@ public class CacheManagerMountPointIterator implements Iterator<Object> {
                 .unwrap(CacheManagerStatsProvider.class)
                 .getMountPointStats()
                 .iterator()
-            : Collections.EMPTY_LIST.iterator();
+            : Collections.emptyIterator();
   }
 
   @Override

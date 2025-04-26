@@ -21,6 +21,8 @@ import static com.dremio.exec.store.easy.arrow.ArrowFormatPlugin.MAGIC_STRING;
 import static com.dremio.exec.store.easy.arrow.ArrowFormatPlugin.MAGIC_STRING_LENGTH;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.expr.TypeHelper;
@@ -36,6 +38,7 @@ import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.scan.OutputMutator;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -48,7 +51,9 @@ import java.util.Map;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.SerializedFieldHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.io.IOUtils;
@@ -60,6 +65,7 @@ import org.apache.commons.io.IOUtils;
 public class ArrowRecordReader extends AbstractRecordReader {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(ArrowRecordReader.class);
+  private static final long INT_SIZE = 4;
 
   private final FileSystem dfs;
   private final Path path;
@@ -75,6 +81,11 @@ public class ArrowRecordReader extends AbstractRecordReader {
   /** File can contain several record batches. This index points to the next record batch. */
   private int nextBatchIndex;
 
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private boolean rowSizeLimitEnabledForThisReader;
+
   public ArrowRecordReader(
       final OperatorContext context,
       final FileSystem dfs,
@@ -83,6 +94,7 @@ public class ArrowRecordReader extends AbstractRecordReader {
     super(context, columns);
     this.dfs = dfs;
     this.path = path;
+    this.rowSizeLimitEnabledForThisReader = rowSizeLimitEnabled;
   }
 
   @Override
@@ -158,6 +170,24 @@ public class ArrowRecordReader extends AbstractRecordReader {
       // Reset to beginning of the file
       inputStream.setPosition(0);
       nextBatchIndex = 0;
+
+      createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      this.variableVectorSizer = VectorContainerHelper.createSizer(vectors.values(), false);
+      for (ValueVector vv : vectors.values()) {
+        if (vv instanceof BaseFixedWidthVector) {
+          fixedDataLenPerRow += ((BaseFixedWidthVector) vv).getTypeWidth();
+        }
+      }
+
+      if (rowSizeLimitEnabled) {
+        if (fixedDataLenPerRow <= rowSizeLimit && variableVectorSizer.getVectorCount() == 0) {
+          rowSizeLimitEnabledForThisReader = false;
+        }
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+        }
+      }
     } catch (final Exception e) {
       String bestEffortMessage = bestEffortMessageForUnknownException(e.getCause());
       if (bestEffortMessage != null) {
@@ -246,6 +276,8 @@ public class ArrowRecordReader extends AbstractRecordReader {
         }
       }
 
+      checkForRowSizeOverLimit(recordCount);
+
       nextBatchIndex++;
 
       return recordCount;
@@ -258,6 +290,34 @@ public class ArrowRecordReader extends AbstractRecordReader {
     }
   }
 
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisReader) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        vectors.values(),
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.READ,
+        logger);
+  }
+
   @Override
   protected boolean supportsSkipAllQuery() {
     return true;
@@ -267,6 +327,10 @@ public class ArrowRecordReader extends AbstractRecordReader {
   public void close() throws Exception {
     if (inputStream != null) {
       inputStream.close();
+    }
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
     }
   }
 

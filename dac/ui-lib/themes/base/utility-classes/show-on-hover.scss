@@ -3,6 +3,7 @@
 }
 
 /* stylelint-disable selector-class-pattern */
-.show-on-hover__target:hover .show-on-hover {
+.show-on-hover__target:hover .show-on-hover,
+.show-on-hover__target:focus-within .show-on-hover {
   visibility: visible;
 }

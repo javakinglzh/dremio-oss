@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { Problem } from "@dremio/dremio-js/interfaces";
+import { Problem } from "@dremio/dremio-js/oss";
 import { SectionMessage } from "dremio-ui-lib/components";
 import { type FC } from "react";
 

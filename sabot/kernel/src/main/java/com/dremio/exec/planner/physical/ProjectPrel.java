@@ -59,7 +59,7 @@ public class ProjectPrel extends ProjectRelBase implements Prel {
   public static final boolean ALLOW_COMPLEX = true;
   public static final boolean ALLOW_GANDIVA_FUNCTIONS = true;
 
-  protected ProjectPrel(
+  public ProjectPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,

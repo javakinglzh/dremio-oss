@@ -118,7 +118,6 @@ public class AccelCreateReflectionHandler extends SimpleDirectHandler {
             table.qualifyColumns(addLayout.getSortList()),
             table.qualifyColumns(addLayout.getDistributionList()),
             partitionTransformList,
-            addLayout.getArrowCachingEnabled(),
             addLayout.getPartitionDistributionStrategy());
     accel.addLayout(table, layout, reflectionContext);
     return Collections.singletonList(SimpleCommandResult.successful("Layout added."));

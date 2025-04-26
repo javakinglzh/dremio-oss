@@ -181,4 +181,63 @@ public interface StructuredLogger<T> {
       parentLogger.error(mapper.apply(data), message, args);
     }
   }
+
+  final class TeeStructuredLogger<T> implements StructuredLogger<T> {
+    private final StructuredLogger<T> first;
+
+    private final StructuredLogger<T> second;
+
+    public TeeStructuredLogger(StructuredLogger<T> firstLogger, StructuredLogger<T> secondLogger) {
+      this.first = firstLogger;
+      this.second = secondLogger;
+    }
+
+    @Override
+    public void info(T data, String message) {
+      first.info(data, message);
+      second.info(data, message);
+    }
+
+    @Override
+    public void debug(T data, String message) {
+      first.debug(data, message);
+      second.debug(data, message);
+    }
+
+    @Override
+    public void warn(T data, String message) {
+      first.warn(data, message);
+      second.warn(data, message);
+    }
+
+    @Override
+    public void error(T data, String message) {
+      first.error(data, message);
+      second.error(data, message);
+    }
+
+    @Override
+    public void info(T data, String message, Object... args) {
+      first.info(data, message, args);
+      second.info(data, message, args);
+    }
+
+    @Override
+    public void debug(T data, String message, Object... args) {
+      first.debug(data, message, args);
+      second.debug(data, message, args);
+    }
+
+    @Override
+    public void warn(T data, String message, Object... args) {
+      first.warn(data, message, args);
+      second.warn(data, message, args);
+    }
+
+    @Override
+    public void error(T data, String message, Object... args) {
+      first.error(data, message, args);
+      second.error(data, message, args);
+    }
+  }
 }

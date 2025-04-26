@@ -15,12 +15,15 @@
  */
 package com.dremio.exec.catalog;
 
+import static org.apache.iceberg.TableProperties.FORMAT_VERSION;
+
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.DatasetStats;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.PartitionChunk;
+import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.connector.metadata.extensions.SupportsDeltaMetadata;
 import com.dremio.connector.metadata.extensions.SupportsIcebergMetadata;
 import com.dremio.exec.record.BatchSchema;
@@ -29,6 +32,7 @@ import com.dremio.service.Pointer;
 import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.MetadataProtoUtils;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
@@ -37,13 +41,15 @@ import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.dremio.service.namespace.dataset.proto.ScanStats;
 import com.dremio.service.namespace.dataset.proto.ScanStatsType;
+import com.dremio.service.namespace.dataset.proto.TableProperties;
+import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.dremio.service.namespace.proto.EntityId;
+import com.google.common.collect.ImmutableList;
 import io.protostuff.ByteString;
 import io.protostuff.ByteStringUtil;
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInput;
 import java.io.ObjectInputStream;
@@ -79,7 +85,16 @@ public final class MetadataObjectsUtils {
     if (handle instanceof DatasetTypeHandle) {
       shallowConfig.setType(((DatasetTypeHandle) handle).getDatasetType());
     } else {
-      shallowConfig.setType(DatasetType.PHYSICAL_DATASET);
+      // TODO(DX-99178): See if there is a better way to figure the type of Dataset - eg reintroduce
+      // DatasetTypeHandle which is deprecated
+      if (handle instanceof ViewDatasetHandle) {
+        shallowConfig.setType(DatasetType.VIRTUAL_DATASET);
+        VirtualDataset shallowVirtualDataset = new VirtualDataset();
+        shallowVirtualDataset.setVersion(DatasetVersion.newVersion());
+        shallowConfig.setVirtualDataset(shallowVirtualDataset);
+      } else {
+        shallowConfig.setType(DatasetType.PHYSICAL_DATASET);
+      }
     }
 
     return shallowConfig;
@@ -184,8 +199,18 @@ public final class MetadataObjectsUtils {
       icebergMetadata.setPartitionSpecsJsonMap(toProtostuff(newMetadata.getPartitionSpecs()));
       icebergMetadata.setDefaultPartitionSpecId(newMetadata.getDefaultPartitionSpecId());
       icebergMetadata.setSortOrder(newMetadata.getSortOrder());
-      icebergMetadata.setTablePropertiesList(
-          IcebergUtils.convertMapToTablePropertiesList(newMetadata.getTableProperties()));
+      // Add format-version to the ordinary table properties, if known
+      final ImmutableList.Builder<TableProperties> tablePropertiesBuilder =
+          ImmutableList.<TableProperties>builder()
+              .addAll(
+                  IcebergUtils.convertMapToTablePropertiesList(newMetadata.getTableProperties()));
+      if (null != newMetadata.getFormatVersion()) {
+        final TableProperties formatVersionProperty = new TableProperties();
+        formatVersionProperty.setTablePropertyName(FORMAT_VERSION);
+        formatVersionProperty.setTablePropertyValue(String.valueOf(newMetadata.getFormatVersion()));
+        tablePropertiesBuilder.add(formatVersionProperty);
+      }
+      icebergMetadata.setTablePropertiesList(tablePropertiesBuilder.build());
       if (newMetadata.getSnapshotId() > 0) {
         icebergMetadata.setSnapshotId(newMetadata.getSnapshotId());
       }
@@ -298,13 +323,7 @@ public final class MetadataObjectsUtils {
    * @return byte string
    */
   public static ByteString toProtostuff(BytesOutput out) {
-    ByteArrayOutputStream output = new ByteArrayOutputStream();
-    try {
-      out.writeTo(output);
-      return ByteStringUtil.wrap(output.toByteArray());
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+    return ByteStringUtil.wrap(out.toByteArray());
   }
 
   /**
@@ -325,6 +344,22 @@ public final class MetadataObjectsUtils {
    */
   public static EntityPath toEntityPath(NamespaceKey namespaceKey) {
     return new EntityPath(namespaceKey.getPathComponents());
+  }
+
+  public static boolean isShallowTable(DatasetConfig config) {
+    return config.getReadDefinition() == null;
+  }
+
+  public static boolean isShallowView(DatasetConfig config) {
+    return config.getType() == DatasetType.VIRTUAL_DATASET
+        && config.getVirtualDataset() != null
+        && config.getVirtualDataset().getSql() == null;
+  }
+
+  public static boolean isShallowDataset(DatasetConfig config) {
+    return config.getType() == DatasetType.VIRTUAL_DATASET
+        ? isShallowView(config)
+        : isShallowTable(config);
   }
 
   // prevent instantiation

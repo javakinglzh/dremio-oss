@@ -29,12 +29,19 @@ public class SplitIdentity implements Serializable {
   private final long offset;
   private final long length;
   private final long fileLength;
+  private final Long fileGroupIndex;
 
   public SplitIdentity(String path, long offset, long length, long fileLength) {
+    this(path, offset, length, fileLength, null);
+  }
+
+  public SplitIdentity(
+      String path, long offset, long length, long fileLength, Long fileGroupIndex) {
     this.path = path;
     this.offset = offset;
     this.length = length;
     this.fileLength = fileLength;
+    this.fileGroupIndex = fileGroupIndex;
   }
 
   public String getPath() {
@@ -51,5 +58,9 @@ public class SplitIdentity implements Serializable {
 
   public long getFileLength() {
     return fileLength;
+  }
+
+  public Long getFileGroupIndex() {
+    return fileGroupIndex;
   }
 }

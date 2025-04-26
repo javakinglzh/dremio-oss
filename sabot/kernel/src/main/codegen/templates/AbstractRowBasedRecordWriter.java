@@ -24,6 +24,7 @@ package com.dremio.exec.store;
 
 import org.apache.arrow.vector.holders.*;
 import com.dremio.exec.store.EventBasedRecordWriter.FieldConverter;
+import com.dremio.sabot.exec.context.OperatorContext;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.complex.reader.FieldReader;
 
@@ -34,6 +35,10 @@ import java.lang.UnsupportedOperationException;
  * generated from ${.template_name}
  */
 public abstract class AbstractRowBasedRecordWriter extends RowBasedRecordWriter {
+
+  public AbstractRowBasedRecordWriter(OperatorContext context) {
+    super(context);
+  }
 
   @Override
   public void setup() throws IOException {

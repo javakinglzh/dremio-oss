@@ -116,7 +116,7 @@ class FragmentStatusReporter {
         // no op.
         break;
       case FAILED:
-        // shouldn't get here since fail() should be called.
+      // shouldn't get here since fail() should be called.
       default:
         throw new IllegalStateException(
             String.format("Received state changed event for unexpected state of %s.", newState));

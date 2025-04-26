@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Button,
+  Checkbox,
   Tooltip,
   type TooltipPlacement,
 } from "dremio-ui-lib/components";
@@ -36,54 +37,60 @@ export const useSqlScriptsMultiSelect = (scripts: Record<string, any>[]) => {
     });
   };
 
-  const onCheckboxClick = (script: any) => (e: any) => {
-    if (
-      e.shiftKey &&
-      !!lastClickedId &&
-      !!scripts.find(({ id }) => id === lastClickedId)
-    ) {
-      const lastClickedIdx = scripts.findIndex(
-        ({ id }) => id === lastClickedId,
-      );
-      const clickedIdx = scripts.findIndex(({ id }) => id === script.id);
-
-      let start = lastClickedIdx;
-      let end = clickedIdx + 1;
-      if (lastClickedIdx > clickedIdx) {
-        start = clickedIdx;
-        end = lastClickedIdx + 1;
-      }
-
-      if (!selectedIds.has(script.id)) {
-        // Select range
-        setSelectedIds(
-          (ids) =>
-            new Set([...ids, ...scripts.slice(start, end).map(({ id }) => id)]),
+  const onCheckboxClick =
+    (script: any): React.ChangeEventHandler<HTMLInputElement> =>
+    (e: any) => {
+      if (
+        e.shiftKey &&
+        !!lastClickedId &&
+        !!scripts.find(({ id }) => id === lastClickedId)
+      ) {
+        const lastClickedIdx = scripts.findIndex(
+          ({ id }) => id === lastClickedId,
         );
-      } else {
-        //Deselect range
-        const deselectIds = scripts.slice(start, end).map(({ id }) => id);
-        setSelectedIds(
-          (ids) => new Set([...ids].filter((id) => !deselectIds.includes(id))),
-        );
-      }
-    } else {
-      if (!selectedIds.has(script.id)) {
-        selectScript(script.id);
-      } else {
-        deselectScript(script.id);
-      }
-    }
+        const clickedIdx = scripts.findIndex(({ id }) => id === script.id);
 
-    setLastClickedId(script.id);
-  };
+        let start = lastClickedIdx;
+        let end = clickedIdx + 1;
+        if (lastClickedIdx > clickedIdx) {
+          start = clickedIdx;
+          end = lastClickedIdx + 1;
+        }
+
+        if (!selectedIds.has(script.id)) {
+          // Select range
+          setSelectedIds(
+            (ids) =>
+              new Set([
+                ...ids,
+                ...scripts.slice(start, end).map(({ id }) => id),
+              ]),
+          );
+        } else {
+          //Deselect range
+          const deselectIds = scripts.slice(start, end).map(({ id }) => id);
+          setSelectedIds(
+            (ids) =>
+              new Set([...ids].filter((id) => !deselectIds.includes(id))),
+          );
+        }
+      } else {
+        if (!selectedIds.has(script.id)) {
+          selectScript(script.id);
+        } else {
+          deselectScript(script.id);
+        }
+      }
+
+      setLastClickedId(script.id);
+    };
 
   const selectedScripts = scripts.filter((script) =>
     selectedIds.has(script.id),
   );
 
   // Select/Deselect all
-  const onAllClick = (e: any) => {
+  const onAllClick: React.ChangeEventHandler<HTMLInputElement> = () => {
     if (selectedScripts.length === scripts.length) {
       setSelectedIds(new Set());
     } else {
@@ -180,13 +187,6 @@ export const ScriptSelectAllCheckbox = ({
     };
   }, [scripts, selectedScripts]);
 
-  const checkboxRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (checkboxRef.current) {
-      checkboxRef.current.indeterminate = indeterminate;
-    }
-  }, [indeterminate]);
-
   return (
     <div
       style={{
@@ -198,23 +198,19 @@ export const ScriptSelectAllCheckbox = ({
       }}
       className="flex shrink-0 items-center px-1"
     >
-      <label className="cursor-pointer flex items-center flex-1 full-height">
-        <input
-          ref={checkboxRef}
-          checked={checked}
-          onClick={onCheckboxClick}
-          className="form-control"
-          type="checkbox"
-          style={{
-            marginInlineEnd: "var(--scale-1)",
-          }}
-        />
-        <span>
-          {t("Sonar.Scripts.NumSelected", {
-            numSelected: selectedScripts.length,
-          })}
-        </span>
-      </label>
+      <Checkbox
+        className="flex-1 full-height gap-1"
+        onChange={onCheckboxClick}
+        checked={checked}
+        indeterminate={indeterminate}
+        label={
+          <span>
+            {t("Sonar.Scripts.NumSelected", {
+              numSelected: selectedScripts.length,
+            })}
+          </span>
+        }
+      />
       <Button variant="tertiary-danger" onClick={onDeleteClick}>
         {t("Common.Actions.Delete")}
       </Button>

@@ -133,7 +133,6 @@ const MultiSelectComponent = (props) => {
 
   const handleClose = () => {
     setShowMenu(false);
-    inputRef.current.blur(); // Todo: This doesn't work for some reason. Needs a fix.
   };
 
   const handleMenuItemClick = (selectedValue) => {
@@ -155,7 +154,6 @@ const MultiSelectComponent = (props) => {
       }
     }
     handleTypeAhead({ currentTarget: { value: "" } });
-    inputRef.current.focus();
   };
 
   const handleChipClick = (e) => {
@@ -169,24 +167,32 @@ const MultiSelectComponent = (props) => {
   };
 
   const handleInputKeyDown = (e) => {
+    if (e.key === "Escape" && showMenu) {
+      handleClose();
+      e.stopPropagation();
+      return;
+    }
+
     const noFilterText = !filterText || filterText === "";
     if (noFilterText && value && value.length > 0 && e.key === "Backspace") {
       removeValue(value[value.length - 1]);
     }
 
-    if (
-      !noFilterText &&
-      filteredValues.length === 1 &&
-      e.key === "Enter" &&
-      value.findIndex(
-        (selectedVal) =>
-          selectedVal.toLowerCase() === filteredValues[0].value.toLowerCase(),
-      ) === -1
-    ) {
-      addValue(filteredValues[0].value);
+    if (e.key === "Enter") {
+      e.preventDefault(); // Usually this exists in a form, so this will prevent the form submission
+      if (
+        !noFilterText &&
+        filteredValues.length === 1 &&
+        value.findIndex(
+          (selectedVal) =>
+            selectedVal.toLowerCase() === filteredValues[0].value.toLowerCase(),
+        ) === -1
+      ) {
+        addValue(filteredValues[0].value);
+      }
     }
 
-    if (!showMenu) {
+    if (!showMenu && e.key !== "Tab" && e.key !== "Shift") {
       setShowMenu(true);
     }
   };
@@ -265,12 +271,27 @@ const MultiSelectComponent = (props) => {
                   </span>
                 }
                 onClick={handleChipClick}
-                onDelete={
-                  selectedVal !== nonClearableValue && !showMenu
-                    ? (ev) => handleDelete(ev, selectedVal)
-                    : null
+                deleteIcon={
+                  <div
+                    tabIndex={0}
+                    onClick={(e) => {
+                      if (selectedVal !== nonClearableValue && !showMenu)
+                        handleDelete(e, selectedVal);
+                    }}
+                    onKeyDown={(e) => {
+                      if (
+                        selectedVal !== nonClearableValue &&
+                        !showMenu &&
+                        (e.code === "Space" || e.code === "Enter")
+                      )
+                        handleDelete(e, selectedVal);
+                    }}
+                    aria-label="remove"
+                    style={{ height: 24 }}
+                  >
+                    <XIcon />
+                  </div>
                 }
-                deleteIcon={<XIcon />}
               />
             );
           })}
@@ -289,12 +310,23 @@ const MultiSelectComponent = (props) => {
               ref={inputRef}
               onKeyDown={handleInputKeyDown}
               placeholder={placeholder && !hasValue ? placeholder : null}
+              disabled={disabled}
             />
           )}
         </div>
         <div className="multiSelect__iconContainer">
           {hasValue && !showMenu && (
-            <span className="multiSelect__clearIcon" onClick={handleClear}>
+            <span
+              tabIndex={0}
+              aria-label={"Clear selections"}
+              className="multiSelect__clearIcon"
+              onClick={handleClear}
+              onKeyDown={(e) => {
+                if (e.code === "Enter" || e.code === "Space") {
+                  handleClear(e);
+                }
+              }}
+            >
               <XIcon />
             </span>
           )}
@@ -423,6 +455,7 @@ const MultiSelectComponent = (props) => {
         PaperProps={{
           onScroll: handleScroll,
         }}
+        container={valueContainerRef.current || document.body}
       >
         {renderMenuItems()}
       </Menu>

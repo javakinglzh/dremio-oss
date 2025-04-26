@@ -46,7 +46,6 @@ public class S3FSHealthChecker implements FSHealthChecker {
   @Override
   public void healthCheck(Path path, Set<AccessMode> mode) throws IOException {
     try (CloseableResource<AmazonS3> s3Ref = getS3V1Client()) {
-      s3Ref.incrementRef();
       final AmazonS3 s3 = s3Ref.getResource();
       ListObjectsV2Request request = createRequestForS3HealthCheck(path);
       ListObjectsV2Result response = s3.listObjectsV2(request);

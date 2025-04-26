@@ -22,17 +22,25 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityForbiddenException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogException;
+import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.CatalogFolder;
+import com.dremio.catalog.model.ImmutableCatalogFolder;
+import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.catalog.model.VersionedDatasetId;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.ProtostuffUtil;
 import com.dremio.dac.explore.QueryExecutor;
@@ -40,8 +48,8 @@ import com.dremio.dac.explore.model.Dataset;
 import com.dremio.dac.explore.model.VersionContextReq;
 import com.dremio.dac.homefiles.HomeFileConf;
 import com.dremio.dac.model.common.Function;
-import com.dremio.dac.model.folder.Folder;
-import com.dremio.dac.model.folder.FolderName;
+import com.dremio.dac.model.folder.FolderBody;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.sources.FormatTools;
@@ -51,19 +59,21 @@ import com.dremio.dac.resource.SourceResource;
 import com.dremio.dac.server.BufferAllocatorFactory;
 import com.dremio.dac.service.collaboration.CollaborationHelper;
 import com.dremio.dac.service.datasets.DatasetVersionMutator;
+import com.dremio.dac.service.errors.ResourceExistsException;
+import com.dremio.dac.service.errors.ResourceForbiddenException;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.ImmutableVersionedListOptions;
 import com.dremio.exec.catalog.ImmutableVersionedListResponsePage;
 import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.SourceCatalog;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.catalog.conf.ConnectionConf;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
-import com.dremio.exec.store.NamespaceAlreadyExistsException;
 import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.dfs.InternalFileConf;
@@ -84,6 +94,8 @@ import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.namespace.source.proto.UpdateMode;
+import com.dremio.service.namespace.space.proto.FolderConfig;
+import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.reflection.ReflectionAdministrationService;
 import com.dremio.service.reflection.ReflectionSettings;
 import com.google.common.collect.ImmutableList;
@@ -94,8 +106,12 @@ import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import javax.inject.Provider;
+import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.SecurityContext;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -111,9 +127,13 @@ public class TestSourceService {
   private static final String DEFAULT_BRANCH_NAME = "somebranch";
   private static final VersionContext DEFAULT_VERSION_CONTEXT =
       VersionContext.ofBranch(DEFAULT_BRANCH_NAME);
+  private static final ResolvedVersionContext DEFAULT_RESOLVED_VERSION_CONTEXT =
+      ResolvedVersionContext.ofBranch(
+          DEFAULT_BRANCH_NAME, DigestUtils.sha256Hex(UUID.randomUUID().toString()));
   private static final String FOLDER_NAME_1 = "folder1";
   private static final String FOLDER_NAME_2 = "folder2";
   private static final String TABLE_NAME_1 = "table1";
+  private static final String CONTENT_ID = "b1f470a9-14fa-4dc5-aa2f-90a36e8c3a87";
   private static final List<ExternalNamespaceEntry> DEFAULT_ENTRIES =
       Arrays.asList(
           ExternalNamespaceEntry.of(Type.FOLDER, Collections.singletonList(FOLDER_NAME_1)),
@@ -145,7 +165,6 @@ public class TestSourceService {
   @Mock private ReflectionAdministrationService.Factory reflectionService;
   @Mock private SecurityContext securityContext;
   @Mock private CatalogService catalogService;
-  @Mock private StoragePlugin storagePlugin;
   @Mock private Catalog catalog;
   @Mock private ReflectionServiceHelper reflectionServiceHelper;
 
@@ -199,58 +218,10 @@ public class TestSourceService {
 
     assertThat(sourceConfig.getCtime()).isNull();
 
-    sourceService.createSource(sourceConfig);
+    sourceService.createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
-    assertThat(sourceConfig.getCtime()).isEqualTo(clock.millis());
-    verify(catalog, times(1)).createSource(eq(sourceConfig));
-  }
-
-  @ParameterizedTest
-  @ValueSource(strings = {"copy", "null", "zero"})
-  public void testUpdateSource(String timeSetOption) throws Exception {
-    Clock clock = Clock.fixed(Instant.now().plusSeconds(1), ZoneId.of("UTC"));
-    SourceService sourceService = getSourceService(clock);
-
-    final Principal principal = mock(Principal.class);
-    when(principal.getName()).thenReturn("username");
-    when(securityContext.getUserPrincipal()).thenReturn(principal);
-
-    final Catalog catalog = mock(Catalog.class);
-    when(catalogService.getCatalog(any())).thenReturn(catalog);
-
-    final ReflectionSettings reflectionSettings = mock(ReflectionSettings.class);
-    when(reflectionServiceHelper.getReflectionSettings()).thenReturn(reflectionSettings);
-
-    // Mock currently stored source.
-    SourceConfig currentSourceConfig = ProtostuffUtil.copy(SOURCE_CONFIG);
-    when(namespaceService.getSourceById(eq(currentSourceConfig.getId())))
-        .thenReturn(currentSourceConfig);
-
-    // Mock updated source.
-    SourceConfig updatedSourceConfig =
-        ProtostuffUtil.copy(currentSourceConfig).setAccelerationNeverRefresh(true);
-    switch (timeSetOption) {
-      case "copy":
-        updatedSourceConfig.setCtime(currentSourceConfig.getCtime());
-        break;
-      case "null":
-        updatedSourceConfig.setCtime(null);
-        break;
-      case "zero":
-        updatedSourceConfig.setCtime(0L);
-        break;
-      default:
-        throw new RuntimeException("Unexpected case: " + timeSetOption);
-    }
-
-    when(connectionReader.getConnectionConf(updatedSourceConfig))
-        .thenReturn(mock(ConnectionConf.class));
-
-    // Expect that the times are the same and the catalog was updated.
-    sourceService.updateSource(updatedSourceConfig.getId().getId(), updatedSourceConfig);
-    assertThat(updatedSourceConfig.getCtime()).isEqualTo(currentSourceConfig.getCtime());
-    assertThat(updatedSourceConfig.getLastModifiedAt()).isEqualTo(clock.millis());
-    verify(catalog, times(1)).updateSource(eq(updatedSourceConfig));
+    verify(catalog, times(1))
+        .createSource(eq(sourceConfig), eq(SourceRefreshOption.WAIT_FOR_DATASETS_CREATION));
   }
 
   @Test
@@ -285,10 +256,21 @@ public class TestSourceService {
   public void testGetSource() throws Exception {
     // Arrange
     complexMockSetup();
-    when(dataplanePlugin.listEntries(any(), eq(DEFAULT_VERSION_CONTEXT)))
+    final Principal principal = mock(Principal.class);
+    when(dataplanePlugin.resolveVersionContext(DEFAULT_VERSION_CONTEXT))
+        .thenReturn(DEFAULT_RESOLVED_VERSION_CONTEXT);
+    when(dataplanePlugin.listEntries(
+            any(),
+            eq(DEFAULT_RESOLVED_VERSION_CONTEXT),
+            eq(VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY),
+            eq(VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY)))
         .thenReturn(DEFAULT_ENTRIES.stream());
     SourceResource sourceResource = makeSourceResource();
     when(dataplanePlugin.getState()).thenReturn(SourceState.GOOD);
+    when(catalogService.getSource(anyString())).thenReturn(dataplanePlugin);
+    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
+    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
 
     // Act
     NamespaceTree contents =
@@ -300,13 +282,27 @@ public class TestSourceService {
 
   @Test
   public void testGetFolder() throws Exception {
+    final Principal principal = mock(Principal.class);
     // Arrange
     when(namespaceService.getDataset(any())).thenThrow(NamespaceNotFoundException.class);
+    when(catalogService.getSource(anyString())).thenReturn(dataplanePlugin);
+    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
+    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
 
-    when(dataplanePlugin.listEntries(any(), eq(DEFAULT_VERSION_CONTEXT)))
+    when(dataplanePlugin.resolveVersionContext(DEFAULT_VERSION_CONTEXT))
+        .thenReturn(DEFAULT_RESOLVED_VERSION_CONTEXT);
+    when(dataplanePlugin.listEntries(
+            any(),
+            eq(DEFAULT_RESOLVED_VERSION_CONTEXT),
+            eq(VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY),
+            eq(VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY)))
         .thenReturn(DEFAULT_ENTRIES.stream());
 
     SourceResource sourceResource = makeSourceResource();
+    when(dataplanePlugin.getState()).thenReturn(SourceState.GOOD);
+    when(dataplanePlugin.getFolder(any(CatalogEntityKey.class)))
+        .thenReturn(Optional.of(mock(FolderConfig.class)));
 
     // Act
     NamespaceTree contents =
@@ -319,127 +315,370 @@ public class TestSourceService {
   }
 
   @Test
-  public void testCreateFolder() {
+  public void testCreateFolder() throws CatalogException {
     SourceResource sourceResource = makeSourceResource();
+    final Principal principal = mock(Principal.class);
+    CatalogFolder catalogFolder = mock(CatalogFolder.class);
 
-    doNothing().when(dataplanePlugin).createNamespace(any(), eq(DEFAULT_VERSION_CONTEXT));
+    final NamespaceKey key = new NamespaceKey(List.of(SOURCE_NAME, FOLDER_NAME_1));
 
-    Folder folder =
+    final VersionedDatasetId versionedDatasetId =
+        VersionedDatasetId.newBuilder()
+            .setTableKey(key.getPathComponents())
+            .setContentId("b1f470a9-14fa-4dc5-aa2f-90a36e8c3a87")
+            .setTableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+            .build();
+
+    when(catalogFolder.id()).thenReturn(versionedDatasetId.asString());
+    when(catalogFolder.fullPath()).thenReturn(key.getPathComponents());
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    when(catalog.createFolder(any())).thenReturn(Optional.of(catalogFolder));
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+
+    FolderModel folder =
         sourceResource.createFolder(
-            null, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(FOLDER_NAME_1));
+            null, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderBody(FOLDER_NAME_1, null));
 
     assertThat(folder.getName()).isEqualTo(FOLDER_NAME_1);
     assertThat(folder.getIsPhysicalDataset()).isFalse();
+    assertThat(VersionedDatasetId.tryParse(folder.getId())).isEqualTo(versionedDatasetId);
   }
 
   @Test
-  public void testFolderIdForVersionedSources() {
+  public void testCreateFolderAlreadyExistsException() throws CatalogException {
+    SourceName sourceName = new SourceName("source");
+    final Principal principal = mock(Principal.class);
+    makeSourceResource();
+    SourceFolderPath folderPath = new SourceFolderPath("source.folder");
+    String userName = "user";
+    String storageUri = "uri";
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    doThrow(CatalogEntityAlreadyExistsException.class).when(catalog).createFolder(any());
+
+    assertThatThrownBy(
+            () ->
+                getSourceService()
+                    .createFolder(sourceName, folderPath, userName, null, null, storageUri))
+        .isInstanceOf(ResourceExistsException.class)
+        .hasMessageContaining("Folder source.folder already exists.");
+  }
+
+  @Test
+  public void testCreateFolderCatalogException() throws CatalogException {
+    SourceName sourceName = new SourceName("source");
+    final Principal principal = mock(Principal.class);
+    makeSourceResource();
+    SourceFolderPath folderPath = new SourceFolderPath("source.folder");
+    String userName = "user";
+    String storageUri = "uri";
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    doThrow(new CatalogEntityNotFoundException("That thang ain't found."))
+        .when(catalog)
+        .createFolder(any());
+
+    assertThatThrownBy(
+            () ->
+                getSourceService()
+                    .createFolder(sourceName, folderPath, userName, null, null, storageUri))
+        .isInstanceOf(WebApplicationException.class)
+        .hasMessageContaining("That thang ain't found.");
+  }
+
+  @Test
+  public void testCreateFolderThrowsResourceForbiddenException() throws CatalogException {
+    SourceName sourceName = new SourceName("source");
+    final Principal principal = mock(Principal.class);
+    makeSourceResource();
+    SourceFolderPath folderPath = new SourceFolderPath("source.folder");
+    String userName = "user";
+    String storageUri = "uri";
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    doThrow(CatalogEntityForbiddenException.class).when(catalog).createFolder(any());
+
+    assertThatThrownBy(
+            () ->
+                getSourceService()
+                    .createFolder(sourceName, folderPath, userName, null, null, storageUri))
+        .isInstanceOf(ResourceForbiddenException.class);
+  }
+
+  @Test
+  public void testDeleteFolderThrowsCatalogException() throws CatalogException {
+    SourceFolderPath folderPath = new SourceFolderPath("source.testFolder");
+    final Principal principal = mock(Principal.class);
+    makeSourceResource();
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+    VersionContext versionContext = VersionContext.NOT_SPECIFIED;
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+
+    doThrow(new CatalogEntityAlreadyExistsException("Catalog error"))
+        .when(catalog)
+        .deleteFolder(folderKey, null);
+
+    assertThatThrownBy(() -> getSourceService().deleteFolder(folderPath, null, null))
+        .isInstanceOf(RuntimeException.class)
+        .hasMessageContaining("Catalog error");
+  }
+
+  @Test
+  public void testUpdateFolderThrowsCatalogEntityNotFoundException() throws CatalogException {
+    SourceName sourceName = new SourceName("testSource");
+    final Principal principal = mock(Principal.class);
+    SourceFolderPath folderPath = new SourceFolderPath("testSource.testFolder");
+    String storageUri = "testUri";
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    VersionContext versionContext = VersionContext.NOT_SPECIFIED;
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    CatalogFolder inputCatalogFolder =
+        new ImmutableCatalogFolder.Builder()
+            .setFullPath(folderKey.getKeyComponents())
+            .setVersionContext(versionContext)
+            .setStorageUri(storageUri)
+            .build();
+
+    doThrow(
+            new CatalogEntityNotFoundException(
+                "Folder not found", new ReferenceNotFoundException()))
+        .when(catalog)
+        .updateFolder(inputCatalogFolder);
+
+    assertThatThrownBy(
+            () -> getSourceService().updateFolder(sourceName, folderPath, null, null, storageUri))
+        .isInstanceOf(UserException.class)
+        .hasMessageContaining("Folder testSource.testFolder does not exist.");
+  }
+
+  @Test
+  public void testUpdateFolderThrowsResourceForbiddenException() throws CatalogException {
+    SourceName sourceName = new SourceName("testSource");
+    final Principal principal = mock(Principal.class);
+    SourceFolderPath folderPath = new SourceFolderPath("testSource.testFolder");
+    String storageUri = "testUri";
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    VersionContext versionContext = VersionContext.NOT_SPECIFIED;
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(folderPath.toPathList())
+            .tableVersionContext(TableVersionContext.of(versionContext))
+            .build();
+    CatalogFolder inputCatalogFolder =
+        new ImmutableCatalogFolder.Builder()
+            .setFullPath(folderKey.getKeyComponents())
+            .setVersionContext(versionContext)
+            .setStorageUri(storageUri)
+            .build();
+
+    doThrow(new CatalogEntityForbiddenException("Forbidden"))
+        .when(catalog)
+        .updateFolder(inputCatalogFolder);
+
+    assertThatThrownBy(
+            () -> getSourceService().updateFolder(sourceName, folderPath, null, null, storageUri))
+        .isInstanceOf(ResourceForbiddenException.class);
+  }
+
+  @Test
+  public void testFolderIdForVersionedSources() throws CatalogException {
     String sourceName = "nessieSource";
+    CatalogFolder catalogFolder = mock(CatalogFolder.class);
     String folderId =
         "{\"tableKey\":[\"nessie_demo\",\"test\"],"
             + "\"contentId\":\"4c04aa93-a1c2-40e3-a3cd-63680617dcfb\","
             + "\"versionContext\":{\"type\":\"BRANCH\",\"value\":\"main\"}}";
     SourceConfig sourceConfig = SourceConfig.getDefaultInstance();
     sourceConfig.setId(new EntityId());
-    when(catalogService.getSource(sourceName)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
     when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
-    when(catalog.getSource(anyString())).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(catalog.resolveCatalog(anyMap())).thenReturn(catalog);
-    when(catalog.getDatasetId(any(NamespaceKey.class))).thenReturn(folderId);
+    when(catalogFolder.id()).thenReturn(folderId);
+    when(catalogFolder.fullPath()).thenReturn(Arrays.asList("nessie_demo", "test"));
+    when(catalog.createFolder(any())).thenReturn(Optional.of(catalogFolder));
+    final Principal principal = mock(Principal.class);
+    when(principal.getName()).thenReturn("username");
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
     SourceFolderPath sourceFolderPath = new SourceFolderPath("foo.bar");
-    Folder folder =
+    Optional<FolderModel> folder =
         getSourceService()
-            .createFolder(new SourceName(sourceName), sourceFolderPath, "bar", "BRANCH", "main");
-    assertThat(folder.getId()).isEqualTo(folderId);
+            .createFolder(
+                new SourceName(sourceName), sourceFolderPath, "bar", "BRANCH", "main", null);
+    assertThat(folder.get().getId()).isEqualTo(folderId);
   }
 
   @Test
-  public void testCreateFolderThrownNessieNamespaceAlreadyExistsException() {
+  public void testCreateFolderException() throws CatalogException {
     SourceResource sourceResource = makeSourceResource();
+    String sourceName = "nessieSource";
+    SourceFolderPath sourceFolderPath = new SourceFolderPath("foo.bar");
+    final Principal principal = mock(Principal.class);
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
 
-    doThrow(NamespaceAlreadyExistsException.class)
-        .doNothing()
-        .when(dataplanePlugin)
-        .createNamespace(any(), eq(DEFAULT_VERSION_CONTEXT));
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+
+    doThrow(CatalogEntityAlreadyExistsException.class).when(catalog).createFolder(any());
 
     assertThatThrownBy(
             () ->
-                sourceResource.createFolder(
-                    null, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(FOLDER_NAME_1)))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("already exists");
+                getSourceService()
+                    .createFolder(
+                        new SourceName(sourceName),
+                        sourceFolderPath,
+                        "user",
+                        "BRANCH",
+                        "main",
+                        null))
+        .isInstanceOf(ResourceExistsException.class);
   }
 
   @Test
-  public void testCreateFolderThrownReferenceNotFoundException() {
-    SourceResource sourceResource = makeSourceResource();
-
-    doThrow(ReferenceNotFoundException.class)
-        .doNothing()
-        .when(dataplanePlugin)
-        .createNamespace(any(), eq(DEFAULT_VERSION_CONTEXT));
-
-    assertThatThrownBy(
-            () ->
-                sourceResource.createFolder(
-                    null, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(FOLDER_NAME_1)))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("not found");
-  }
-
-  @Test
-  public void testCreateFolderWithSpaceInFolderName() {
+  public void testCreateFolderWithSpaceInFolderName() throws CatalogException {
     final String folderNameWithSpace = "folder with space";
-    SourceResource sourceResource = makeSourceResource();
+    SourceFolderPath sourceFolderPath =
+        SourceFolderPath.fromURLPath(new SourceName(SOURCE_NAME), folderNameWithSpace);
+    makeSourceResource();
+    CatalogFolder returnedCatalogFolder = mock(CatalogFolder.class);
 
-    Folder folder =
-        sourceResource.createFolder(
-            null, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(folderNameWithSpace));
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
+    final CatalogEntityKey key =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(SOURCE_NAME, folderNameWithSpace))
+            .tableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+            .build();
+    final VersionedDatasetId versionedDatasetId =
+        VersionedDatasetId.newBuilder()
+            .setTableKey(key.getKeyComponents())
+            .setContentId(CONTENT_ID)
+            .setTableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+            .build();
+    when(returnedCatalogFolder.id()).thenReturn(versionedDatasetId.asString());
+    when(returnedCatalogFolder.fullPath())
+        .thenReturn(Arrays.asList(SOURCE_NAME, folderNameWithSpace));
+    when(catalog.createFolder(any())).thenReturn(Optional.of(returnedCatalogFolder));
+    final Principal principal = mock(Principal.class);
+    when(principal.getName()).thenReturn("username");
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
 
-    verify(dataplanePlugin)
-        .createNamespace(
-            new NamespaceKey(Arrays.asList(SOURCE_NAME, folderNameWithSpace)),
-            DEFAULT_VERSION_CONTEXT);
-    assertThat(folder.getName()).isEqualTo(folderNameWithSpace);
-    assertThat(folder.getIsPhysicalDataset()).isFalse();
+    Optional<FolderModel> folder =
+        getSourceService()
+            .createFolder(
+                new SourceName(SOURCE_NAME),
+                sourceFolderPath,
+                "user",
+                DEFAULT_REF_TYPE,
+                DEFAULT_BRANCH_NAME,
+                null);
+
+    verify(catalog)
+        .createFolder(
+            new ImmutableCatalogFolder.Builder()
+                .setFullPath(key.getKeyComponents())
+                .setVersionContext(DEFAULT_VERSION_CONTEXT)
+                .build());
+    assertThat(folder.get().getName()).isEqualTo(folderNameWithSpace);
+    assertThat(folder.get().getIsPhysicalDataset()).isFalse();
+    assertThat(VersionedDatasetId.tryParse(folder.get().getId())).isEqualTo(versionedDatasetId);
   }
 
   @Test
-  public void testCreateFolderWithSpaceInFolderNameWithinNestedFolder() {
+  public void testCreateFolderWithSpaceInFolderNameWithinNestedFolder() throws CatalogException {
     final String rootFolderNameWithSpace = "folder with space";
     final String leafFolderNameWithSpace = "folder with another space";
-    final String path = "folder with space/";
-    SourceResource sourceResource = makeSourceResource();
+    SourceFolderPath sourceFolderPath =
+        SourceFolderPath.fromURLPath(
+            new SourceName(SOURCE_NAME), rootFolderNameWithSpace + "/" + leafFolderNameWithSpace);
+    final Principal principal = mock(Principal.class);
+    makeSourceResource();
+    CatalogFolder returnedCatalogFolder = mock(CatalogFolder.class);
 
-    Folder folder =
-        sourceResource.createFolder(
-            path, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(leafFolderNameWithSpace));
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
 
-    verify(dataplanePlugin)
-        .createNamespace(
-            new NamespaceKey(
-                Arrays.asList(SOURCE_NAME, rootFolderNameWithSpace, leafFolderNameWithSpace)),
-            DEFAULT_VERSION_CONTEXT);
-    assertThat(folder.getName()).isEqualTo(leafFolderNameWithSpace);
-    assertThat(folder.getIsPhysicalDataset()).isFalse();
+    final CatalogEntityKey key =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(
+                Arrays.asList(SOURCE_NAME, rootFolderNameWithSpace, leafFolderNameWithSpace))
+            .tableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+            .build();
+    final VersionedDatasetId versionedDatasetId =
+        VersionedDatasetId.newBuilder()
+            .setTableKey(key.getKeyComponents())
+            .setContentId(CONTENT_ID)
+            .setTableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+            .build();
+
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+    when(returnedCatalogFolder.id()).thenReturn(versionedDatasetId.asString());
+    when(returnedCatalogFolder.fullPath())
+        .thenReturn(Arrays.asList(SOURCE_NAME, rootFolderNameWithSpace, leafFolderNameWithSpace));
+    when(catalog.createFolder(any())).thenReturn(Optional.of(returnedCatalogFolder));
+    when(principal.getName()).thenReturn("username");
+    Optional<FolderModel> folder =
+        getSourceService()
+            .createFolder(
+                new SourceName(SOURCE_NAME),
+                sourceFolderPath,
+                "user",
+                DEFAULT_REF_TYPE,
+                DEFAULT_BRANCH_NAME,
+                null);
+
+    verify(catalog)
+        .createFolder(
+            new ImmutableCatalogFolder.Builder()
+                .setFullPath(key.getKeyComponents())
+                .setVersionContext(DEFAULT_VERSION_CONTEXT)
+                .build());
+    assertThat(folder.get().getName()).isEqualTo(leafFolderNameWithSpace);
+    assertThat(folder.get().getIsPhysicalDataset()).isFalse();
+    assertThat(VersionedDatasetId.tryParse(folder.get().getId())).isEqualTo(versionedDatasetId);
   }
 
   @Test
-  public void testDeleteFolder() {
+  public void testDeleteFolder() throws CatalogException {
     final String rootFolder = "rootFolder";
-    final String path = "";
+    SourceFolderPath sourceFolderPath =
+        new SourceFolderPath(Arrays.asList(SOURCE_NAME, rootFolder));
     SourceResource sourceResource = makeSourceResource();
+    final Principal principal = mock(Principal.class);
+    CatalogFolder catalogFolder = mock(CatalogFolder.class);
 
-    sourceResource.createFolder(
-        path, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME, new FolderName(rootFolder));
+    when(catalogService.getCatalog(any(MetadataRequestOptions.class))).thenReturn(catalog);
 
-    sourceResource.deleteFolder("rootFolder/", DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME);
-    verify(dataplanePlugin)
+    when(catalogFolder.id()).thenReturn("id");
+    when(catalogFolder.fullPath()).thenReturn(Arrays.asList(SOURCE_NAME, rootFolder));
+    when(catalog.createFolder(any())).thenReturn(Optional.of(catalogFolder));
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+
+    getSourceService()
+        .createFolder(
+            new SourceName(SOURCE_NAME),
+            sourceFolderPath,
+            "user",
+            DEFAULT_REF_TYPE,
+            DEFAULT_BRANCH_NAME,
+            null);
+
+    getSourceService().deleteFolder(sourceFolderPath, DEFAULT_REF_TYPE, DEFAULT_BRANCH_NAME);
+    verify(catalog)
         .deleteFolder(
-            new NamespaceKey(Arrays.asList(SOURCE_NAME, rootFolder)), DEFAULT_VERSION_CONTEXT);
+            CatalogEntityKey.newBuilder()
+                .keyComponents(Arrays.asList(SOURCE_NAME, rootFolder))
+                .tableVersionContext(TableVersionContext.of(DEFAULT_VERSION_CONTEXT))
+                .build(),
+            null);
   }
 
   @Test
@@ -470,7 +709,9 @@ public class TestSourceService {
     int maxResults = 3;
     when(dataplanePlugin.listEntriesPage(
             folderOrSource ? ImmutableList.of("folder") : ImmutableList.of(),
-            VersionContext.NOT_SPECIFIED,
+            dataplanePlugin.resolveVersionContext(VersionContext.NOT_SPECIFIED),
+            VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+            VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY,
             new ImmutableVersionedListOptions.Builder()
                 .setPageToken(pageToken)
                 .setMaxResultsPerPage(maxResults)
@@ -487,13 +728,19 @@ public class TestSourceService {
                     new SourceName("source"),
                     new SourceFolderPath(ImmutableList.of("source", "folder")),
                     null,
+                    null,
+                    null,
                     pageToken,
-                    maxResults)
+                    maxResults,
+                    false)
             : getSourceService()
-                .listSource(new SourceName("source"), null, null, pageToken, maxResults);
+                .listSource(
+                    new SourceName("source"), null, null, null, null, pageToken, maxResults, false);
     assertThat(tree.getNextPageToken()).isEqualTo(nextPageToken);
 
-    verify(dataplanePlugin, times(1)).listEntriesPage(any(), any(), any());
+    verify(dataplanePlugin, times(1))
+        .listEntriesPage(
+            any(), any(), any(), eq(VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY), any());
   }
 
   @Test
@@ -523,7 +770,7 @@ public class TestSourceService {
 
   private void assertMatchesDefaultEntries(NamespaceTree contents) {
 
-    List<Folder> folders = contents.getFolders();
+    List<FolderModel> folders = contents.getFolders();
     List<PhysicalDataset> physicalDatasets = contents.getPhysicalDatasets();
     List<File> files = contents.getFiles();
     List<Dataset> virtualDatasets = contents.getDatasets();
@@ -544,14 +791,6 @@ public class TestSourceService {
   }
 
   private SourceResource makeSourceResource() {
-    when(catalogService.getSource(anyString())).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
-
-    final Principal principal = mock(Principal.class);
-    when(principal.getName()).thenReturn("username");
-    when(securityContext.getUserPrincipal()).thenReturn(principal);
-
     final SourceService sourceService = getSourceService();
 
     return new SourceResource(
@@ -564,8 +803,10 @@ public class TestSourceService {
         connectionReader,
         mock(SourceCatalog.class),
         mock(FormatTools.class),
-        mock(SabotContext.class),
-        mock(BufferAllocatorFactory.class));
+        mock(BufferAllocatorFactory.class),
+        mock(OptionManager.class),
+        () -> mock(Orphanage.Factory.class),
+        catalogService);
   }
 
   private void complexMockSetup() throws NamespaceException {
@@ -596,7 +837,9 @@ public class TestSourceService {
 
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
 

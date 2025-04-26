@@ -16,6 +16,9 @@
 package com.dremio.exec.store.hive.exec;
 
 import com.dremio.common.FSConstants;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
+import com.dremio.io.file.Path;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -28,7 +31,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.Set;
 
-import static com.dremio.io.file.UriSchemes.AZURE_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_ABFSS_SCHEME;
+import static com.dremio.io.file.UriSchemes.AZURE_WASBS_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_AZURE_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_GCS_SCHEME;
 import static com.dremio.io.file.UriSchemes.DREMIO_HDFS_SCHEME;
@@ -62,14 +66,8 @@ public class FileSystemConfUtil {
   public static final Set<String> GCS_FILE_SYSTEM = ImmutableSet.of(GCS_SCHEME, DREMIO_GCS_SCHEME);
   public static final Set<String> S3_FILE_SYSTEM =
       ImmutableSet.of("s3a", S3_SCHEME, "s3n", DREMIO_S3_SCHEME);
-  public static final Set<String> AZURE_FILE_SYSTEM =
-      ImmutableSet.of(AZURE_SCHEME, "wasb", "abfs", "abfss");
+  public static final Set<String> AZURE_FILE_SYSTEM = Path.AZURE_FILE_SYSTEM;
   public static final Set<String> HDFS_FILE_SYSTEM = ImmutableSet.of(HDFS_SCHEME);
-
-  public static final ImmutableMap<String, String> ADL_PROPS =
-      ImmutableMap.of(
-          "fs.adl.impl", "org.apache.hadoop.fs.adl.AdlFileSystem",
-          "fs.AbstractFileSystem.adl.impl", "org.apache.hadoop.fs.adl.Adl");
 
   // Azure WASB and WASBS file system implementation
   public static final ImmutableMap<String, String> WASB_PROPS =
@@ -99,8 +97,7 @@ public class FileSystemConfUtil {
   public static ImmutableMap<String, String> FS_CACHE_DISABLES =
       ImmutableMap.of("fs.dremioS3.impl.disable.cache", "true",
       "fs.dremiogcs.impl.disable.cache", "true",
-      "fs.dremioAzureStorage.impl.disable.cache", "true",
-      "fs.dremioAdl.impl.disable.cache", "true");
+      "fs.dremioAzureStorage.impl.disable.cache", "true");
 
   public static void initializeConfiguration(URI name, Configuration conf) throws IOException {
     switch (name.getScheme()) {
@@ -128,7 +125,7 @@ public class FileSystemConfUtil {
     String accountName = getAccountNameFromURI(conf.get("authority"), uri);
     // strip any url information if any
     String accountNameWithoutSuffix = accountName.split("[.]")[0];
-    conf.set("dremio.azure.account", accountNameWithoutSuffix);
+    conf.set(AzureStorageConfProperties.ACCOUNT, accountNameWithoutSuffix);
     String authType = getAuthTypeForAccount(conf, accountName, accountNameWithoutSuffix);
     String key = null;
 
@@ -147,10 +144,24 @@ public class FileSystemConfUtil {
     } else if (authType.equals(AuthType.OAuth.name())) {
       updateOAuthConfig(conf, accountName, accountNameWithoutSuffix);
       conf.set("dremio.azure.credentialsType", "AZURE_ACTIVE_DIRECTORY");
+    } else if ("SAS".equals(authType)
+        && hasValueForProperty(
+        conf, "dremio.azure.sas-signature", accountName, accountNameWithoutSuffix)) {
+      conf.set("dremio.azure.credentialsType", AzureAuthenticationType.SAS_SIGNATURE.name());
     } else {
       throw new UnsupportedOperationException("This credentials type is not supported " + authType);
     }
 
+  }
+
+  private static boolean hasValueForProperty(
+      Configuration conf,
+      String propertyName,
+      String accountName,
+      String accountNameWithoutSuffix) {
+    return conf.get(getAccountConfigurationName(propertyName, accountName)) != null
+        || conf.get(getAccountConfigurationName(propertyName, accountNameWithoutSuffix)) != null
+        || conf.get(propertyName) != null;
   }
 
   private static String getAuthTypeForAccount(Configuration conf, String accountName, String accountNameWithoutSuffix) {

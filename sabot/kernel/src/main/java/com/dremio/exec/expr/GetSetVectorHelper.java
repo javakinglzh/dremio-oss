@@ -67,7 +67,7 @@ public class GetSetVectorHelper {
       case INTERVALYEAR:
       case DATE:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case BIT:
         eval.assign(out.getValue(), vector.invoke("get").arg(indexVariable));
         return;
@@ -140,7 +140,7 @@ public class GetSetVectorHelper {
       case INTERVALYEAR:
       case DATE:
       case TIME:
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
       case BIT:
       case DECIMAL9:
       case DECIMAL18:

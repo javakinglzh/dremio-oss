@@ -22,6 +22,7 @@ import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceUtils;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
 import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.namespace.space.proto.FolderConfig;
 import com.dremio.service.namespace.space.proto.HomeConfig;
@@ -46,6 +47,7 @@ public class ResourceTreeEntity {
   private List<ResourceTreeEntity> resources = null; // filled in only on expansion.
   private final ResourceType rootType; // can only be top level types i.e. SOURCE, SPACE, or HOME
   private Boolean metadataOutdated; // only for VIRTUAL_DATASET
+  private SourceChangeState sourceChangeState; // only for sources
 
   public ResourceTreeEntity(SourceConfig sourceConfig) throws UnsupportedEncodingException {
     this.type = ResourceType.SOURCE;
@@ -54,6 +56,7 @@ public class ResourceTreeEntity {
     this.url = null; // TODO can't explore sources yet
     this.id = sourceConfig.getId().getId();
     this.rootType = ResourceType.SOURCE;
+    this.sourceChangeState = sourceConfig.getSourceChangeState();
   }
 
   public ResourceTreeEntity(SpaceConfig spaceConfig) throws UnsupportedEncodingException {
@@ -114,6 +117,7 @@ public class ResourceTreeEntity {
     this.id = id;
     this.rootType = rootType;
     this.metadataOutdated = metadataOutdated;
+    this.sourceChangeState = null;
   }
 
   public ResourceType getType() {
@@ -142,6 +146,10 @@ public class ResourceTreeEntity {
 
   public Boolean getMetadataOutdated() {
     return metadataOutdated;
+  }
+
+  public SourceChangeState getSourceChangeState() {
+    return sourceChangeState;
   }
 
   public static ResourceType getResourceType(DatasetType type) {

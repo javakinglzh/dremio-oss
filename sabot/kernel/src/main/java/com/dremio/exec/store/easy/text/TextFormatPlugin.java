@@ -19,21 +19,23 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.physical.base.ScanStats;
 import com.dremio.exec.physical.base.ScanStats.GroupScanProperty;
 import com.dremio.exec.proto.UserBitShared.CoreOperatorType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.CompleteFileWork;
 import com.dremio.exec.store.dfs.FileDatasetHandle;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.easy.EasyFormatPlugin;
 import com.dremio.exec.store.dfs.easy.EasyGroupScanUtils;
 import com.dremio.exec.store.dfs.easy.EasyWriter;
 import com.dremio.exec.store.dfs.easy.ExtendedEasyReaderProperties;
 import com.dremio.exec.store.easy.text.compliant.CompliantTextRecordReader;
+import com.dremio.exec.store.easy.text.compliant.SchemaImposedTextRecordReader;
 import com.dremio.exec.store.easy.text.compliant.TextParsingSettings;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.text.TextRecordWriter;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -54,36 +56,33 @@ import org.apache.hadoop.mapred.FileSplit;
 public class TextFormatPlugin extends EasyFormatPlugin<TextFormatPlugin.TextFormatConfig> {
   private static final String DEFAULT_NAME = "text";
 
-  public TextFormatPlugin(String name, SabotContext context, FileSystemPlugin<?> fsPlugin) {
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
+  public TextFormatPlugin(
+      String name, PluginSabotContext context, SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         new TextFormatConfig(),
         true,
-        false,
-        true,
         true,
         Collections.<String>emptyList(),
-        DEFAULT_NAME,
-        fsPlugin);
+        DEFAULT_NAME);
   }
 
+  // NOTE: This constructor is used by FormatCreator through classpath scanning.
   public TextFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       TextFormatConfig formatPluginConfig,
-      FileSystemPlugin<?> fsPlugin) {
+      SupportsFsCreation supportsFsCreation) {
     super(
         name,
         context,
         formatPluginConfig,
         true,
-        false,
-        true,
         true,
         formatPluginConfig.getExtensions(),
-        DEFAULT_NAME,
-        fsPlugin);
+        DEFAULT_NAME);
   }
 
   @Override
@@ -101,7 +100,7 @@ public class TextFormatPlugin extends EasyFormatPlugin<TextFormatPlugin.TextForm
     TextParsingSettings settings = new TextParsingSettings();
     settings.set((TextFormatConfig) formatConfig);
     return new CompliantTextRecordReader(
-        split, getFsPlugin().getCompressionCodecFactory(), dfs, context, settings, columns);
+        split, HadoopCompressionCodecFactory.DEFAULT, dfs, context, settings, columns);
   }
 
   @Override
@@ -120,14 +119,9 @@ public class TextFormatPlugin extends EasyFormatPlugin<TextFormatPlugin.TextForm
             path, splitAttributes.getStart(), splitAttributes.getLength(), new String[] {""});
     TextParsingSettings settings = new TextParsingSettings();
     settings.set((TextFormatConfig) formatConfig);
-    if (properties.getExtendedFormatOptions() != null
-        && properties.getExtendedFormatOptions().getTrimSpace() != null) {
-      settings.setIgnoreTrailingWhitespaces(properties.getExtendedFormatOptions().getTrimSpace());
-      settings.setIgnoreLeadingWhitespaces(properties.getExtendedFormatOptions().getTrimSpace());
-    }
-    return new CompliantTextRecordReader(
+    return new SchemaImposedTextRecordReader(
         split,
-        getFsPlugin().getCompressionCodecFactory(),
+        HadoopCompressionCodecFactory.DEFAULT,
         dfs,
         context,
         settings,
@@ -313,11 +307,6 @@ public class TextFormatPlugin extends EasyFormatPlugin<TextFormatPlugin.TextForm
   @Override
   public int getWriterOperatorType() {
     return CoreOperatorType.TEXT_WRITER_VALUE;
-  }
-
-  @Override
-  public boolean supportsPushDown() {
-    return true;
   }
 
   @Override

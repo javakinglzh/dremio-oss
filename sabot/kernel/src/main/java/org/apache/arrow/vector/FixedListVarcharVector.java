@@ -34,6 +34,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.memory.ReusableBuffer;
 import org.apache.arrow.vector.complex.ListVector;
 import org.apache.arrow.vector.complex.impl.UnionListReader;
 import org.apache.arrow.vector.complex.impl.UnionListWriter;
@@ -395,6 +396,7 @@ public class FixedListVarcharVector extends BaseVariableWidthVector {
    * @param index position of element to get
    * @return array of bytes saved at the index.
    */
+  @Override
   public byte[] get(int index) {
     Preconditions.checkState(index >= 0 && index < head);
     if (super.isSet(index) == 0) {
@@ -1052,5 +1054,10 @@ public class FixedListVarcharVector extends BaseVariableWidthVector {
     if (dstIndex > 0) {
       compact();
     }
+  }
+
+  @Override
+  public void read(int index, ReusableBuffer<?> buffer) {
+    // This method was added for StringView support.
   }
 }

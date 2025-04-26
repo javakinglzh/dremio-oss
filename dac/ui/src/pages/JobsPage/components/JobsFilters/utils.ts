@@ -13,116 +13,87 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
-import {
-  jobsPageTableColumns,
-  JOB_COLUMNS,
-  getJobColumnLabels,
-  //@ts-ignore
-} from "dremio-ui-common/sonar/components/JobsTable/jobsPageTableColumns.js";
-import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
+import Immutable from "immutable";
+import moment from "#oss/utils/dayjs";
 import { isNotSoftware } from "dyn-load/utils/versionUtils";
-import { isEqual } from "lodash";
 
-export enum GenericFilters {
-  jst = "jst",
-  qt = "qt",
-  usr = "usr",
-  st = "st",
-  qn = "qn",
+import * as IntervalTypes from "./IntervalTypes";
+
+const defaultStartTime = new Date(2015, 0).getTime();
+
+type Interval = {
+  type: string;
+  label?: string;
+  time?: moment.Dayjs[];
+  dataQa?: string;
+};
+
+export const Intervals = (hideTimes?: boolean) =>
+  Object.freeze(
+    [
+      !hideTimes && {
+        type: IntervalTypes.LAST_HOUR_INTERVAL,
+        label: `Last Hour`,
+        time: [moment().subtract(1, "h"), moment()],
+        dataQa: "lastHours",
+      },
+      !hideTimes && {
+        type: IntervalTypes.LAST_6_HOURS_INTERVAL,
+        label: `Last 6 Hours`,
+        time: [moment().subtract(6, "h"), moment()],
+      },
+      {
+        type: IntervalTypes.LAST_1_DAY_INTERVAL,
+        label: `Last 24 Hours`,
+        time: [moment().subtract(1, "d"), moment()],
+      },
+      {
+        type: IntervalTypes.SEPARATOR,
+      },
+      {
+        type: IntervalTypes.LAST_3_DAYS_INTERVAL,
+        label: `Last 3 Days`,
+        time: [moment().subtract(3, "d"), moment()],
+      },
+      {
+        type: IntervalTypes.LAST_7_DAYS_INTERVAL,
+        label: `Last 7 Days`,
+        time: [moment().subtract(7, "d"), moment()],
+      },
+      !isNotSoftware() && {
+        type: IntervalTypes.LAST_30_DAYS_INTERVAL,
+        label: `Last 30 Days`,
+        time: [moment().subtract(30, "d"), moment()],
+      },
+      !isNotSoftware() && {
+        type: IntervalTypes.LAST_90_DAYS_INTERVAL,
+        label: `Last 90 Days`,
+        time: [moment().subtract(90, "d"), moment()],
+      },
+      !isNotSoftware() && {
+        type: IntervalTypes.SEPARATOR,
+      },
+      !isNotSoftware() && {
+        type: IntervalTypes.YEAR_TO_DATE_INTERVAL,
+        label: "Year to Date",
+        time: [moment().startOf("year"), moment()],
+      },
+      !isNotSoftware() && {
+        type: IntervalTypes.ALL_TIME_INTERVAL,
+        label: "All",
+        time: [moment(defaultStartTime), moment()], // start from 2015
+      },
+      {
+        type: IntervalTypes.SEPARATOR,
+      },
+      {
+        type: IntervalTypes.CUSTOM_INTERVAL,
+        label: "Custom",
+        time: [moment(), moment()],
+      },
+    ].filter(Boolean) as Interval[],
+  );
+
+export function getIntervals() {
+  return Immutable.fromJS(Intervals().filter((cur) => cur.time !== undefined));
 }
-
-export const FILTER_LABEL_IDS = {
-  [GenericFilters.jst]: "Common.Status",
-  [GenericFilters.qt]: "Common.Type",
-  [GenericFilters.usr]: "Common.User",
-  [GenericFilters.qn]: "Common.Queue",
-  [GenericFilters.st]: "",
-};
-
-export const itemsForStateFilter = [
-  { id: "SETUP", label: "Setup", icon: "job-state/setup" },
-  { id: "QUEUED", label: "Queued", icon: "job-state/queued" },
-  { id: "ENGINE_START", label: "Engine Start", icon: "job-state/engine-start" },
-  { id: "RUNNING", label: "Running", icon: "job-state/running" },
-  { id: "COMPLETED", label: "Completed", icon: "job-state/completed" },
-  { id: "CANCELED", label: "Canceled", icon: "job-state/cancel" },
-  { id: "FAILED", label: "Failed", icon: "job-state/failed" },
-];
-
-export const itemsForQueryTypeFilter = [
-  { id: "UI", label: "UI", default: true },
-  { id: "EXTERNAL", label: "External Tools", default: true },
-  { id: "ACCELERATION", label: "Accelerator", default: false },
-  { id: "INTERNAL", label: "Internal", default: false },
-  { id: "DOWNLOAD", label: "Downloads", default: false },
-];
-
-const disabledColumns = [
-  JOB_COLUMNS.accelerated,
-  JOB_COLUMNS.user,
-  JOB_COLUMNS.startTime,
-  JOB_COLUMNS.queryType,
-  JOB_COLUMNS.jobId,
-];
-
-const nonDefaultSelectedColumns = [
-  JOB_COLUMNS.plannerCostEstimate,
-  JOB_COLUMNS.planningTime,
-  JOB_COLUMNS.rowsScanned,
-  JOB_COLUMNS.rowsReturned,
-];
-
-export const getShowHideColumns = () => {
-  const cols = localStorageUtils?.getJobColumns();
-  const tableCols = jobsPageTableColumns(
-    undefined,
-    undefined,
-    undefined,
-    !isNotSoftware(),
-  );
-  const isValidColIds = isEqual(
-    (cols || []).map(({ id }: any) => id),
-    tableCols.map(({ id }) => id),
-  );
-
-  if (
-    cols &&
-    cols.find((col: any) => col.id === JOB_COLUMNS.jobId) &&
-    isValidColIds
-  ) {
-    return cols;
-  } else {
-    localStorageUtils?.clearJobColumns();
-    const newCols = tableCols.map((col: any, idx: number) => ({
-      id: col.id,
-      disabled: disabledColumns.includes(col.id),
-      sort: idx,
-      selected: !nonDefaultSelectedColumns.includes(col.id),
-    }));
-    return newCols;
-  }
-};
-
-export const transformToItems = (columns: any[]) => {
-  const jobColumnLabels = getJobColumnLabels();
-  return columns.map((col: any) => ({
-    key: col.id,
-    id: col.id,
-    label: jobColumnLabels[col.id as keyof typeof JOB_COLUMNS],
-    disableSort: undefined,
-    isSelected: col.selected,
-    width: 122,
-    height: 40,
-    flexGrow: "0",
-    flexShrink: "0",
-    isFixedWidth: false,
-    isDraggable: col.id !== JOB_COLUMNS.jobId,
-    headerClassName: "",
-    disabled: col.disabled,
-  }));
-};
-
-export const transformToSelectedItems = (columns: any[]) => {
-  return columns.filter((col: any) => col.selected).map((col: any) => col.id);
-};

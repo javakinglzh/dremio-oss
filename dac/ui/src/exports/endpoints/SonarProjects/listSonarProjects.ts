@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import { getUsersDetails } from "../Users/getUsersDetails";
-import { UserDetails } from "../Users/UserDetails.type";
 import { transformSonarProject } from "./transformSonarProject";
 import { APIV2Call } from "#oss/core/APICall";
 import { getApiContext } from "dremio-ui-common/contexts/ApiContext.js";
@@ -30,7 +28,6 @@ export type SonarProject = {
   type: "QUERY_ENGINE";
   cloudType: typeof VENDORS.AWS | typeof VENDORS.AZURE;
   createdBy: string;
-  createdByDetails?: UserDetails;
   projectStore: string;
   credentials: {
     type:
@@ -45,9 +42,6 @@ export type SonarProject = {
 
 type ListSonarProjectsParams = {
   filterTypes?: SonarProject["type"][];
-  include?: {
-    createdByDetails?: boolean;
-  };
 };
 
 export const listSonarProjects = (
@@ -63,18 +57,6 @@ export const listSonarProjects = (
         filteredProjects = filteredProjects.filter((project) =>
           params.filterTypes?.includes(project.type),
         );
-      }
-
-      if (params.include?.createdByDetails === true) {
-        const userDetails = await getUsersDetails({
-          ids: filteredProjects.map((project) => project.createdBy),
-        });
-        filteredProjects = filteredProjects.map((project) => {
-          return {
-            ...project,
-            createdByDetails: userDetails.get(project.createdBy),
-          };
-        });
       }
 
       return filteredProjects.map(transformSonarProject);

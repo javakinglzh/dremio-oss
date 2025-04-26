@@ -17,10 +17,13 @@ package com.dremio.exec.planner.serializer;
 
 import com.dremio.exec.planner.serializer.RelNodeSerde.RelToProto;
 import com.dremio.plan.serialization.PRelDataType;
+import com.dremio.plan.serialization.PRelDataTypeField;
 import com.dremio.plan.serialization.PRelList;
+import com.dremio.plan.serialization.PRexLiteral;
 import com.dremio.plan.serialization.PRexNode;
 import com.dremio.plan.serialization.PRexWindowBound;
 import com.dremio.plan.serialization.PSqlOperator;
+import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Any;
 import com.google.protobuf.Message;
 import java.util.ArrayList;
@@ -28,6 +31,8 @@ import java.util.List;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeField;
+import org.apache.calcite.rex.RexLiteral;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexWindowBound;
 import org.apache.calcite.sql.SqlOperator;
@@ -75,6 +80,16 @@ class RelSerializer implements RelToProto {
   @Override
   public PRexNode toProto(RexNode node) {
     return node.accept(rex);
+  }
+
+  @Override
+  public ImmutableList<PRelDataTypeField> toProto(List<RelDataTypeField> fieldList) {
+    return fieldList.stream().map(type::toProto).collect(ImmutableList.toImmutableList());
+  }
+
+  @Override
+  public PRexLiteral toProtoLiteral(RexLiteral rexLiteral) {
+    return rex.toProto(rexLiteral);
   }
 
   @Override

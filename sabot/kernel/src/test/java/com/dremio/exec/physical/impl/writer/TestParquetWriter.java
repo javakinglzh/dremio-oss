@@ -17,6 +17,7 @@ package com.dremio.exec.physical.impl.writer;
 
 import static com.dremio.exec.store.parquet.ParquetRecordWriter.DREMIO_VERSION_PROPERTY;
 import static org.apache.parquet.format.converter.ParquetMetadataConverter.SKIP_ROW_GROUPS;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -40,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -50,6 +52,7 @@ import org.apache.parquet.format.PageHeader;
 import org.apache.parquet.format.PageType;
 import org.apache.parquet.format.Util;
 import org.apache.parquet.hadoop.ParquetFileReader;
+import org.apache.parquet.hadoop.metadata.CompressionCodecName;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
 import org.joda.time.Period;
 import org.junit.Assert;
@@ -458,6 +461,82 @@ public class TestParquetWriter extends BaseTestQuery {
       deleteTableIfExists(outputTableMinLevel);
       deleteTableIfExists(outputTableMaxLevel);
     }
+  }
+
+  /** Tests Iceberg table properties taking into account at Parquet writes. */
+  @Test
+  public void testIcebergTableProperties() throws Exception {
+    String outputTableMinLevel = "iceberg_properties_minlevel";
+    String outputTableMaxLevel = "iceberg_properties_maxlevel";
+    Map<String, String> tblProperties = Map.of("write.parquet.compression-codec", "zstd");
+    try {
+      // Set the session parameters differently than the table properties to test precedence
+      test(
+          String.format(
+              "ALTER SESSION SET \"%s\" = 'none'", ExecConstants.PARQUET_WRITER_COMPRESSION_TYPE));
+
+      Map<String, String> mutableTblProperties = new HashMap<>(tblProperties);
+      mutableTblProperties.put("write.parquet.compression-level", "-9");
+      test(
+          "CREATE TABLE dfs_test.\"%s\"  TBLPROPERTIES (%s) STORE AS (type => 'iceberg') AS SELECT * FROM cp.\"tpch/supplier.parquet\"",
+          outputTableMinLevel, toSqlTblProperties(mutableTblProperties));
+
+      mutableTblProperties.put("write.parquet.compression-level", "9");
+      test(
+          "CREATE TABLE dfs_test.\"%s\" TBLPROPERTIES (%s) STORE AS (type => 'iceberg') AS SELECT * FROM cp.\"tpch/supplier.parquet\"",
+          outputTableMaxLevel, toSqlTblProperties(mutableTblProperties));
+
+      // The only way to check if the level arrives to the compressor is to check the sizes of the
+      // generated files
+      long minLevelSize =
+          calculateSize(new Path(getDfsTestTmpSchemaLocation(), outputTableMinLevel));
+      long maxLevelSize =
+          calculateSize(new Path(getDfsTestTmpSchemaLocation(), outputTableMaxLevel));
+      assertTrue(
+          "The parquet files generated with minimum ZSTD compression level should be bigger than the"
+              + " ones generated with maximum compression level",
+          minLevelSize > maxLevelSize);
+
+      validateParquetProperties(
+          new Path(getDfsTestTmpSchemaLocation(), outputTableMinLevel), tblProperties);
+      validateParquetProperties(
+          new Path(getDfsTestTmpSchemaLocation(), outputTableMaxLevel), tblProperties);
+
+    } finally {
+      test(
+          String.format(
+              "ALTER SESSION RESET \"%s\"", ExecConstants.PARQUET_WRITER_COMPRESSION_TYPE));
+      deleteTableIfExists(outputTableMinLevel);
+      deleteTableIfExists(outputTableMaxLevel);
+    }
+  }
+
+  private void validateParquetProperties(Path path, Map<String, String> tblProperties)
+      throws IOException {
+    String codec = tblProperties.get("write.parquet.compression-codec");
+
+    Configuration conf = new Configuration(false);
+    FileSystem fs = path.getFileSystem(conf);
+    for (FileStatus file : fs.listStatus(path)) {
+      if (file.isFile() && file.getPath().getName().endsWith(".parquet")) {
+        ParquetMetadata footer = ParquetFileReader.readFooter(conf, file);
+        if (codec != null) {
+          // It is enough to check one column chunk only, because we use the same compression codec
+          // for the entire file
+          assertEquals(
+              "The compression codec used for the Parquet file is not what was configured in the"
+                  + " Iceberg table property",
+              CompressionCodecName.valueOf(codec.toUpperCase()),
+              footer.getBlocks().get(0).getColumns().get(0).getCodec());
+        }
+      }
+    }
+  }
+
+  private String toSqlTblProperties(Map<String, String> mutableTblProperties) {
+    return mutableTblProperties.entrySet().stream()
+        .map(e -> '\'' + e.getKey() + "' = '" + e.getValue() + '\'')
+        .collect(Collectors.joining(", "));
   }
 
   private long calculateSize(Path path) throws IOException {
@@ -1060,6 +1139,46 @@ public class TestParquetWriter extends BaseTestQuery {
       test(
           String.format(
               "ALTER SESSION RESET %s", ExecConstants.PARQUET_WRITER_VERSION.getOptionName()));
+    }
+  }
+
+  @Test
+  @Ignore("DX-98274")
+  public void testListOfNullTypedListIsNotWritten() throws Exception {
+    try {
+      runSQL(
+          "CREATE TABLE dfs_test.unionWithNullTypedList STORE AS (type => 'parquet') AS "
+              + "SELECT CONVERT_FROM('{ a: 1, b: [ [ [] ] ] }', 'json') AS f");
+
+      assertThatThrownBy(() -> runSQL("SELECT t.f.b FROM dfs_test.unionWithNullTypedList t"))
+          .hasMessageContaining("Column 'f.b' not found in table 't'");
+    } finally {
+      runSQL("DROP TABLE IF EXISTS dfs_test.unionWithNullTypedList");
+    }
+  }
+
+  @Test
+  public void testUnionWithNullTypedList() throws Exception {
+    try {
+      runSQL(
+          "CREATE TABLE dfs_test.unionWithNullTypedList STORE AS (type => 'parquet') AS "
+              + "SELECT CONVERT_FROM('{ a: 1, b: [ 1, \"a\", [], 2, 3, \"b\", 4, [] ] }', 'json') AS f");
+
+      testBuilder()
+          .unOrdered()
+          .sqlQuery(
+              "SELECT t.f.a AS a, FLATTEN(t.f.b) AS b " + "FROM dfs_test.unionWithNullTypedList t")
+          .baselineColumns("a", "b")
+          .baselineValues(1L, "1")
+          .baselineValues(1L, "a")
+          .baselineValues(1L, "2")
+          .baselineValues(1L, "3")
+          .baselineValues(1L, "b")
+          .baselineValues(1L, "4")
+          .build()
+          .run();
+    } finally {
+      runSQL("DROP TABLE IF EXISTS dfs_test.unionWithNullTypedList");
     }
   }
 

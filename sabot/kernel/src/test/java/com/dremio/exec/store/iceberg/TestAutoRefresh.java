@@ -17,6 +17,7 @@ package com.dremio.exec.store.iceberg;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.exec.catalog.ManagedStoragePlugin;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.store.CatalogService;
@@ -72,7 +73,9 @@ public class TestAutoRefresh extends BaseTestQuery {
             .setNamesRefreshMs(0L)
             .setDatasetDefinitionExpireAfterMs(Long.MAX_VALUE));
     config.setConfig(nasConf.toBytesString());
-    catalogService.getSystemUserCatalog().createSource(config);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @Test

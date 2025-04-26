@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import Immutable from "immutable";
+import type { CatalogReference } from "@dremio/dremio-js/oss";
 import { splitFullPath, constructFullPath } from "utils/pathUtils";
 import {
   CONTAINER_ENTITY_TYPES,
@@ -27,18 +28,18 @@ import additionalResourceTreeUtils from "@inject/shared/AdditionalResourceTreeUt
 export const starTabNames = {
   all: "All",
   starred: "Starred",
-};
+} as const;
 
 export const DATA_SCRIPT_TABS = {
   Data: "Data",
   Scripts: "Scripts",
-};
+} as const;
 
 export const entityTypes = {
   container: "container",
   dataset: "dataset",
   columnItem: "columnItem",
-};
+} as const;
 
 export const STARRED_VIEW_ID = "StarredItems";
 export const RESOURCE_TREE_VIEW_ID = "ResourceTree";
@@ -390,7 +391,7 @@ export function clearResourceTree(
   return state.set(treeContextName, Immutable.fromJS([]));
 }
 
-function getResourceByName(node: any, tree: any) {
+function getResourceByFullPath(node: any, tree: any) {
   return tree.find(
     (child: any) => child.get("name") === node.getIn(["fullPath", 0]),
   );
@@ -405,6 +406,28 @@ export function getFullPathFromResourceTree(node: any) {
     const root = fullPath.shift();
     fullPath = [root, "folder", ...fullPath];
   }
-  const rootSource = getResourceByName(node, tree);
+  const rootSource = getResourceByFullPath(node, tree);
+  return [rootSource?.get("type")?.toLowerCase(), ...fullPath].join("/");
+}
+
+function getResourceByName(name: string, tree: any[]) {
+  return tree.find((child) => child.get("name") === name);
+}
+
+export function getFullPathFromCatalogReference(
+  catalogReference: CatalogReference,
+) {
+  const tree = getResourceTree(store.getState());
+
+  let fullPath = catalogReference.path.map((part) => encodeURIComponent(part));
+  const rootName = catalogReference.path[0];
+
+  if (catalogReference.type === "FOLDER") {
+    const root = fullPath.shift() as string;
+    fullPath = [root, "folder", ...fullPath];
+  }
+
+  const rootSource = getResourceByName(rootName, tree);
+
   return [rootSource?.get("type")?.toLowerCase(), ...fullPath].join("/");
 }

@@ -233,7 +233,7 @@ public class AccumulatorBuilder {
    * @param jointAllocationMin Minimum size of combined accumulators buffers in AccumulatorSet
    * @param jointAllocationLimit Maximum size of combined accumulators buffers in AccumulatorSet
    * @param decimalV2Enabled
-   * @param tempAccumulatorHolder Temporary accumulator to copy the variable records from Mutable
+   * @param tempAccumulatorHolders Temporary accumulator to copy the variable records from Mutable
    *     varchar vector, where the records were not stored in record order. These temporary
    *     accumulator buffers hold the data to be spilled.
    * @return A Nested accumulator that holds individual sub-accumulators.
@@ -254,8 +254,8 @@ public class AccumulatorBuilder {
       boolean decimalV2Enabled,
       VarLenAccumParams varLenAccumParams,
       int maxListAggSize,
-      BaseValueVector[] tempAccumulatorHolder,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
+      BaseValueVector[] tempAccumulatorHolders,
       int initialVectorSize) {
     final byte[] accumulatorTypes = materializedAggExpressions.getAccumulatorTypes();
     final List<FieldVector> inputVectors = materializedAggExpressions.getInputVectors();
@@ -276,8 +276,11 @@ public class AccumulatorBuilder {
           || accumulatorType == AccumulatorType.LISTAGG_MERGE.ordinal()) {
         listAggParams = buildListAggParams((ListAggExpression) expressions.get(i), maxListAggSize);
       }
-
-      varLenAccumParams.setAccumIndex(i);
+      BaseValueVector tempAccumulatorHolder = null;
+      if (varLenAccumParams != null) {
+        varLenAccumParams.setAccumIndex(i);
+        tempAccumulatorHolder = tempAccumulatorHolders[i];
+      }
       /* this step doesn't allocate any memory for accumulators */
       accums[i] =
           getAccumulator(
@@ -290,8 +293,8 @@ public class AccumulatorBuilder {
               decimalV2Enabled,
               varLenAccumParams,
               listAggParams,
-              tempAccumulatorHolder[i],
-              maxFieldSizeBytes,
+              tempAccumulatorHolder,
+              maxArrayAggSize,
               initialVectorSize);
       if (accums[i] == null) {
         throw new IllegalStateException("ERROR: invalid accumulator state");
@@ -313,7 +316,7 @@ public class AccumulatorBuilder {
       VarLenAccumParams varLenAccumParams,
       ListAggParams listAggParams,
       BaseValueVector tempAccumulatorHolder,
-      int maxFieldSizeBytes,
+      int maxArrayAggSize,
       int initialVectorSize) {
     if (accumulatorType == AccumulatorType.COUNT1.ordinal()) {
       return new CountOneAccumulator(
@@ -451,7 +454,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   maxValuesPerBatch,
                   computationVectorAllocator);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of min(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values
@@ -571,7 +574,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   maxValuesPerBatch,
                   computationVectorAllocator);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of max(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values
@@ -750,7 +753,7 @@ public class AccumulatorBuilder {
                   maxValuesPerBatch,
                   computationVectorAllocator,
                   tempAccumulatorHolder);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
               // of min(), comparisons
               // of NullableTimeStampMilli are the same as comparisons on the underlying long values
@@ -842,7 +845,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case INT:
               return new IntArrayAggAccumulator(
@@ -850,7 +853,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case FLOAT4:
               return new FloatArrayAggAccumulator(
@@ -858,7 +861,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case FLOAT8:
               return new DoubleArrayAggAccumulator(
@@ -866,7 +869,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case DECIMAL:
               return new BigDecimalArrayAggAccumulator(
@@ -874,7 +877,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case VARCHAR:
               return new VarcharArrayAggAccumulator(
@@ -882,7 +885,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case VARBINARY:
               return new VarbinaryArrayAggAccumulator(
@@ -890,7 +893,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case BIT:
               return new BitArrayAggAccumulator(
@@ -898,7 +901,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case DATE:
               return new DateArrayAggAccumulator(
@@ -906,15 +909,15 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
               return new TimestampArrayAggAccumulator(
                   incomingValues,
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case TIME:
               return new TimeArrayAggAccumulator(
@@ -922,7 +925,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case INTERVALDAY:
               return new IntervalDayArrayAggAccumulator(
@@ -930,7 +933,7 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             case INTERVALYEAR:
               return new IntervalYearArrayAggAccumulator(
@@ -938,11 +941,132 @@ public class AccumulatorBuilder {
                   transferVector,
                   tempAccumulatorHolder,
                   computationVectorAllocator,
-                  maxFieldSizeBytes,
+                  maxArrayAggSize,
                   initialVectorSize);
             default:
               throw UserException.unsupportedError(
                       new Exception(String.format("ARRAY_AGG is not supported for %s", type)))
+                  .buildSilently();
+          }
+        }
+      case 12:
+        {
+          switch (type) {
+            case INT:
+              return new SingleValueAccumulators.IntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case FLOAT4:
+              return new SingleValueAccumulators.FloatSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case BIGINT:
+              return new SingleValueAccumulators.BigIntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case FLOAT8:
+              return new SingleValueAccumulators.DoubleSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case DECIMAL:
+              if (decimalCompleteEnabled) {
+                return new SingleValueAccumulators.DecimalSingleValueAccumulatorV2(
+                    incomingValues,
+                    outputVector,
+                    transferVector,
+                    maxValuesPerBatch,
+                    computationVectorAllocator);
+              } else {
+                return new SingleValueAccumulators.DecimalSingleValueAccumulator(
+                    incomingValues,
+                    outputVector,
+                    transferVector,
+                    maxValuesPerBatch,
+                    computationVectorAllocator);
+              }
+            case BIT:
+              return new SingleValueAccumulators.BitSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case DATE:
+              // dates represented as NullableDateMilli, which are 8-byte values. For purposes of
+              // max(), comparisions
+              // of NullableDateMilli are the same as comparisons on the underlying long values
+              return new SingleValueAccumulators.BigIntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case TIME:
+              // time represented as NullableTimeMilli, which are 4-byte values. For purposes of
+              // max(), comparisons
+              // of NullableTimeMilli are the same as comparisons on the underlying int values
+              return new SingleValueAccumulators.IntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case TIMESTAMPMILLI:
+              // time represented as NullableTimeStampMilli, which are 8-byte values. For purposes
+              // of max(), comparisons
+              // of NullableTimeStampMilli are the same as comparisons on the underlying long values
+              return new SingleValueAccumulators.BigIntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case INTERVALDAY:
+              return new SingleValueAccumulators.IntervalDaySingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case INTERVALYEAR:
+              // interval-year represented as a NullableIntervalYear, which is a 4-byte value
+              // containing the number of months
+              // in the interval. Comparisons are the same as comparisons on the underlying int
+              // values
+              return new SingleValueAccumulators.IntSingleValueAccumulator(
+                  incomingValues,
+                  outputVector,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator);
+            case VARCHAR:
+            case VARBINARY:
+              return new SingleValueAccumulators.VarLenSingleValueAccumulator(
+                  incomingValues,
+                  transferVector,
+                  maxValuesPerBatch,
+                  computationVectorAllocator,
+                  varLenAccumParams.estimatedVarKeySize,
+                  varLenAccumParams.maxVarKeySize,
+                  varLenAccumParams.maxVarVecUsagePercentage,
+                  varLenAccumParams.accumIndex,
+                  tempAccumulatorHolder,
+                  varLenAccumParams.varLenVectorResizer);
+            default:
+              throw UserException.unsupportedError(
+                      new Exception(String.format("SINGLE_VALUE is not supported for %s", type)))
                   .buildSilently();
           }
         }
@@ -1003,6 +1127,7 @@ public class AccumulatorBuilder {
     LOCAL_LISTAGG, /*  9 */
     LISTAGG_MERGE, /* 10 */
     ARRAY_AGG, /* 11 */
+    SINGLE_VALUE, /* 12 */
   }
 
   private static byte getAccumulatorTypeFromName(String name) {
@@ -1059,6 +1184,15 @@ public class AccumulatorBuilder {
         throw UserException.unsupportedError()
             .message("Unable to handle accumulator function %s", name)
             .build(logger);
+      case "single":
+        switch (name) {
+          case "single_value":
+            return (byte) AccumulatorType.SINGLE_VALUE.ordinal();
+          default:
+            throw UserException.unsupportedError()
+                .message("Unable to handle accumulator function %s", name)
+                .build(logger);
+        }
       default:
         throw UserException.unsupportedError()
             .message("Unable to handle accumulator function %s", name)

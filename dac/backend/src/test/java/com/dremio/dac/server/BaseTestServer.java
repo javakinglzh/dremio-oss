@@ -15,6 +15,7 @@
  */
 package com.dremio.dac.server;
 
+import static com.dremio.common.util.TestToolUtils.readTestResourceAsString;
 import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
 import static com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME;
 import static java.lang.String.format;
@@ -90,8 +91,10 @@ import com.dremio.service.jobs.JobsProtoUtil;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetVersion;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
 import com.dremio.service.namespace.space.proto.FolderConfig;
 import com.dremio.service.namespace.space.proto.SpaceConfig;
 import com.dremio.service.users.SimpleUserService;
@@ -99,8 +102,10 @@ import com.dremio.service.users.SystemUser;
 import com.dremio.service.users.UserNotFoundException;
 import com.dremio.service.users.UserService;
 import com.dremio.services.fabric.api.FabricService;
+import com.dremio.test.ClearInlineMocksRule;
 import com.dremio.test.DremioTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
@@ -114,11 +119,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.Principal;
 import java.time.Duration;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import javax.inject.Provider;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.Invocation;
@@ -126,6 +134,8 @@ import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.arrow.memory.BufferAllocator;
 import org.assertj.core.api.SoftAssertions;
+import org.awaitility.Awaitility;
+import org.awaitility.core.ConditionTimeoutException;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -142,6 +152,9 @@ import org.junit.runner.Description;
 public abstract class BaseTestServer extends BaseClientUtils {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(BaseTestServer.class);
+
+  @ClassRule
+  public static final ClearInlineMocksRule CLEAR_INLINE_MOCKS = new ClearInlineMocksRule();
 
   @Rule public final TestRule timeoutRule = TestTools.getTimeoutRule(Duration.ofMinutes(2));
 
@@ -465,6 +478,7 @@ public abstract class BaseTestServer extends BaseClientUtils {
       Files.createDirectories(new File(rootFolder0 + "/gandiva").toPath());
       Files.createDirectories(new File(rootFolder0 + "/system_iceberg_tables").toPath());
       Files.createDirectories(new File(rootFolder0 + "/node_history").toPath());
+      Files.createDirectories(new File(rootFolder0 + "/profile").toPath());
 
       // Get a random port
       int port;
@@ -728,31 +742,42 @@ public abstract class BaseTestServer extends BaseClientUtils {
     final NodeRegistration nodeRegistration = daemon.getInstance(NodeRegistration.class);
     final ForemenWorkManager foremenWorkManager = daemon.getInstance(ForemenWorkManager.class);
     nodeRegistration.close();
-    foremenWorkManager.close();
+    foremenWorkManager.stopAcceptingQueries();
 
-    // Drain actively running jobs
-    await()
-        .atMost(Duration.ofSeconds(100))
-        .until(() -> foremenWorkManager.getActiveQueryCount() == 0);
-
-    // Fail if any jobs are still running and record query information
-    final StringBuilder msg = new StringBuilder();
-    msg.append("There are actively running queries that have not finished:\n");
-    foremenWorkManager
-        .getActiveProfiles()
-        .forEach(
-            profile ->
-                msg.append("Query ")
-                    .append(QueryIdHelper.getQueryId(profile.getId()))
-                    .append(": ")
-                    .append(profile.getQuery())
-                    .append("\n\n"));
-    assertEquals(msg.toString(), 0, foremenWorkManager.getActiveQueryCount());
+    try {
+      // Drain actively running jobs
+      await()
+          .atMost(Duration.ofSeconds(100))
+          .then()
+          .until(() -> foremenWorkManager.getActiveQueryCount() == 0);
+    } catch (ConditionTimeoutException ex) {
+      // Fail if any jobs are still running and record query information
+      final StringBuilder msg = new StringBuilder();
+      msg.append("There are actively running queries that have not finished:\n");
+      foremenWorkManager
+          .getActiveProfiles()
+          .forEach(
+              profile ->
+                  msg.append("Query ")
+                      .append(QueryIdHelper.getQueryId(profile.getId()))
+                      .append(": ")
+                      .append(profile.getQuery())
+                      .append("\n\n"));
+      assertEquals(msg.toString(), 0, foremenWorkManager.getActiveQueryCount());
+      throw ex;
+    } finally {
+      foremenWorkManager.close();
+    }
   }
 
   public static void assertAllocatorsAreClosed(DACDaemon daemon) {
     int resourceAllocatorCount = getResourceAllocatorCount(daemon);
-    int queryPlanningAllocatorCount = getQueryPlanningAllocatorCount(daemon);
+
+    final BufferAllocator queryPlanningAllocator =
+        daemon.getInstance(SabotContext.class).getQueryPlanningAllocator();
+    Collection<BufferAllocator> queryPlanningChildAllocators =
+        queryPlanningAllocator.getChildAllocators();
+    int queryPlanningAllocatorCount = queryPlanningChildAllocators.size();
     SoftAssertions.assertSoftly(
         softly -> {
           softly
@@ -762,8 +787,12 @@ public abstract class BaseTestServer extends BaseClientUtils {
           softly
               .assertThat(queryPlanningAllocatorCount)
               .withFailMessage(
-                  "Not all query-planning allocators were closed. "
-                      + "There are queries that are still running and have not been cancelled.")
+                  "The following query planning allocators have not been closed:/n "
+                      + Joiner.on("/n")
+                          .join(
+                              queryPlanningChildAllocators.stream()
+                                  .map(Object::toString)
+                                  .collect(Collectors.toList())))
               .isEqualTo(0);
         });
   }
@@ -1027,7 +1056,7 @@ public abstract class BaseTestServer extends BaseClientUtils {
   }
 
   protected static String readResourceAsString(String fileName) {
-    return TestTools.readTestResourceAsString(fileName);
+    return readTestResourceAsString(fileName);
   }
 
   protected void downloadSupportRequest(String jobId) {
@@ -1044,5 +1073,26 @@ public abstract class BaseTestServer extends BaseClientUtils {
     } catch (UserNotFoundException | IOException | JobNotFoundException e) {
       throw new RuntimeException(e);
     }
+  }
+
+  /**
+   * @param sourceName name of the source
+   * @return tag of the sources after async modification.
+   * @throws NamespaceException The async source at the kvStore will have correct tag, however since
+   *     we store the value after we return, the tag stored in the kvStore is different from what we
+   *     get from the ' REST API.
+   */
+  protected static String waitForSourceModificationAndGetNewTag(String sourceName)
+      throws NamespaceException {
+    Awaitility.await()
+        .atMost(300, TimeUnit.SECONDS)
+        .until(
+            () ->
+                getNamespaceService()
+                    .getSource(new NamespaceKey(sourceName))
+                    .getSourceChangeState()
+                    .equals(SourceChangeState.SOURCE_CHANGE_STATE_NONE));
+
+    return getNamespaceService().getSource(new NamespaceKey(sourceName)).getTag();
   }
 }

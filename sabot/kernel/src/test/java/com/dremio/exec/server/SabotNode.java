@@ -32,6 +32,8 @@ import com.dremio.datastore.LocalKVStoreProvider;
 import com.dremio.datastore.adapter.LegacyKVStoreProviderAdapter;
 import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
+import com.dremio.distributedplancache.transientstore.DistributedPlanCacheInMemoryStoreProvider;
+import com.dremio.distributedplancache.transientstore.DistributedPlanCacheStoreProvider;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogServiceImpl;
 import com.dremio.exec.catalog.ConnectionReader;
@@ -552,7 +554,8 @@ public class SabotNode implements AutoCloseable {
                     getProvider(ModifiableSchedulerService.class),
                     getProvider(VersionedDatasetAdapterFactory.class),
                     getProvider(CatalogStatusEvents.class),
-                    getProvider(ExecutorService.class)));
+                    getProvider(ExecutorService.class),
+                    getProvider(NamespaceService.Factory.class)));
 
         conduitServiceRegistry.registerService(
             new InformationSchemaServiceImpl(
@@ -649,6 +652,7 @@ public class SabotNode implements AutoCloseable {
                     getProvider(KVStoreProvider.class),
                     getProvider(LegacyKVStoreProvider.class),
                     getProvider(NodeEndpoint.class),
+                    Providers.of(null),
                     grpcTracerFacade,
                     CloseableThreadPool::newCachedThreadPool));
 
@@ -662,9 +666,12 @@ public class SabotNode implements AutoCloseable {
         bind(StatisticsListManager.class).toProvider(Providers.of(null));
         bind(UserDefinedFunctionService.class).toProvider(Providers.of(null));
         bind(PartitionStatsCacheStoreProvider.class).to(MockPartitionStatsStoreProvider.class);
+        bind(DistributedPlanCacheStoreProvider.class)
+            .toInstance(new DistributedPlanCacheInMemoryStoreProvider());
         bind(RelMetadataQuerySupplier.class)
             .toInstance(
                 DremioRelMetadataQuery.getSupplier(StatisticsService.MOCK_STATISTICS_SERVICE));
+        bind(JobResultInfoProvider.class).toProvider(Providers.of(JobResultInfoProvider.NOOP));
       } catch (Exception e) {
         throw new RuntimeException(e);
       }
@@ -856,7 +863,8 @@ public class SabotNode implements AutoCloseable {
         Provider<MaestroForwarder> forwarderProvider,
         Provider<RuleBasedEngineSelector> ruleBasedEngineSelectorProvider,
         Provider<RequestContext> requestContextProvider,
-        Provider<PartitionStatsCacheStoreProvider> transientStoreProvider) {
+        Provider<PartitionStatsCacheStoreProvider> transientStoreProvider,
+        Provider<DistributedPlanCacheStoreProvider> distributedPlanCacheStoreProvider) {
       return new ForemenWorkManager(
           fabricService,
           sabotContext,
@@ -866,7 +874,8 @@ public class SabotNode implements AutoCloseable {
           forwarderProvider,
           ruleBasedEngineSelectorProvider,
           requestContextProvider,
-          transientStoreProvider);
+          transientStoreProvider,
+          distributedPlanCacheStoreProvider);
     }
 
     @Provides

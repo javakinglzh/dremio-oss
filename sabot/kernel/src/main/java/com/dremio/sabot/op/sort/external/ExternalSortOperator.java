@@ -16,12 +16,19 @@
 package com.dremio.sabot.op.sort.external;
 
 import static com.dremio.exec.ExecConstants.ENABLE_SPILLABLE_OPERATORS;
+import static com.dremio.exec.ExecConstants.EXTERNAL_SORT_ENABLE_SEGMENT_SORT;
+import static com.dremio.exec.store.SystemSchemas.SEGMENT_COMPARATOR_FIELD;
+import static com.dremio.exec.util.VectorUtil.getVectorFromSchemaPath;
 
+import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.physical.config.ExternalSort;
 import com.dremio.exec.proto.CoordExecRPC;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
 import com.dremio.exec.proto.ExecProtos.ExtSortSpillNotificationMessage;
+import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
+import com.dremio.exec.record.TypedFieldId;
 import com.dremio.exec.record.VectorAccessible;
+import com.dremio.exec.record.VectorContainer;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.BooleanValidator;
 import com.dremio.options.TypeValidators.DoubleValidator;
@@ -34,11 +41,18 @@ import com.dremio.sabot.op.spi.Operator.ShrinkableOperator;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
+import com.google.common.collect.Streams;
 import java.util.EnumSet;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.vector.BitVector;
+import org.apache.arrow.vector.util.TransferPair;
 
 /**
  * Primary algorithm:
@@ -83,8 +97,11 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
   private final OperatorContext context;
   private final ExternalSort config;
   private VectorSorter vectorSorter;
-
+  private Queue<VectorSorter> segmentedVectorSorters;
+  private VectorContainer incoming;
+  private VectorContainer output;
   private BufferAllocator allocator;
+  private BitVector segmentChangeVector;
   public static boolean oobSpillNotificationsEnabled;
 
   public int oobSends;
@@ -96,6 +113,7 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
   private final Stopwatch produceDataWatch = Stopwatch.createUnstarted();
   private final Stopwatch consumeDataWatch = Stopwatch.createUnstarted();
   private final Stopwatch noMoreToConsumeWatch = Stopwatch.createUnstarted();
+  private int segmentId = 0;
 
   @Override
   public State getState() {
@@ -121,7 +139,24 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
 
   @Override
   public VectorAccessible setup(VectorAccessible incoming) {
-    return vectorSorter.setup(incoming, true);
+    this.incoming = (VectorContainer) incoming;
+    final TypedFieldId segmentChangeDetectionField =
+        incoming.getValueVectorId(SchemaPath.getSimplePath(SEGMENT_COMPARATOR_FIELD));
+    VectorContainer vectorSorterOutput = (VectorContainer) vectorSorter.setup(incoming, true);
+
+    if (context.getOptions().getOption(EXTERNAL_SORT_ENABLE_SEGMENT_SORT)
+        && segmentChangeDetectionField != null) {
+      segmentChangeVector =
+          incoming
+              .getValueAccessorById(BitVector.class, segmentChangeDetectionField.getFieldIds())
+              .getValueVector();
+      segmentedVectorSorters = new LinkedList<>();
+      output = context.createOutputVectorContainer(incoming.getSchema());
+      output.buildSchema(SelectionVectorMode.NONE);
+    } else {
+      output = vectorSorterOutput;
+    }
+    return output;
   }
 
   @Override
@@ -132,6 +167,17 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
      * etc. are released first. Otherwise 'memoryRun' close would fail reporting memory leak.
      */
     vectorSorter.close();
+    if (output != null) {
+      output.close();
+    }
+
+    if (segmentedVectorSorters != null) {
+      while (!segmentedVectorSorters.isEmpty()) {
+        VectorSorter sorter = segmentedVectorSorters.poll();
+        sorter.close();
+      }
+    }
+
     addDisplayStatsWithZeroValue(context, EnumSet.allOf(ExternalSortStats.Metric.class));
     updateStats(true);
   }
@@ -146,10 +192,125 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
     this.vectorSorter.setStates(masterState, sortState);
   }
 
+  private void addDataToSorter(int offset, int length, VectorSorter vectorSorter) {
+    boolean multiSegmentsBatchMode = !(offset == 0 && length == incoming.getRecordCount());
+
+    VectorContainer consumableBatch =
+        multiSegmentsBatchMode ? buildSubBatch(incoming, allocator, offset, length) : incoming;
+
+    try {
+      setupSorter(consumableBatch, vectorSorter, true);
+
+      vectorSorter.consumeData(length);
+    } catch (Exception e) {
+      consumableBatch.close();
+      throw new RuntimeException("Unable to add batch into sorter.", e);
+    } finally {
+      if (multiSegmentsBatchMode) {
+        consumableBatch.close();
+      }
+    }
+  }
+
+  /**
+   * Consume data for segment sort Each segment uses dedicate vectorSorter 1. except for the first
+   * segment, first row of each segment has segmentChangeVector == 1 2. when start a new segment,
+   * wrap current vectorSort and start a new vectorSort 3. when the incoming batch has multiple
+   * segments, add additional vectorSorts to a queue 4. current vectorSort calls noMoreToConsume(),
+   * the state of ExternalSortOperator becomes CAN_PRODUCE
+   */
+  private void consumeSegmentData(int records) throws Exception {
+    int pointer = 0;
+    int start = 0;
+    VectorSorter currentSorter = vectorSorter;
+    while (pointer < records) {
+      if (segmentChangeVector.get(pointer) == 1) {
+        segmentId++;
+        int length = pointer - start;
+        if (length > 0) {
+          addDataToSorter(start, length, currentSorter);
+        }
+
+        // the state of currentSorter becomes CAN_PRODUCE
+        currentSorter.noMoreToConsume();
+
+        // create additional sorters
+        currentSorter =
+            new VectorSorter(
+                context,
+                this::notifyOthersOfSpill,
+                config.getOrderings(),
+                // operatorLocalId in VectorSorter has to be unique
+                (config.getProps().getLocalOperatorId() << 16) + segmentId);
+
+        // add additional sorters to the queue
+        segmentedVectorSorters.add(currentSorter);
+
+        start = pointer;
+      }
+      pointer++;
+    }
+
+    // add any remaining to existing sorter.
+    addDataToSorter(start, pointer - start, currentSorter);
+  }
+
+  /**
+   * Builds a sub batch the source
+   *
+   * @param offset the starting boundary of the sub-batch
+   * @param length the number of records from the batch that belong to sub-batch
+   */
+  private static VectorContainer buildSubBatch(
+      VectorContainer source, BufferAllocator allocator, int offset, int length) {
+    VectorContainer subBatch = new VectorContainer(allocator);
+    subBatch.addSchema(source.getSchema());
+    subBatch.buildSchema();
+
+    copyVectorContainer(source, subBatch, offset, length);
+
+    subBatch.setRecordCount(length);
+    return subBatch;
+  }
+
+  private static void copyVectorContainer(
+      VectorContainer from, VectorContainer to, int offset, int length) {
+    List<TransferPair> transfers =
+        Streams.stream(from)
+            .map(
+                vw ->
+                    vw.getValueVector()
+                        .makeTransferPair(getVectorFromSchemaPath(to, vw.getField().getName())))
+            .collect(Collectors.toList());
+
+    for (int i = 0; i < length; i++) {
+      int finalI = i;
+      transfers.forEach(transfer -> transfer.copyValueSafe(finalI + offset, finalI));
+      to.setAllCount(i + 1);
+    }
+  }
+
+  /** prepare the VectorSorter for consumption. */
+  private static void setupSorter(
+      VectorContainer incoming, VectorSorter vectorSorter, boolean isSpillAllowed) {
+    if (vectorSorter.getState() == State.NEEDS_SETUP) {
+      vectorSorter.setup(incoming, isSpillAllowed);
+    } else {
+      vectorSorter.setIncoming(incoming);
+    }
+  }
+
   @Override
   public void consumeData(int records) throws Exception {
     consumeDataWatch.start();
-    vectorSorter.consumeData(records);
+    // sorting mode:
+    // 1. regular sorting: read entire data and sort
+    // 2. segment sorting: sort data by segment (segmentChangeVector != null)
+    if (segmentChangeVector != null) {
+      consumeSegmentData(records);
+    } else {
+      vectorSorter.consumeData(records);
+    }
     consumeDataWatch.stop();
     updateStats(false);
   }
@@ -190,7 +351,6 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
   @Override
   public int outputData() throws Exception {
     produceDataWatch.start();
-    vectorSorter.getState().is(State.CAN_PRODUCE);
 
     if (vectorSorter.handleIfSpillInProgress()) {
       produceDataWatch.stop();
@@ -203,9 +363,24 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
       return 0;
     }
 
-    int noOfOutputRecords = vectorSorter.outputData();
+    int sortedOutputRecords = vectorSorter.outputData();
+    if (segmentedVectorSorters != null) {
+      if (sortedOutputRecords == 0 && !segmentedVectorSorters.isEmpty()) {
+        // done with outputting with current segment
+        produceDataWatch.stop();
+        vectorSorter.close();
+        // get vectorSorter from the queue
+        vectorSorter = segmentedVectorSorters.poll();
+        return 0;
+      } else if (sortedOutputRecords > 0) {
+        // copy vectorSort's output to ExternalSortOperator's output
+        copyVectorContainer(
+            (VectorContainer) vectorSorter.getOutputVector(), output, 0, sortedOutputRecords);
+      }
+    }
+
     produceDataWatch.stop();
-    return noOfOutputRecords;
+    return sortedOutputRecords;
   }
 
   /** When this operator starts spilling, notify others if the triggering is enabled. */
@@ -279,7 +454,7 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
 
     // check to see if we're at the point where we want to spill.
     final ExtSortSpillNotificationMessage spill =
-        message.getPayload(ExtSortSpillNotificationMessage.PARSER);
+        message.getPayload(ExtSortSpillNotificationMessage.parser());
     final long allocatedMemoryBeforeSpilling = allocator.getAllocatedMemory();
     final double triggerFactor = context.getOptions().getOption(OOB_SORT_SPILL_TRIGGER_FACTOR);
     final double headroomRemaining =

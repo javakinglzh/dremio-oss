@@ -130,6 +130,7 @@ public class SingleSenderOperator extends BaseSender {
             .addReceivingMinorFragmentId(oppositeHandle.getMinorFragmentId())
             .build();
     tunnel.sendStreamComplete(completionMessage);
+    state = State.DONE;
   }
 
   @Override

@@ -39,6 +39,7 @@ import com.dremio.services.nessie.grpc.api.MultipleNamespacesRequest;
 import com.dremio.services.nessie.grpc.api.MultipleNamespacesResponse;
 import com.dremio.services.nessie.grpc.api.NamespaceRequest;
 import com.dremio.services.nessie.grpc.api.NessieConfiguration;
+import com.dremio.services.nessie.grpc.api.PropertyEntry;
 import com.dremio.services.nessie.grpc.api.ReferenceHistoryRequest;
 import com.dremio.services.nessie.grpc.api.ReferenceResponse;
 import com.dremio.services.nessie.grpc.api.RepositoryConfigRequest;
@@ -53,6 +54,7 @@ import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.protobuf.Timestamp;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
@@ -689,12 +691,8 @@ public final class ProtoUtil {
     if (null != commitMeta.getHash()) {
       builder.setHash(commitMeta.getHash());
     }
-    if (null != commitMeta.getSignedOffBy()) {
-      builder.setSignedOffBy(commitMeta.getSignedOffBy());
-    }
-    if (null != commitMeta.getAuthor()) {
-      builder.setAuthor(commitMeta.getAuthor());
-    }
+    commitMeta.getAllSignedOffBy().forEach(builder::addSignedOffBy);
+    commitMeta.getAllAuthors().forEach(builder::addAuthor);
     if (null != commitMeta.getAuthorTime()) {
       builder.setAuthorTime(toProto(commitMeta.getAuthorTime()));
     }
@@ -704,6 +702,15 @@ public final class ProtoUtil {
     if (null != commitMeta.getCommitTime()) {
       builder.setCommitTime(toProto(commitMeta.getCommitTime()));
     }
+
+    // Main properties transfer
+    commitMeta
+        .getAllProperties()
+        .forEach(
+            (k, list) -> {
+              builder.putPropertyEntries(k, PropertyEntry.newBuilder().addAllValue(list).build());
+            });
+
     return builder
         .addAllParentHashes(commitMeta.getParentCommitHashes())
         .setMessage(commitMeta.getMessage())
@@ -719,12 +726,8 @@ public final class ProtoUtil {
     if (commitMeta.hasHash()) {
       builder.hash(commitMeta.getHash());
     }
-    if (commitMeta.hasSignedOffBy()) {
-      builder.signedOffBy(commitMeta.getSignedOffBy());
-    }
-    if (commitMeta.hasAuthor()) {
-      builder.author(commitMeta.getAuthor());
-    }
+    commitMeta.getSignedOffByList().forEach(builder::addAllSignedOffBy);
+    commitMeta.getAuthorList().forEach(builder::addAllAuthors);
     if (commitMeta.hasAuthorTime()) {
       builder.authorTime(fromProto(commitMeta.getAuthorTime()));
     }
@@ -734,10 +737,21 @@ public final class ProtoUtil {
     if (commitMeta.hasCommitTime()) {
       builder.commitTime(fromProto(commitMeta.getCommitTime()));
     }
+
+    // Legacy clients
+    commitMeta.getPropertiesMap().forEach(builder::putProperties);
+
+    // Main properties transfer
+    commitMeta
+        .getPropertyEntriesMap()
+        .forEach(
+            (k, list) -> {
+              builder.putAllProperties(k, new ArrayList<>(list.getValueList()));
+            });
+
     return builder
         .addAllParentCommitHashes(commitMeta.getParentHashesList())
         .message(commitMeta.getMessage())
-        .properties(commitMeta.getPropertiesMap())
         .build();
   }
 

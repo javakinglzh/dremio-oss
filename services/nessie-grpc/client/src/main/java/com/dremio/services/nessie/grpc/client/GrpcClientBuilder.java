@@ -109,6 +109,11 @@ public final class GrpcClientBuilder implements NessieClientBuilder {
     throw new UnsupportedOperationException("withSSLParameters is not supported for gRPC");
   }
 
+  @Override
+  public NessieClientBuilder withHttpHeader(String header, String value) {
+    throw new UnsupportedOperationException("withHttpHeader is not supported for gRPC");
+  }
+
   /**
    * Returns a new {@link GrpcClientBuilder} instance.
    *

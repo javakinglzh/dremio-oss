@@ -26,6 +26,7 @@ import {
   CUSTOM_JOIN,
 } from "#oss/constants/explorePage/joinTabs";
 import { setJoinTab, clearJoinDataset } from "actions/explore/join";
+import { isNotSoftware } from "dyn-load/utils/versionUtils";
 
 import * as classes from "./JoinHeader.module.less";
 
@@ -115,6 +116,20 @@ export class JoinHeader extends Component {
   }
 
   render() {
+    const shouldHideHeader = !isNotSoftware();
+
+    if (shouldHideHeader && this.props.closeIcon) {
+      return (
+        <dremio-icon
+          name="interface/close-big"
+          alt={this.props.intl.formatMessage({ id: "Common.Close" })}
+          style={styles.iconNoHeader}
+          onClick={this.props.closeIconHandler}
+          class={classNames(classes["join-header-tab__closeIcon"], "ml-1")}
+        />
+      );
+    }
+
     return (
       <div className="raw-wizard-header" style={styles.base}>
         <div style={styles.content}>
@@ -151,6 +166,15 @@ const styles = {
     fontSize: 18,
     cursor: "pointer",
     color: "var()",
+  },
+  iconNoHeader: {
+    position: "absolute",
+    right: 16,
+    marginTop: 16,
+    width: 24,
+    height: 24,
+    cursor: "pointer",
+    zIndex: 1000,
   },
 };
 

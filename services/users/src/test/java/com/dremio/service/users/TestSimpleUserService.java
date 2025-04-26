@@ -206,6 +206,11 @@ public class TestSimpleUserService {
       // verify update doesn't set the user type to local
       User updatedUserWithId =
           SimpleUser.newBuilder().setUID(uid).setEmail("newemail@test.com").build();
+
+      // ensure that consecutive System.currentTimeMillis() calls return different values
+      // so that the modifiedAt timestamp is not the same as createdAt
+      Thread.sleep(1);
+
       userGroupService.updateUserById(updatedUserWithId, null);
       UserConfig updatedUserConfig = userGroupStore.get(uid).getConfig();
       // fields that cannot be updated

@@ -147,7 +147,7 @@ public class IcebergExpGenVisitor extends RexVisitorImpl<Expression> {
       switch (call.getOperator().getKind()) {
         case AND:
           isAND = true;
-          // fall through
+        // fall through
         case OR:
           List<RexNode> nodeList = call.getOperands();
           Expression left = nodeList.get(0).accept(this);

@@ -22,6 +22,7 @@ import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.sql.DremioSqlOperatorTable;
 import com.dremio.options.OptionManager;
+import com.dremio.service.Pointer;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.RefreshMethod;
@@ -112,6 +113,13 @@ public class IncrementalChecker extends RoutingShuttle {
     }
 
     return isIncremental;
+  }
+
+  public IncrementalUpdateServiceUtils.RefreshDetails performFinalChecks(
+      IncrementalUpdateServiceUtils.RefreshDetails refreshDetails,
+      RelNode normalizedPlan,
+      Pointer<String> fullRefreshReason) {
+    return refreshDetails;
   }
 
   @Override

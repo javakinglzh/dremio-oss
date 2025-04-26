@@ -279,4 +279,24 @@ public class TestCastFunctions extends BaseTestQuery {
         .build()
         .run();
   }
+
+  @Test
+  public void testIntervalYearCastToBigInt() throws Exception {
+    String query = "SELECT CAST((SELECT CAST(12 AS INTERVAL YEAR)) AS BIGINT) as col";
+
+    testBuilder()
+        .sqlQuery(query)
+        .ordered()
+        .baselineColumns("col")
+        .baselineValues(12L)
+        .build()
+        .run();
+  }
+
+  @Test
+  public void testIntervalYearCastToInt() throws Exception {
+    String query = "SELECT CAST((SELECT CAST(12 AS INTERVAL YEAR)) AS INT) as col";
+
+    testBuilder().sqlQuery(query).ordered().baselineColumns("col").baselineValues(12).build().run();
+  }
 }

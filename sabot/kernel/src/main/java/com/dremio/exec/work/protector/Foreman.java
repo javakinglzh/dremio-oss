@@ -38,7 +38,7 @@ import com.dremio.exec.planner.observer.DelegatingAttemptObserver;
 import com.dremio.exec.planner.observer.QueryObserver;
 import com.dremio.exec.planner.physical.HashAggPrel;
 import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.planner.plancache.LegacyPlanCache;
+import com.dremio.exec.planner.plancache.PlanCacheProvider;
 import com.dremio.exec.planner.sql.handlers.commands.PreparedPlan;
 import com.dremio.exec.planner.sql.handlers.query.SupportsSystemIcebergTables;
 import com.dremio.exec.proto.GeneralRPCProtos;
@@ -118,7 +118,7 @@ public class Foreman {
   private final QueryObserver observer;
   private final ReAttemptHandler attemptHandler;
   private final Cache<Long, PreparedPlan> preparedPlans;
-  private final LegacyPlanCache planCache;
+  private final PlanCacheProvider planCacheProvider;
   private final PartitionStatsCache partitionStatsCache;
   protected final MaestroService maestroService;
   protected final JobTelemetryClient jobTelemetryClient;
@@ -143,7 +143,7 @@ public class Foreman {
       final OptionProvider config,
       final ReAttemptHandler attemptHandler,
       Cache<Long, PreparedPlan> preparedPlans,
-      LegacyPlanCache planCache,
+      PlanCacheProvider planCacheProvider,
       final MaestroService maestroService,
       final JobTelemetryClient jobTelemetryClient,
       final RuleBasedEngineSelector ruleBasedEngineSelector,
@@ -160,7 +160,7 @@ public class Foreman {
     this.observer = observer;
     this.attemptHandler = attemptHandler;
     this.preparedPlans = preparedPlans;
-    this.planCache = planCache;
+    this.planCacheProvider = planCacheProvider;
     this.maestroService = maestroService;
     this.jobTelemetryClient = jobTelemetryClient;
     this.ruleBasedEngineSelector = ruleBasedEngineSelector;
@@ -208,7 +208,7 @@ public class Foreman {
               session,
               optionProvider,
               preparedPlans,
-              planCache,
+              planCacheProvider,
               datasetValidityChecker,
               commandPool,
               partitionStatsCache);
@@ -286,7 +286,7 @@ public class Foreman {
       UserSession session,
       OptionProvider options,
       Cache<Long, PreparedPlan> preparedPlans,
-      LegacyPlanCache planCache,
+      PlanCacheProvider planCacheProvider,
       Predicate<DatasetConfig> datasetValidityChecker,
       CommandPool commandPool,
       PartitionStatsCache partitionStatsCache) {
@@ -298,7 +298,7 @@ public class Foreman {
             queryRequest.getPriority(),
             queryRequest.getMaxAllocation(),
             datasetValidityChecker,
-            planCache,
+            planCacheProvider,
             partitionStatsCache);
     return new AttemptManager(
         sabotContext,
@@ -705,6 +705,21 @@ public class Foreman {
       observer.execCompletion(result);
 
       listener.completed();
+    }
+
+    @Override
+    public void putExecutorProfile(String nodeEndpoint) {
+      observer.putExecutorProfile(nodeEndpoint);
+    }
+
+    @Override
+    public void removeExecutorProfile(String nodeEndpoint) {
+      observer.removeExecutorProfile(nodeEndpoint);
+    }
+
+    @Override
+    public void queryClosed() {
+      observer.queryClosed();
     }
 
     @Override

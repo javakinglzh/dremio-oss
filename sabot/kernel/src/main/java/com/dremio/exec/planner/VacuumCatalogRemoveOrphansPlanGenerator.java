@@ -17,7 +17,7 @@ package com.dremio.exec.planner;
 
 import static com.dremio.exec.ExecConstants.ENABLE_VACUUM_CATALOG_BRIDGE_OPERATOR;
 import static com.dremio.exec.planner.VacuumOutputSchema.getRowType;
-import static com.dremio.exec.store.SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA;
+import static com.dremio.exec.store.SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA;
 import static com.dremio.exec.store.SystemSchemas.FILE_PATH;
 import static com.dremio.exec.store.SystemSchemas.ICEBERG_SNAPSHOTS_SCAN_SCHEMA;
 import static com.dremio.exec.store.SystemSchemas.METADATA_FILE_PATH;
@@ -71,6 +71,7 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
   private final OptionManager optionManager;
   private BridgeExchangePrel bridgePrel;
   private String bridgeId;
+  private List<String> excludedContentIDs;
 
   public VacuumCatalogRemoveOrphansPlanGenerator(
       RelOptCluster cluster,
@@ -78,10 +79,11 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
       VacuumOptions vacuumOptions,
       StoragePluginId storagePluginId,
       IcebergCostEstimates icebergCostEstimates,
-      String user,
+      String userName,
       String fsScheme,
       String schemeVariate,
-      OptimizerRulesContext context) {
+      OptimizerRulesContext context,
+      List<String> excludedContentIDs) {
     super(
         cluster,
         traitSet,
@@ -90,13 +92,16 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
         vacuumOptions,
         storagePluginId,
         storagePluginId,
-        user,
+        userName,
+        null, // Not needed for vacuum catalog
         null,
-        null);
+        null,
+        List.of());
     this.vacuumCatalogOptions = vacuumOptions;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
     this.optionManager = ((QueryContext) context).getOptions();
+    this.excludedContentIDs = excludedContentIDs;
   }
 
   private Prel createMetadataPathScanPlan() {
@@ -119,52 +124,27 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
         traitSet,
         METADATA_PATH_SCAN_SCHEMA,
         snapshotsScanOptions,
-        user,
+        userName,
         storagePluginId,
         icebergCostEstimates.getSnapshotsCount(),
         1,
         fsScheme,
-        getSchemeVariate());
+        getSchemeVariate(),
+        excludedContentIDs);
   }
 
   @Override
-  protected Prel getPartitionStatsScanPrel(Prel snapshotsScanPlan) {
+  protected Prel getPartitionStatsScanPrel(
+      Prel liveSnapshotsScanPlan, BatchSchema carryForwardSchema) {
     DistributionTrait distributionTrait =
         getHashDistributionTraitForFields(
-            snapshotsScanPlan.getRowType(), ImmutableList.of(METADATA_FILE_PATH, FILE_PATH));
+            liveSnapshotsScanPlan.getRowType(), ImmutableList.of(METADATA_FILE_PATH, FILE_PATH));
     RelTraitSet traitSet =
         cluster.getPlanner().emptyTraitSet().plus(Prel.PHYSICAL).plus(distributionTrait);
     HashToRandomExchangePrel hashToRandomExchangePrel =
         new HashToRandomExchangePrel(
-            cluster, traitSet, snapshotsScanPlan, distributionTrait.getFields());
-    return super.getPartitionStatsScanPrel(hashToRandomExchangePrel);
-  }
-
-  @Override
-  protected Prel createLiveSnapshotsProducerPlan() {
-    if (vacuumCatalogBridgeOperatorEnabled()) {
-      createBridgeNessieScanIfNotExists();
-      return new BridgeReaderPrel(
-          bridgePrel.getCluster(), bridgePrel.getTraitSet(), bridgePrel.getRowType(), 1d, bridgeId);
-    }
-
-    SnapshotsScanOptions snapshotsScanOptions =
-        new SnapshotsScanOptions(
-            Mode.LIVE_SNAPSHOTS,
-            vacuumCatalogOptions.getOlderThanInMillis(),
-            vacuumCatalogOptions.getRetainLast());
-    BatchSchema schema = ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA);
-    return new NessieCommitsScanPrel(
-        cluster,
-        traitSet,
-        schema,
-        snapshotsScanOptions,
-        user,
-        storagePluginId,
-        icebergCostEstimates.getSnapshotsCount(),
-        1,
-        fsScheme,
-        getSchemeVariate());
+            cluster, traitSet, liveSnapshotsScanPlan, distributionTrait.getFields());
+    return super.getPartitionStatsScanPrel(hashToRandomExchangePrel, carryForwardSchema);
   }
 
   @Override
@@ -195,7 +175,7 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
             getRowType(SystemSchemas.TABLE_LOCATION_SCHEMA, cluster.getTypeFactory()),
             mq -> mq.getRowCount(metadataJsonProducerPrel),
             metadataJsonProducerPrel.getEstimatedSize(),
-            user,
+            userName,
             ImmutableMap.of(NESSIE_GC_ENABLED, Boolean.FALSE.toString()),
             continueOnError());
     Prel dedupLocation = reduceDuplicateFilePaths(locationFinder);
@@ -205,6 +185,41 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
   @Override
   protected boolean continueOnError() {
     return true;
+  }
+
+  @Override
+  protected Prel liveSnapshotsScanPlan(
+      SnapshotsScanOptions.Mode scanMode, List<String> qualifiedTableName) {
+    if (vacuumCatalogBridgeOperatorEnabled()) {
+      createBridgeNessieScanIfNotExists();
+      return new BridgeReaderPrel(
+          bridgePrel.getCluster(), bridgePrel.getTraitSet(), bridgePrel.getRowType(), 1d, bridgeId);
+    }
+
+    SnapshotsScanOptions snapshotsScanOptions =
+        new SnapshotsScanOptions(
+            Mode.LIVE_SNAPSHOTS,
+            vacuumCatalogOptions.getOlderThanInMillis(),
+            vacuumCatalogOptions.getRetainLast());
+    BatchSchema schema =
+        ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA);
+    return new NessieCommitsScanPrel(
+        cluster,
+        traitSet,
+        schema,
+        snapshotsScanOptions,
+        userName,
+        storagePluginId,
+        icebergCostEstimates.getSnapshotsCount(),
+        1,
+        fsScheme,
+        getSchemeVariate(),
+        excludedContentIDs);
+  }
+
+  @Override
+  protected BatchSchema getCarryForwardSchema() {
+    return CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA;
   }
 
   /**
@@ -223,19 +238,21 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
             Mode.LIVE_SNAPSHOTS,
             vacuumCatalogOptions.getOlderThanInMillis(),
             vacuumCatalogOptions.getRetainLast());
-    BatchSchema schema = ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_SCHEMA);
+    BatchSchema schema =
+        ICEBERG_SNAPSHOTS_SCAN_SCHEMA.merge(CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA);
     final NessieCommitsScanPrel scanPrel =
         new NessieCommitsScanPrel(
             cluster,
             traitSet,
             schema,
             snapshotsScanOptions,
-            user,
+            userName,
             storagePluginId,
             icebergCostEstimates.getSnapshotsCount(),
             1,
             fsScheme,
-            getSchemeVariate());
+            getSchemeVariate(),
+            excludedContentIDs);
     bridgeId = UUID.randomUUID().toString();
     bridgePrel =
         new BridgeExchangePrel(scanPrel.getCluster(), scanPrel.getTraitSet(), scanPrel, bridgeId);

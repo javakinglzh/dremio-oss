@@ -19,6 +19,7 @@ import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.types.TypeProtos.MajorType;
 import com.dremio.common.types.TypeProtos.MinorType;
 import com.dremio.common.types.Types;
+import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.physical.base.ScanStats;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
@@ -27,6 +28,7 @@ import com.dremio.exec.store.dfs.BlockMapBuilder;
 import com.dremio.exec.store.dfs.CompleteFileWork;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.io.file.FileSystem;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterators;
@@ -44,8 +46,8 @@ public class EasyGroupScanUtils {
   private final EasyFormatPlugin<?> formatPlugin;
   private final List<SchemaPath> columns;
   private List<CompleteFileWork> chunks;
-  private String selectionRoot;
-  private String userName;
+  private final String selectionRoot;
+  private final String userName;
   protected boolean includeModTime;
 
   public EasyGroupScanUtils(
@@ -71,11 +73,11 @@ public class EasyGroupScanUtils {
 
   private void initFromSelection(FileSelection selection, EasyFormatPlugin<?> formatPlugin)
       throws IOException {
-    final FileSystem dfs = plugin.createFS(userName);
+    final FileSystem dfs = plugin.createFS(SupportsFsCreation.builder().userName(userName));
     this.selection = selection;
     BlockMapBuilder b =
         new BlockMapBuilder(
-            plugin.getCompressionCodecFactory(),
+            HadoopCompressionCodecFactory.DEFAULT,
             dfs,
             plugin.getContext().getClusterCoordinator().getExecutorEndpoints());
     this.chunks =
@@ -136,10 +138,6 @@ public class EasyGroupScanUtils {
       return Types.optional(MinorType.BIGINT);
     }
     return null;
-  }
-
-  public boolean canPushdownProjects(List<SchemaPath> columns) {
-    return formatPlugin.supportsPushDown();
   }
 
   public List<SchemaPath> getPartitionColumns() {

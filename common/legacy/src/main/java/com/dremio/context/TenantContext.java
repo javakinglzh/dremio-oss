@@ -15,10 +15,12 @@
  */
 package com.dremio.context;
 
+import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import io.grpc.Metadata;
 import java.util.Map;
 import java.util.UUID;
+import org.jetbrains.annotations.NotNull;
 
 /** Tenant context. */
 public class TenantContext implements SerializableContext {
@@ -45,6 +47,13 @@ public class TenantContext implements SerializableContext {
   public TenantContext(String projectId, String orgId) {
     this.projectId = UUID.fromString(projectId);
     this.orgId = UUID.fromString(orgId);
+  }
+
+  public TenantContext(@NotNull UUID projectId, @NotNull UUID orgId) {
+    Preconditions.checkNotNull(projectId, "projectId should not be null");
+    Preconditions.checkNotNull(orgId, "orgId should not be null");
+    this.projectId = projectId;
+    this.orgId = orgId;
   }
 
   public UUID getProjectId() {

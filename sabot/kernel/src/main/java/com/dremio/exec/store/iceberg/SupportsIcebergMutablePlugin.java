@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store.iceberg;
 
-import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.model.IcebergModel;
 import com.dremio.sabot.exec.context.OperatorContext;
@@ -23,7 +23,8 @@ import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.io.FileIO;
 
-public interface SupportsIcebergMutablePlugin extends MutablePlugin, SupportsIcebergRootPointer {
+public interface SupportsIcebergMutablePlugin
+    extends SupportsFsMutablePlugin, SupportsIcebergRootPointer {
   /**
    * @param tableProps Iceberg table props
    * @param userName userName of current user

@@ -43,13 +43,14 @@ public class IcebergOrphanFileDeletePrel extends TableFunctionPrel {
       RelNode child,
       Long survivingRecords,
       String user,
-      String tableLocation) {
+      String tableLocation,
+      List<String> dataset) {
     this(
         cluster,
         traitSet,
         child,
         TableFunctionUtil.getOrphanFileDeleteTableFunctionConfig(
-            outSchema, storagePluginId, tableLocation),
+            outSchema, storagePluginId, tableLocation, dataset),
         CalciteArrowHelper.wrap(outSchema).toCalciteRecordType(cluster.getTypeFactory(), true),
         survivingRecords,
         user);

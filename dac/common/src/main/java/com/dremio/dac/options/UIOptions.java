@@ -18,6 +18,7 @@ package com.dremio.dac.options;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.BooleanValidator;
 import com.dremio.options.TypeValidators.StringValidator;
+import com.dremio.options.UserControlledOption;
 
 /** Options to customize the UI behavior */
 @Options
@@ -28,15 +29,18 @@ public final class UIOptions {
   public static final StringValidator TABLEAU_TDS_MIMETYPE =
       new StringValidator("ui.tableau.tds-mime-type", "application/tds");
 
+  @UserControlledOption
   public static final BooleanValidator ALLOW_FILE_UPLOADS =
       new BooleanValidator("ui.upload.allow", true);
 
+  @UserControlledOption
   public static final BooleanValidator ALLOW_AUTOCOMPLETE =
       new BooleanValidator("ui.autocomplete.allow", true);
 
   public static final BooleanValidator LIVE_SYNTAX_ERROR_DETECTION =
       new BooleanValidator("ui.live_syntax_error_detection.enabled", true);
 
+  @UserControlledOption
   public static final BooleanValidator ALLOW_DOWNLOAD =
       new BooleanValidator("ui.download.allow", true);
 
@@ -74,7 +78,7 @@ public final class UIOptions {
           "ui.csp.value",
           "default-src 'self' 'unsafe-inline'"
               + " blob: ws: wss: *.dremio.com *.googletagmanager.com *.intercom.io *.intercomcdn.com *.intercomusercontent.com"
-              + " *.cloudfront.net sentry.io *.sentry.io *.walkme.com;"
+              + " sentry.io *.sentry.io *.walkme.com;"
               + " img-src 'self' blob: data: *;"
               + " font-src 'self' data: *.intercomcdn.com;"
               + " object-src 'none';");
@@ -88,14 +92,9 @@ public final class UIOptions {
   /*
    * Specifies whether the UI will use the new dataset navigation behavior
    */
+  @UserControlledOption
   public static final BooleanValidator DATASET_NAVIGATION_CHECK =
       new BooleanValidator("ui.dataset.navigation.new", true);
-
-  /*
-   * Specifies whether the UI will use the new reflection-jobs/jobs tables
-   */
-  public static final BooleanValidator JOBS_TABLES_UI_CHECK =
-      new BooleanValidator("dremio.jobs.new.ui-tables", true);
 
   /*
    * Specifies whether the UI will asynchronously download results

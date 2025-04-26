@@ -19,6 +19,8 @@ import static java.nio.charset.StandardCharsets.UTF_8;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.InvalidMetadataErrorContext;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.elastic.proto.ElasticReaderProto.ElasticSplitXattr;
@@ -59,7 +61,6 @@ import org.apache.arrow.vector.complex.impl.SingleStructReaderImpl;
 import org.apache.arrow.vector.complex.impl.VectorContainerWriter;
 import org.apache.arrow.vector.complex.reader.FieldReader;
 import org.apache.calcite.util.Pair;
-import org.elasticsearch.index.query.QueryBuilders;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,8 +69,7 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
 
   private static final boolean PRINT_OUTPUT = false;
   private static final Logger logger = LoggerFactory.getLogger(ElasticsearchRecordReader.class);
-  public static final String MATCH_ALL_QUERY = QueryBuilders.matchAllQuery().toString(false);
-
+  public static final String MATCH_ALL_QUERY = "{\"match_all\": {} }";
   public static final String MATCH_ALL_REQUEST = String.format("{\"query\": %s }", MATCH_ALL_QUERY);
   private static final int STREAM_COUNT_BREAK_MULTIPLIER = 3;
   private static final String TIMED_OUT = "\"timed_out\": true";
@@ -106,6 +106,7 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
   private VectorContainerWriter complexWriter;
   private BaseJsonProcessor jsonReader;
   private State state = State.INIT;
+  private boolean rowSizeLimitEnabledForReader;
   private final ElasticVersionBehaviorProvider elasticVersionBehaviorProvider;
 
   public ElasticsearchRecordReader(
@@ -140,20 +141,9 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
     this.resource = split == null ? spec.getResource() : splitAttributes.getResource();
     this.elasticVersionBehaviorProvider =
         new ElasticVersionBehaviorProvider(this.connection.getESVersionInCluster());
-    if (elasticVersionBehaviorProvider.isEnable7vFeatures()) {
-      this.metaUIDSelected = false;
-      this.metaIDSelected =
-          getColumns().contains(SchemaPath.getSimplePath(ElasticsearchConstants.ID))
-              || isStarQuery();
-    } else {
-      this.metaUIDSelected =
-          getColumns().contains(SchemaPath.getSimplePath(ElasticsearchConstants.UID))
-              || isStarQuery();
-      this.metaIDSelected =
-          config.isShowIdColumn()
-              && (getColumns().contains(SchemaPath.getSimplePath(ElasticsearchConstants.ID))
-                  || isStarQuery());
-    }
+    this.metaUIDSelected = false;
+    this.metaIDSelected =
+        getColumns().contains(SchemaPath.getSimplePath(ElasticsearchConstants.ID)) || isStarQuery();
     this.metaTypeSelected =
         getColumns().contains(SchemaPath.getSimplePath(ElasticsearchConstants.TYPE))
             || isStarQuery();
@@ -164,15 +154,27 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
     if (spec.getFetch() > 0) {
       this.numRowsPerBatch = Math.min(this.numRowsPerBatch, spec.getFetch());
     }
+    this.rowSizeLimitEnabledForReader = rowSizeLimitEnabled;
   }
 
   @Override
   public void setup(OutputMutator output) throws ExecutionSetupException {
     complexWriter = new VectorContainerWriter(output);
+    setUpVectorsLenAndCount(output.getVectors());
+    if (rowSizeLimitEnabled) {
+      if (fixedDataLenPerRow <= rowSizeLimit && variableVectorCount == 0) {
+        rowSizeLimitEnabledForReader = false;
+      }
+      if (fixedDataLenPerRow > rowSizeLimit) {
+        throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+            rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+      }
+      rowSizeLimit -= fixedDataLenPerRow;
+    }
     if (getColumns().isEmpty()) {
       jsonReader =
           elasticVersionBehaviorProvider.createCountingElasticSearchReader(
-              context.getManagedBuffer(),
+              context,
               ImmutableList.copyOf(getColumns()),
               resource,
               readDefinition,
@@ -184,7 +186,7 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
     } else {
       jsonReader =
           elasticVersionBehaviorProvider.createElasticSearchReader(
-              context.getManagedBuffer(),
+              context,
               ImmutableList.copyOf(getColumns()),
               resource,
               readDefinition,
@@ -192,7 +194,9 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
               metaUIDSelected,
               metaIDSelected,
               metaTypeSelected,
-              metaIndexSelected);
+              metaIndexSelected,
+              rowSizeLimitEnabledForReader,
+              fixedDataLenPerRow);
     }
   }
 
@@ -212,6 +216,7 @@ public class ElasticsearchRecordReader extends AbstractRecordReader {
     final Search<byte[]> search;
     final String newQuery;
     newQuery = elasticVersionBehaviorProvider.processElasticSearchQuery(query);
+    logger.debug("elastic query: " + newQuery);
     search =
         new SearchBytes()
             .setQuery(newQuery)

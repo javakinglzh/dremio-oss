@@ -275,4 +275,48 @@ public class SqlCleanserTest {
             .call(() -> SqlCleanser.cleanseSql(sql));
     assertEquals("Obfuscating of sql failed.", expectedSql, observedSql);
   }
+
+  @Test
+  public void testReflectionRefreshFullObfuscation() throws Exception {
+    String sql =
+        "REFRESH REFLECTION 'a6979177-9e3a-4cdf-b67f-1d7300955ba1' AS 'a0996580-c903-4d5f-9fd3-72d218da2942'\n"
+            + "/** XYZ */";
+
+    String expectedSql = "REFRESH REFLECTION 'literal_b8f215e7' AS 'literal_aaa1c9e4'";
+
+    ObfuscationUtils.setFullObfuscation(true);
+
+    String observedSql =
+        RequestContext.current()
+            .with(
+                SupportContext.CTX_KEY,
+                new SupportContext(
+                    "dummy",
+                    "dummy",
+                    new String[] {SupportContext.SupportRole.BASIC_SUPPORT_ROLE.getValue()}))
+            .call(() -> SqlCleanser.cleanseSql(sql));
+    assertEquals("Obfuscating of sql failed.", expectedSql, observedSql);
+  }
+
+  @Test
+  public void testReflectionRefreshPartialObfuscation() throws Exception {
+    String sql =
+        "REFRESH REFLECTION 'a6979177-9e3a-4cdf-b67f-1d7300955ba1' AS 'a0996580-c903-4d5f-9fd3-72d218da2942'\n"
+            + "/** XYZ */";
+
+    ObfuscationUtils.setFullObfuscation(false);
+
+    String observedSql =
+        RequestContext.current()
+            .with(
+                SupportContext.CTX_KEY,
+                new SupportContext(
+                    "dummy",
+                    "dummy",
+                    new String[] {SupportContext.SupportRole.BASIC_SUPPORT_ROLE.getValue()}))
+            .call(() -> SqlCleanser.cleanseSql(sql));
+    // Verify we preserve comments in SQL
+    assertEquals(
+        "Partial obfuscation should produce same SQL for reflection refresh", sql, observedSql);
+  }
 }

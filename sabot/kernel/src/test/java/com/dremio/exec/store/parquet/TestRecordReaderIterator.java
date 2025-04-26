@@ -95,7 +95,7 @@ public class TestRecordReaderIterator {
   public void testJoinOneIteratorsHaveValues() throws Exception {
     List<RecordReader> readers1 =
         IntStream.range(0, 10).mapToObj(i -> mock(RecordReader.class)).collect(Collectors.toList());
-    List<RecordReader> readers2 = Collections.EMPTY_LIST;
+    List<RecordReader> readers2 = Collections.emptyList();
 
     RecordReaderIterator it1 = spy(RecordReaderIterator.from(readers1.iterator()));
     RecordReaderIterator it2 = spy(RecordReaderIterator.from(readers2.iterator()));

@@ -32,6 +32,7 @@ public class FlightTestBuilder {
   private final FlightClientUtils.FlightClientWrapper flightClientWrapper;
   private List<Map<String, Object>> baselineRecords;
   private String[] baselineColumns;
+  private Object[] parameters;
   private String query;
 
   public FlightTestBuilder(FlightClientUtils.FlightClientWrapper flightClientWrapper) {
@@ -48,13 +49,20 @@ public class FlightTestBuilder {
     return this;
   }
 
-  FlightTestBuilder baselineColumns(String... columns) {
+  public FlightTestBuilder baselineColumns(String... columns) {
     baselineColumns = columns;
     return this;
   }
 
+  public FlightTestBuilder parameters(Object... params) {
+    parameters = params;
+    return this;
+  }
+
   public FlightQueryTestWrapper build() {
-    return new FlightQueryTestWrapper(flightClientWrapper, baselineRecords, query);
+    return parameters == null
+        ? new FlightQueryTestWrapper(flightClientWrapper, baselineRecords, query)
+        : new FlightQueryTestWrapper(flightClientWrapper, baselineRecords, query, parameters);
   }
 
   public void go() throws Exception {

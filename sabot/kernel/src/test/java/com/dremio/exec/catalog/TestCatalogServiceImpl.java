@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
@@ -59,7 +60,6 @@ import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.ops.OptimizerRulesContext;
 import com.dremio.exec.planner.PlannerPhase;
 import com.dremio.exec.planner.cost.ScanCostFactor;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.server.SabotContext;
@@ -68,14 +68,12 @@ import com.dremio.exec.server.options.SystemOptionManager;
 import com.dremio.exec.server.options.SystemOptionManagerImpl;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.MissingPluginConf;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.exec.store.dfs.MetadataIOPool;
 import com.dremio.exec.store.sys.SystemTablePluginConfigProvider;
 import com.dremio.options.OptionManager;
 import com.dremio.options.OptionValidatorListing;
-import com.dremio.options.OptionValue;
 import com.dremio.options.impl.DefaultOptionManager;
 import com.dremio.options.impl.OptionManagerWrapper;
 import com.dremio.service.DirectProvider;
@@ -135,7 +133,6 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.jupiter.api.Disabled;
 
 /**
  * Unit tests for {@link CatalogServiceImpl}.
@@ -240,7 +237,6 @@ public class TestCatalogServiceImpl {
           @Override
           public void close() throws Exception {}
         };
-    when(sabotContext.getNamespaceServiceFactory()).thenReturn(namespaceServiceFactory);
     when(sabotContext.getNamespaceService(anyString())).thenReturn(namespaceService);
     when(sabotContext.getOrphanageFactory()).thenReturn(orphanageFactory);
     when(sabotContext.getViewCreatorFactoryProvider()).thenReturn(() -> viewCreatorFactory);
@@ -303,29 +299,33 @@ public class TestCatalogServiceImpl {
     doNothing().when(broadcaster).communicateChange(any());
 
     catalogService =
-        new CatalogServiceImpl(
-            () -> sabotContext,
-            () -> new LocalSchedulerService(1),
-            () -> new SystemTablePluginConfigProvider(),
-            null,
-            () -> fabricService,
-            () -> ConnectionReader.of(sabotContext.getClasspathScan(), ConnectionReaderImpl.class),
-            () -> allocator,
-            () -> storeProvider,
-            () -> datasetListingService,
-            () -> optionManager,
-            () -> broadcaster,
-            dremioConfig,
-            EnumSet.allOf(ClusterCoordinator.Role.class),
-            () ->
-                new ModifiableLocalSchedulerService(
-                    2,
-                    "modifiable-scheduler-",
-                    ExecConstants.MAX_CONCURRENT_METADATA_REFRESHES,
-                    () -> optionManager),
-            () -> new VersionedDatasetAdapterFactory(),
-            () -> new CatalogStatusEventsImpl(),
-            () -> pool);
+        spy(
+            new CatalogServiceImpl(
+                () -> sabotContext,
+                () -> new LocalSchedulerService(1),
+                () -> new SystemTablePluginConfigProvider(),
+                null,
+                () -> fabricService,
+                () ->
+                    ConnectionReader.of(
+                        sabotContext.getClasspathScan(), ConnectionReaderImpl.class),
+                () -> allocator,
+                () -> storeProvider,
+                () -> datasetListingService,
+                () -> optionManager,
+                () -> broadcaster,
+                dremioConfig,
+                EnumSet.allOf(ClusterCoordinator.Role.class),
+                () ->
+                    new ModifiableLocalSchedulerService(
+                        2,
+                        "modifiable-scheduler-",
+                        ExecConstants.MAX_CONCURRENT_METADATA_REFRESHES,
+                        () -> optionManager),
+                () -> new VersionedDatasetAdapterFactory(),
+                () -> new CatalogStatusEventsImpl(),
+                () -> pool,
+                () -> namespaceServiceFactory));
     catalogService.start();
 
     mockUpPlugin = new MockUpPlugin();
@@ -357,9 +357,15 @@ public class TestCatalogServiceImpl {
 
     doMockDatasets(mockUpPlugin, ImmutableList.of());
 
-    catalogService.getSystemUserCatalog().createSource(mockUpConfig);
-    catalogService.getSystemUserCatalog().createSource(mockUpConfig2);
-    catalogService.getSystemUserCatalog().createSource(deletingConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(mockUpConfig2, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(deletingConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     originalCatalogVersion = mockUpConfig.getTag();
 
     final SourceConfig mockUpBadConfig =
@@ -368,7 +374,9 @@ public class TestCatalogServiceImpl {
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY)
             .setCtime(100L)
             .setConnectionConf(new MockUpBadConfig());
-    catalogService.getSystemUserCatalog().createSource(mockUpBadConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(mockUpBadConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   @After
@@ -387,7 +395,7 @@ public class TestCatalogServiceImpl {
   public void refreshSourceMetadata_EmptySource() throws Exception {
     doMockDatasets(mockUpPlugin, ImmutableList.of());
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     // make sure the namespace has no datasets under mockUpKey
     List<NamespaceKey> datasets = Lists.newArrayList(namespaceService.getAllDatasets(mockUpKey));
@@ -400,9 +408,9 @@ public class TestCatalogServiceImpl {
   public void refreshSourceMetadata_FirstTime() throws Exception {
     doMockDatasets(mockUpPlugin, mockDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     // make sure the namespace has datasets and folders according to the data supplied by plugin
     List<NamespaceKey> actualDatasetKeys =
@@ -421,9 +429,9 @@ public class TestCatalogServiceImpl {
   public void refreshSourceMetadata_FirstTime_UpdateWithNewDatasets() throws Exception {
     doMockDatasets(mockUpPlugin, mockDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     List<NamespaceKey> actualDatasetKeys =
         Lists.newArrayList(namespaceService.getAllDatasets(mockUpKey));
@@ -437,9 +445,9 @@ public class TestCatalogServiceImpl {
 
     doMockDatasets(mockUpPlugin, testDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     // make sure the namespace has datasets and folders according to the data supplied by plugin in
     // second request
@@ -460,9 +468,9 @@ public class TestCatalogServiceImpl {
       throws Exception {
     doMockDatasets(mockUpPlugin, mockDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     List<DatasetHandle> testDatasets = Lists.newArrayList();
     testDatasets.add(newDataset(MOCK_UP + ".fld1.ds11"));
@@ -473,9 +481,9 @@ public class TestCatalogServiceImpl {
 
     doMockDatasets(mockUpPlugin, testDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     // make sure the namespace has datasets and folders according to the data supplied by plugin in
     // second request
@@ -502,9 +510,9 @@ public class TestCatalogServiceImpl {
 
     doMockDatasets(mockUpPlugin, testDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, CatalogServiceImpl.UpdateType.FULL);
+        mockUpKey, CatalogService.REFRESH_EVERYTHING_NOW, SourceUpdateType.FULL);
 
     // make sure the namespace has datasets and folders according to the data supplied by plugin in
     // second request
@@ -527,7 +535,7 @@ public class TestCatalogServiceImpl {
   public void refreshSourceNames() throws Exception {
     doMockDatasets(mockUpPlugin, mockDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.DEFAULT_METADATA_POLICY, CatalogServiceImpl.UpdateType.NAMES);
+        mockUpKey, CatalogService.DEFAULT_METADATA_POLICY, SourceUpdateType.NAMES);
 
     assertEquals(5, Lists.newArrayList(namespaceService.getAllDatasets(mockUpKey)).size());
 
@@ -539,7 +547,7 @@ public class TestCatalogServiceImpl {
     testDatasets.add(newDataset(MOCK_UP + ".fld5.ds51"));
     doMockDatasets(mockUpPlugin, testDatasets);
     catalogService.refreshSource(
-        mockUpKey, CatalogService.DEFAULT_METADATA_POLICY, CatalogServiceImpl.UpdateType.NAMES);
+        mockUpKey, CatalogService.DEFAULT_METADATA_POLICY, SourceUpdateType.NAMES);
 
     // make sure the namespace has datasets and folders according to the data supplied by plugin in
     // second request
@@ -573,12 +581,13 @@ public class TestCatalogServiceImpl {
         new SourceConfig()
             .setName(pluginName)
             .setMetadataPolicy(rapidRefreshPolicy)
-            .setCtime(100L)
             .setConnectionConf(new MockUpConfig());
 
     boolean testPassed = false;
     try {
-      catalogService.getSystemUserCatalog().createSource(mockUpConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .createSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException ue) {
       assertEquals(UserBitShared.DremioPBError.ErrorType.RESOURCE, ue.getErrorType());
       ManagedStoragePlugin msp = catalogService.getManagedSource(pluginName);
@@ -594,14 +603,15 @@ public class TestCatalogServiceImpl {
     SourceConfig mockUpConfig =
         new SourceConfig()
             .setName(MOCK_UP)
-            .setCtime(100L)
             .setTag("4")
             .setConfigOrdinal(0L)
             .setConnectionConf(new MockUpConfig());
 
     boolean testPassed = false;
     try {
-      catalogService.getSystemUserCatalog().deleteSource(mockUpConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .deleteSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException ue) {
       testPassed = true;
     }
@@ -611,14 +621,15 @@ public class TestCatalogServiceImpl {
     mockUpConfig =
         new SourceConfig()
             .setName(MOCK_UP)
-            .setCtime(100L)
             .setTag(originalCatalogVersion)
             .setConfigOrdinal(2L)
             .setConnectionConf(new MockUpConfig());
 
     testPassed = false;
     try {
-      catalogService.getSystemUserCatalog().deleteSource(mockUpConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .deleteSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException ue) {
       testPassed = true;
     }
@@ -632,7 +643,9 @@ public class TestCatalogServiceImpl {
     SourceConfig missingConfig =
         new SourceConfig().setName(MISSING_CONFIG_NAME).setConnectionConf(missing);
 
-    catalogService.getSystemUserCatalog().createSource(missingConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(missingConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     catalogService.deleteSource(MISSING_CONFIG_NAME);
 
     Assert.assertEquals(
@@ -647,14 +660,6 @@ public class TestCatalogServiceImpl {
   @Test
   public void testDeleteAsync() throws Exception {
     CountDownLatch latch = new CountDownLatch(1);
-    catalogService
-        .optionManager
-        .get()
-        .setOption(
-            OptionValue.createBoolean(
-                OptionValue.OptionType.SYSTEM,
-                ExecConstants.SOURCE_ASYNC_MODIFICATION_ENABLED.getOptionName(),
-                true));
 
     doAnswer(
             (args) -> {
@@ -671,19 +676,41 @@ public class TestCatalogServiceImpl {
 
     // verify that the async method has been called.
     assertTrue("Async task deletion was not completed.", completed);
-
-    catalogService
-        .optionManager
-        .get()
-        .setOption(
-            OptionValue.createBoolean(
-                OptionValue.OptionType.SYSTEM,
-                ExecConstants.SOURCE_ASYNC_MODIFICATION_ENABLED.getOptionName(),
-                false));
   }
 
   @Test
-  @Disabled("DX-95117: Will be re-enabled when async source modification flag is on")
+  public void testDeleteAsyncThrowsRollback() throws Exception {
+    CountDownLatch latch = new CountDownLatch(1);
+
+    doAnswer(
+            (args) -> {
+              latch.countDown();
+              return null;
+            })
+        .when(catalogService)
+        .postSourceModify(any(), any(), any(), any());
+
+    doThrow(
+            UserException.validationError()
+                .message("Failed to create for some reason")
+                .buildSilently())
+        .when(namespaceService)
+        .deleteSourceWithCallBack(any(), any(), any());
+
+    try {
+      catalogService.deleteSource(MOCK_UP2);
+    } catch (Exception ignored) {
+
+    }
+
+    // check postModify is being called when there's exception during the process.
+    boolean completed = latch.await(5, TimeUnit.SECONDS);
+
+    // verify that the async method has been called.
+    assertTrue("Async task deletion was not completed.", completed);
+  }
+
+  @Test
   public void testCreateSourceThrowsWhenSourceActionIsNotNone() throws Exception {
     SourceConfig creatingConfig =
         new SourceConfig()
@@ -692,7 +719,9 @@ public class TestCatalogServiceImpl {
 
     boolean testPassed = false;
     try {
-      catalogService.getSystemUserCatalog().createSource(creatingConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .createSource(creatingConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException ue) {
       testPassed = true;
     }
@@ -700,7 +729,6 @@ public class TestCatalogServiceImpl {
   }
 
   @Test
-  @Disabled("DX-95117: Will be re-enabled when async source modification flag is on")
   public void testUpdateSourceThrowsWhenSourceActionIsNotNone() throws Exception {
     SourceConfig creatingConfig =
         new SourceConfig()
@@ -709,7 +737,9 @@ public class TestCatalogServiceImpl {
 
     boolean testPassed = false;
     try {
-      catalogService.getSystemUserCatalog().updateSource(creatingConfig);
+      catalogService
+          .getSystemUserCatalog()
+          .updateSource(creatingConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     } catch (UserException ue) {
       testPassed = true;
     }
@@ -723,20 +753,22 @@ public class TestCatalogServiceImpl {
     SourceConfig missingConfig =
         new SourceConfig().setName(MISSING_CONFIG_NAME).setConnectionConf(missing);
 
-    catalogService.getSystemUserCatalog().createSource(missingConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(missingConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     assertFalse(
         catalogService.refreshSource(
             new NamespaceKey(MISSING_CONFIG_NAME),
             CatalogService.REFRESH_EVERYTHING_NOW,
-            CatalogServiceImpl.UpdateType.FULL));
+            SourceUpdateType.FULL));
   }
 
   @Test
   public void badSourceShouldNotBlockStorageRules_UNSAFE_WAIT() throws Exception {
     OptimizerRulesContext mock = mock(OptimizerRulesContext.class);
 
-    ManagedStoragePlugin managedStoragePlugin = catalogService.getPlugins().get(MOCK_UP_BAD);
+    ManagedStoragePlugin managedStoragePlugin = catalogService.getPluginsManager().get(MOCK_UP_BAD);
     managedStoragePlugin.refreshState().get();
 
     AtomicBoolean test = new AtomicBoolean(false);
@@ -867,7 +899,9 @@ public class TestCatalogServiceImpl {
 
     @Override
     public MockUpPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return plugin;
     }
   }
@@ -893,11 +927,6 @@ public class TestCatalogServiceImpl {
     @Override
     public SourceCapabilities getSourceCapabilities() {
       return SourceCapabilities.NONE;
-    }
-
-    @Override
-    public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-      throw new UnsupportedOperationException();
     }
 
     @Override
@@ -971,7 +1000,9 @@ public class TestCatalogServiceImpl {
 
     @Override
     public MockUpBadPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return mockUpBadPlugin;
     }
   }
@@ -1002,11 +1033,6 @@ public class TestCatalogServiceImpl {
     @Override
     public SourceCapabilities getSourceCapabilities() {
       return SourceCapabilities.NONE;
-    }
-
-    @Override
-    public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-      throw new UnsupportedOperationException();
     }
 
     @Override

@@ -26,7 +26,6 @@ import com.dremio.exec.planner.physical.DistributionTrait.DistributionField;
 import com.dremio.exec.planner.physical.visitor.PrelVisitor;
 import com.dremio.exec.planner.sql.DremioSqlOperatorTable;
 import com.dremio.service.Pointer;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -45,6 +44,7 @@ import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.RelCollation;
 import org.apache.calcite.rel.RelCollations;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.RelWriter;
 import org.apache.calcite.rel.core.AggregateCall;
 import org.apache.calcite.rel.core.Project;
 import org.apache.calcite.rel.type.RelDataType;
@@ -75,12 +75,10 @@ public abstract class AggregatePrel extends AggregateRelBase implements Prel {
       RelTraitSet traits,
       RelNode child,
       ImmutableBitSet groupSet,
-      List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls,
       OperatorPhase phase)
       throws InvalidRelException {
-    super(cluster, traits, child, groupSet, groupSets, aggCalls);
-    Preconditions.checkArgument(groupSets == null || groupSets.size() < 2);
+    super(cluster, traits, child, groupSet, null, aggCalls);
     this.operPhase = phase;
     this.keys = RexToExpr.groupSetToExpr(child, groupSet);
     this.aggExprs = RexToExpr.aggCallsToExpr(getRowType(), child, groupSet, aggCalls);
@@ -370,6 +368,13 @@ public abstract class AggregatePrel extends AggregateRelBase implements Prel {
               }
               return new DistributionTrait(distribution.getType(), fields);
             });
+  }
+
+  @Override
+  public RelWriter explainTerms(RelWriter pw) {
+    return super.explainTerms(pw)
+        .itemIf(
+            "OperatorPhase", operPhase, operPhase != null && operPhase != OperatorPhase.PHASE_1of1);
   }
 
   public OperatorPhase getOperatorPhase() {

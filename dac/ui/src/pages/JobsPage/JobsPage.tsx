@@ -27,9 +27,9 @@ import NavCrumbs from "@inject/components/NavCrumbs/NavCrumbs";
 import { JobsTable } from "dremio-ui-common/sonar/components/JobsTable/JobsTable.js";
 // @ts-ignore
 import { jobsPageTableColumns } from "dremio-ui-common/sonar/components/JobsTable/jobsPageTableColumns.js";
-import JobsFilters from "./components/JobsFilters/JobsFilter";
+import JobsFilters from "./components/JobsPageFilters/JobsPageFilter";
 import { JobsQueryParams } from "dremio-ui-common/types/Jobs.types";
-import { getShowHideColumns } from "./components/JobsFilters/utils";
+import { getShowHideColumns } from "./components/JobsPageFilters/utils";
 import localStorageUtils from "#oss/utils/storageUtils/localStorageUtils";
 import { DatasetCell } from "./components/DatasetCell/DatasetCell";
 import { SQLCell } from "./components/SQLCell/SQLCell";
@@ -41,7 +41,7 @@ import { isNotSoftware } from "dyn-load/utils/versionUtils";
 
 import classes from "./JobsPage.module.less";
 import { PageTop } from "dremio-ui-common/components/PageTop.js";
-import { SearchTriggerWrapper } from "#oss/exports/searchModal/SearchTriggerWrapper";
+import SearchTriggerWrapper from "@inject/catalogSearch/SearchTriggerWrapper";
 
 const loadingSkeletonRows = Array(10).fill(null);
 

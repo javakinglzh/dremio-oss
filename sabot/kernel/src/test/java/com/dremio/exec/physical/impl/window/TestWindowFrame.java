@@ -18,17 +18,30 @@ package com.dremio.exec.physical.impl.window;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
-import com.dremio.BaseTestQuery;
+import com.dremio.BaseTestQueryJunit5;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.common.util.TestTools;
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
 import com.dremio.sabot.op.windowframe.Partition;
-import org.junit.Ignore;
-import org.junit.Test;
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Stream;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
-public class TestWindowFrame extends BaseTestQuery {
+public class TestWindowFrame extends BaseTestQueryJunit5 {
 
   private static final String TEST_RES_PATH = TestTools.getWorkingPath() + "/src/test/resources";
+
+  @BeforeAll
+  public static void setupDefaultTestCluster() throws Exception {
+    BaseTestQueryJunit5.setupDefaultTestCluster();
+  }
 
   @Test
   public void testMultipleFramers() throws Exception {
@@ -46,6 +59,146 @@ public class TestWindowFrame extends BaseTestQuery {
             + "FROM dfs.\""
             + TEST_RES_PATH
             + "/window/b1.p1\"");
+  }
+
+  private static Stream<Arguments> paramsForMultipleWindowFramerWithNullabilityConstraintTest() {
+    return Stream.of(
+        Arguments.of(
+            TEMP_SCHEMA + ".nullability_bug_int_not_null",
+            "col INT NOT NULL",
+            Arrays.asList(1, 2, 3)),
+        Arguments.of(
+            TEMP_SCHEMA + ".nullability_bug_big_int_not_null",
+            "col BIGINT NOT NULL",
+            Arrays.asList(1L, 2L, 3L)),
+        Arguments.of(
+            TEMP_SCHEMA + ".nullability_bug_float_not_null",
+            "col FLOAT NOT NULL",
+            Arrays.asList(1f, 2f, 3f)),
+        Arguments.of(
+            TEMP_SCHEMA + ".nullability_bug_decimal_not_null",
+            "col DECIMAL(10, 0) NOT NULL",
+            Arrays.asList(new BigDecimal(1), new BigDecimal(2), new BigDecimal(3))));
+  }
+
+  @ParameterizedTest(name = "{index} {0}")
+  @MethodSource("paramsForMultipleWindowFramerWithNullabilityConstraintTest")
+  public void testMultipleWindowFramerWithNullabilityConstraint(
+      String tableSchema, String columnSpec, List<Number> numbers) throws Exception {
+    final String baseCreateTableQuery = "CREATE TABLE %s (%s);";
+    final String insertQuery = "INSERT INTO %s VALUES (1.0)," + "(2.0)," + "(3.0);";
+    final String windowQuery =
+        "SELECT col, ROW_NUMBER() OVER() as c_numbers, SUM(1) OVER() as c_sum FROM %s";
+
+    try {
+      test(String.format(baseCreateTableQuery, tableSchema, columnSpec));
+      test(String.format(insertQuery, tableSchema));
+      testBuilder()
+          .sqlQuery(String.format(windowQuery, tableSchema))
+          .ordered()
+          .baselineColumns("col", "c_numbers", "c_sum")
+          .baselineValues(numbers.get(0), 1L, 3L)
+          .baselineValues(numbers.get(1), 2L, 3L)
+          .baselineValues(numbers.get(2), 3L, 3L)
+          .go();
+    } finally {
+      test("DROP TABLE " + tableSchema);
+    }
+  }
+
+  @Test
+  public void testMultipleWindowFramerWithNullabilityConstraintsInTwoFields() throws Exception {
+    final List<String> targetTableSchemas =
+        List.of(
+            TEMP_SCHEMA + ".nullability_bug_one_in_two_fields_not_null",
+            TEMP_SCHEMA + ".nullability_bug_two_in_two_fields_not_null");
+    final List<String> columnSpecs =
+        List.of(
+            "c_int INT,          c_dec_not_null DECIMAL(10, 0) NOT NULL",
+            "c_int INT NOT NULL, c_dec_not_null DECIMAL(10, 0) NOT NULL");
+    final String baseCreateTableQuery = "CREATE TABLE %s (%s);";
+    final String insertQuery = "INSERT INTO %s VALUES (1.0, 1.0)," + "(2.0, 2.0)," + "(3.0, 3.0);";
+    final String windowQuery =
+        "SELECT c_dec_not_null, ROW_NUMBER() OVER() as c_numbers, SUM(1) OVER() as c_sum FROM %s";
+
+    int nFailures = 0;
+    StringBuilder exceptionMessages = new StringBuilder();
+    for (int i = 0; i < targetTableSchemas.size(); i++) {
+      try {
+        test(String.format(baseCreateTableQuery, targetTableSchemas.get(i), columnSpecs.get(i)));
+        test(String.format(insertQuery, targetTableSchemas.get(i)));
+        testBuilder()
+            .sqlQuery(String.format(windowQuery, targetTableSchemas.get(i)))
+            .ordered()
+            .baselineColumns("c_dec_not_null", "c_numbers", "c_sum")
+            .baselineValues(BigDecimal.valueOf(1.0), 1L, 3L)
+            .baselineValues(BigDecimal.valueOf(2.0), 2L, 3L)
+            .baselineValues(BigDecimal.valueOf(3.0), 3L, 3L)
+            .go();
+      } catch (Exception e) {
+        nFailures++;
+        exceptionMessages.append(e.getMessage() + "\n");
+      } finally {
+        test("DROP TABLE " + targetTableSchemas.get(i));
+      }
+    }
+    if (nFailures > 0) {
+      fail(
+          "Encountered "
+              + nFailures
+              + " failures out of "
+              + targetTableSchemas.size()
+              + " tests: "
+              + exceptionMessages.toString());
+    }
+  }
+
+  @Test
+  public void testMultipleWindowFramerWithNullabilityConstraintsInFourFields() throws Exception {
+    final List<String> targetTableSchemas =
+        List.of(
+            TEMP_SCHEMA + ".nullability_two_in_four_fields_not_null",
+            TEMP_SCHEMA + ".nullability_one_in_four_field_not_null");
+    final List<String> columnSpecs =
+        List.of(
+            "c_int INT, c_dec DECIMAL(10, 0), c_int_not_null INT NOT NULL, c_dec_not_null DECIMAL(10, 0) NOT NULL",
+            "c_int INT, c_dec DECIMAL(10, 0), c_int_null     INT,          c_dec_not_null DECIMAL(10, 0) NOT NULL");
+    final String baseCreateTableQuery = "CREATE TABLE %s (%s);";
+    final String insertQuery =
+        "INSERT INTO %s VALUES (1, 1.0, 1, 1.0)," + "(2, 2.0, 2, 2.0)," + "(3, 3.0, 3, 3.0);";
+    final String windowQuery =
+        "SELECT c_dec_not_null, ROW_NUMBER() OVER() as c_numbers, SUM(1) OVER() as c_sum FROM %s";
+
+    int nFailures = 0;
+    StringBuilder exceptionMessages = new StringBuilder();
+    for (int i = 0; i < targetTableSchemas.size(); i++) {
+      try {
+        test(String.format(baseCreateTableQuery, targetTableSchemas.get(i), columnSpecs.get(i)));
+        test(String.format(insertQuery, targetTableSchemas.get(i)));
+        testBuilder()
+            .sqlQuery(String.format(windowQuery, targetTableSchemas.get(i)))
+            .ordered()
+            .baselineColumns("c_dec_not_null", "c_numbers", "c_sum")
+            .baselineValues(BigDecimal.valueOf(1.0), 1L, 3L)
+            .baselineValues(BigDecimal.valueOf(2.0), 2L, 3L)
+            .baselineValues(BigDecimal.valueOf(3.0), 3L, 3L)
+            .go();
+      } catch (Exception e) {
+        nFailures++;
+        exceptionMessages.append(e.getMessage() + "\n");
+      } finally {
+        test("DROP TABLE " + targetTableSchemas.get(i));
+      }
+    }
+    if (nFailures > 0) {
+      fail(
+          "Encountered "
+              + nFailures
+              + " failures out of "
+              + targetTableSchemas.size()
+              + " tests: "
+              + exceptionMessages.toString());
+    }
   }
 
   @Test
@@ -259,7 +412,7 @@ public class TestWindowFrame extends BaseTestQuery {
   }
 
   @Test
-  @Ignore // DX-18534
+  @Disabled // DX-18534
   public void testNtile() throws Exception {
     testBuilder()
         .sqlQuery(getFile("window/ntile.sql"), TEST_RES_PATH)

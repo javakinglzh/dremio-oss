@@ -17,6 +17,7 @@ package com.dremio.exec.store.iceberg.model;
 
 import com.dremio.exec.catalog.PartitionSpecAlterOption;
 import com.dremio.exec.catalog.RollbackOption;
+import com.dremio.exec.proto.ExecProtos.ClusteringStatus;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
 import java.util.List;
@@ -305,6 +306,8 @@ public interface IcebergCommand {
   void updatePartitionSpec(PartitionSpecAlterOption partitionSpecAlterOption);
 
   long propertyAsLong(String propertyName, long defaultValue);
+
+  void consumeClusteringStatus(ClusteringStatus clusteringStatus);
 
   FileIO getFileIO();
 }

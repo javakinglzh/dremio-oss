@@ -17,13 +17,11 @@
 package com.dremio.exec.store.deltalake;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.junit.Assert.assertTrue;
 
 import com.dremio.PlanTestBase;
 import com.dremio.TestBuilder;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.common.util.TestTools;
-import com.dremio.exec.ExecConstants;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.server.SabotContext;
@@ -264,7 +262,7 @@ public class TestDeltaScan extends PlanTestBase {
                     new LocalDateTime(commit.getTimestamp().getTime(), DateTimeZone.UTC),
                     commit.getVersion().orElse(0L),
                     null,
-                    null));
+                    false));
     testBuilder.go();
   }
 
@@ -660,9 +658,6 @@ public class TestDeltaScan extends PlanTestBase {
             dremioFs,
             Collections.singletonList(dremioFs.getFileAttributes(checkpointPath)),
             10);
-    assertTrue(
-        snapshot.getSchema().length()
-            > sabotContext.getOptionManager().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
 
     final String sql = "select count(*) cnt from dfs.tmp.deltalake." + tableName;
     testBuilder().sqlQuery(sql).unOrdered().baselineColumns("cnt").baselineValues(23L).go();
@@ -689,9 +684,6 @@ public class TestDeltaScan extends PlanTestBase {
             dremioFs,
             Collections.singletonList(dremioFs.getFileAttributes(commitPath)),
             0);
-    assertTrue(
-        snapshot.getSchema().length()
-            > sabotContext.getOptionManager().getOption(ExecConstants.LIMIT_FIELD_SIZE_BYTES));
 
     final String sql = "select count(*) cnt from dfs.tmp.deltalake." + tableName;
     testBuilder().sqlQuery(sql).unOrdered().baselineColumns("cnt").baselineValues(5L).go();
@@ -745,6 +737,14 @@ public class TestDeltaScan extends PlanTestBase {
         .baselineValues(1, 12, 11, 1)
         .baselineValues(2, 22, 21, 2)
         .go();
+  }
+
+  @Test
+  public void testColumnMappingNestedTypesWithPushArrayColumnsIntoScan() throws Exception {
+    try (AutoCloseable ignored =
+        withSystemOption(PlannerSettings.PUSH_ARRAY_COLUMNS_INTO_SCAN, true)) {
+      testColumnMappingNestedTypes();
+    }
   }
 
   @Test

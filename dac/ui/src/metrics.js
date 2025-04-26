@@ -63,10 +63,10 @@ export default {
     ); //ignore errors
   },
 
-  fetchJobAndUserStats(numDaysBack) {
+  fetchJobAndUserStats(numDaysBack, detailedStats = false) {
     let url = "/stats/jobsandusers";
     if (numDaysBack) {
-      url += `?numDaysBack=${numDaysBack}`;
+      url += `?numDaysBack=${numDaysBack}&detailedStats=${detailedStats}`;
     } else {
       url += `?numDaysBack=10&detailedStats=true`;
     }

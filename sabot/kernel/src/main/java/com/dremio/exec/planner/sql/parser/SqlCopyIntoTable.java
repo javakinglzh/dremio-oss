@@ -71,6 +71,7 @@ import org.apache.calcite.sql.SqlSelect;
 import org.apache.calcite.sql.SqlSpecialOperator;
 import org.apache.calcite.sql.SqlUserDefinedTypeNameSpec;
 import org.apache.calcite.sql.SqlWriter;
+import org.apache.calcite.sql.fun.SqlCase;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -198,8 +199,9 @@ public class SqlCopyIntoTable extends SqlCall
    * recursively traverses the SqlNode tree, specifically targeting identifiers and basic calls. For
    * identifiers (SqlIdentifier), it prepends each identifier segment with {@link
    * ColumnUtils#VIRTUAL_COLUMN_PREFIX} and converts it to uppercase. For other functions
-   * (SqlBasicCall), it applies the renaming logic to each operand within the call. SqlNodes that
-   * are not identifiers or basic calls are left unchanged.
+   * (SqlBasicCall), it applies the renaming logic to each operand within the call. Also handles
+   * SqlCase where all the WHEN/THEN/ELSE nodes are considered. SqlNodes that are not identifiers,
+   * basic calls or SqlCase are left unchanged.
    *
    * @param node the SqlNode representing the SELECT statement to be renamed
    * @return a new SqlNode with renamed identifiers (if applicable)
@@ -217,6 +219,20 @@ public class SqlCopyIntoTable extends SqlCall
           sqlBasicCall.getOperator(),
           operandList.stream().map(this::renameSelectNode).toArray(SqlNode[]::new),
           sqlBasicCall.getParserPosition());
+    } else if (node instanceof SqlCase) {
+      SqlCase sqlCase = (SqlCase) node;
+      SqlNodeList whenList = sqlCase.getWhenOperands();
+      SqlNodeList thenList = sqlCase.getThenOperands();
+      return new SqlCase(
+          sqlCase.getParserPosition(),
+          renameSelectNode(sqlCase.getValueOperand()),
+          new SqlNodeList(
+              whenList.getList().stream().map(this::renameSelectNode).collect(Collectors.toList()),
+              whenList.getParserPosition()),
+          new SqlNodeList(
+              thenList.getList().stream().map(this::renameSelectNode).collect(Collectors.toList()),
+              thenList.getParserPosition()),
+          renameSelectNode(sqlCase.getElseOperand()));
     }
     return node;
   }
@@ -530,6 +546,10 @@ public class SqlCopyIntoTable extends SqlCall
         } else {
           collectTransformationColNames(basicCall.getOperandList(), innerTypeDef);
         }
+      } else if (node instanceof SqlCase) {
+        collectTransformationColNames(((SqlCase) node).getOperandList(), innerTypeDef);
+      } else if (node instanceof SqlNodeList) {
+        collectTransformationColNames(((SqlNodeList) node).getList(), innerTypeDef);
       }
     }
   }

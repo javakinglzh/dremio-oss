@@ -16,23 +16,47 @@
 
 package com.dremio.common.util;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
 import java.io.IOException;
 import java.sql.SQLException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 import org.mockito.ArgumentCaptor;
+import org.slf4j.LoggerFactory;
 
 /** Tests for Retryer */
 public class TestRetryer {
   private static final int MAX_RETRIES = 4;
+
+  private ListAppender<ILoggingEvent> appender;
+
+  @SuppressWarnings("Slf4jIllegalPassedClass") // intentionally using logger from another class
+  private final ch.qos.logback.classic.Logger retryerLogger =
+      (ch.qos.logback.classic.Logger) LoggerFactory.getLogger(Retryer.class);
+
+  @Before
+  public void beforeAll() {
+    appender = new ListAppender<>();
+    appender.start();
+    retryerLogger.addAppender(appender);
+  }
+
+  @After
+  public void afterAll() {
+    retryerLogger.detachAppender(appender);
+  }
 
   @Test
   public void testMaxRetries() {
@@ -203,5 +227,32 @@ public class TestRetryer {
     // retry will not throw exception because infinite was set, only condition is reached, counter
     // should be greater than the max retries passed in params
     assertTrue(counter.get() > maxRetries);
+  }
+
+  @Test
+  public void testRetryMentionsCaller() {
+    final int expectedWait = 100;
+
+    Retryer retryer =
+        Retryer.newBuilder()
+            .setWaitStrategy(Retryer.WaitStrategy.FLAT, expectedWait, expectedWait)
+            .retryIfExceptionOfType(RuntimeException.class)
+            .setMaxRetries(MAX_RETRIES)
+            .build();
+
+    try {
+      retryer.call(
+          () -> {
+            throw new RuntimeException("Failure");
+          });
+    } catch (RuntimeException e) {
+      // Nothing to do
+    }
+
+    assertThat(appender.list)
+        .allSatisfy(
+            iLoggingEvent ->
+                assertThat(iLoggingEvent.getFormattedMessage())
+                    .contains("TestRetryer:testRetryMentionsCaller"));
   }
 }

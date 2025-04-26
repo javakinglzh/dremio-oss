@@ -36,14 +36,13 @@ public class ManifestEntryProcessorFactory {
 
   ManifestEntryProcessor getManifestEntryProcessor(TableFunctionConfig functionConfig) {
     // DX-49879: SPLIT_GEN_MANIFEST_SCAN needs to be migrated to the new
-    // ICEBERG_MANIFEST_SCAN/ICEBERG_SPLIT_GEN table
-    // functions
+    // ICEBERG_MANIFEST_SCAN/ICEBERG_SPLIT_GEN table functions
     switch (functionConfig.getType()) {
       case METADATA_MANIFEST_FILE_SCAN:
         return new DataFileContentReader(context, functionConfig.getFunctionContext());
       case SPLIT_GEN_MANIFEST_SCAN:
-        SupportsInternalIcebergTable plugin =
-            IcebergUtils.getSupportsInternalIcebergTablePlugin(
+        SupportsIcebergRootPointer plugin =
+            IcebergUtils.getSupportsIcebergRootPointerPlugin(
                 fec, functionConfig.getFunctionContext().getPluginId());
         return new SplitGeneratingDatafileProcessor(
             context, plugin, props, functionConfig.getFunctionContext());

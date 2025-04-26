@@ -20,8 +20,14 @@ import static com.dremio.exec.planner.sql.DremioSqlOperatorTable.ARRAY_AGG;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import org.apache.calcite.rel.RelNode;
+import org.apache.calcite.rel.core.Sample;
+import org.apache.calcite.rel.core.Sort;
 import org.apache.calcite.rel.logical.LogicalAggregate;
+import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.logical.LogicalSort;
+import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Visitor that checks to see if the query plan is unsupported. */
@@ -31,8 +37,15 @@ public final class UnsupportedQueryPlanVisitor extends StatelessRelShuttleImpl {
   private UnsupportedQueryPlanVisitor() {}
 
   @Override
+  public RelNode visit(RelNode other) {
+    checkTableSample(other);
+    return this.visitChildren(other);
+  }
+
+  @Override
   public RelNode visit(LogicalSort sort) {
     checkOrderByArray(sort);
+    checkOverflow(sort);
     return super.visit(sort);
   }
 
@@ -40,6 +53,23 @@ public final class UnsupportedQueryPlanVisitor extends StatelessRelShuttleImpl {
   public RelNode visit(LogicalAggregate aggregate) {
     checkArrayAggWithRollup(aggregate);
     return super.visit(aggregate);
+  }
+
+  /**
+   * Fix for agg operators that accept IGNORE NULLS option even though it's not supported TODO:
+   * Remove this check when it is supported
+   */
+  @Override
+  public RelNode visit(LogicalProject project) {
+    for (RexNode expr : project.getProjects()) {
+      if (expr instanceof RexOver) {
+        RexOver rexOver = (RexOver) expr;
+        if (rexOver.ignoreNulls()) {
+          throw UserException.planError().message("IGNORE NULLS is not supported.").buildSilently();
+        }
+      }
+    }
+    return super.visit(project);
   }
 
   public static void checkForUnsupportedQueryPlan(RelNode queryPlan) {
@@ -53,6 +83,39 @@ public final class UnsupportedQueryPlanVisitor extends StatelessRelShuttleImpl {
     if (orderingByArray) {
       throw UserException.planError()
           .message("Sorting by arrays is not supported.")
+          .buildSilently();
+    }
+  }
+
+  private static void checkOverflow(Sort sort) {
+    RexNode offsetRex = sort.offset;
+    RexNode fetchRex = sort.fetch;
+    double offset = getDoubleValue(offsetRex);
+    double fetch = getDoubleValue(fetchRex);
+    double limit = offset + fetch;
+    assertOverflow(limit);
+  }
+
+  private static double getDoubleValue(RexNode rexNode) {
+    double value = 0;
+    if (rexNode != null) {
+      Number number = (Number) RexLiteral.value(rexNode);
+      value = number.doubleValue();
+      assertOverflow(value);
+    }
+    return value;
+  }
+
+  private static void checkTableSample(RelNode relNode) {
+    if (relNode instanceof Sample) {
+      throw UserException.planError().message("Table sampling is not supported.").buildSilently();
+    }
+  }
+
+  private static void assertOverflow(double value) {
+    if (value > Integer.MAX_VALUE) {
+      throw UserException.planError()
+          .message("LIMIT + OFFSET exceeds maximum integer value.")
           .buildSilently();
     }
   }

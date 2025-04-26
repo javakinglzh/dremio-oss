@@ -27,7 +27,6 @@ import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.IcebergFileConfig;
 import com.dremio.service.namespace.file.proto.ParquetFileConfig;
 import java.util.function.Supplier;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Table;
 
 /**
@@ -44,28 +43,17 @@ public class SystemIcebergTablesExecutionDatasetAccessor
    *
    * @param entityPath The entity path representing the dataset.
    * @param tableSupplier A supplier function to provide the Iceberg {@link Table} instance.
-   * @param configuration The configuration for the dataset accessor.
    * @param tableSnapshotProvider The provider for table snapshots.
-   * @param plugin The {@link SystemIcebergTablesStoragePlugin} instance.
    * @param tableSchemaProvider The provider for table schema.
    * @param optionResolver The option resolver for dataset options.
    */
   SystemIcebergTablesExecutionDatasetAccessor(
       EntityPath entityPath,
       Supplier<Table> tableSupplier,
-      Configuration configuration,
       TableSnapshotProvider tableSnapshotProvider,
-      SystemIcebergTablesStoragePlugin plugin,
       TableSchemaProvider tableSchemaProvider,
       OptionResolver optionResolver) {
-    super(
-        entityPath,
-        tableSupplier,
-        configuration,
-        tableSnapshotProvider,
-        plugin,
-        tableSchemaProvider,
-        optionResolver);
+    super(entityPath, tableSupplier, tableSnapshotProvider, tableSchemaProvider, optionResolver);
     this.tableSupplier = tableSupplier;
   }
 

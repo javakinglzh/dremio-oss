@@ -18,6 +18,7 @@ package com.dremio.exec.planner.sql;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.types.TypeProtos;
+import com.dremio.common.types.TypeProtos.DataMode;
 import com.dremio.common.types.TypeProtos.MinorType;
 import com.dremio.common.types.Types;
 import com.dremio.common.util.MajorTypeHelper;
@@ -109,7 +110,11 @@ public class CalciteArrowHelper {
   }
 
   public static CompleteTypeWrapper wrap(CompleteType ct) {
-    return new CompleteTypeWrapper(ct);
+    return wrap(ct, true);
+  }
+
+  public static CompleteTypeWrapper wrap(CompleteType ct, boolean isNullable) {
+    return new CompleteTypeWrapper(ct, isNullable);
   }
 
   public static BatchSchema fromDataset(DatasetConfig config) {
@@ -138,15 +143,13 @@ public class CalciteArrowHelper {
     }
 
     MinorType minorType = TypeInferenceUtils.getMinorTypeFromCalciteType(relDataType);
+    DataMode dataMode = relDataType.isNullable() ? DataMode.OPTIONAL : DataMode.REQUIRED;
     if (minorType != null) {
       final TypeProtos.MajorType majorType;
       if (minorType == TypeProtos.MinorType.DECIMAL) {
         majorType =
             Types.withScaleAndPrecision(
-                minorType,
-                TypeProtos.DataMode.OPTIONAL,
-                relDataType.getScale(),
-                relDataType.getPrecision());
+                minorType, dataMode, relDataType.getScale(), relDataType.getPrecision());
       } else if (minorType == MinorType.STRUCT) {
         return Optional.of(getStructField(name, relDataType));
       } else if (minorType == MinorType.LIST) {
@@ -154,7 +157,8 @@ public class CalciteArrowHelper {
       } else if (minorType == MinorType.MAP) {
         return Optional.of(getMapField(name, relDataType));
       } else {
-        majorType = Types.optional(minorType);
+        majorType =
+            relDataType.isNullable() ? Types.optional(minorType) : Types.required(minorType);
       }
 
       return Optional.of(MajorTypeHelper.getFieldForNameAndMajorType(name, majorType));
@@ -162,33 +166,39 @@ public class CalciteArrowHelper {
     return Optional.empty();
   }
 
-  private static Optional<Field> fieldFromCalciteRowTypeJson(String name, RelDataType relDataType) {
+  private static Optional<Field> fieldFromCalciteRowTypeJson(
+      String name, RelDataType relDataType, boolean isValueCastEnabled) {
     // Same as the non JSON variant, but special casing for the fact that JSON Reader only has LONGs
     // and DOUBLEs
     if (relDataType == null) {
       return Optional.empty();
     }
-
-    Optional<Field> result;
-    if (relDataType.getSqlTypeName() == SqlTypeName.INTEGER) {
-      ArrowType arrowType = new ArrowType.Int(64, true); // 8 bytes
-      Field field =
-          relDataType.isNullable()
-              ? Field.nullable(name, arrowType)
-              : Field.notNullable(name, arrowType);
-      result = Optional.of(field);
-    } else if (relDataType.getSqlTypeName() == SqlTypeName.FLOAT) {
-      ArrowType arrowType = new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE); // 8 bytes
-      Field field =
-          relDataType.isNullable()
-              ? Field.nullable(name, arrowType)
-              : Field.notNullable(name, arrowType);
-      result = Optional.of(field);
-    } else {
-      result = fieldFromCalciteRowType(name, relDataType);
+    ArrowType arrowType;
+    switch (relDataType.getSqlTypeName()) {
+      case INTEGER:
+        arrowType = new ArrowType.Int(isValueCastEnabled ? 64 : 32, true); // 4 bytes
+        break;
+      case BIGINT:
+        arrowType = new ArrowType.Int(64, true); // 8 bytes
+        break;
+      case FLOAT:
+        arrowType =
+            new ArrowType.FloatingPoint(
+                isValueCastEnabled
+                    ? FloatingPointPrecision.DOUBLE
+                    : FloatingPointPrecision.SINGLE); // 4 bytes
+        break;
+      case DOUBLE:
+        arrowType = new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE); // 8 bytes
+        break;
+      default:
+        return fieldFromCalciteRowType(name, relDataType);
     }
-
-    return result;
+    Field field =
+        relDataType.isNullable()
+            ? Field.nullable(name, arrowType)
+            : Field.notNullable(name, arrowType);
+    return Optional.of(field);
   }
 
   private static Field getStructField(String name, RelDataType relDataType) {
@@ -199,7 +209,9 @@ public class CalciteArrowHelper {
     return new Field(
         name,
         new FieldType(
-            true, MajorTypeHelper.getArrowTypeForMajorType(Types.optional(MinorType.STRUCT)), null),
+            relDataType.isNullable(),
+            MajorTypeHelper.getArrowTypeForMajorType(Types.optional(MinorType.STRUCT)),
+            null),
         children);
   }
 
@@ -212,23 +224,28 @@ public class CalciteArrowHelper {
     return new Field(
         name,
         new FieldType(
-            true, MajorTypeHelper.getArrowTypeForMajorType(Types.optional(MinorType.LIST)), null),
+            relDataType == null || relDataType.isNullable(),
+            MajorTypeHelper.getArrowTypeForMajorType(Types.optional(MinorType.LIST)),
+            null),
         onlyChild);
   }
 
   private static Field getMapField(String name, RelDataType relDataType) {
     final List<Field> structChild = new ArrayList<>();
+    // the map data structure is represented as a struct with two fields: key and value
+    // the inner struct is called entries which is wrapped by the map type field
     if (relDataType != null) {
-      Optional<Field> keyField = fieldFromCalciteRowType("key", relDataType.getKeyType());
-      if (keyField.isPresent()) {
-        structChild.add(
-            new Field(
-                "key",
-                new FieldType(false, keyField.get().getType(), null),
-                keyField.get().getChildren()));
-      }
+      fieldFromCalciteRowType("key", relDataType.getKeyType())
+          .ifPresent(
+              field ->
+                  structChild.add(
+                      new Field(
+                          "key",
+                          new FieldType(field.isNullable(), field.getType(), null),
+                          field.getChildren())));
       fieldFromCalciteRowType("value", relDataType.getValueType()).ifPresent(structChild::add);
     }
+    // the inner struct is always required
     Field entriesStruct =
         new Field(
             "entries",
@@ -239,7 +256,8 @@ public class CalciteArrowHelper {
             structChild);
     return new Field(
         name,
-        new FieldType(true, new ArrowType.Map(false), null),
+        new FieldType(
+            relDataType == null || relDataType.isNullable(), new ArrowType.Map(false), null),
         Collections.singletonList(entriesStruct));
   }
 
@@ -253,12 +271,14 @@ public class CalciteArrowHelper {
     return builder.build();
   }
 
-  public static BatchSchema fromCalciteRowTypeJson(final RelDataType relDataType) {
+  public static BatchSchema fromCalciteRowTypeJson(
+      final RelDataType relDataType, boolean isValueCastEnabled) {
     Preconditions.checkArgument(relDataType.isStruct());
 
     SchemaBuilder builder = BatchSchema.newBuilder();
     for (Map.Entry<String, RelDataType> field : relDataType.getFieldList()) {
-      fieldFromCalciteRowTypeJson(field.getKey(), field.getValue()).ifPresent(builder::addField);
+      fieldFromCalciteRowTypeJson(field.getKey(), field.getValue(), isValueCastEnabled)
+          .ifPresent(builder::addField);
     }
     return builder.build();
   }
@@ -275,9 +295,11 @@ public class CalciteArrowHelper {
   public static class CompleteTypeWrapper {
 
     private final CompleteType completeType;
+    private final boolean isNullable;
 
-    private CompleteTypeWrapper(CompleteType completeType) {
+    private CompleteTypeWrapper(CompleteType completeType, boolean isNullable) {
       this.completeType = completeType;
+      this.isNullable = isNullable;
     }
 
     public RelDataType toCalciteType(
@@ -287,13 +309,14 @@ public class CalciteArrowHelper {
       if (completeType.isList()) {
         if (withComplexTypeSupport) {
           RelDataType childType =
-              new CompleteTypeWrapper(completeType.getOnlyChildType())
+              new CompleteTypeWrapper(
+                      completeType.getOnlyChildType(), completeType.getOnlyChild().isNullable())
                   .toCalciteType(typeFactory, true);
           return typeFactory.createTypeWithNullability(
-              typeFactory.createArrayType(childType, -1), true);
+              typeFactory.createArrayType(childType, -1), isNullable);
         } else {
           return typeFactory.createTypeWithNullability(
-              typeFactory.createSqlType(SqlTypeName.ANY), true);
+              typeFactory.createSqlType(SqlTypeName.ANY), isNullable);
         }
       }
       if (completeType.isStruct()) {
@@ -301,7 +324,7 @@ public class CalciteArrowHelper {
           return convertFieldsToStruct(completeType.getChildren(), typeFactory, true);
         } else {
           return typeFactory.createTypeWithNullability(
-              typeFactory.createSqlType(SqlTypeName.ANY), true);
+              typeFactory.createSqlType(SqlTypeName.ANY), isNullable);
         }
       }
 
@@ -320,7 +343,7 @@ public class CalciteArrowHelper {
               true);
         } else {
           return typeFactory.createTypeWithNullability(
-              typeFactory.createSqlType(SqlTypeName.ANY), true);
+              typeFactory.createSqlType(SqlTypeName.ANY), isNullable);
         }
       }
 
@@ -328,20 +351,20 @@ public class CalciteArrowHelper {
 
       if (completeType.isVariableWidthScalar()) {
         return typeFactory.createTypeWithNullability(
-            typeFactory.createSqlType(sqlTypeName, 1 << 16), true);
+            typeFactory.createSqlType(sqlTypeName, 1 << 16), isNullable);
       }
 
       if (completeType.isDecimal()) {
         return typeFactory.createTypeWithNullability(
             typeFactory.createSqlType(
                 sqlTypeName, completeType.getPrecision(), completeType.getScale()),
-            true);
+            isNullable);
       }
 
       if (completeType.getType().getTypeID() == ArrowTypeID.Timestamp
           || completeType.getType().getTypeID() == ArrowTypeID.Time) {
         return typeFactory.createTypeWithNullability(
-            typeFactory.createSqlType(sqlTypeName, completeType.getPrecision()), true);
+            typeFactory.createSqlType(sqlTypeName, completeType.getPrecision()), isNullable);
       }
       if (completeType.getType().getTypeID() == ArrowTypeID.Interval) {
         switch (completeType.toMinorType()) {
@@ -349,28 +372,29 @@ public class CalciteArrowHelper {
             return typeFactory.createTypeWithNullability(
                 typeFactory.createSqlIntervalType(
                     new SqlIntervalQualifier(TimeUnit.DAY, TimeUnit.SECOND, SqlParserPos.ZERO)),
-                true);
+                isNullable);
           case INTERVALYEAR:
             return typeFactory.createTypeWithNullability(
                 typeFactory.createSqlIntervalType(
                     new SqlIntervalQualifier(TimeUnit.YEAR, TimeUnit.MONTH, SqlParserPos.ZERO)),
-                true);
+                isNullable);
           default:
             break;
         }
       }
 
-      return typeFactory.createTypeWithNullability(typeFactory.createSqlType(sqlTypeName), true);
+      return typeFactory.createTypeWithNullability(
+          typeFactory.createSqlType(sqlTypeName), isNullable);
     }
 
-    public static RelDataType convertFieldsToMap(
+    public RelDataType convertFieldsToMap(
         Field key, Field value, RelDataTypeFactory typeFactory, boolean withComplexTypeSupport) {
 
       return typeFactory.createTypeWithNullability(
           typeFactory.createMapType(
               toCalciteFieldType(key, typeFactory, withComplexTypeSupport),
               toCalciteFieldType(value, typeFactory, withComplexTypeSupport)),
-          true);
+          isNullable);
     }
 
     public RelDataType convertFieldsToStruct(
@@ -382,18 +406,20 @@ public class CalciteArrowHelper {
         names.add(field.getName());
       }
       return typeFactory.createTypeWithNullability(
-          typeFactory.createStructType(types, names), true);
+          typeFactory.createStructType(types, names), isNullable);
     }
   }
 
   public static RelDataType toCalciteType(
       Field field, RelDataTypeFactory typeFactory, boolean withComplexTypeSupport) {
-    return wrap(CompleteType.fromField(field)).toCalciteType(typeFactory, withComplexTypeSupport);
+    return wrap(CompleteType.fromField(field), field.isNullable())
+        .toCalciteType(typeFactory, withComplexTypeSupport);
   }
 
   public static RelDataType toCalciteFieldType(
       Field field, RelDataTypeFactory typeFactory, boolean withComplexTypeSupport) {
-    return wrap(CompleteType.fromField(field)).toCalciteType(typeFactory, withComplexTypeSupport);
+    return wrap(CompleteType.fromField(field), field.isNullable())
+        .toCalciteType(typeFactory, withComplexTypeSupport);
   }
 
   public static CompleteType fromRelAndMinorType(RelDataType type, MinorType minorType) {

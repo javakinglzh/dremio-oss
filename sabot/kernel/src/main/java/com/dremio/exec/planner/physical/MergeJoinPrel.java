@@ -50,7 +50,7 @@ public class MergeJoinPrel extends JoinPrel {
       new PositiveLongValidator("planner.op.mergejoin.limit_bytes", Long.MAX_VALUE, DEFAULT_LIMIT);
 
   /** Creates a MergeJoinPrel. */
-  private MergeJoinPrel(
+  public MergeJoinPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode left,

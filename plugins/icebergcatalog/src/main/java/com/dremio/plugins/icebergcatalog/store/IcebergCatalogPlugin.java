@@ -15,107 +15,138 @@
  */
 package com.dremio.plugins.icebergcatalog.store;
 
+import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_MUTABLE_ENABLED;
+
+import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetHandleListing;
 import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.connector.metadata.DatasetMetadataVerifyResult;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
+import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
-import com.dremio.exec.hadoop.HadoopFileSystem;
-import com.dremio.exec.hadoop.HadoopFileSystemConfigurationAdapter;
+import com.dremio.connector.metadata.extensions.SupportsMetadataVerify;
+import com.dremio.connector.metadata.options.MetadataVerifyRequest;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SupportsFolderIngestion;
+import com.dremio.exec.catalog.SupportsMutatingFolders;
+import com.dremio.exec.catalog.SupportsMutatingViews;
+import com.dremio.exec.catalog.SupportsRefreshViews;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.TableFunctionConfig;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.physical.PlannerSettings;
-import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.planner.sql.handlers.refresh.AbstractRefreshPlanBuilder;
-import com.dremio.exec.planner.sql.handlers.refresh.UnlimitedSplitsMetadataProvider;
-import com.dremio.exec.planner.sql.parser.SqlRefreshDataset;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.BlockBasedSplitGenerator;
-import com.dremio.exec.store.SchemaConfig;
+import com.dremio.exec.store.ClassPathFileSystem;
+import com.dremio.exec.store.LocalSyncableFileSystem;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
-import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.dfs.FileSystemConfigurationUtils;
+import com.dremio.exec.store.dfs.FileSystemRulesFactory;
+import com.dremio.exec.store.dfs.FileSystemWrapper;
 import com.dremio.exec.store.dfs.FormatPlugin;
+import com.dremio.exec.store.dfs.MetadataVerifyHandle;
+import com.dremio.exec.store.hive.exec.FileSystemConfUtil;
 import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.IcebergFormatConfig;
 import com.dremio.exec.store.iceberg.IcebergFormatPlugin;
-import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SchemaConverter;
+import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
+import com.dremio.exec.store.iceberg.SupportsIcebergRestApi;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
-import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.iceberg.model.IcebergTableIdentifier;
-import com.dremio.exec.store.metadatarefresh.dirlisting.DirListingRecordReader;
-import com.dremio.exec.store.metadatarefresh.footerread.FooterReadTableFunction;
 import com.dremio.exec.store.parquet.ParquetScanTableFunction;
 import com.dremio.exec.store.parquet.ParquetSplitCreator;
 import com.dremio.exec.store.parquet.ScanTableFunction;
 import com.dremio.io.file.FileSystem;
 import com.dremio.options.OptionManager;
-import com.dremio.plugins.icebergcatalog.dfs.HadoopFileSystemCache;
+import com.dremio.options.TypeValidators.BooleanValidator;
+import com.dremio.plugins.icebergcatalog.dfs.DatasetFileSystemCache;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
+import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
-import com.dremio.service.namespace.dirlist.proto.DirListInputSplitProto;
 import com.google.common.annotations.VisibleForTesting;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.stream.Collectors;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.iceberg.TableMetadata;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableOperations;
+import org.apache.iceberg.exceptions.BadRequestException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.io.FileIO;
 
-public class IcebergCatalogPlugin
+public abstract class IcebergCatalogPlugin
     implements StoragePlugin,
         SupportsIcebergRootPointer,
-        SupportsInternalIcebergTable,
-        SupportsListingDatasets {
+        SupportsListingDatasets,
+        SupportsMutatingViews,
+        SupportsMutatingFolders,
+        SupportsFolderIngestion,
+        SupportsIcebergMutablePlugin,
+        SupportsRefreshViews,
+        SupportsIcebergRestApi,
+        SupportsMetadataVerify {
 
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(IcebergCatalogPlugin.class);
 
   private final IcebergCatalogPluginConfig config;
-  private final SabotContext sabotContext;
   private final String name;
-  private final Configuration fsConf;
-  private final HadoopFileSystemCache hadoopFs;
+  private final IcebergCatalogFileSystemConfigurationAdapter fsConfAdapter;
+  private DatasetFileSystemCache hadoopFs;
   private CatalogAccessor catalogAccessor = null;
   private final AtomicBoolean isOpen = new AtomicBoolean(false);
+  private final OptionManager optionManager;
+  private final SabotConfig sabotConfig;
+  private final FileSystemWrapper fileSystemWrapper;
+  private final boolean isExecutor;
+  private final PluginSabotContext pluginSabotContext;
 
   public IcebergCatalogPlugin(
-      IcebergCatalogPluginConfig config, SabotContext sabotContext, String name) {
+      IcebergCatalogPluginConfig config, PluginSabotContext pluginSabotContext, String name) {
     this.config = config;
-    this.sabotContext = sabotContext;
     this.name = name;
-    this.fsConf = FileSystemPlugin.getNewFsConf();
-    this.hadoopFs = new HadoopFileSystemCache(sabotContext.getOptionManager());
+    this.optionManager = pluginSabotContext.getOptionManager();
+    this.fsConfAdapter = initializeFileSystemConfigurationAdapter(optionManager);
+    this.sabotConfig = pluginSabotContext.getConfig();
+    this.fileSystemWrapper = pluginSabotContext.getFileSystemWrapper();
+    this.isExecutor = pluginSabotContext.isExecutor();
+    this.pluginSabotContext = pluginSabotContext;
   }
 
-  @VisibleForTesting
-  protected IcebergCatalogPlugin(
-      IcebergCatalogPluginConfig config,
-      SabotContext sabotContext,
-      String name,
-      HadoopFileSystemCache hadoopFs) {
-    this.config = config;
-    this.sabotContext = sabotContext;
-    this.name = name;
-    this.fsConf = FileSystemPlugin.getNewFsConf();
-    this.hadoopFs = hadoopFs;
+  private static IcebergCatalogFileSystemConfigurationAdapter
+      initializeFileSystemConfigurationAdapter(OptionManager optionManager) {
+    Configuration fsConf = FileSystemConfigurationUtils.getNewFsConf(optionManager);
+    initializeHadoopConf(fsConf);
+    return new IcebergCatalogFileSystemConfigurationAdapter(fsConf);
+  }
+
+  private static void initializeHadoopConf(Configuration hadoopConf) {
+    hadoopConf.set("fs.classpath.impl", ClassPathFileSystem.class.getName());
+    hadoopConf.set("fs.dremio-local.impl", LocalSyncableFileSystem.class.getName());
+    FileSystemConfUtil.FS_CACHE_DISABLES.forEach(hadoopConf::set);
+    FileSystemConfUtil.S3_PROPS.forEach(hadoopConf::set);
+    FileSystemConfUtil.WASB_PROPS.forEach(hadoopConf::set);
+    FileSystemConfUtil.ABFS_PROPS.forEach(hadoopConf::set);
+  }
+
+  protected DatasetFileSystemCache createFSCache() {
+    return new DatasetFileSystemCache((noop) -> getFsConfCopy(), optionManager);
   }
 
   public String getName() {
@@ -145,21 +176,20 @@ public class IcebergCatalogPlugin
       return Optional.empty();
     }
 
-    if (getCatalogAccessor().datasetExists(components)) {
-      return Optional.of(getCatalogAccessor().getDatasetHandle(components, this, options));
-    }
-
-    logger.warn("DatasetHandle '{}' empty, table not found.", datasetPath);
-    return Optional.empty();
+    return Optional.ofNullable(getCatalogAccessor().getDatasetHandle(components, this, options));
   }
 
   @Override
   public PartitionChunkListing listPartitionChunks(
       DatasetHandle datasetHandle, ListPartitionChunkOption... options) {
 
+    if (datasetHandle instanceof ViewDatasetHandle) {
+      return Collections::emptyIterator;
+    }
+
     IcebergCatalogTableProvider icebergTableProvider =
         datasetHandle.unwrap(IcebergCatalogTableProvider.class);
-    return icebergTableProvider.listPartitionChunks(options);
+    return getCatalogAccessor().listPartitionChunks(icebergTableProvider, options);
   }
 
   @Override
@@ -168,14 +198,22 @@ public class IcebergCatalogPlugin
       PartitionChunkListing chunkListing,
       GetMetadataOption... options) {
 
+    if (viewsEnabled() && datasetHandle instanceof ViewDatasetHandle) {
+      return getCatalogAccessor().getViewMetadata(datasetHandle);
+    }
     IcebergCatalogTableProvider icebergTableProvider =
         datasetHandle.unwrap(IcebergCatalogTableProvider.class);
-    return icebergTableProvider.getDatasetMetadata(options);
+    return getCatalogAccessor().getTableMetadata(icebergTableProvider, options);
   }
 
   @Override
   public boolean containerExists(EntityPath containerPath, GetMetadataOption... options) {
-    return getCatalogAccessor().datasetExists(containerPath.getComponents());
+    try {
+      return getCatalogAccessor().datasetExists(containerPath.getComponents())
+          || getCatalogAccessor().namespaceExists(containerPath.getComponents());
+    } catch (BadRequestException e) {
+      return false;
+    }
   }
 
   @Override
@@ -217,26 +255,18 @@ public class IcebergCatalogPlugin
   }
 
   @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    return null;
-  }
-
-  @Override
   public Class<? extends StoragePluginRulesFactory> getRulesFactoryClass() {
-    return sabotContext
-        .getConfig()
-        .getClass(
-            "dremio.plugins.icebergcatalog.rulesfactory",
-            StoragePluginRulesFactory.class,
-            IcebergCatalogRulesFactory.class);
+    return sabotConfig.getClass(
+        "dremio.plugins.dfs.rulesfactory",
+        StoragePluginRulesFactory.class,
+        FileSystemRulesFactory.class);
   }
 
   @Override
   public void start() throws IOException {
-    config.validateOnStart(sabotContext);
-
-    catalogAccessor = config.createCatalog(fsConf, sabotContext);
-
+    validateOnStart();
+    catalogAccessor = createCatalog(fsConfAdapter.getConfiguration());
+    hadoopFs = createFSCache();
     isOpen.set(true);
   }
 
@@ -253,7 +283,7 @@ public class IcebergCatalogPlugin
     }
 
     try {
-      hadoopFs.close();
+      getHadoopFileSystemCache().close();
     } catch (Exception e) {
       logger.warn("Failed to close file system provider", e);
     }
@@ -272,11 +302,8 @@ public class IcebergCatalogPlugin
   @Override
   public FormatPlugin getFormatPlugin(FormatPluginConfig formatConfig) {
     if (formatConfig instanceof IcebergFormatConfig) {
-      IcebergFormatPlugin icebergFormatPlugin =
-          new IcebergFormatPlugin(
-              "iceberg", sabotContext, (IcebergFormatConfig) formatConfig, null);
-      icebergFormatPlugin.initialize((IcebergFormatConfig) formatConfig, this);
-      return icebergFormatPlugin;
+      return new IcebergFormatPlugin(
+          "iceberg", pluginSabotContext, (IcebergFormatConfig) formatConfig, this);
     }
     throw new UnsupportedOperationException(
         "Format plugins for non iceberg use cases are not supported.");
@@ -284,51 +311,29 @@ public class IcebergCatalogPlugin
 
   @Override
   public Configuration getFsConfCopy() {
-    return new Configuration(fsConf);
-  }
-
-  private FileSystem createFileSystem(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return this.sabotContext
-        .getFileSystemWrapper()
-        .wrap(
-            newFileSystem(filePath, userName, operatorContext),
-            getName(),
-            config,
-            operatorContext,
-            config.isAsyncEnabled(),
-            false);
+    return new Configuration(fsConfAdapter.getConfiguration());
   }
 
   private FileSystem newFileSystem(
-      String filePath, String userName, OperatorContext operatorContext) {
-    return HadoopFileSystem.get(
-        hadoopFs.load(filePath, getFsConfCopy(), userName),
-        operatorContext == null ? null : operatorContext.getStats(),
-        config.isAsyncEnabled());
+      String filePath, String userName, OperatorContext operatorContext, List<String> dataset) {
+    return getHadoopFileSystemCache()
+        .load(
+            filePath,
+            userName,
+            dataset,
+            operatorContext == null ? null : operatorContext.getStats(),
+            config.isAsyncEnabled());
   }
 
   @Override
-  public FileSystem createFS(String filePath, String userName, OperatorContext operatorContext)
-      throws IOException {
-    return createFileSystem(filePath, userName, operatorContext);
-  }
-
-  @Override
-  public FileSystem createFSWithAsyncOptions(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFileSystem(filePath, userName, operatorContext);
-  }
-
-  @Override
-  public FileSystem createFSWithoutHDFSCache(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFileSystem(filePath, userName, operatorContext);
-  }
-
-  @Override
-  public List<String> resolveTableNameToValidPath(List<String> tableSchemaPath) {
-    return tableSchemaPath.stream().skip(1).collect(Collectors.toList());
+  public FileSystem createFS(Builder b) throws IOException {
+    return fileSystemWrapper.wrap(
+        newFileSystem(b.filePath(), b.userName(), b.operatorContext(), b.dataset()),
+        getName(),
+        config,
+        b.operatorContext(),
+        config.isAsyncEnabled(),
+        false);
   }
 
   @Override
@@ -347,59 +352,28 @@ public class IcebergCatalogPlugin
   }
 
   @Override
-  public FooterReadTableFunction getFooterReaderTableFunction(
-      FragmentExecutionContext fec,
-      OperatorContext context,
-      OpProps props,
-      TableFunctionConfig functionConfig) {
-    return new FooterReadTableFunction(fec, context, props, functionConfig);
-  }
-
-  @Override
-  public AbstractRefreshPlanBuilder createRefreshDatasetPlanBuilder(
-      SqlHandlerConfig config,
-      SqlRefreshDataset sqlRefreshDataset,
-      UnlimitedSplitsMetadataProvider metadataProvider,
-      boolean isFullRefresh) {
-    throw new UnsupportedOperationException(
-        "Refresh dataset for tables from iceberg catalog is not supported.");
-  }
-
-  @Override
-  public DirListingRecordReader createDirListRecordReader(
-      OperatorContext context,
-      FileSystem fs,
-      DirListInputSplitProto.DirListInputSplit dirListInputSplit,
-      boolean isRecursive,
-      BatchSchema tableSchema,
-      List<PartitionProtobuf.PartitionValue> partitionValues) {
-    return new DirListingRecordReader(
-        context,
-        fs,
-        dirListInputSplit,
-        isRecursive,
-        tableSchema,
-        partitionValues,
-        false,
-        false,
-        null);
-  }
-
-  @Override
   public boolean isIcebergMetadataValid(DatasetConfig config, NamespaceKey tableSchemaPath) {
+    return DatasetHelper.isIcebergView(config)
+        ? isIcebergViewMetadataValid(config, tableSchemaPath)
+        : isIcebergTableMetadataValid(config, tableSchemaPath);
+  }
+
+  private boolean isIcebergTableMetadataValid(DatasetConfig config, NamespaceKey tableSchemaPath) {
     if (config.getPhysicalDataset().getIcebergMetadata() == null
         || config.getPhysicalDataset().getIcebergMetadata().getMetadataFileLocation() == null
         || config.getPhysicalDataset().getIcebergMetadata().getMetadataFileLocation().isEmpty()) {
       return false;
     }
 
-    List<String> dataset = tableSchemaPath.getPathComponents();
+    List<String> tableSchemaPathPathComponents = tableSchemaPath.getPathComponents();
 
     String existingRootPointer =
         config.getPhysicalDataset().getIcebergMetadata().getMetadataFileLocation();
     try {
       String latestRootPointer =
-          getCatalogAccessor().getTableMetadata(dataset).metadataFileLocation();
+          getCatalogAccessor()
+              .getTableMetadata(tableSchemaPathPathComponents)
+              .metadataFileLocation();
       if (!existingRootPointer.equals(latestRootPointer)) {
         logger.debug(
             "Iceberg Dataset {} metadata is not valid. Existing root pointer in catalog: {}. Latest Iceberg table root pointer: {}.",
@@ -416,11 +390,68 @@ public class IcebergCatalogPlugin
     return true;
   }
 
+  private boolean isIcebergViewMetadataValid(DatasetConfig config, NamespaceKey viewPath) {
+    if (config.getVirtualDataset() == null
+        || config.getVirtualDataset().getIcebergViewAttributes() == null
+        || config.getVirtualDataset().getIcebergViewAttributes().getMetadataLocation() == null
+        || config.getVirtualDataset().getIcebergViewAttributes().getMetadataLocation().isEmpty()) {
+      return false;
+    }
+
+    List<String> viewPathComponents = viewPath.getPathComponents();
+
+    String existingRootPointer =
+        config.getVirtualDataset().getIcebergViewAttributes().getMetadataLocation();
+    try {
+      String latestRootPointer =
+          getCatalogAccessor().getViewMetadata(viewPathComponents).metadataFileLocation();
+      if (!existingRootPointer.equals(latestRootPointer)) {
+        logger.debug(
+            "Iceberg view {} metadata is not valid. Existing root pointer in catalog: {}. Latest Iceberg view root pointer: {}.",
+            viewPath,
+            existingRootPointer,
+            latestRootPointer);
+        return false;
+      }
+    } catch (NoSuchTableException e) {
+      throw UserException.ioExceptionError(e)
+          .message(String.format("View path '%s', not found.", viewPath))
+          .buildSilently();
+    }
+    return true;
+  }
+
   @Override
   public TableOperations createIcebergTableOperations(
-      FileIO fileIO, String queryUserName, IcebergTableIdentifier tableIdentifier) {
-    // TODO: maybe create an IcebergRESTModel for DML/DDL?
-    throw new UnsupportedOperationException();
+      FileIO fileIO,
+      IcebergTableIdentifier tableIdentifier,
+      @Nullable String queryUserName,
+      @Nullable String queryUserId) {
+    if (!optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)) {
+      throw new UnsupportedOperationException(
+          "This operation is unsupported for Iceberg Catalog sources.");
+    }
+
+    List<String> dataset = ((IcebergCatalogTableIdentifier) tableIdentifier).getDataset();
+    return getCatalogAccessor()
+        .createIcebergTableOperations(fileIO, dataset, queryUserName, queryUserId);
+  }
+
+  public TableOperations createIcebergTableOperationsForCtas(
+      FileIO fileIO,
+      IcebergTableIdentifier tableIdentifier,
+      BatchSchema batchSchema,
+      @Nullable String userName,
+      @Nullable String userId) {
+    if (!optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)) {
+      throw new UnsupportedOperationException(
+          "This operation is unsupported for Iceberg Catalog sources.");
+    }
+
+    Schema schema = SchemaConverter.getBuilder().build().toIcebergSchema(batchSchema);
+    List<String> dataset = ((IcebergCatalogTableIdentifier) tableIdentifier).getDataset();
+    return getCatalogAccessor()
+        .createIcebergTableOperationsForCtas(fileIO, dataset, schema, userName, userId);
   }
 
   @Override
@@ -430,19 +461,53 @@ public class IcebergCatalogPlugin
       List<String> dataset,
       String datasourcePluginUID,
       Long fileLength) {
+
+    Configuration wrappedFsConf = fs.unwrap(org.apache.hadoop.fs.FileSystem.class).getConf();
     return new DremioFileIO(
         fs,
         context,
         dataset,
         datasourcePluginUID,
         fileLength,
-        new HadoopFileSystemConfigurationAdapter(fsConf));
+        new IcebergCatalogFileSystemConfigurationAdapter(wrappedFsConf));
   }
 
-  @Override
-  public TableMetadata loadTableMetadata(
-      FileIO io, OperatorContext context, List<String> dataset, String metadataLocation) {
-    return Optional.ofNullable(getCatalogAccessor().getTableMetadata(dataset))
-        .orElseGet(() -> IcebergUtils.loadTableMetadata(io, context, metadataLocation));
+  public DatasetFileSystemCache getHadoopFileSystemCache() {
+    return hadoopFs;
   }
+
+  @VisibleForTesting
+  public void validateOnStart() {
+    if (isExecutor) {
+      // Executor only reads default options at startup time since it does not have access
+      // to the KV store so there is no point validating the default options. We only
+      // evaluate the options at coordinator.
+      return;
+    }
+
+    // Don't let the plugin start if the feature flag is disabled
+    if (!optionManager.getOption(getEnableOption())) {
+      throw UserException.unsupportedError()
+          .message(errorMessageWhenSupportKeyIsDisabled())
+          .buildSilently();
+    }
+  }
+
+  @Nonnull
+  @Override
+  public Optional<DatasetMetadataVerifyResult> verifyMetadata(
+      DatasetHandle datasetHandle, MetadataVerifyRequest metadataVerifyRequest) {
+    if (datasetHandle instanceof MetadataVerifyHandle) {
+      return datasetHandle.unwrap(MetadataVerifyHandle.class).verifyMetadata(metadataVerifyRequest);
+    }
+    return Optional.empty();
+  }
+
+  public abstract CatalogAccessor createCatalog(Configuration fsConf);
+
+  public abstract BooleanValidator getEnableOption();
+
+  public abstract boolean viewsEnabled();
+
+  public abstract String errorMessageWhenSupportKeyIsDisabled();
 }

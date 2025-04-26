@@ -30,7 +30,6 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler;
 import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
-import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Preconditions;
@@ -46,6 +45,8 @@ public class AlterTablePartitionSpecHandler extends SimpleDirectHandler {
     this.catalog = catalog;
     this.config = config;
   }
+
+  protected void handleCommandOptionConflicts(DremioTable table, NamespaceKey path) {}
 
   @Override
   public List<SimpleCommandResult> toResult(String sql, SqlNode sqlNode) throws Exception {
@@ -72,13 +73,7 @@ public class AlterTablePartitionSpecHandler extends SimpleDirectHandler {
       return Collections.singletonList(result);
     }
 
-    // Cannot later table if the table has clustering keys
-    if (IcebergUtils.hasClusteringColumns(table)) {
-      throw UserException.unsupportedError()
-          .message(
-              "Using \'ALTER TABLE\' command to change partition specification is supported only for table without clustering")
-          .buildSilently();
-    }
+    handleCommandOptionConflicts(table, path);
 
     boolean isInternalIcebergTableOrJsonTableOrMongoTable =
         CatalogUtil.isFSInternalIcebergTableOrJsonTableOrMongo(

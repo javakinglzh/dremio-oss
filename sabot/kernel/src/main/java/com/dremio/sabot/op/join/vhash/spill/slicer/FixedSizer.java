@@ -30,6 +30,7 @@ import org.apache.arrow.vector.types.Types.MinorType;
 class FixedSizer implements Sizer {
   private final BaseFixedWidthVector incoming;
   private final int dataSizeInBits;
+  private final int dataSizeInBytes;
 
   public FixedSizer(BaseFixedWidthVector incoming) {
     super();
@@ -38,6 +39,11 @@ class FixedSizer implements Sizer {
       dataSizeInBits = 1;
     } else {
       dataSizeInBits = TypeHelper.getSize(incoming.getMinorType()) * BYTE_SIZE_BITS;
+    }
+    if (dataSizeInBits == 1) {
+      dataSizeInBytes = 0;
+    } else {
+      dataSizeInBytes = dataSizeInBits / BYTE_SIZE_BITS;
     }
   }
 
@@ -48,16 +54,15 @@ class FixedSizer implements Sizer {
 
   @Override
   public int getDataLengthFromIndex(int startIndex, int numberOfEntries) {
-    int dataLen = 0;
-    int endIndex = startIndex + numberOfEntries;
-    for (; startIndex < endIndex; startIndex++) {
-      if (incoming.isNull(startIndex)) {
-        continue;
-      }
-      dataLen += (dataSizeInBits / BYTE_SIZE_BITS);
-    }
+    return dataSizeInBytes * numberOfEntries;
+  }
 
-    return dataLen;
+  @Override
+  public void accumulateFieldSizesInABuffer(ArrowBuf rowLengthAccumulator, int recordCount) {
+    for (int index = 0; index < recordCount; index++) {
+      rowLengthAccumulator.setInt(
+          index * 4L, rowLengthAccumulator.getInt(index * 4L) + dataSizeInBytes);
+    }
   }
 
   @Override

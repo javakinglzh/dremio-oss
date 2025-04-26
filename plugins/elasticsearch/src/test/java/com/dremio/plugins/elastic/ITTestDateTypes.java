@@ -148,7 +148,7 @@ public class ITTestDateTypes extends ElasticBaseTestQuery {
 
   @Test
   public void runTest() throws Exception {
-    LocalDateTime dt = new LocalDateTime(System.currentTimeMillis());
+    LocalDateTime dt = new LocalDateTime(2019, 12, 6, 0, 0, 0);
     final String value1 = formatter.dateFormatString(dt);
     logger.info(value1);
     dt = dt.plusYears(1);

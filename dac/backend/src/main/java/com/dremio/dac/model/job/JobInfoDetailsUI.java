@@ -45,6 +45,7 @@ import com.dremio.service.job.proto.JobProtobuf.QueryType;
 import com.dremio.service.job.proto.Reflection;
 import com.dremio.service.job.proto.ReflectionMatchingType;
 import com.dremio.service.job.proto.ReflectionType;
+import com.dremio.service.job.proto.ResultsCacheUsed;
 import com.dremio.service.job.proto.ScannedDataset;
 import com.dremio.service.jobs.JobsProtoUtil;
 import com.dremio.service.jobs.JobsServiceUtil;
@@ -126,6 +127,8 @@ public class JobInfoDetailsUI {
   private Boolean isOutputLimited;
   private List<String> datasetPaths;
   private Boolean isProfileIncomplete;
+  private Boolean isProfileUpdateComplete;
+  private ResultsCacheUsed resultsCacheUsed;
 
   public JobInfoDetailsUI() {}
 
@@ -175,7 +178,9 @@ public class JobInfoDetailsUI {
       @JsonProperty("cpuUsed") Long cpuUsed,
       @JsonProperty("isOutputLimited") Boolean isOutputLimited,
       @JsonProperty("datasetPaths") List<String> datasetPaths,
-      @JsonProperty("isProfileIncomplete") Boolean isProfileIncomplete) {
+      @JsonProperty("isProfileIncomplete") Boolean isProfileIncomplete,
+      @JsonProperty("isProfileUpdateComplete") Boolean isProfileUpdateComplete,
+      @JsonProperty("resultsCacheUsed") ResultsCacheUsed resultsCacheUsed) {
     this.id = id;
     this.jobStatus = jobStatus;
     this.queryType = queryType;
@@ -221,6 +226,8 @@ public class JobInfoDetailsUI {
     this.isOutputLimited = isOutputLimited;
     this.datasetPaths = datasetPaths;
     this.isProfileIncomplete = isProfileIncomplete;
+    this.isProfileUpdateComplete = isProfileUpdateComplete;
+    this.resultsCacheUsed = resultsCacheUsed;
   }
 
   @WithSpan
@@ -322,6 +329,15 @@ public class JobInfoDetailsUI {
     cpuUsed = jobAttempt.getDetails().getCpuUsed();
     isOutputLimited = jobAttempt.getStats().getIsOutputLimited();
     isProfileIncomplete = jobAttempt.getIsProfileIncomplete();
+    isProfileUpdateComplete = jobAttempt.getIsProfileUpdateComplete();
+
+    if (jobAttempt.getInfo().hasResultsCacheUsed()) {
+      resultsCacheUsed = new ResultsCacheUsed();
+      resultsCacheUsed.setCacheAge(jobAttempt.getInfo().getResultsCacheUsed().getCacheAge());
+      resultsCacheUsed.setCacheFileSize(
+          jobAttempt.getInfo().getResultsCacheUsed().getCacheFileSize());
+    }
+
     return new JobInfoDetailsUI(
         id,
         jobStatus,
@@ -367,7 +383,9 @@ public class JobInfoDetailsUI {
         cpuUsed,
         isOutputLimited,
         datasetPaths,
-        isProfileIncomplete);
+        isProfileIncomplete,
+        isProfileUpdateComplete,
+        resultsCacheUsed);
   }
 
   public String getDatasetVersion() {
@@ -549,6 +567,10 @@ public class JobInfoDetailsUI {
 
   public boolean getIsProfileIncomplete() {
     return isProfileIncomplete;
+  }
+
+  public boolean getIsProfileUpdateComplete() {
+    return isProfileUpdateComplete;
   }
 
   private void convertReflectionListToMap(
@@ -858,5 +880,9 @@ public class JobInfoDetailsUI {
 
   public void setWlmQueue(String wlmQueue) {
     this.wlmQueue = wlmQueue;
+  }
+
+  public ResultsCacheUsed getResultsCacheUsed() {
+    return resultsCacheUsed;
   }
 }

@@ -233,11 +233,12 @@ final class TaskRecoveryMonitor implements NodeStatusListener, AutoCloseable {
     } finally {
       if (LOGGER.isDebugEnabled()) {
         LOGGER.debug(
-            "{}: Locally monitoring {} tasks `{}`. This node index is {}. Death set is `{}`",
+            "{}: Locally monitoring {} tasks `{}`. This node index is {}. Members {}. Death set is `{}`",
             ENDPOINT_AS_STRING.apply(schedulerCommon.getThisEndpoint()),
             locallyMonitoredTasks.size(),
             String.join(" ; ", locallyMonitoredTasks),
             currentEndPointLocation,
+            groupMembers.size(),
             deathWatchSet.stream()
                 .map(PerTaskRecoveryMonitor::getTaskName)
                 .collect(Collectors.joining(" ; ")));

@@ -16,12 +16,19 @@
 
 package com.dremio.exec.planner.sql.handlers.query;
 
+import static com.dremio.optimization.api.OptimizeConstants.OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY;
+import static com.dremio.optimization.api.OptimizeConstants.OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY;
+import static com.dremio.optimization.api.util.OptimizeOptionUtils.validateOptionsInBytes;
+import static org.apache.iceberg.TableProperties.WRITE_TARGET_FILE_SIZE_BYTES;
+
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.sql.parser.SqlOptimize;
+import com.dremio.optimization.api.OptimizeConstants;
 import com.dremio.options.OptionManager;
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.google.common.base.Preconditions;
+import java.util.Map;
 import java.util.Optional;
+import org.apache.iceberg.util.PropertyUtil;
 
 /**
  * A rewrite strategy for data files which determines which files to rewrite based on their size. If
@@ -67,24 +74,48 @@ public final class OptimizeOptions {
   }
 
   public static OptimizeOptions createInstance(
-      OptionManager optionManager, SqlOptimize call, boolean isSingleDataWriter) {
+      Map<String, String> tableProperties,
+      OptionManager optionManager,
+      SqlOptimize call,
+      boolean isSingleDataWriter) {
     Builder instanceBuilder = new Builder();
 
     instanceBuilder.setSingleWriter(isSingleDataWriter);
-    instanceBuilder.setTargetFileSizeMB(
-        call.getTargetFileSize()
-            .orElse(optionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)));
     instanceBuilder.setMaxFileSizeRatio(
         optionManager.getOption(ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO));
     instanceBuilder.setMinFileSizeRatio(
         optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO));
 
-    instanceBuilder.setMaxFileSizeMB(call.getMaxFileSize()); // computed from ratio if not set
-    instanceBuilder.setMinFileSizeMB(call.getMinFileSize()); // computed from ratio if not set
-    Long minInputFiles =
+    // All the OPTIMIZE options will have precedence in order: SQL options, table properties,
+    // support keys, default options
+    instanceBuilder.setTargetFileSizeBytes(
+        call.getTargetFileSize()
+            .map(OptimizeOptions::mbToBytes)
+            .orElse(
+                getLongTableProperty(tableProperties, WRITE_TARGET_FILE_SIZE_BYTES)
+                    .orElse(
+                        mbToBytes(
+                            optionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)))));
+
+    instanceBuilder.setMaxFileSizeMB(
+        call.getMaxFileSize()
+            .or(() -> getLongTableProperty(tableProperties, OPTIMIZE_MAX_FILE_SIZE_MB_PROPERTY)));
+
+    instanceBuilder.setMinFileSizeMB(
+        call.getMinFileSize()
+            .or(() -> getLongTableProperty(tableProperties, OPTIMIZE_MIN_FILE_SIZE_MB_PROPERTY)));
+
+    instanceBuilder.setMinInputFiles(
         call.getMinInputFiles()
-            .orElse(optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES));
-    instanceBuilder.setMinInputFiles(Optional.of(minInputFiles));
+            .or(
+                () ->
+                    getLongTableProperty(
+                            tableProperties, OptimizeConstants.OPTIMIZE_MINIMAL_INPUT_FILES)
+                        .or(
+                            () ->
+                                Optional.of(
+                                    optionManager.getOption(
+                                        ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES)))));
 
     instanceBuilder.setOptimizeDataFiles(call.getRewriteDataFiles().booleanValue());
     instanceBuilder.setOptimizeManifestFiles(call.getRewriteManifests().booleanValue());
@@ -92,10 +123,29 @@ public final class OptimizeOptions {
     return instanceBuilder.build();
   }
 
+  public static OptimizeOptions createDefaultOptimizeOptions(
+      OptionManager optionManager, boolean isSingleDataWriter) {
+    Builder instanceBuilder = new Builder();
+
+    instanceBuilder.setSingleWriter(isSingleDataWriter);
+    instanceBuilder.setTargetFileSizeBytes(
+        mbToBytes(optionManager.getOption(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB)));
+    instanceBuilder.setMaxFileSizeRatio(
+        optionManager.getOption(ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO));
+    instanceBuilder.setMinFileSizeRatio(
+        optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_FILE_SIZE_DEFAULT_RATIO));
+
+    Long minInputFiles = optionManager.getOption(ExecConstants.OPTIMIZE_MINIMUM_INPUT_FILES);
+    instanceBuilder.setMinInputFiles(Optional.of(minInputFiles));
+
+    return instanceBuilder.build();
+  }
+
   public static OptimizeOptions createInstance(SqlOptimize call) {
     Builder instanceBuilder = new Builder();
 
-    call.getTargetFileSize().ifPresent(instanceBuilder::setTargetFileSizeMB);
+    call.getTargetFileSize()
+        .ifPresent(size -> instanceBuilder.setTargetFileSizeBytes(mbToBytes(size)));
     instanceBuilder.setMaxFileSizeMB(call.getMaxFileSize());
     instanceBuilder.setMinFileSizeMB(call.getMinFileSize());
     instanceBuilder.setMinInputFiles(call.getMinInputFiles());
@@ -104,45 +154,6 @@ public final class OptimizeOptions {
     instanceBuilder.setOptimizeManifestFiles(call.getRewriteManifests().booleanValue());
 
     return instanceBuilder.build();
-  }
-
-  public static void validateOptions(
-      Long targetFileSizeMB, Long minFileSizeMB, Long maxFileSizeMB, Long minInputFiles) {
-    Preconditions.checkArgument(
-        targetFileSizeMB > 0,
-        "TARGET_FILE_SIZE_MB [%s] should be a positive integer value.",
-        targetFileSizeMB);
-
-    Preconditions.checkArgument(
-        minFileSizeMB >= 0,
-        "MIN_FILE_SIZE_MB [%s] should be a non-negative integer value.",
-        minFileSizeMB);
-
-    Preconditions.checkArgument(
-        maxFileSizeMB > 0,
-        "MAX_FILE_SIZE_MB [%s] should be a positive integer value.",
-        maxFileSizeMB);
-
-    Preconditions.checkArgument(
-        maxFileSizeMB >= minFileSizeMB,
-        "Value of MIN_FILE_SIZE_MB [%s] cannot be greater than MAX_FILE_SIZE_MB [%s].",
-        minFileSizeMB,
-        maxFileSizeMB);
-
-    Preconditions.checkArgument(
-        targetFileSizeMB >= minFileSizeMB,
-        "Value of TARGET_FILE_SIZE_MB [%s] cannot be less than MIN_FILE_SIZE_MB [%s].",
-        targetFileSizeMB,
-        minFileSizeMB);
-
-    Preconditions.checkArgument(
-        maxFileSizeMB >= targetFileSizeMB,
-        "Value of TARGET_FILE_SIZE_MB [%s] cannot be greater than MAX_FILE_SIZE_MB [%s].",
-        targetFileSizeMB,
-        maxFileSizeMB);
-
-    Preconditions.checkArgument(
-        minInputFiles > 0, "Value of MIN_INPUT_FILES [%s] cannot be less than 1.", minInputFiles);
   }
 
   public Long getTargetFileSizeBytes() {
@@ -178,9 +189,29 @@ public final class OptimizeOptions {
     return isOptimizeManifestFiles() && !isOptimizeDataFiles();
   }
 
+  private static Optional<Long> getLongTableProperty(
+      Map<String, String> tableProperties, String propertyName) {
+    if (propertyName == null) {
+      return Optional.empty();
+    }
+
+    try {
+      return Optional.ofNullable(
+          PropertyUtil.propertyAsNullableLong(tableProperties, propertyName));
+    } catch (NumberFormatException exception) {
+      return Optional.empty();
+    }
+  }
+
+  private static long mbToBytes(long sizeMB) {
+    return sizeMB * 1024 * 1024;
+  }
+
   private static class Builder {
-    private Long targetFileSizeMB =
-        ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB.getDefault().getNumVal();
+    // To consistent with upstream WRITE_TARGET_FILE_SIZE_BYTES and avoid multiple conversions. It's
+    // better to use targetFileSizeBytes
+    private Long targetFileSizeBytes =
+        mbToBytes(ExecConstants.OPTIMIZE_TARGET_FILE_SIZE_MB.getDefault().getNumVal());
     private Double maxFileSizeRatio =
         ExecConstants.OPTIMIZE_MAXIMUM_FILE_SIZE_DEFAULT_RATIO.getDefault().getFloatVal();
     private Double minFileSizeRatio =
@@ -215,8 +246,8 @@ public final class OptimizeOptions {
       this.minFileSizeMB = minFileSizeMB;
     }
 
-    private void setTargetFileSizeMB(Long targetFileSizeMB) {
-      this.targetFileSizeMB = targetFileSizeMB;
+    private void setTargetFileSizeBytes(Long targetFileSizeBytes) {
+      this.targetFileSizeBytes = targetFileSizeBytes;
     }
 
     private void setOptimizeDataFiles(boolean optimizeDataFiles) {
@@ -231,21 +262,18 @@ public final class OptimizeOptions {
       isSingleWriter = singleWriter;
     }
 
-    private long mbToBytes(long sizeMB) {
-      return sizeMB * 1024 * 1024;
-    }
-
     private OptimizeOptions build() {
-      long maxFileSizeMbVal =
-          this.maxFileSizeMB.orElse((long) (this.targetFileSizeMB * maxFileSizeRatio));
-      long minFileSizeMbVal =
-          this.minFileSizeMB.orElse((long) (this.targetFileSizeMB * minFileSizeRatio));
+      long maxFileSizeBytes =
+          this.maxFileSizeMB
+              .map(OptimizeOptions::mbToBytes)
+              .orElse((long) (this.targetFileSizeBytes * maxFileSizeRatio));
+      long minFileSizeBytes =
+          this.minFileSizeMB
+              .map(OptimizeOptions::mbToBytes)
+              .orElse((long) (this.targetFileSizeBytes * minFileSizeRatio));
 
-      validateOptions(targetFileSizeMB, minFileSizeMbVal, maxFileSizeMbVal, minInputFiles);
-
-      long targetFileSizeBytes = mbToBytes(targetFileSizeMB);
-      long maxFileSizeBytes = mbToBytes(maxFileSizeMbVal);
-      long minFileSizeBytes = mbToBytes(minFileSizeMbVal);
+      validateOptionsInBytes(
+          targetFileSizeBytes, minFileSizeBytes, maxFileSizeBytes, minInputFiles);
 
       return new OptimizeOptions(
           targetFileSizeBytes,

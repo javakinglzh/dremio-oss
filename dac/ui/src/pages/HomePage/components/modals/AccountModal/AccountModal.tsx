@@ -18,7 +18,7 @@ import { injectIntl } from "react-intl";
 import AccountModalForm from "./AccountModalForm";
 import Modal from "#oss/components/Modals/Modal";
 import FormUnsavedWarningHOC from "#oss/components/Modals/FormUnsavedWarningHOC";
-
+import ConfirmCancelFooter from "#oss/components/Modals/ConfirmCancelFooter";
 import "#oss/pages/HomePage/components/modals/Modal.less";
 
 type AccountModalProps = {
@@ -46,6 +46,12 @@ const AccountModal = (props: AccountModalProps) => {
       <AccountModalForm
         updateFormDirtyState={updateFormDirtyState}
         cancelFunc={hide}
+      />
+      <ConfirmCancelFooter
+        hideCancel
+        confirmText="Done"
+        confirm={hide}
+        canSubmit
       />
     </Modal>
   );

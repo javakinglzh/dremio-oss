@@ -32,6 +32,7 @@ import com.dremio.options.OptionValue.Kind;
 import com.dremio.options.impl.DefaultOptionManager;
 import com.dremio.options.impl.OptionManagerWrapper;
 import com.dremio.service.scheduler.LocalSchedulerService;
+import com.dremio.service.tokens.jwks.jwk.JWK;
 import com.dremio.service.tokens.jwt.ImmutableJWTClaims;
 import com.dremio.service.tokens.jwt.JWTClaims;
 import com.dremio.service.users.SimpleUser;
@@ -47,8 +48,7 @@ import com.dremio.services.credentials.SecretsCreatorImpl;
 import com.dremio.services.credentials.SystemCipher;
 import com.dremio.services.credentials.SystemSecretCredentialsProvider;
 import com.dremio.test.DremioTest;
-import java.net.MalformedURLException;
-import java.net.URL;
+import java.net.URI;
 import java.nio.file.Path;
 import java.text.ParseException;
 import java.time.Duration;
@@ -56,7 +56,6 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.Date;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -77,6 +76,7 @@ class TestSystemJWKSetManager {
   private static final String CLUSTER_ID = "test-cluster-id";
   private static final String ISSUER_URL = "https://localhost:9047";
   private static final int JWT_EXPIRATION_MINUTES = 60;
+  private static final int JWKS_ROTATION_PERIOD_DAYS = 15;
 
   @TempDir private Path securityFolder;
 
@@ -105,13 +105,20 @@ class TestSystemJWKSetManager {
                 OptionValue.OptionType.SYSTEM,
                 "token.jwt-access-token.enabled",
                 "true"));
-    when(optionManager.getOption("token.jwt-access-token.expiration.minutes"))
+    when(optionManager.getOption("token.access-token-v2.expiration.minutes"))
         .thenReturn(
             OptionValue.createOption(
                 OptionValue.Kind.LONG,
                 OptionValue.OptionType.SYSTEM,
-                "token.jwt-access-token.expiration.minutes",
+                "token.access-token-v2.expiration.minutes",
                 "" + JWT_EXPIRATION_MINUTES));
+    when(optionManager.getOption("token.jwks-key-rotation-period.days"))
+        .thenReturn(
+            OptionValue.createOption(
+                OptionValue.Kind.LONG,
+                OptionValue.OptionType.SYSTEM,
+                "token.jwks-key-rotation-period.days",
+                "" + JWKS_ROTATION_PERIOD_DAYS));
     this.webServerInfoProvider =
         new WebServerInfoProvider() {
           @Override
@@ -120,12 +127,8 @@ class TestSystemJWKSetManager {
           }
 
           @Override
-          public URL getBaseURL() {
-            try {
-              return new URL(ISSUER_URL);
-            } catch (MalformedURLException e) {
-              throw new RuntimeException(e);
-            }
+          public URI getIssuer() {
+            return URI.create(ISSUER_URL);
           }
         };
     this.userResolver = mock(UserResolver.class);
@@ -174,10 +177,9 @@ class TestSystemJWKSetManager {
   @Test
   public void enforceConsistentJwksState() throws ParseException {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     // Need to use the actual current time for the issue time and not-before-time because the
     // library we use to verify JWTs uses the system time to verify these properties.
@@ -198,19 +200,19 @@ class TestSystemJWKSetManager {
 
     // We haven't passed any rotation period, so enforcing a consistent state should be a no-op.
     jwkSetManager.enforceConsistentJwksState();
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    assertEquals(originalKeyId, keys.get(0).get("kid"));
+    assertEquals(originalKeyId, keys.get(0).getKeyId());
     assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
 
     // Advance time to immediately after the key rotation period and enforce the consistency of the
     // JWKS state to trigger a key rotation. Afterward, we'll sign JWTs with a new private key and
     // verify JWTs with both the old and new public key.
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
     jwkSetManager.enforceConsistentJwksState();
 
     assertNotNull(jwkSetManager.getPublicJWKS());
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
     assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
 
@@ -235,7 +237,7 @@ class TestSystemJWKSetManager {
     // We haven't passed a rotation period since last enforcing a consistent state, so enforce
     // consistent state should be a no-op.
     jwkSetManager.enforceConsistentJwksState();
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
     assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
     assertEquals(USERNAME, jwkSetManager.getValidator().validate(newToken).username);
@@ -247,9 +249,9 @@ class TestSystemJWKSetManager {
     jwkSetManager.enforceConsistentJwksState();
 
     assertNotNull(jwkSetManager.getPublicJWKS());
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size(), "There should be one key in our JWKS after revoking the old key");
-    assertNotEquals(originalKeyId, keys.get(0).get("kid"));
+    assertNotEquals(originalKeyId, keys.get(0).getKeyId());
     assertThrows(
         IllegalArgumentException.class,
         () -> jwkSetManager.getValidator().validate(originalToken),
@@ -260,9 +262,126 @@ class TestSystemJWKSetManager {
     // consistent state should be a no-op.
     jwkSetManager.enforceConsistentJwksState();
     assertNotNull(jwkSetManager.getPublicJWKS());
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size(), "There should be one key in our JWKS after revoking the old key");
-    assertNotEquals(originalKeyId, keys.get(0).get("kid"));
+    assertNotEquals(originalKeyId, keys.get(0).getKeyId());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> jwkSetManager.getValidator().validate(originalToken),
+        "The original token should fail to validate because we've revoked its key pair and the JWT has expired");
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(newToken).username);
+  }
+
+  @Test
+  public void enforceConsistentJwksStateChangingRotationPeriod() throws ParseException {
+    assertNotNull(jwkSetManager.getPublicJWKS());
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(1, keys.size());
+    final String originalKeyId = keys.get(0).getKeyId();
+
+    // Need to use the actual current time for the issue time and not-before-time because the
+    // library we use to verify JWTs uses the system time to verify these properties.
+    final Date originalIssueTime = new Date();
+    final Date originalExpirationTime =
+        new Date(clock.instant().plus(Duration.ofMinutes(JWT_EXPIRATION_MINUTES)).toEpochMilli());
+    final JWTClaims originalJwtClaims =
+        new ImmutableJWTClaims.Builder()
+            .setJWTId(UUID.randomUUID().toString())
+            .setSubject(TEST_USER.getUID().getId())
+            .setAudience(CLUSTER_ID)
+            .setIssuer(ISSUER_URL)
+            .setIssueTime(originalIssueTime)
+            .setNotBeforeTime(originalIssueTime)
+            .setExpirationTime(originalExpirationTime)
+            .build();
+    final String originalToken = jwkSetManager.getSigner().sign(originalJwtClaims);
+
+    keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(1, keys.size());
+    assertEquals(originalKeyId, keys.get(0).getKeyId());
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
+
+    // Change the rotation period to 2 days and ensure enforcing consistent state after 2 days have
+    // passed triggers a key rotation.
+    int newRotationPeriodDays = 2;
+    when(optionManager.getOption("token.jwks-key-rotation-period.days"))
+        .thenReturn(
+            OptionValue.createOption(
+                OptionValue.Kind.LONG,
+                OptionValue.OptionType.SYSTEM,
+                "token.jwks-key-rotation-period.days",
+                "" + newRotationPeriodDays));
+
+    // Advance time to immediately after the key rotation period and enforce the consistency of the
+    // JWKS state to trigger a key rotation. Afterward, we'll sign JWTs with a new private key and
+    // verify JWTs with both the old and new public key.
+    clock.add(Duration.ofDays(newRotationPeriodDays).plusSeconds(1));
+    jwkSetManager.enforceConsistentJwksState();
+
+    assertNotNull(jwkSetManager.getPublicJWKS());
+    keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(2, keys.size());
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
+
+    // Need to use the actual current time for the issue time and not-before-time because the
+    // library we use to verify JWTs uses the system time to verify these properties.
+    final Date newIssueTime = new Date();
+    final Date newExpirationTime =
+        new Date(clock.instant().plus(Duration.ofMinutes(JWT_EXPIRATION_MINUTES)).toEpochMilli());
+    final JWTClaims newJwtClaims =
+        new ImmutableJWTClaims.Builder()
+            .setJWTId(UUID.randomUUID().toString())
+            .setSubject(TEST_USER.getUID().getId())
+            .setAudience(CLUSTER_ID)
+            .setIssuer(ISSUER_URL)
+            .setIssueTime(newIssueTime)
+            .setNotBeforeTime(newIssueTime)
+            .setExpirationTime(newExpirationTime)
+            .build();
+    final String newToken = jwkSetManager.getSigner().sign(newJwtClaims);
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(newToken).username);
+
+    // We haven't passed a rotation period since last enforcing a consistent state, so enforce
+    // consistent state should be a no-op.
+    jwkSetManager.enforceConsistentJwksState();
+    keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(2, keys.size());
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(newToken).username);
+
+    // Advance time to immediately after the rotation period where we maintained the old and new
+    // public key to validate JWTs that may have been signed with the old private key. After
+    // enforcing a consistent state of the JWKS, we should revoke the old key.
+    clock.add(Duration.ofMinutes(JWT_EXPIRATION_MINUTES));
+    jwkSetManager.enforceConsistentJwksState();
+
+    assertNotNull(jwkSetManager.getPublicJWKS());
+    keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(1, keys.size(), "There should be one key in our JWKS after revoking the old key");
+    final String newKeyId = keys.get(0).getKeyId();
+    assertNotEquals(originalKeyId, newKeyId);
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> jwkSetManager.getValidator().validate(originalToken),
+        "The original token should fail to validate because we've revoked its key pair and the JWT has expired");
+    assertEquals(USERNAME, jwkSetManager.getValidator().validate(newToken).username);
+
+    // Change the rotation period again to 5 days and check that another rotation occurs 5 days
+    // after the last rotation.
+    newRotationPeriodDays = 5;
+    when(optionManager.getOption("token.jwks-key-rotation-period.days"))
+        .thenReturn(
+            OptionValue.createOption(
+                OptionValue.Kind.LONG,
+                OptionValue.OptionType.SYSTEM,
+                "token.jwks-key-rotation-period.days",
+                "" + newRotationPeriodDays));
+    // Advance time to just after the current key should expire based on the new rotation period.
+    clock.add(Duration.ofDays(newRotationPeriodDays).minusMinutes(JWT_EXPIRATION_MINUTES));
+    jwkSetManager.enforceConsistentJwksState();
+
+    keys = jwkSetManager.getPublicJWKS().getKeys();
+    assertEquals(2, keys.size());
     assertThrows(
         IllegalArgumentException.class,
         () -> jwkSetManager.getValidator().validate(originalToken),
@@ -273,26 +392,25 @@ class TestSystemJWKSetManager {
   @Test
   public void enforceConsistentJwksStateManagesKeyPasswordLifecycle() {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     validateKeyPasswordConfigStoreEntryExists(originalKeyId);
 
     // Advance time to immediately after the key rotation period and enforce the consistency of the
     // JWKS state to trigger a key rotation.
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
     jwkSetManager.enforceConsistentJwksState();
 
     assertNotNull(jwkSetManager.getPublicJWKS());
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
-    final Optional<Map<String, Object>> optionalNewKey =
-        keys.stream().filter(key -> !originalKeyId.equals(key.get("kid"))).findFirst();
+    final Optional<JWK> optionalNewKey =
+        keys.stream().filter(key -> !originalKeyId.equals(key.getKeyId())).findFirst();
     assertTrue(optionalNewKey.isPresent());
-    final Map<String, Object> newKey = optionalNewKey.get();
-    final String newKeyId = (String) newKey.get("kid");
+    final JWK newKey = optionalNewKey.get();
+    final String newKeyId = newKey.getKeyId();
 
     validateKeyPasswordConfigStoreEntryExists(
         originalKeyId,
@@ -305,7 +423,7 @@ class TestSystemJWKSetManager {
     jwkSetManager.enforceConsistentJwksState();
 
     assertNotNull(jwkSetManager.getPublicJWKS());
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
 
     validateKeyPasswordConfigStoreEntryIsDeleted(
@@ -351,10 +469,9 @@ class TestSystemJWKSetManager {
   @Test
   public void enforceConsistentJwksStateHandlesOnlyKeyIsExpired() {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     // Need to use the actual current time for the issue time and not-before-time because the
     // library we use to verify JWTs uses the system time to verify these properties.
@@ -381,18 +498,17 @@ class TestSystemJWKSetManager {
 
     // The old key pair has been rotated out, but we'll continue to publish the old public key until
     // we enforce a consistent JWKS state again.
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
-    final Set<String> keyIds =
-        keys.stream().map(key -> (String) key.get("kid")).collect(Collectors.toSet());
+    final Set<String> keyIds = keys.stream().map(JWK::getKeyId).collect(Collectors.toSet());
     assertTrue(keyIds.contains(originalKeyId));
 
     // Enforce a consistent JWKS state so that we revoke the old key pair. At this point, we'll only
     // publish the new public key that was rotated in with the last consistency check.
     jwkSetManager.enforceConsistentJwksState();
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    assertNotEquals(originalKeyId, keys.get(0).get("kid"));
+    assertNotEquals(originalKeyId, keys.get(0).getKeyId());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -403,8 +519,7 @@ class TestSystemJWKSetManager {
   @Test
   public void enforceConsistentJwksStateHandlesBothKeysExpired() throws ParseException {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> originalKeys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> originalKeys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, originalKeys.size());
 
     // Need to use the actual current time for the issue time and not-before-time because the
@@ -424,11 +539,11 @@ class TestSystemJWKSetManager {
             .build();
     final String originalToken = jwkSetManager.getSigner().sign(originalJwtClaims);
 
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
     jwkSetManager.enforceConsistentJwksState();
 
     assertNotNull(jwkSetManager.getPublicJWKS());
-    originalKeys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    originalKeys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, originalKeys.size());
 
     assertEquals(USERNAME, jwkSetManager.getValidator().validate(originalToken).username);
@@ -438,15 +553,14 @@ class TestSystemJWKSetManager {
     // for an extended period such that both keys have expired.
     clock.add(Duration.ofDays(366));
     jwkSetManager.enforceConsistentJwksState();
-    List<Map<String, Object>> newKeys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> newKeys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, newKeys.size());
     final Set<String> originalKeyIds =
-        originalKeys.stream().map(key -> (String) key.get("kid")).collect(Collectors.toSet());
+        originalKeys.stream().map(JWK::getKeyId).collect(Collectors.toSet());
 
     final Set<String> newKeyIds =
         newKeys.stream()
-            .map(key -> (String) key.get("kid"))
+            .map(JWK::getKeyId)
             .filter(key -> !originalKeyIds.contains(key))
             .collect(Collectors.toSet());
     assertEquals(1, newKeyIds.size(), "There should be 1 new key in the JWK set");
@@ -476,13 +590,12 @@ class TestSystemJWKSetManager {
   @Test
   public void rotateSingleKeyOnStart() throws Exception {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     // Advance time passed the rotation period for the original generated key
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
 
     // Create a new SystemJWKSetManager and start it to simulate a server restart
     try (final SystemJWKSetManager otherJwksManager =
@@ -499,14 +612,13 @@ class TestSystemJWKSetManager {
       otherJwksManager.start();
 
       assertNotNull(otherJwksManager.getPublicJWKS());
-      List<Map<String, Object>> otherKeys =
-          (List<Map<String, Object>>) otherJwksManager.getPublicJWKS().get("keys");
+      List<JWK> otherKeys = otherJwksManager.getPublicJWKS().getKeys();
       assertEquals(
           2,
           otherKeys.size(),
           "A new key should have been rotated in on SystemJWKSetManager startup");
-      final Optional<Map<String, Object>> optionalOriginalKeyId =
-          otherKeys.stream().filter(key -> originalKeyId.equals(key.get("kid"))).findFirst();
+      final Optional<JWK> optionalOriginalKeyId =
+          otherKeys.stream().filter(key -> originalKeyId.equals(key.getKeyId())).findFirst();
       assertTrue(
           optionalOriginalKeyId.isPresent(),
           "The original key should have been loaded by the new SystemJWKSetManager");
@@ -516,25 +628,24 @@ class TestSystemJWKSetManager {
   @Test
   public void revokeOldKeyOnStart() throws Exception {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     // Advance time passed the rotation period for the original generated key
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
     // Enforce consistency to trigger key rotation
     jwkSetManager.enforceConsistentJwksState();
 
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
-    final Optional<Map<String, Object>> optionalOriginalKey =
-        keys.stream().filter(key -> originalKeyId.equals(key.get("kid"))).findFirst();
+    final Optional<JWK> optionalOriginalKey =
+        keys.stream().filter(key -> originalKeyId.equals(key.getKeyId())).findFirst();
     assertTrue(
         optionalOriginalKey.isPresent(), "The original key should still be in the current JWK set");
     final String newKeyId =
         keys.stream()
-            .map(key -> (String) key.get("kid"))
+            .map(JWK::getKeyId)
             .filter(keyId -> !originalKeyId.equals(keyId))
             .findFirst()
             .get();
@@ -557,12 +668,11 @@ class TestSystemJWKSetManager {
       otherJwksManager.start();
 
       assertNotNull(otherJwksManager.getPublicJWKS());
-      List<Map<String, Object>> otherKeys =
-          (List<Map<String, Object>>) otherJwksManager.getPublicJWKS().get("keys");
+      List<JWK> otherKeys = otherJwksManager.getPublicJWKS().getKeys();
       assertEquals(1, otherKeys.size(), "The old key should have been revoked on startup");
       assertEquals(
           newKeyId,
-          otherKeys.get(0).get("kid"),
+          otherKeys.get(0).getKeyId(),
           "The new key should be the only key in the current JWK set");
     }
   }
@@ -570,33 +680,30 @@ class TestSystemJWKSetManager {
   @Test
   public void revokeAndRotateOldKeysOnStart() throws Exception {
     assertNotNull(jwkSetManager.getPublicJWKS());
-    List<Map<String, Object>> keys =
-        (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    List<JWK> keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(1, keys.size());
-    final String originalKeyId = (String) keys.get(0).get("kid");
+    final String originalKeyId = keys.get(0).getKeyId();
 
     // Advance time passed the rotation period for the original generated key
-    clock.add(Duration.ofDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS).plusSeconds(1));
+    clock.add(Duration.ofDays(JWKS_ROTATION_PERIOD_DAYS).plusSeconds(1));
     // Enforce consistency to trigger key rotation
     jwkSetManager.enforceConsistentJwksState();
 
-    keys = (List<Map<String, Object>>) jwkSetManager.getPublicJWKS().get("keys");
+    keys = jwkSetManager.getPublicJWKS().getKeys();
     assertEquals(2, keys.size());
-    final Optional<Map<String, Object>> optionalOriginalKey =
-        keys.stream().filter(key -> originalKeyId.equals(key.get("kid"))).findFirst();
+    final Optional<JWK> optionalOriginalKey =
+        keys.stream().filter(key -> originalKeyId.equals(key.getKeyId())).findFirst();
     assertTrue(
         optionalOriginalKey.isPresent(), "The original key should still be in the current JWK set");
     final String secondKeyId =
         keys.stream()
-            .map(key -> (String) key.get("kid"))
+            .map(JWK::getKeyId)
             .filter(keyId -> !originalKeyId.equals(keyId))
             .findFirst()
             .get();
 
     // Advance time passed both the new and old key revocation dates
-    clock.add(
-        Duration.ofMinutes(JWT_EXPIRATION_MINUTES)
-            .plusDays(SystemJWKSetManager.KEY_ROTATION_PERIOD_DAYS));
+    clock.add(Duration.ofMinutes(JWT_EXPIRATION_MINUTES).plusDays(JWKS_ROTATION_PERIOD_DAYS));
 
     // Create a new SystemJWKSetManager and start it to simulate a server restart
     try (final SystemJWKSetManager otherJwksManager =
@@ -613,14 +720,13 @@ class TestSystemJWKSetManager {
       otherJwksManager.start();
 
       assertNotNull(otherJwksManager.getPublicJWKS());
-      List<Map<String, Object>> otherKeys =
-          (List<Map<String, Object>>) otherJwksManager.getPublicJWKS().get("keys");
+      List<JWK> otherKeys = otherJwksManager.getPublicJWKS().getKeys();
       assertEquals(
           2,
           otherKeys.size(),
           "The old key should have been revoked and a new key should have been rotated in on startup");
       final Set<String> otherKeyIds =
-          otherKeys.stream().map(key -> (String) key.get("kid")).collect(Collectors.toSet());
+          otherKeys.stream().map(JWK::getKeyId).collect(Collectors.toSet());
       assertFalse(
           otherKeyIds.contains(originalKeyId),
           "The original key should have been revoked on startup");

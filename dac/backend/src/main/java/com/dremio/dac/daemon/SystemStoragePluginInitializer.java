@@ -28,6 +28,7 @@ import com.dremio.config.DremioConfig;
 import com.dremio.dac.homefiles.HomeFileConf;
 import com.dremio.dac.homefiles.HomeFileSystemStoragePlugin;
 import com.dremio.dac.service.nodeshistory.NodesHistoryPluginInitializer;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.server.SabotContext;
@@ -42,7 +43,6 @@ import com.dremio.plugins.nodeshistory.NodeHistorySourceConfigFactory;
 import com.dremio.service.BindingProvider;
 import com.dremio.service.DirectProvider;
 import com.dremio.service.Initializer;
-import com.dremio.service.coordinator.ClusterCoordinator;
 import com.dremio.service.coordinator.ProjectConfig;
 import com.dremio.service.coordinator.TaskLeaderElection;
 import com.dremio.service.namespace.NamespaceKey;
@@ -55,6 +55,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ConcurrentModificationException;
 import java.util.concurrent.Callable;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Create all the system storage plugins, such as results, accelerator, etc. Also creates the
@@ -70,247 +71,184 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
 
   @Override
   public Void initialize(BindingProvider provider) throws Exception {
-    final SabotContext sabotContext = provider.lookup(SabotContext.class);
-
-    createIcebergTablePlugin(provider, sabotContext);
-
-    boolean isDistributedCoordinator =
-        sabotContext.getDremioConfig().isMasterlessEnabled()
-            && sabotContext.getRoles().contains(ClusterCoordinator.Role.COORDINATOR);
-    boolean isMaster = sabotContext.getRoles().contains(ClusterCoordinator.Role.MASTER);
-    if (!(isMaster || isDistributedCoordinator)) {
+    initializeIcebergTablePlugin(provider);
+    if (!canStoragePluginsBeCreated(provider)) {
       logger.debug("System storage plugins will be created only on master coordinator");
       return null;
     }
+    return initializePlugins(provider);
+  }
 
-    if (!isMaster) {
-      // masterless mode
-      TaskLeaderElection taskLeaderElection =
-          new TaskLeaderElection(
-              LOCAL_TASK_LEADER_NAME,
-              DirectProvider.wrap(sabotContext.getClusterCoordinator()),
-              DirectProvider.wrap(sabotContext.getClusterCoordinator()),
-              DirectProvider.wrap(sabotContext.getEndpoint()));
+  private static void initializeIcebergTablePlugin(BindingProvider provider) {
+    createIcebergTablePlugin(
+        provider.lookup(ProjectConfig.class),
+        provider.lookup(SabotContext.class).getNamespaceService(SYSTEM_USERNAME),
+        provider.lookup(DremioConfig.class),
+        provider.lookup(SystemIcebergTablesStoragePluginConfigFactory.class),
+        provider.lookup(CatalogService.class));
+  }
 
-      taskLeaderElection.start();
-      // waiting for the leader to show
-      taskLeaderElection.getTaskLeader();
-
-      if (taskLeaderElection.isTaskLeader()) {
-        try {
-          pluginsCreation(provider, sabotContext);
-        } catch (Exception e) {
-          logger.warn(
-              "Exception while trying to init system plugins. Let other node (if available) handle it");
-          // close leader elections for this service
-          // let others take over leadership - if they initialize later
-          taskLeaderElection.close();
-          throw e;
-        }
-      } else {
-        logger.debug("System storage plugins will be created only on task leader coordinator");
-      }
-      return null;
+  private static @Nullable Void initializePlugins(BindingProvider provider) throws Exception {
+    SabotContext sabotContext = provider.lookup(SabotContext.class);
+    if (!sabotContext.isMaster()) {
+      return initializePluginsForMasterlessMode(provider, sabotContext);
     }
 
-    pluginsCreation(provider, sabotContext);
+    initializeSystemStoragePlugins(provider, sabotContext);
     return null;
   }
 
-  private void createIcebergTablePlugin(
-      final BindingProvider provider, final SabotContext sabotContext) {
-    final DremioConfig config = provider.lookup(DremioConfig.class);
-    final CatalogService catalogService = provider.lookup(CatalogService.class);
-    final ProjectConfig projectConfig = provider.lookup(ProjectConfig.class);
+  private static boolean canStoragePluginsBeCreated(BindingProvider provider) {
+    SabotContext sabotContext = provider.lookup(SabotContext.class);
+    DremioConfig dremioConfig = provider.lookup(DremioConfig.class);
+
+    boolean isDistributedCoordinator =
+        dremioConfig.isMasterlessEnabled() && sabotContext.isCoordinator();
+    boolean isMaster = sabotContext.isMaster();
+    return isMaster || isDistributedCoordinator;
+  }
+
+  private static @Nullable Void initializePluginsForMasterlessMode(
+      BindingProvider provider, SabotContext sabotContext) throws Exception {
+    TaskLeaderElection taskLeaderElection = electTaskLeader(sabotContext);
+    if (!taskLeaderElection.isTaskLeader()) {
+      logger.debug("System storage plugins will be created only on task leader coordinator");
+      return null;
+    }
+
+    try {
+      return initializeSystemStoragePlugins(provider, sabotContext);
+    } catch (Exception e) {
+      logger.warn(
+          "Exception while trying to init system plugins. Let other node (if available) handle it");
+      // close leader elections for this service
+      // let others take over leadership - if they initialize later
+      taskLeaderElection.close();
+      throw e;
+    }
+  }
+
+  private static TaskLeaderElection electTaskLeader(SabotContext sabotContext) throws Exception {
+    TaskLeaderElection taskLeaderElection =
+        new TaskLeaderElection(
+            LOCAL_TASK_LEADER_NAME,
+            DirectProvider.wrap(sabotContext.getClusterCoordinator()),
+            DirectProvider.wrap(sabotContext.getClusterCoordinator()),
+            DirectProvider.wrap(sabotContext.getEndpoint()));
+    taskLeaderElection.start();
+    // waiting for the leader to show
+    taskLeaderElection.getTaskLeader();
+    return taskLeaderElection;
+  }
+
+  private static void createIcebergTablePlugin(
+      ProjectConfig projectConfig,
+      NamespaceService systemNamespaceService,
+      DremioConfig dremioConfig,
+      SystemIcebergTablesStoragePluginConfigFactory systemIcebergTablesStoragePluginConfigFactory,
+      CatalogService catalogService) {
     final ProjectConfig.DistPathConfig systemIcebergTablesPathConfig =
         projectConfig.getSystemIcebergTablesConfig();
-    final NamespaceService ns =
-        provider.lookup(SabotContext.class).getNamespaceService(SYSTEM_USERNAME);
     final DeferredException deferred = new DeferredException();
 
     final boolean enableAsyncForSystemIcebergTablesStorage =
-        enable(config, DremioConfig.DEBUG_SYSTEM_ICEBERG_TABLES_STORAGE_ASYNC_ENABLED);
-
-    final SystemIcebergTablesStoragePluginConfigFactory factory =
-        provider.lookup(SystemIcebergTablesStoragePluginConfigFactory.class);
+        enable(dremioConfig, DremioConfig.DEBUG_SYSTEM_ICEBERG_TABLES_STORAGE_ASYNC_ENABLED);
 
     final ConnectionConf<?, ?> connectionConf =
-        factory.create(
+        systemIcebergTablesStoragePluginConfigFactory.create(
             systemIcebergTablesPathConfig.getUri(),
             enableAsyncForSystemIcebergTablesStorage,
-            isEnableS3FileStatusCheck(config, systemIcebergTablesPathConfig),
+            isEnableS3FileStatusCheck(dremioConfig, systemIcebergTablesPathConfig),
             systemIcebergTablesPathConfig.getDataCredentials());
 
     createSafe(
         catalogService,
-        ns,
+        systemNamespaceService,
         SystemIcebergTablesStoragePluginConfigFactory.create(connectionConf),
         deferred);
   }
 
-  /**
-   * To wrap plugins creation
-   *
-   * @param provider
-   * @param sabotContext
-   * @throws Exception
-   */
-  private void pluginsCreation(final BindingProvider provider, final SabotContext sabotContext)
-      throws Exception {
-    final DremioConfig config = provider.lookup(DremioConfig.class);
+  private static @Nullable Void initializeSystemStoragePlugins(
+      BindingProvider provider, SabotContext sabotContext) throws Exception {
+    DremioConfig dremioConfig = provider.lookup(DremioConfig.class);
     final CatalogService catalogService = provider.lookup(CatalogService.class);
-    final NamespaceService ns =
-        provider.lookup(SabotContext.class).getNamespaceService(SYSTEM_USERNAME);
+    final NamespaceService systemNamespaceService =
+        sabotContext.getNamespaceService(SYSTEM_USERNAME);
     final DeferredException deferred = new DeferredException();
     final ProjectConfig projectConfig = provider.lookup(ProjectConfig.class);
-
     final Path supportPath =
         Paths.get(sabotContext.getOptionManager().getOption(TEMPORARY_SUPPORT_PATH));
     final Path logPath = Paths.get(System.getProperty(DREMIO_LOG_PATH_PROPERTY, "/var/log/dremio"));
-
-    final ProjectConfig.DistPathConfig uploadsPathConfig = projectConfig.getUploadsConfig();
     final ProjectConfig.DistPathConfig accelerationPathConfig =
         projectConfig.getAcceleratorConfig();
     final ProjectConfig.DistPathConfig scratchPathConfig = projectConfig.getScratchConfig();
-    final ProjectConfig.DistPathConfig metadataPathConfig = projectConfig.getMetadataConfig();
-    final ProjectConfig.DistPathConfig nodeHistoryPathConfig = projectConfig.getNodeHistoryConfig();
-    final URI downloadPath = config.getURI(DremioConfig.DOWNLOADS_PATH_STRING);
-    final URI resultsPath = config.getURI(DremioConfig.RESULTS_PATH_STRING);
+    final URI downloadPath = dremioConfig.getURI(DremioConfig.DOWNLOADS_PATH_STRING);
+    final URI resultsPath = dremioConfig.getURI(DremioConfig.RESULTS_PATH_STRING);
     // Do not construct URI simply by concatenating, as it might not be encoded properly
     final URI logsPath = new URI("pdfs", "//" + logPath.toUri().getPath(), null);
     final URI supportURI = supportPath.toUri();
-
-    final boolean enableAsyncForUploads = enable(config, DremioConfig.DEBUG_UPLOADS_ASYNC_ENABLED);
-    createSafe(
-        catalogService,
-        ns,
-        HomeFileConf.create(
-            HomeFileSystemStoragePlugin.HOME_PLUGIN_NAME,
-            uploadsPathConfig.getUri(),
-            config.getThisNode(),
-            SchemaMutability.USER_TABLE,
-            CatalogService.NEVER_REFRESH_POLICY,
-            enableAsyncForUploads,
-            scratchPathConfig.getDataCredentials()),
-        deferred);
-
     final int maxCacheSpacePercent =
-        config.hasPath(DremioConfig.DEBUG_DIST_MAX_CACHE_SPACE_PERCENT)
-            ? config.getInt(DremioConfig.DEBUG_DIST_MAX_CACHE_SPACE_PERCENT)
+        dremioConfig.hasPath(DremioConfig.DEBUG_DIST_MAX_CACHE_SPACE_PERCENT)
+            ? dremioConfig.getInt(DremioConfig.DEBUG_DIST_MAX_CACHE_SPACE_PERCENT)
             : MAX_CACHE_SPACE_PERCENT;
 
-    final boolean enableAsyncForAcceleration =
-        enable(config, DremioConfig.DEBUG_DIST_ASYNC_ENABLED);
-
-    final boolean enableS3FileStatusCheck =
-        isEnableS3FileStatusCheck(config, accelerationPathConfig);
-    boolean enableCachingForAcceleration =
-        isEnableCaching(sabotContext, config, accelerationPathConfig, CLOUD_CACHING_ENABLED);
-
-    createSafe(
+    initializeHomeStoragePlugin(
+        projectConfig,
         catalogService,
-        ns,
-        AccelerationStoragePluginConfig.create(
-            accelerationPathConfig.getUri(),
-            enableAsyncForAcceleration,
-            enableCachingForAcceleration,
-            maxCacheSpacePercent,
-            enableS3FileStatusCheck,
-            accelerationPathConfig.getDataCredentials()),
+        systemNamespaceService,
+        dremioConfig,
+        scratchPathConfig,
         deferred);
-
-    final boolean enableAsyncForJobs = enable(config, DremioConfig.DEBUG_JOBS_ASYNC_ENABLED);
-    createSafe(
+    initializeAccelerationStoragePlugin(
+        sabotContext,
+        dremioConfig,
+        accelerationPathConfig,
         catalogService,
-        ns,
-        InternalFileConf.create(
-            DACDaemonModule.JOBS_STORAGEPLUGIN_NAME,
-            resultsPath,
-            SchemaMutability.SYSTEM_TABLE,
-            CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE,
-            enableAsyncForJobs,
-            null),
+        systemNamespaceService,
+        maxCacheSpacePercent,
         deferred);
-
-    final boolean enableAsyncForScratch = enable(config, DremioConfig.DEBUG_SCRATCH_ASYNC_ENABLED);
-    createSafe(
+    initializeJobStoragePlugin(
+        dremioConfig, catalogService, systemNamespaceService, resultsPath, deferred);
+    initializeScratchStoragePlugin(
+        dremioConfig, catalogService, systemNamespaceService, scratchPathConfig, deferred);
+    initializeDownloadDataStoragePlugin(
+        dremioConfig, catalogService, systemNamespaceService, downloadPath, deferred);
+    initializeProfileStoragePlugin(
+        dremioConfig, projectConfig, catalogService, systemNamespaceService, deferred);
+    initializeMetadataStoragePlugin(
+        sabotContext,
+        dremioConfig,
+        projectConfig,
         catalogService,
-        ns,
-        InternalFileConf.create(
-            DACDaemonModule.SCRATCH_STORAGEPLUGIN_NAME,
-            scratchPathConfig.getUri(),
-            SchemaMutability.USER_TABLE,
-            CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE,
-            enableAsyncForScratch,
-            scratchPathConfig.getDataCredentials()),
+        systemNamespaceService,
+        maxCacheSpacePercent,
         deferred);
+    initializeLogsStoragePlugin(
+        dremioConfig, catalogService, systemNamespaceService, logsPath, deferred);
+    initializeLocalStoragePlugin(
+        dremioConfig, catalogService, systemNamespaceService, supportURI, deferred);
+    initializeNodeHistoryStoragePlugin(
+        provider, sabotContext, projectConfig, catalogService, systemNamespaceService, deferred);
 
-    final boolean enableAsyncForDownload =
-        enable(config, DremioConfig.DEBUG_DOWNLOAD_ASYNC_ENABLED);
-    createSafe(
-        catalogService,
-        ns,
-        InternalFileConf.create(
-            DATASET_DOWNLOAD_STORAGE_PLUGIN,
-            downloadPath,
-            SchemaMutability.USER_TABLE,
-            CatalogService.NEVER_REFRESH_POLICY,
-            enableAsyncForDownload,
-            null),
-        deferred);
+    deferred.throwAndClear();
+    return null;
+  }
 
-    final boolean enableAsyncForMetadata =
-        enable(config, DremioConfig.DEBUG_METADATA_ASYNC_ENABLED);
-
-    final boolean enableS3FileStatusCheckForMetadata =
-        isEnableS3FileStatusCheck(config, metadataPathConfig);
-    boolean enableCachingForMetadata =
-        isEnableCaching(sabotContext, config, metadataPathConfig, METADATA_CLOUD_CACHING_ENABLED);
-
-    createSafe(
-        catalogService,
-        ns,
-        MetadataStoragePluginConfig.create(
-            metadataPathConfig.getUri(),
-            enableAsyncForMetadata,
-            enableCachingForMetadata,
-            maxCacheSpacePercent,
-            enableS3FileStatusCheckForMetadata,
-            metadataPathConfig.getDataCredentials()),
-        deferred);
-
-    final boolean enableAsyncForLogs = enable(config, DremioConfig.DEBUG_LOGS_ASYNC_ENABLED);
-    createSafe(
-        catalogService,
-        ns,
-        InternalFileConf.create(
-            LOGS_STORAGE_PLUGIN,
-            logsPath,
-            SchemaMutability.NONE,
-            CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE,
-            enableAsyncForLogs,
-            null),
-        deferred);
-
-    final boolean enableAsyncForSupport = enable(config, DremioConfig.DEBUG_SUPPORT_ASYNC_ENABLED);
-    createSafe(
-        catalogService,
-        ns,
-        InternalFileConf.create(
-            LOCAL_STORAGE_PLUGIN,
-            supportURI,
-            SchemaMutability.SYSTEM_TABLE,
-            CatalogService.NEVER_REFRESH_POLICY,
-            enableAsyncForSupport,
-            null),
-        deferred);
-
+  private static void initializeNodeHistoryStoragePlugin(
+      BindingProvider provider,
+      SabotContext sabotContext,
+      ProjectConfig projectConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      DeferredException deferred) {
     if (sabotContext.getOptionManager().getOption(NODE_HISTORY_ENABLED)) {
+      final ProjectConfig.DistPathConfig nodeHistoryPathConfig =
+          projectConfig.getNodeHistoryConfig();
       NodesHistoryPluginInitializer nodesHistoryPluginInitializer =
           provider.lookup(NodesHistoryPluginInitializer.class);
       createSafe(
           catalogService,
-          ns,
+          systemNamespaceService,
           NodeHistorySourceConfigFactory.newSourceConfig(
               nodeHistoryPathConfig.getUri(), nodeHistoryPathConfig.getDataCredentials()),
           deferred);
@@ -321,11 +259,218 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
           },
           deferred);
     }
-
-    deferred.throwAndClear();
   }
 
-  private boolean isEnableCaching(
+  private static void initializeLocalStoragePlugin(
+      DremioConfig dremioConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      URI supportURI,
+      DeferredException deferred) {
+    final boolean enableAsyncForSupport =
+        enable(dremioConfig, DremioConfig.DEBUG_SUPPORT_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            LOCAL_STORAGE_PLUGIN,
+            supportURI,
+            SchemaMutability.SYSTEM_TABLE,
+            CatalogService.NEVER_REFRESH_POLICY,
+            enableAsyncForSupport,
+            null),
+        deferred);
+  }
+
+  private static void initializeLogsStoragePlugin(
+      DremioConfig dremioConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      URI logsPath,
+      DeferredException deferred) {
+    final boolean enableAsyncForLogs = enable(dremioConfig, DremioConfig.DEBUG_LOGS_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            LOGS_STORAGE_PLUGIN,
+            logsPath,
+            SchemaMutability.NONE,
+            CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE,
+            enableAsyncForLogs,
+            null),
+        deferred);
+  }
+
+  private static void initializeMetadataStoragePlugin(
+      SabotContext sabotContext,
+      DremioConfig dremioConfig,
+      ProjectConfig projectConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      int maxCacheSpacePercent,
+      DeferredException deferred) {
+    final boolean enableAsyncForMetadata =
+        enable(dremioConfig, DremioConfig.DEBUG_METADATA_ASYNC_ENABLED);
+
+    final ProjectConfig.DistPathConfig metadataPathConfig = projectConfig.getMetadataConfig();
+    final boolean enableS3FileStatusCheckForMetadata =
+        isEnableS3FileStatusCheck(dremioConfig, metadataPathConfig);
+    boolean enableCachingForMetadata =
+        isEnableCaching(
+            sabotContext, dremioConfig, metadataPathConfig, METADATA_CLOUD_CACHING_ENABLED);
+
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        MetadataStoragePluginConfig.create(
+            metadataPathConfig.getUri(),
+            enableAsyncForMetadata,
+            enableCachingForMetadata,
+            maxCacheSpacePercent,
+            enableS3FileStatusCheckForMetadata,
+            metadataPathConfig.getDataCredentials()),
+        deferred);
+  }
+
+  private static void initializeProfileStoragePlugin(
+      DremioConfig dremioConfig,
+      ProjectConfig projectConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      DeferredException deferred) {
+    final boolean enableAsyncForProfile =
+        enable(dremioConfig, DremioConfig.DEBUG_PROFILE_ASYNC_ENABLED);
+    final ProjectConfig.DistPathConfig profilePathConfig = projectConfig.getProfileConfig();
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            DACDaemonModule.PROFILE_STORAGEPLUGIN_NAME,
+            profilePathConfig.getUri(),
+            SchemaMutability.SYSTEM_TABLE,
+            CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE,
+            enableAsyncForProfile,
+            profilePathConfig.getDataCredentials()),
+        deferred);
+  }
+
+  private static void initializeDownloadDataStoragePlugin(
+      DremioConfig dremioConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      URI downloadPath,
+      DeferredException deferred) {
+    final boolean enableAsyncForDownload =
+        enable(dremioConfig, DremioConfig.DEBUG_DOWNLOAD_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            DATASET_DOWNLOAD_STORAGE_PLUGIN,
+            downloadPath,
+            SchemaMutability.USER_TABLE,
+            CatalogService.NEVER_REFRESH_POLICY,
+            enableAsyncForDownload,
+            null),
+        deferred);
+  }
+
+  private static void initializeScratchStoragePlugin(
+      DremioConfig dremioConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      ProjectConfig.DistPathConfig scratchPathConfig,
+      DeferredException deferred) {
+    final boolean enableAsyncForScratch =
+        enable(dremioConfig, DremioConfig.DEBUG_SCRATCH_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            DACDaemonModule.SCRATCH_STORAGEPLUGIN_NAME,
+            scratchPathConfig.getUri(),
+            SchemaMutability.USER_TABLE,
+            CatalogService.NEVER_REFRESH_POLICY_WITH_AUTO_PROMOTE,
+            enableAsyncForScratch,
+            scratchPathConfig.getDataCredentials()),
+        deferred);
+  }
+
+  private static void initializeJobStoragePlugin(
+      DremioConfig dremioConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      URI resultsPath,
+      DeferredException deferred) {
+    final boolean enableAsyncForJobs = enable(dremioConfig, DremioConfig.DEBUG_JOBS_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        InternalFileConf.create(
+            DACDaemonModule.JOBS_STORAGEPLUGIN_NAME,
+            resultsPath,
+            SchemaMutability.SYSTEM_TABLE,
+            CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE,
+            enableAsyncForJobs,
+            null),
+        deferred);
+  }
+
+  private static void initializeAccelerationStoragePlugin(
+      SabotContext sabotContext,
+      DremioConfig dremioConfig,
+      ProjectConfig.DistPathConfig accelerationPathConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      int maxCacheSpacePercent,
+      DeferredException deferred) {
+    final boolean enableAsyncForAcceleration =
+        enable(dremioConfig, DremioConfig.DEBUG_DIST_ASYNC_ENABLED);
+
+    final boolean enableS3FileStatusCheck =
+        isEnableS3FileStatusCheck(dremioConfig, accelerationPathConfig);
+    boolean enableCachingForAcceleration =
+        isEnableCaching(sabotContext, dremioConfig, accelerationPathConfig, CLOUD_CACHING_ENABLED);
+
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        AccelerationStoragePluginConfig.create(
+            accelerationPathConfig.getUri(),
+            enableAsyncForAcceleration,
+            enableCachingForAcceleration,
+            maxCacheSpacePercent,
+            enableS3FileStatusCheck,
+            accelerationPathConfig.getDataCredentials()),
+        deferred);
+  }
+
+  private static void initializeHomeStoragePlugin(
+      ProjectConfig projectConfig,
+      CatalogService catalogService,
+      NamespaceService systemNamespaceService,
+      DremioConfig dremioConfig,
+      ProjectConfig.DistPathConfig scratchPathConfig,
+      DeferredException deferred) {
+    final ProjectConfig.DistPathConfig uploadsPathConfig = projectConfig.getUploadsConfig();
+    final boolean enableAsyncForUploads =
+        enable(dremioConfig, DremioConfig.DEBUG_UPLOADS_ASYNC_ENABLED);
+    createSafe(
+        catalogService,
+        systemNamespaceService,
+        HomeFileConf.create(
+            HomeFileSystemStoragePlugin.HOME_PLUGIN_NAME,
+            uploadsPathConfig.getUri(),
+            dremioConfig.getThisNode(),
+            SchemaMutability.USER_TABLE,
+            CatalogService.NEVER_REFRESH_POLICY,
+            enableAsyncForUploads,
+            scratchPathConfig.getDataCredentials()),
+        deferred);
+  }
+
+  private static boolean isEnableCaching(
       SabotContext sabotContext,
       DremioConfig config,
       ProjectConfig.DistPathConfig pathConfig,
@@ -337,32 +482,32 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
     return enableCachingForAcceleration;
   }
 
-  private boolean isEnableS3FileStatusCheck(
-      DremioConfig config, ProjectConfig.DistPathConfig pathConfig) {
+  private static boolean isEnableS3FileStatusCheck(
+      DremioConfig dremioConfig, ProjectConfig.DistPathConfig pathConfig) {
     return !FileSystemConf.CloudFileSystemScheme.S3_FILE_SYSTEM_SCHEME
             .getScheme()
             .equals(pathConfig.getUri().getScheme())
-        || enable(config, DremioConfig.DEBUG_DIST_S3_FILE_STATUS_CHECK);
+        || enable(dremioConfig, DremioConfig.DEBUG_DIST_S3_FILE_STATUS_CHECK);
   }
 
   private static boolean enable(DremioConfig config, String path) {
     return !config.hasPath(path) || config.getBoolean(path);
   }
 
-  protected void createSafe(
+  protected static void createSafe(
       final CatalogService catalogService,
-      final NamespaceService ns,
+      final NamespaceService systemNamespaceService,
       final SourceConfig config,
       DeferredException deferred) {
     deferExceptions(
         () -> {
-          createOrUpdateSystemSource(catalogService, ns, config);
+          createOrUpdateSystemSource(catalogService, systemNamespaceService, config);
           return null;
         },
         deferred);
   }
 
-  private void deferExceptions(Callable<Void> callable, DeferredException deferred) {
+  private static void deferExceptions(Callable<Void> callable, DeferredException deferred) {
     try {
       callable.call();
     } catch (Exception ex) {
@@ -379,7 +524,7 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
    * @param config
    */
   @VisibleForTesting
-  void createOrUpdateSystemSource(
+  static void createOrUpdateSystemSource(
       final CatalogService catalogService, final NamespaceService ns, final SourceConfig config)
       throws Exception {
     try {
@@ -407,11 +552,14 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
         .setId(oldConfig.getId())
         .setCtime(oldConfig.getCtime())
         .setTag(oldConfig.getTag())
-        .setConfigOrdinal(oldConfig.getConfigOrdinal());
+        .setConfigOrdinal(oldConfig.getConfigOrdinal())
+        .setLastModifiedAt(oldConfig.getLastModifiedAt());
     // if old and new configs match don't update
     if (oldConfig.equals(updatedConfig)) {
       return;
     }
-    catalogService.getSystemUserCatalog().updateSource(updatedConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .updateSource(updatedConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 }

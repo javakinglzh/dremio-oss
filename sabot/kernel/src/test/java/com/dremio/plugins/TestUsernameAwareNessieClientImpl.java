@@ -68,11 +68,11 @@ public class TestUsernameAwareNessieClientImpl {
               return null;
             })
         .when(nessieClient)
-        .createNamespace(namespaceList, versionContext);
+        .createNamespace(namespaceList, versionContext, null);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext(userId))
-        .run(() -> usernameAwareNessieClient.createNamespace(namespaceList, versionContext));
+        .with(UserContext.CTX_KEY, UserContext.of(userId))
+        .run(() -> usernameAwareNessieClient.createNamespace(namespaceList, versionContext, null));
   }
 
   @Test
@@ -94,7 +94,7 @@ public class TestUsernameAwareNessieClientImpl {
         .getDefaultBranch();
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext(userId))
+        .with(UserContext.CTX_KEY, UserContext.of(userId))
         .call(usernameAwareNessieClient::getDefaultBranch);
   }
 
@@ -119,7 +119,7 @@ public class TestUsernameAwareNessieClientImpl {
         .deleteNamespace(namespaceList, versionContext);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext(userId))
+        .with(UserContext.CTX_KEY, UserContext.of(userId))
         .run(() -> usernameAwareNessieClient.deleteNamespace(namespaceList, versionContext));
   }
 
@@ -137,10 +137,10 @@ public class TestUsernameAwareNessieClientImpl {
               return null;
             })
         .when(nessieClient)
-        .createNamespace(namespaceList, versionContext);
+        .createNamespace(namespaceList, versionContext, null);
 
     RequestContext.current()
-        .with(UserContext.CTX_KEY, new UserContext(userId))
-        .run(() -> usernameAwareNessieClient.createNamespace(namespaceList, versionContext));
+        .with(UserContext.CTX_KEY, UserContext.of(userId))
+        .run(() -> usernameAwareNessieClient.createNamespace(namespaceList, versionContext, null));
   }
 }

@@ -49,8 +49,7 @@ public interface SourceMetadata {
 
   /**
    * Returns a listing of partition chunk handles for the given dataset handle, where each handle
-   * represents a ... . There must be one or more partition chunks in a dataset. TODO: finish the
-   * comment
+   * represents a ... . There must be one or more partition chunks in a dataset.
    *
    * @param datasetHandle dataset handle
    * @return listing of partition chunk handles, not null
@@ -83,8 +82,8 @@ public interface SourceMetadata {
       throws ConnectorException;
 
   /**
-   * Check if the given path exists, and that the entity at the path is a container. TODO: defined
-   * what a container is
+   * Check if the given path exists, and that the entity at the path is a container. A container can
+   * be a dataset or a folder.
    *
    * @param containerPath container path
    * @param options

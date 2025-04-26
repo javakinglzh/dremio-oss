@@ -18,10 +18,13 @@ package com.dremio.common.config;
 import com.dremio.common.expression.FieldReference;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.common.logical.FormatPluginConfigBase;
 import com.dremio.common.logical.StoragePluginConfigBase;
+import com.dremio.common.logical.data.LogicalOperator;
 import com.dremio.common.logical.data.LogicalOperatorBase;
 import com.dremio.common.scanner.persistence.ScanResult;
+import com.dremio.common.store.StoragePluginConfig;
 import com.fasterxml.jackson.core.JsonGenerator;
 import com.fasterxml.jackson.core.JsonParser.Feature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,6 +45,17 @@ public class LogicalPlanPersistence {
 
   @Inject
   public LogicalPlanPersistence(ScanResult scanResult) {
+    this(
+        LogicalOperatorBase.getSubTypes(scanResult),
+        StoragePluginConfigBase.getSubTypes(scanResult),
+        FormatPluginConfigBase.getSubTypes(scanResult));
+  }
+
+  /** Constructor use sets extract from scan result. */
+  public LogicalPlanPersistence(
+      Set<Class<? extends LogicalOperator>> logicalOperatorSubTypes,
+      Set<Class<? extends StoragePluginConfig>> storagePluginSubTypes,
+      Set<Class<? extends FormatPluginConfig>> formatPluginSubTypes) {
     mapper = new ObjectMapper();
 
     SimpleModule deserModule =
@@ -56,14 +70,8 @@ public class LogicalPlanPersistence {
     mapper.configure(Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
     mapper.configure(JsonGenerator.Feature.QUOTE_FIELD_NAMES, true);
     mapper.configure(Feature.ALLOW_COMMENTS, true);
-    registerSubtypes(LogicalOperatorBase.getSubTypes(scanResult));
-    registerSubtypes(StoragePluginConfigBase.getSubTypes(scanResult));
-    registerSubtypes(FormatPluginConfigBase.getSubTypes(scanResult));
-  }
-
-  private <T> void registerSubtypes(Set<Class<? extends T>> types) {
-    for (Class<? extends T> type : types) {
-      mapper.registerSubtypes(type);
-    }
+    logicalOperatorSubTypes.forEach(mapper::registerSubtypes);
+    storagePluginSubTypes.forEach(mapper::registerSubtypes);
+    formatPluginSubTypes.forEach(mapper::registerSubtypes);
   }
 }

@@ -15,17 +15,21 @@
  */
 package com.dremio.exec.planner.logical;
 
+import static com.dremio.test.dsl.RexDsl.and;
 import static com.dremio.test.dsl.RexDsl.dateInput;
 import static com.dremio.test.dsl.RexDsl.eq;
 import static com.dremio.test.dsl.RexDsl.gt;
 import static com.dremio.test.dsl.RexDsl.gte;
+import static com.dremio.test.dsl.RexDsl.isNull;
 import static com.dremio.test.dsl.RexDsl.literal;
 import static com.dremio.test.dsl.RexDsl.literalDate;
 import static com.dremio.test.dsl.RexDsl.literalTimestamp;
 import static com.dremio.test.dsl.RexDsl.lt;
 import static com.dremio.test.dsl.RexDsl.lte;
 import static com.dremio.test.dsl.RexDsl.notEq;
+import static com.dremio.test.dsl.RexDsl.or;
 import static com.dremio.test.dsl.RexDsl.timestampInput;
+import static com.dremio.test.dsl.RexDsl.varcharInput;
 import static com.dremio.test.scaffolding.ScaffoldingRel.DATE_TYPE;
 
 import com.dremio.common.collections.ImmutableEntry;
@@ -415,6 +419,44 @@ public final class DateTimeFunctionRexShuttleTest {
         .runTests();
   }
 
+  @Test
+  public void testSARGableInTransform() {
+    new GoldenFileTestBuilder<>(this::sargableTransform, Objects::toString)
+        .add(
+            "DateInput IN",
+            or(
+                and(
+                    gte(dateInput(0), literalDate("2020-08-01")),
+                    lt(dateInput(0), literalDate("2020-09-01"))),
+                and(
+                    gte(dateInput(0), literalDate("2020-09-01")),
+                    lt(dateInput(0), literalDate("2020-10-01"))),
+                and(
+                    gte(dateInput(0), literalDate("2020-10-01")),
+                    lt(dateInput(0), literalDate("2020-11-01")))))
+        .add(
+            "DateInput NOT IN",
+            and(
+                or(
+                    gte(dateInput(0), literalDate("2020-08-01")),
+                    lt(dateInput(0), literalDate("2020-09-01"))),
+                or(
+                    gte(dateInput(0), literalDate("2020-09-01")),
+                    lt(dateInput(0), literalDate("2020-10-01"))),
+                or(
+                    gte(dateInput(0), literalDate("2020-10-01")),
+                    lt(dateInput(0), literalDate("2020-11-01")))))
+        .add(
+            "VarcharInput IN",
+            or(eq(varcharInput(2), literal("abc")), eq(varcharInput(2), literal("def"))))
+        .add(
+            "COALESCE NOT IN",
+            and(
+                or(notEq(varcharInput(2), literal("abc")), isNull(varcharInput(2))),
+                or(notEq(varcharInput(2), literal("def")), isNull(varcharInput(2)))))
+        .runTests();
+  }
+
   private static RexNode dateTrunc(String strInterval, RexNode dateExpr) {
     return rexBuilder.makeCall(
         SARGableRexUtils.DATE_TRUNC, rexBuilder.makeLiteral(strInterval), dateExpr);
@@ -550,7 +592,14 @@ public final class DateTimeFunctionRexShuttleTest {
     LogicalFilter filter =
         (LogicalFilter)
             relBuilder
-                .values(createSimpleRowType("a", SqlTypeName.DATE, "b", SqlTypeName.TIMESTAMP))
+                .values(
+                    createSimpleRowType(
+                        "a",
+                        SqlTypeName.DATE,
+                        "b",
+                        SqlTypeName.TIMESTAMP,
+                        "c",
+                        SqlTypeName.VARCHAR))
                 .filter(filterExpr)
                 .build();
     RelOptCluster relOptCluster = filter.getCluster();
@@ -560,11 +609,17 @@ public final class DateTimeFunctionRexShuttleTest {
   }
 
   private static RelDataType createSimpleRowType(
-      String name, SqlTypeName typeName, String name2, SqlTypeName typeName2) {
+      String name,
+      SqlTypeName typeName,
+      String name2,
+      SqlTypeName typeName2,
+      String name3,
+      SqlTypeName typeName3) {
     return typeFactory.createStructType(
         ImmutableList.<Map.Entry<String, RelDataType>>of(
             new ImmutableEntry<>(name, typeFactory.createSqlType(typeName)),
-            new ImmutableEntry<>(name2, typeFactory.createSqlType(typeName2))));
+            new ImmutableEntry<>(name2, typeFactory.createSqlType(typeName2)),
+            new ImmutableEntry<>(name3, typeFactory.createSqlType(typeName3))));
   }
 
   private static RelBuilder makeRelBuilder() {

@@ -16,7 +16,7 @@
 
 package com.dremio.exec.planner.logical;
 
-import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.Writer;
@@ -79,7 +79,7 @@ public interface CreateTableEntry {
   /**
    * @return The plugin
    */
-  MutablePlugin getPlugin();
+  SupportsFsMutablePlugin getPlugin();
 
   /**
    * @return the data set path for table

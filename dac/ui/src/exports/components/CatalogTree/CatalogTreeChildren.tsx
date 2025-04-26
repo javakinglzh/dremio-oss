@@ -16,18 +16,28 @@
 
 import { memo, Suspense, type FC } from "react";
 import { ErrorBoundary } from "react-error-boundary";
-import type { CatalogReference } from "@dremio/dremio-js/interfaces";
+import type { CatalogReference } from "@dremio/dremio-js/oss";
 import { CatalogReferenceChild } from "./CatalogReferenceChild";
 import { FailedCatalogTreeItem } from "./FailedCatalogTreeItem";
 import { LoadingCatalogTreeItem } from "./LoadingCatalogTreeItem";
 
-const renderCatalogReferenceSkeleton = (catalogReference: CatalogReference) => (
-  <LoadingCatalogTreeItem key={catalogReference.id} />
-);
+const renderCatalogReferenceSkeleton = (catalogReference: CatalogReference) => {
+  return (
+    <LoadingCatalogTreeItem
+      key={catalogReference.id}
+      catalogReference={catalogReference}
+    />
+  );
+};
 
 const renderCatalogReferenceChild = (catalogReference: CatalogReference) => (
   <ErrorBoundary
-    fallback={<FailedCatalogTreeItem catalogReference={catalogReference} />}
+    fallbackRender={({ error }) => (
+      <FailedCatalogTreeItem
+        catalogReference={catalogReference}
+        error={error}
+      />
+    )}
     key={catalogReference.id}
   >
     <CatalogReferenceChild catalogReference={catalogReference} />

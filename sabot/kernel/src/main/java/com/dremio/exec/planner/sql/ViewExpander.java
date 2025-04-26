@@ -94,6 +94,10 @@ public class ViewExpander {
     return root;
   }
 
+  public SqlValidatorAndToRelContext getSqlValidatorAndToRelContext() {
+    return sqlValidatorAndToRelContextBuilderFactory.builder().build();
+  }
+
   private RelRoot expandViewInternalErrorWithHandling(final ViewTable viewTable) {
 
     try {

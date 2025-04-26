@@ -21,11 +21,14 @@ import com.dremio.exec.planner.acceleration.IncrementalUpdateSettings;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils.VersionedPath;
 import com.dremio.exec.planner.sql.SqlConverter;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.ReflectionType;
 import java.util.List;
 import java.util.Set;
 
+/** This interfaces describes a materialization that can be used for accelerating queries. */
 public interface MaterializationDescriptor {
+
   IncrementalUpdateSettings getIncrementalUpdateSettings();
 
   String getLayoutId();
@@ -44,7 +47,7 @@ public interface MaterializationDescriptor {
 
   long getJobStart();
 
-  List<String> getPartition();
+  String getMatchingHash();
 
   boolean isApplicable(
       Set<VersionedPath> queryTablesUsed,
@@ -56,4 +59,6 @@ public interface MaterializationDescriptor {
   ReflectionType getReflectionType();
 
   boolean isStale();
+
+  LayoutMaterializedViewProfile getLayoutMaterializedViewProfile(boolean verbose);
 }

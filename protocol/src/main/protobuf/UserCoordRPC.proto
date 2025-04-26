@@ -535,6 +535,16 @@ message PreparedStatementArrow {
    * clients need to submit this object in RunQuery message.
    */
   optional PreparedStatementHandle server_handle = 2;
+
+  /*
+   * Schema of the dynamic parameter list as described in Schema.fbs::Schema.
+   */
+  optional bytes parameter_arrow_schema = 3;
+
+  /*
+   * Parameter list.
+   */
+  repeated PreparedStatementParameterValue parameters = 4;
 }
 
 /*

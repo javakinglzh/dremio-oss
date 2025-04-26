@@ -15,6 +15,7 @@
  */
 package com.dremio.dac.server;
 
+import static com.dremio.common.util.TestToolUtils.readTestResourceAsString;
 import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
 import static com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME;
 import static java.lang.String.format;
@@ -26,7 +27,6 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.memory.DremioRootAllocator;
 import com.dremio.common.perf.Timer;
 import com.dremio.common.perf.Timer.TimedBlock;
-import com.dremio.common.util.TestTools;
 import com.dremio.config.DremioConfig;
 import com.dremio.dac.daemon.DACDaemon;
 import com.dremio.dac.daemon.DACDaemon.ClusterMode;
@@ -53,6 +53,7 @@ import com.dremio.exec.client.DremioClient;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.rpc.RpcException;
 import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.options.SystemOptionManager;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.util.TestUtilities;
 import com.dremio.file.FilePath;
@@ -73,11 +74,15 @@ import com.dremio.service.jobs.JobStatusListener;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.NamespaceException;
+import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetVersion;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
+import com.dremio.service.reflection.ReflectionService;
 import com.dremio.service.users.SimpleUserService;
 import com.dremio.service.users.UserService;
 import com.dremio.services.fabric.api.FabricService;
+import com.dremio.test.ClearInlineMocksExtension;
 import com.dremio.test.DremioTest;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Preconditions;
@@ -93,16 +98,19 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import javax.inject.Provider;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.Invocation;
 import javax.ws.rs.client.WebTarget;
 import org.apache.arrow.memory.BufferAllocator;
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.junit.jupiter.api.io.TempDir;
 
 @Tag("dremio-multi-node-tests")
@@ -112,6 +120,10 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
 
   protected static final String DEFAULT_USERNAME = SampleDataPopulator.DEFAULT_USER_NAME;
   protected static final String DEFAULT_PASSWORD = SampleDataPopulator.PASSWORD;
+
+  @RegisterExtension
+  private static final ClearInlineMocksExtension CLEAR_INLINE_MOCKS =
+      new ClearInlineMocksExtension();
 
   private static boolean defaultUser = true;
   private static boolean testApiEnabled = true;
@@ -465,6 +477,10 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
     return l(DatasetVersionMutator.class);
   }
 
+  protected static ReflectionService getReflectionService() {
+    return l(ReflectionService.class);
+  }
+
   protected static SabotContext getSabotContext() {
     return l(SabotContext.class);
   }
@@ -745,7 +761,7 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
   }
 
   protected static String readResourceAsString(String fileName) {
-    return TestTools.readTestResourceAsString(fileName);
+    return readTestResourceAsString(fileName);
   }
 
   protected static JobRequest createNewJobRequestFromSql(String sql) {
@@ -843,5 +859,29 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
             .setSqlQuery(sqlQuery)
             .setQueryType(QueryType.UI_INTERNAL_RUN)
             .build());
+  }
+
+  /**
+   * @param sourceName name of the source
+   * @return tag of the sources after async modification.
+   * @throws NamespaceException The async source at the kvStore will have correct tag, however since
+   *     we store the value after we return, the tag stored in the kvStore is different from what we
+   *     get from the ' REST API.
+   */
+  protected static String waitForSourceModificationAndGetNewTag(String sourceName)
+      throws NamespaceException {
+    Awaitility.await()
+        .atMost(300, TimeUnit.SECONDS)
+        .until(
+            () ->
+                getNamespaceService()
+                    .getSource(new NamespaceKey(sourceName))
+                    .getSourceChangeState()
+                    .equals(SourceChangeState.SOURCE_CHANGE_STATE_NONE));
+    return getNamespaceService().getSource(new NamespaceKey(sourceName)).getTag();
+  }
+
+  public static String toSystemPropertyName(OptionValidator optionValidator) {
+    return SystemOptionManager.SYSTEM_OPTION_PREFIX + optionValidator.getOptionName();
   }
 }

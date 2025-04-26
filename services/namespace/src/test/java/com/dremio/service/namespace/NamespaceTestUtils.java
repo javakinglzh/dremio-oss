@@ -15,7 +15,9 @@
  */
 package com.dremio.service.namespace;
 
+import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.PHYSICAL_DATASET;
+import static com.dremio.service.namespace.dataset.proto.DatasetType.VIRTUAL_DATASET;
 
 import com.dremio.common.utils.PathUtils;
 import com.dremio.service.namespace.dataset.DatasetVersion;
@@ -52,7 +54,6 @@ public final class NamespaceTestUtils {
     final SourceConfig src =
         new SourceConfig()
             .setName(name)
-            .setCtime(100L)
             .setLegacySourceTypeEnum(LegacySourceType.NAS)
             .setAccelerationRefreshPeriod(refreshPeriod)
             .setAccelerationGracePeriod(gracePeriod);
@@ -99,7 +100,7 @@ public final class NamespaceTestUtils {
 
   public static void addFile(NamespaceService ns, List<String> path) throws Exception {
     NamespaceKey filePath = new NamespaceKey(path);
-    final boolean isHome = path.get(0).startsWith("@");
+    final boolean isHome = isHomeSpace(path.get(0));
     final DatasetConfig ds =
         new DatasetConfig()
             .setType(
@@ -141,6 +142,36 @@ public final class NamespaceTestUtils {
     datasetConfig.setSchemaVersion(DatasetHelper.CURRENT_VERSION);
     datasetConfig.setPhysicalDataset(physicalDataset);
     ns.tryCreatePhysicalDataset(datasetPath, datasetConfig);
+  }
+
+  public static void addVirtualDS(NamespaceService ns, String filePath, String sql)
+      throws Exception {
+    NamespaceKey datasetPath = new NamespaceKey(PathUtils.parseFullPath(filePath));
+    final DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setName(datasetPath.getName());
+    datasetConfig.setType(VIRTUAL_DATASET);
+    datasetConfig.setFullPathList(datasetPath.getPathComponents());
+
+    final VirtualDataset virtualDataset = new VirtualDataset();
+    virtualDataset.setSql(sql);
+    datasetConfig.setSchemaVersion(DatasetHelper.CURRENT_VERSION);
+    datasetConfig.setVirtualDataset(virtualDataset);
+    ns.addOrUpdateDataset(datasetPath, datasetConfig);
+  }
+
+  public static void addShallowVirtualDS(NamespaceService ns, String filePath) throws Exception {
+    NamespaceKey datasetPath = new NamespaceKey(PathUtils.parseFullPath(filePath));
+    final DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setName(datasetPath.getName());
+    datasetConfig.setType(VIRTUAL_DATASET);
+    datasetConfig.setFullPathList(datasetPath.getPathComponents());
+    datasetConfig.setSchemaVersion(DatasetHelper.CURRENT_VERSION);
+
+    final VirtualDataset virtualDataset = new VirtualDataset();
+    virtualDataset.setVersion(DatasetVersion.newVersion());
+    datasetConfig.setVirtualDataset(virtualDataset);
+
+    ns.addOrUpdateDataset(datasetPath, datasetConfig);
   }
 
   public static Map<String, NameSpaceContainer> listFolder(NamespaceService ns, String parent)

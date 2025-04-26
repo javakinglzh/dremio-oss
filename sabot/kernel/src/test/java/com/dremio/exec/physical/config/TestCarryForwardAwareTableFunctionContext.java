@@ -24,6 +24,7 @@ import com.dremio.exec.store.iceberg.IcebergFileType;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.ImmutableMap;
+import java.util.List;
 import org.junit.Test;
 
 /** Tests for {@link CarryForwardAwareTableFunctionContext} */
@@ -42,7 +43,8 @@ public class TestCarryForwardAwareTableFunctionContext {
                 SchemaPath.getSimplePath(SystemSchemas.FILE_PATH)),
             SystemSchemas.FILE_TYPE,
             IcebergFileType.MANIFEST_LIST.name(),
-            "file");
+            "file",
+            List.of("source", "namespace", "table"));
 
     String serialized = mapper.writeValueAsString(ctx);
     CarryForwardAwareTableFunctionContext deserialized =
@@ -50,12 +52,18 @@ public class TestCarryForwardAwareTableFunctionContext {
 
     assertThat(deserialized)
         .extracting(
-            "isCarryForwardEnabled", "inputColMap", "constValCol", "constVal", "schemeVariate")
+            "isCarryForwardEnabled",
+            "inputColMap",
+            "constValCol",
+            "constVal",
+            "schemeVariate",
+            "referencedTables")
         .containsExactly(
             ctx.isCarryForwardEnabled(),
             ctx.getInputColMap(),
             ctx.getConstValCol(),
             ctx.getConstVal(),
-            ctx.getSchemeVariate());
+            ctx.getSchemeVariate(),
+            ctx.getReferencedTables());
   }
 }

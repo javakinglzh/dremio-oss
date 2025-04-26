@@ -23,6 +23,7 @@ import com.dremio.exec.expr.ClassGenerator;
 import com.dremio.exec.expr.ExpressionEvaluationOptions;
 import com.dremio.exec.expr.ExpressionSplitter;
 import com.dremio.exec.record.VectorContainer;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.scan.ScanOperator;
@@ -54,17 +55,29 @@ public class SimpleProjector implements AutoCloseable {
       OperatorContext context,
       VectorContainer inputVectors,
       List<NamedExpression> exprs,
-      VectorContainer outputVectors) {
+      VectorContainer outputVectors,
+      ExpressionEvaluationOptions projectorOptions) {
     this.context = context;
     this.inputVectors = inputVectors;
     this.exprs = exprs;
     this.outputVectors = outputVectors;
-    this.projectorOptions = new ExpressionEvaluationOptions(context.getOptions());
-    this.projectorOptions.setCodeGenOption(
-        context
-            .getOptions()
-            .getOption(ExecConstants.QUERY_EXEC_OPTION.getOptionName())
-            .getStringVal());
+    this.projectorOptions = projectorOptions;
+  }
+
+  public SimpleProjector(
+      OperatorContext context,
+      VectorContainer inputVectors,
+      List<NamedExpression> exprs,
+      VectorContainer outputVectors) {
+    this(
+        context, inputVectors, exprs, outputVectors, defaultProjectorOptions(context.getOptions()));
+  }
+
+  public static ExpressionEvaluationOptions defaultProjectorOptions(OptionManager options) {
+    ExpressionEvaluationOptions projectorOptions = new ExpressionEvaluationOptions(options);
+    projectorOptions.setCodeGenOption(
+        options.getOption(ExecConstants.QUERY_EXEC_OPTION.getOptionName()).getStringVal());
+    return projectorOptions;
   }
 
   public void setup() {

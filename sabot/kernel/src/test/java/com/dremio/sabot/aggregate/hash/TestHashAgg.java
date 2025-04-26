@@ -19,6 +19,8 @@ import static com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType.FUNCTI
 import static com.dremio.sabot.Fixtures.t;
 import static com.dremio.sabot.Fixtures.th;
 import static com.dremio.sabot.Fixtures.tr;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.dremio.common.logical.data.NamedExpression;
 import com.dremio.common.types.TypeProtos.MinorType;
@@ -35,7 +37,6 @@ import com.dremio.sabot.Fixtures.Table;
 import com.dremio.sabot.Generator;
 import com.dremio.sabot.op.aggregate.hash.HashAggOperator;
 import com.dremio.sabot.op.aggregate.vectorized.VectorizedHashAggOperator;
-import com.dremio.sabot.op.aggregate.vectorized.nospill.VectorizedHashAggOperatorNoSpill;
 import com.dremio.test.UserExceptionAssert;
 import io.airlift.tpch.GenerationDefinition.TpchTable;
 import io.airlift.tpch.TpchGenerator;
@@ -67,40 +68,21 @@ public class TestHashAgg extends BaseTestOperator {
     validateSingle(vanillaConf, HashAggOperator.class, table, scale, expectedResult);
 
     /* test with vectorized hashagg operator that supports spilling */
-    try (AutoCloseable options1 =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true)) {
-      for (int i = 0; i <= 5; i++) {
-        try (AutoCloseable options2 =
-            with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
-          HashAggregate vectorizedConf =
-              new HashAggregate(
-                  OpProps.prototype(),
-                  conf.getChild(),
-                  conf.getGroupByExprs(),
-                  conf.getAggrExprs(),
-                  true,
-                  true,
-                  conf.getCardinality());
-          validateSingle(
-              vectorizedConf, VectorizedHashAggOperator.class, table, scale, expectedResult);
-        }
+    for (int i = 0; i <= 5; i++) {
+      try (AutoCloseable options2 =
+          with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
+        HashAggregate vectorizedConf =
+            new HashAggregate(
+                OpProps.prototype(),
+                conf.getChild(),
+                conf.getGroupByExprs(),
+                conf.getAggrExprs(),
+                true,
+                true,
+                conf.getCardinality());
+        validateSingle(
+            vectorizedConf, VectorizedHashAggOperator.class, table, scale, expectedResult);
       }
-    }
-
-    /* test with old vectorized hashagg operator -- that does not support spilling */
-    try (AutoCloseable options =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, false)) {
-      HashAggregate vectorizedConf =
-          new HashAggregate(
-              OpProps.prototype(),
-              conf.getChild(),
-              conf.getGroupByExprs(),
-              conf.getAggrExprs(),
-              true,
-              false,
-              conf.getCardinality());
-      validateSingle(
-          vectorizedConf, VectorizedHashAggOperatorNoSpill.class, table, scale, expectedResult);
     }
   }
 
@@ -119,38 +101,20 @@ public class TestHashAgg extends BaseTestOperator {
     validateSingle(vanillaConf, HashAggOperator.class, input, expectedResult);
 
     /* test with vectorized hashagg operator that supports spilling */
-    try (AutoCloseable options1 =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true)) {
-      for (int i = 0; i <= 5; i++) {
-        try (AutoCloseable options2 =
-            with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
-          HashAggregate vectorizedConf =
-              new HashAggregate(
-                  OpProps.prototype(),
-                  conf.getChild(),
-                  conf.getGroupByExprs(),
-                  conf.getAggrExprs(),
-                  true,
-                  true,
-                  conf.getCardinality());
-          validateSingle(vectorizedConf, VectorizedHashAggOperator.class, input, expectedResult);
-        }
+    for (int i = 0; i <= 5; i++) {
+      try (AutoCloseable options2 =
+          with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
+        HashAggregate vectorizedConf =
+            new HashAggregate(
+                OpProps.prototype(),
+                conf.getChild(),
+                conf.getGroupByExprs(),
+                conf.getAggrExprs(),
+                true,
+                true,
+                conf.getCardinality());
+        validateSingle(vectorizedConf, VectorizedHashAggOperator.class, input, expectedResult);
       }
-    }
-
-    /* test with old vectorized hashagg operator -- that does not support spilling */
-    try (AutoCloseable options =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, false)) {
-      HashAggregate vectorizedConf =
-          new HashAggregate(
-              OpProps.prototype(),
-              conf.getChild(),
-              conf.getGroupByExprs(),
-              conf.getAggrExprs(),
-              true,
-              true,
-              conf.getCardinality());
-      validateSingle(vectorizedConf, VectorizedHashAggOperatorNoSpill.class, input, expectedResult);
     }
   }
 
@@ -170,53 +134,55 @@ public class TestHashAgg extends BaseTestOperator {
         vanillaConf, HashAggOperator.class, input.toGenerator(allocator), expectedResult, 1000);
 
     /* test with vectorized hashagg operator that supports spilling */
-    try (AutoCloseable options1 =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true)) {
-      for (int i = 0; i <= 5; i++) {
-        try (AutoCloseable options2 =
-            with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
-          HashAggregate vectorizedConf =
-              new HashAggregate(
-                  OpProps.prototype(),
-                  conf.getChild(),
-                  conf.getGroupByExprs(),
-                  conf.getAggrExprs(),
-                  true,
-                  true,
-                  conf.getCardinality());
-          validateSingle(
-              vectorizedConf,
-              VectorizedHashAggOperator.class,
-              input.toGenerator(allocator),
-              expectedResult,
-              1000);
-        }
+    for (int i = 0; i <= 5; i++) {
+      try (AutoCloseable options2 =
+          with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 1 << i)) {
+        HashAggregate vectorizedConf =
+            new HashAggregate(
+                OpProps.prototype(),
+                conf.getChild(),
+                conf.getGroupByExprs(),
+                conf.getAggrExprs(),
+                true,
+                true,
+                conf.getCardinality());
+        validateSingle(
+            vectorizedConf,
+            VectorizedHashAggOperator.class,
+            input.toGenerator(allocator),
+            expectedResult,
+            1000);
       }
-    }
-
-    /* test with old vectorized hashagg operator -- that does not support spilling */
-    try (AutoCloseable options =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, false)) {
-      HashAggregate vectorizedConf =
-          new HashAggregate(
-              OpProps.prototype(),
-              conf.getChild(),
-              conf.getGroupByExprs(),
-              conf.getAggrExprs(),
-              true,
-              false,
-              conf.getCardinality());
-      validateSingle(
-          vectorizedConf,
-          VectorizedHashAggOperatorNoSpill.class,
-          input.toGenerator(allocator),
-          expectedResult,
-          1000);
     }
   }
 
   @Test
   public void oneKeySumCnt() throws Exception {
+    HashAggregate conf =
+        new HashAggregate(
+            OpProps.prototype(),
+            null,
+            Arrays.asList(n("r_name")),
+            Arrays.asList(n("sum(r_regionkey)", "sum"), n("count(r_regionkey)", "cnt")),
+            false,
+            false,
+            1f);
+
+    final Table expected =
+        t(
+                th("r_name", "sum", "cnt"),
+                tr("AFRICA", 0L, 1L),
+                tr("AMERICA", 1L, 1L),
+                tr("ASIA", 2L, 1L),
+                tr("EUROPE", 3L, 1L),
+                tr("MIDDLE EAST", 4L, 1L))
+            .orderInsensitive();
+
+    validateAgg(conf, TpchTable.REGION, 0.1, expected);
+  }
+
+  @Test
+  public void checkRowSizeLimit() throws Exception {
     HashAggregate conf =
         new HashAggregate(
             OpProps.prototype(),
@@ -763,9 +729,7 @@ public class TestHashAgg extends BaseTestOperator {
 
     final HashAggregate conf =
         new HashAggregate(OpProps.prototype(), null, dim, measure, true, true, 1f);
-    try (AutoCloseable options1 = with(ExecConstants.MIN_HASH_TABLE_SIZE, 1);
-        AutoCloseable options2 =
-            with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true)) {
+    try (AutoCloseable options1 = with(ExecConstants.MIN_HASH_TABLE_SIZE, 1)) {
       /* test with vectorized hashagg that supports spilling */
       for (int i = 0; i <= 5; i++) {
         try (AutoCloseable options3 =
@@ -788,17 +752,47 @@ public class TestHashAgg extends BaseTestOperator {
           TpchGenerator.singleGenerator(TpchTable.CUSTOMER, 1, allocator),
           expected,
           1000);
+    }
+  }
 
-      /* test with vectorized hashagg that does not support spilling */
-      try (AutoCloseable options =
-          with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, false)) {
-        validateSingle(
-            conf,
-            VectorizedHashAggOperatorNoSpill.class,
-            TpchGenerator.singleGenerator(TpchTable.CUSTOMER, 1, allocator),
-            expected,
-            1000);
-      }
+  @Test
+  public void largeSumWithResizeRowSizeCheck() throws Exception {
+    final List<NamedExpression> dim = Arrays.asList(n("c_mktsegment"));
+    final List<NamedExpression> measure =
+        Arrays.asList(n("max(c_name)", "listagg1"), n("count(1)", "cnt"));
+
+    final HashAggregate conf =
+        new HashAggregate(OpProps.prototype(), null, dim, measure, true, true, 1f);
+
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 35); ) {
+      validateSingle(
+          conf,
+          VectorizedHashAggOperator.class,
+          TpchGenerator.singleGenerator(TpchTable.CUSTOMER, 1, allocator),
+          null,
+          1000);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(
+          e.getMessage().contains("Exceeded maximum allowed row size of 35 bytes processing data"));
+    }
+
+    try (AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 35); ) {
+      /* test with row-wise hashagg */
+      final HashAggregate conf2 =
+          new HashAggregate(OpProps.prototype(), null, dim, measure, false, false, 1f);
+      validateSingle(
+          conf2,
+          HashAggOperator.class,
+          TpchGenerator.singleGenerator(TpchTable.CUSTOMER, 1, allocator),
+          null,
+          1000);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(
+          e.getMessage().contains("Exceeded maximum allowed row size of 35 bytes processing data"));
     }
   }
 
@@ -1016,37 +1010,17 @@ public class TestHashAgg extends BaseTestOperator {
       validateSingle(vanillaConf, HashAggOperator.class, generator, expected, 1000);
     }
 
-    try (AutoCloseable useSpillingAgg =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, true)) {
-      try (BitGenerator generator = new BitGenerator(allocator, column)) {
-        HashAggregate vectorizedConf =
-            new HashAggregate(
-                OpProps.prototype(),
-                conf.getChild(),
-                conf.getGroupByExprs(),
-                conf.getAggrExprs(),
-                true,
-                true,
-                conf.getCardinality());
-        validateSingle(vectorizedConf, VectorizedHashAggOperator.class, generator, expected, 1000);
-      }
-    }
-
-    try (AutoCloseable useSpillingAgg =
-        with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_SPILLING_OPERATOR, false)) {
-      try (BitGenerator generator = new BitGenerator(allocator, column)) {
-        HashAggregate vectorizedConf =
-            new HashAggregate(
-                OpProps.prototype(),
-                conf.getChild(),
-                conf.getGroupByExprs(),
-                conf.getAggrExprs(),
-                true,
-                true,
-                conf.getCardinality());
-        validateSingle(
-            vectorizedConf, VectorizedHashAggOperatorNoSpill.class, generator, expected, 1000);
-      }
+    try (BitGenerator generator = new BitGenerator(allocator, column)) {
+      HashAggregate vectorizedConf =
+          new HashAggregate(
+              OpProps.prototype(),
+              conf.getChild(),
+              conf.getGroupByExprs(),
+              conf.getAggrExprs(),
+              true,
+              true,
+              conf.getCardinality());
+      validateSingle(vectorizedConf, VectorizedHashAggOperator.class, generator, expected, 1000);
     }
   }
 

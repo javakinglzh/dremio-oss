@@ -17,8 +17,12 @@ package com.dremio.services.nodemetrics;
 
 import static com.dremio.common.util.DremioVersionUtils.isCompatibleVersion;
 
+import com.dremio.exec.enginemanagement.proto.EngineManagementProtos.EngineId;
+import com.dremio.exec.enginemanagement.proto.EngineManagementProtos.SubEngineId;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.store.sys.NodeInstance;
+import com.dremio.services.nodemetrics.ImmutableNodeMetrics.Builder;
+import org.apache.commons.lang3.StringUtils;
 
 /** Factory to create a NodeMetrics instance */
 public final class NodeMetricsFactory {
@@ -26,26 +30,33 @@ public final class NodeMetricsFactory {
 
   public static NodeMetrics newNodeMetrics(NodeInstance nodeInstance) {
     boolean isCompatible = isCompatibleVersion(nodeInstance.version);
-    return new ImmutableNodeMetrics.Builder()
-        .setName(nodeInstance.name)
-        .setHost(nodeInstance.hostname)
-        .setIp(nodeInstance.ip)
-        .setPort(nodeInstance.user_port)
-        .setCpu(nodeInstance.cpu)
-        .setMemory(nodeInstance.memory)
-        .setStatus(nodeInstance.status)
-        .setIsMaster(nodeInstance.is_master)
-        .setIsCoordinator(nodeInstance.is_coordinator)
-        .setIsExecutor(nodeInstance.is_executor)
-        .setIsCompatible(isCompatible)
-        .setNodeTag(nodeInstance.node_tag)
-        .setVersion(nodeInstance.version)
-        .setStart(nodeInstance.start.getMillis())
-        .setDetails(
-            isCompatible
-                ? NodeState.NONE.toMessage(null)
-                : NodeState.INVALID_VERSION.toMessage(nodeInstance.version))
-        .build();
+    var builder =
+        new Builder()
+            .setName(nodeInstance.name)
+            .setHost(nodeInstance.hostname)
+            .setIp(nodeInstance.ip)
+            .setPort(nodeInstance.user_port)
+            .setCpu(nodeInstance.cpu)
+            .setMemory(nodeInstance.memory)
+            .setStatus(nodeInstance.status)
+            .setIsMaster(nodeInstance.is_master)
+            .setIsCoordinator(nodeInstance.is_coordinator)
+            .setIsExecutor(nodeInstance.is_executor)
+            .setIsCompatible(isCompatible)
+            .setNodeTag(nodeInstance.node_tag)
+            .setVersion(nodeInstance.version)
+            .setStart(nodeInstance.start.getMillis())
+            .setDetails(
+                isCompatible
+                    ? NodeState.NONE.toMessage(null)
+                    : NodeState.INVALID_VERSION.toMessage(nodeInstance.version));
+    if (StringUtils.isNotBlank(nodeInstance.engineId)) {
+      builder.setEngineId(EngineId.newBuilder().setId(nodeInstance.engineId).build());
+    }
+    if (StringUtils.isNotBlank(nodeInstance.subEngineId)) {
+      builder.setSubEngineId(SubEngineId.newBuilder().setId(nodeInstance.subEngineId).build());
+    }
+    return builder.build();
   }
 
   /**
@@ -70,6 +81,12 @@ public final class NodeMetricsFactory {
     } else {
       builder.setStatus("red");
       builder.setDetails(NodeState.NO_RESPONSE.toMessage(null));
+    }
+    if (endpoint.hasEngineId()) {
+      builder.setEngineId(endpoint.getEngineId());
+    }
+    if (endpoint.hasSubEngineId()) {
+      builder.setSubEngineId(endpoint.getSubEngineId());
     }
     return builder
         .setName(endpoint.getAddress())

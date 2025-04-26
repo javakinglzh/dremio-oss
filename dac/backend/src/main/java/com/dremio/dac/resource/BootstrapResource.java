@@ -89,7 +89,7 @@ public class BootstrapResource {
           .getNamespaceService(SystemUser.SYSTEM_USERNAME)
           .addOrUpdateHome(
               new HomePath(HomeName.getUserHomePath(userName.getName())).toNamespaceKey(),
-              new HomeConfig().setCtime(System.currentTimeMillis()).setOwner(userName.getName()));
+              new HomeConfig().setOwner(userName.getName()));
       return new UserUI(new UserResourcePath(userName), userName, newUser);
     }
   }

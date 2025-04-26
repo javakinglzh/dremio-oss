@@ -19,6 +19,8 @@ import static com.dremio.common.util.MajorTypeHelper.getFieldForNameAndMajorType
 import static com.dremio.exec.store.hive.HiveUtilities.addProperties;
 
 import com.dremio.common.exceptions.InvalidMetadataErrorContext;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.types.TypeProtos.MajorType;
@@ -35,6 +37,7 @@ import com.dremio.hive.proto.HiveReaderProto.HiveSplitXattr;
 import com.dremio.hive.proto.HiveReaderProto.HiveTableXattr;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.scan.OutputMutator;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf.PartitionValue;
 import com.google.common.base.Function;
@@ -53,7 +56,10 @@ import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
+import org.apache.arrow.memory.ArrowBuf;
+import org.apache.arrow.vector.BaseFixedWidthVector;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
 import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
@@ -70,6 +76,8 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.security.UserGroupInformation;
 
 public abstract class HiveAbstractReader extends AbstractRecordReader {
+
+  private static final long INT_SIZE = 4;
   protected final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(this.getClass());
 
   public enum HiveFileFormat {
@@ -106,6 +114,13 @@ public abstract class HiveAbstractReader extends AbstractRecordReader {
   private final Collection<List<String>> referencedTables;
   private final UserGroupInformation readerUgi;
   protected HiveOperatorContextOptions operatorContextOptions;
+  OutputMutator outputMutator;
+  boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
+  final int rowSizeLimit;
+  ArrowBuf rowSizeAccumulator;
+  int fixedDataLenPerRow;
+  CombinedSizer variableVectorSizer;
 
   public HiveAbstractReader(
       final HiveTableXattr tableAttr,
@@ -131,10 +146,16 @@ public abstract class HiveAbstractReader extends AbstractRecordReader {
     this.filter = filter;
     this.referencedTables = referencedTables;
     this.readerUgi = readerUgi;
+    this.rowSizeLimit =
+        Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    this.rowSizeLimitEnabled =
+        this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
   }
 
   @Override
   public final void setup(OutputMutator output) {
+    this.outputMutator = output;
     try (Closeable ccls = HivePf4jPlugin.swapClassLoader()) {
       final HiveSplitXattr splitAttr;
       try {
@@ -261,6 +282,23 @@ public abstract class HiveAbstractReader extends AbstractRecordReader {
         throw createExceptionWithContext("Failed to initialize Hive record reader", e);
       }
     }
+    createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+    this.variableVectorSizer = VectorContainerHelper.createSizer(output.getVectors(), false);
+    for (ValueVector vv : outputMutator.getVectors()) {
+      if (vv instanceof BaseFixedWidthVector) {
+        fixedDataLenPerRow += ((BaseFixedWidthVector) vv).getTypeWidth();
+      }
+    }
+
+    if (rowSizeLimitEnabled) {
+      if (fixedDataLenPerRow <= rowSizeLimit && variableVectorSizer.getVectorCount() == 0) {
+        rowSizeLimitEnabledForThisOperator = false;
+      }
+      if (fixedDataLenPerRow > rowSizeLimit) {
+        throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+            rowSizeLimit, RowSizeLimitExceptionType.READ, logger);
+      }
+    }
   }
 
   protected abstract void internalInit(
@@ -292,6 +330,8 @@ public abstract class HiveAbstractReader extends AbstractRecordReader {
     partitionOI = null;
     finalOI = null;
     filter = null;
+    rowSizeAccumulator.close();
+    rowSizeAccumulator = null;
   }
 
   @Override
@@ -309,6 +349,34 @@ public abstract class HiveAbstractReader extends AbstractRecordReader {
    */
   protected void logDebugMessages() {
     logger.debug("Class loader is {}", this.getClass().getClassLoader().toString());
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outputMutator.getContainer(),
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.READ,
+        logger);
   }
 
   UserException createExceptionWithContext(String errorMessage, Throwable t) {

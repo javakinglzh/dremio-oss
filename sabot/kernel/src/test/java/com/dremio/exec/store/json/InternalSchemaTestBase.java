@@ -168,6 +168,6 @@ public class InternalSchemaTestBase extends PlanTestBase {
         .isThrownBy(() -> testRunAndReturn(UserBitShared.QueryType.SQL, query))
         .havingCause()
         .isInstanceOf(UserException.class)
-        .withMessageContaining("GandivaException: Failed to cast");
+        .withMessageContaining("Failed to cast");
   }
 }

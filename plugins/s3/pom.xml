@@ -42,6 +42,10 @@
       <artifactId>apache-client</artifactId>
     </dependency>
     <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>regions</artifactId>
+    </dependency>
+    <dependency>
       <groupId>com.dremio</groupId>
       <artifactId>dremio-common</artifactId>
     </dependency>
@@ -104,22 +108,10 @@
       <artifactId>javassist</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-azure-datalake</artifactId>
+      <version>${hadoop.version}</version>
+    </dependency>
   </dependencies>
-  <profiles>
-    <profile>
-      <id>notmapr</id>
-      <activation>
-        <property>
-          <name>!mapr</name>
-        </property>
-      </activation>
-      <dependencies>
-        <dependency>
-          <groupId>org.apache.hadoop</groupId>
-          <artifactId>hadoop-azure-datalake</artifactId>
-          <version>${hadoop.version}</version>
-        </dependency>
-      </dependencies>
-    </profile>
-  </profiles>
 </project>

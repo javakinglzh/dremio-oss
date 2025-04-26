@@ -21,7 +21,11 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
+import com.google.common.cache.LoadingCache;
 import com.google.common.collect.Lists;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
@@ -302,5 +306,15 @@ public class TestByteStoreManager {
     File f = new File(logFile);
     assertTrue(!f.exists());
     bsm.close();
+  }
+
+  @Test
+  public void testCacheOnRemovalCallsClose() throws Exception {
+    ByteStoreManager bsm = new ByteStoreManager("baseDirectory", false, false, true);
+    LoadingCache<String, ByteStore> cache = bsm.getMaps();
+    ByteStore mockByteStore = mock(ByteStore.class);
+    cache.put("key", mockByteStore);
+    cache.invalidate("key");
+    verify(mockByteStore, times(1)).close();
   }
 }

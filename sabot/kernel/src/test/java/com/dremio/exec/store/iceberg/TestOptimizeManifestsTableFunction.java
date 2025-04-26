@@ -80,7 +80,7 @@ public class TestOptimizeManifestsTableFunction extends BaseTestQuery {
   public void testHasNoManifestRewritten() {
     Snapshot snapshot = mock(Snapshot.class);
 
-    when(snapshot.summary()).thenReturn(Collections.EMPTY_MAP);
+    when(snapshot.summary()).thenReturn(Collections.emptyMap());
     assertThat(OptimizeManifestsTableFunction.hasNoManifestChanges(snapshot)).isTrue();
 
     when(snapshot.summary()).thenReturn(ImmutableMap.of("manifests-created", "0"));

@@ -16,8 +16,6 @@
 export const REFLECTION_ARCTIC_ENABLED = "reflection.arctic.enabled";
 export const SUBHOUR_ACCELERATION_POLICY =
   "accelerator.enable.subhour.policies";
-export const REFLECTION_SCHEDULER_POLICY =
-  "reflection.manager.refresh_schedule_policy.enabled";
 export const ALLOW_DOWNLOAD = "ui.download.allow";
 export const LIVE_SYNTAX_ERROR_DETECTION =
   "ui.live_syntax_error_detection.enabled";
@@ -43,3 +41,5 @@ export const ALLOW_ASYNC_DOWNLOAD = "dremio.async.download.enable";
 export const ENABLED_SCRIPTS_API_V3 = "enable.scripts.api.v3";
 export const MANUALLY_GENERATE_RECOMMENDATION =
   "reflection.manager.suggest_reflection_based_on_type";
+export const JOBS_PROFILE_ASYNC_UPDATE = "job.profile.async.update";
+export const RERUN_QUERY_ON_DOWNLOAD = "dac.download.from_jobs_store";

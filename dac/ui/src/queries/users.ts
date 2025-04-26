@@ -17,17 +17,23 @@
 import { queryOptions } from "@tanstack/react-query";
 import { dremio } from "#oss/dremio";
 
+export const USER_STALE_TIME = Infinity;
+
 export const userByUsername = (username: string) =>
   queryOptions({
     queryKey: ["user", username],
     queryFn: () =>
       dremio.users.retrieveByName(username).then((result) => result.unwrap()),
-    staleTime: 5 * 60 * 1000,
+    retry: false,
+    staleTime: USER_STALE_TIME,
+    enabled: !!username,
   });
 
 export const userById = (id: string) =>
   queryOptions({
     queryKey: ["user", id],
-    queryFn: () => dremio.users.retrieve(id).then((result) => result.unwrap()),
-    staleTime: 5 * 60 * 1000,
+    queryFn: () => dremio.users.retrieveById(id),
+    retry: false,
+    staleTime: USER_STALE_TIME,
+    enabled: !!id,
   });

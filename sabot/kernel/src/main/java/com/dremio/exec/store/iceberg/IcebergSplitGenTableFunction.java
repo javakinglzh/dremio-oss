@@ -56,6 +56,7 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
   private final BlockBasedSplitGenerator splitGenerator;
 
   private VarCharVector inputDataFilePath;
+  private BigIntVector inputDataFileGroupIndex;
   private BigIntVector inputFileSize;
   private VarBinaryVector inputPartitionInfo;
   private StructVector outputSplitIdentity;
@@ -63,6 +64,7 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
   private List<TransferPair> transfers;
   private int inputIndex;
   private String dataFilePath;
+  private Long dataFileGroupIndex;
   private long fileSize;
   private PartitionProtobuf.NormalizedPartitionInfo partitionInfo;
   private ArrowBuf buf;
@@ -80,8 +82,8 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
         functionContext.getExtendedProperty() != null
             ? functionContext.getExtendedProperty().toByteArray()
             : null;
-    SupportsInternalIcebergTable plugin =
-        IcebergUtils.getSupportsInternalIcebergTablePlugin(
+    SupportsIcebergRootPointer plugin =
+        IcebergUtils.getSupportsIcebergRootPointerPlugin(
             fragmentExecutionContext, functionContext.getPluginId());
 
     boolean isOneSplitPerFile =
@@ -124,6 +126,10 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
 
     inputDataFilePath =
         (VarCharVector) getVectorFromSchemaPath(incoming, SystemSchemas.DATAFILE_PATH);
+    if (incoming.getSchema().findFieldIgnoreCase(SystemSchemas.FILE_GROUP_INDEX).isPresent()) {
+      inputDataFileGroupIndex =
+          (BigIntVector) getVectorFromSchemaPath(incoming, SystemSchemas.FILE_GROUP_INDEX);
+    }
     inputFileSize = (BigIntVector) getVectorFromSchemaPath(incoming, SystemSchemas.FILE_SIZE);
     inputPartitionInfo =
         (VarBinaryVector) getVectorFromSchemaPath(incoming, SystemSchemas.PARTITION_INFO);
@@ -161,6 +167,9 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
   public void startRow(int row) throws Exception {
     inputIndex = row;
     dataFilePath = new String(inputDataFilePath.get(row), StandardCharsets.UTF_8);
+    if (inputDataFileGroupIndex != null) {
+      dataFileGroupIndex = inputDataFileGroupIndex.get(row);
+    }
     fileSize = inputFileSize.get(row);
     partitionInfo = IcebergSerDe.deserializeFromByteArray(inputPartitionInfo.get(row));
     if (partitionInfo == null) {
@@ -186,6 +195,7 @@ public class IcebergSplitGenTableFunction extends AbstractTableFunction {
             fileSize,
             version,
             fileType.toString(),
+            dataFileGroupIndex,
             splitsIdentity);
     currentDataFileOffset = splitGenerator.getCurrentOffset();
     Preconditions.checkState(

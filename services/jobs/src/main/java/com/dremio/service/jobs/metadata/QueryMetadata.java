@@ -15,13 +15,11 @@
  */
 package com.dremio.service.jobs.metadata;
 
-import static com.dremio.common.utils.Protos.listNotNull;
-
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.exec.catalog.CatalogUtil;
+import com.dremio.exec.catalog.lineage.FieldOriginExtractor;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.common.ContainerRel;
@@ -34,7 +32,6 @@ import com.dremio.exec.planner.logical.WriterRel;
 import com.dremio.exec.planner.sql.TableIdentifierCollector;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.tablefunctions.ExternalQueryRelBase;
 import com.dremio.exec.tablefunctions.ExternalQueryScanDrel;
 import com.dremio.service.job.proto.JoinInfo;
@@ -42,13 +39,11 @@ import com.dremio.service.job.proto.ParentDatasetInfo;
 import com.dremio.service.job.proto.ScanPath;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.DatasetMetadata;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.FieldOrigin;
 import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
-import com.dremio.service.namespace.dataset.proto.Origin;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
@@ -56,10 +51,10 @@ import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -78,19 +73,23 @@ import org.apache.calcite.sql.SqlIdentifier;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.tools.ValidationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** A description of information we use to better understand a query. */
 public class QueryMetadata {
 
+  private static final Logger logger = LoggerFactory.getLogger(QueryMetadata.class);
+
   private static final Set<String> RESERVED_PARENT_NAMES =
       ImmutableSet.of("dremio_limited_preview");
 
-  private final RelDataType rowType;
   private final Optional<List<SqlIdentifier>> ancestors;
   private final Optional<List<FieldOrigin>> fieldOrigins;
   @Deprecated private final Optional<List<JoinInfo>> joins;
   private final Optional<List<ParentDatasetInfo>> parents;
   private final Optional<SqlNode> sqlNode;
+  private final RelDataType rowType;
   private final Optional<List<ParentDataset>> grandParents;
   private final Optional<RelOptCost> cost;
   private final Optional<PlanningSet> planningSet;
@@ -117,13 +116,12 @@ public class QueryMetadata {
       List<String> queryContext,
       List<String> sourceNames,
       List<String> sinkPath) {
-    this.rowType = rowType;
-
     this.ancestors = Optional.ofNullable(ancestors);
     this.fieldOrigins = Optional.ofNullable(fieldOrigins);
     this.joins = Optional.ofNullable(joins);
     this.parents = Optional.ofNullable(parents);
     this.sqlNode = Optional.ofNullable(sqlNode);
+    this.rowType = rowType;
     this.grandParents = Optional.ofNullable(grandParents);
     this.cost = Optional.ofNullable(cost);
     this.planningSet = Optional.ofNullable(planningSet);
@@ -215,26 +213,24 @@ public class QueryMetadata {
   /**
    * Create a builder for QueryMetadata.
    *
-   * @param namespace A namespace service. If provided, ParentDatasetInfo will be extracted,
-   *     otherwise it won't.
    * @return The builder.
    */
-  public static Builder builder(NamespaceService namespace, CatalogService catalogService) {
-    return new Builder(namespace, catalogService, null);
+  public static Builder builder(Catalog userCatalog, Catalog systemCatalog) {
+    return new Builder(userCatalog, systemCatalog, null);
   }
 
   public static Builder builder(
-      NamespaceService namespace, CatalogService catalogService, String jobResultsSourceName) {
-    return new Builder(namespace, catalogService, jobResultsSourceName);
+      Catalog userCatalog, Catalog systemCatalog, String jobResultsSourceName) {
+    return new Builder(userCatalog, systemCatalog, jobResultsSourceName);
   }
 
   /** A builder to construct query metadata. */
   public static class Builder {
 
-    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(Builder.class);
+    private static final Logger logger = LoggerFactory.getLogger(Builder.class);
 
-    private final NamespaceService namespace;
-    private final CatalogService catalogService;
+    private final Catalog userCatalog;
+    private final Catalog systemCatalog;
     private final String jobResultsSourceName;
 
     private RelDataType rowType;
@@ -251,10 +247,9 @@ public class QueryMetadata {
     private List<String> queryContext;
     private List<String> externalQuerySourceInfo;
 
-    Builder(
-        NamespaceService namespace, CatalogService catalogService, String jobResultsSourceName) {
-      this.namespace = namespace;
-      this.catalogService = catalogService;
+    Builder(Catalog userCatalog, Catalog systemCatalog, String jobResultsSourceName) {
+      this.userCatalog = userCatalog;
+      this.systemCatalog = systemCatalog;
       this.jobResultsSourceName = jobResultsSourceName;
     }
 
@@ -294,6 +289,10 @@ public class QueryMetadata {
       return this;
     }
 
+    /**
+     * Expanded plan is needed to capture the query's dataset lineage. The lineage needs to be the
+     * plan after expansion of views and UDFs but before any reflections.
+     */
     public Builder addExpandedPlan(RelNode rel) {
       this.expanded = rel;
       return this;
@@ -437,7 +436,7 @@ public class QueryMetadata {
 
       // add parents of parents.
       if (!parentKeys.isEmpty()) {
-        for (NameSpaceContainer container : namespace.getEntities(parentKeys)) {
+        for (NameSpaceContainer container : userCatalog.getEntities(parentKeys)) {
           if (container != null && container.getType() == Type.DATASET) { // missing parent
             if (container.getDataset() != null) {
               final VirtualDataset virtualDataset = container.getDataset().getVirtualDataset();
@@ -508,7 +507,6 @@ public class QueryMetadata {
         }
 
         final int versionContextsSize = versionContexts.size();
-        final Catalog catalog = CatalogUtil.getSystemCatalogForJobs(catalogService);
 
         for (int index = 0; index < versionContextsSize; ++index) {
           final TableVersionContext versionContext = versionContexts.get(index);
@@ -522,7 +520,7 @@ public class QueryMetadata {
                   .keyComponents(datasetPath)
                   .tableVersionContext(versionContext)
                   .build();
-          final DatasetType datasetType = catalog.getDatasetType(catalogEntityKey);
+          final DatasetType datasetType = systemCatalog.getDatasetType(catalogEntityKey);
 
           result.get(index).setType(datasetType);
           result.get(index).setVersionContext(versionContext.serialize());
@@ -558,7 +556,7 @@ public class QueryMetadata {
       // try the original path and then try the cleaned path.
       for (List<String> paths : Arrays.asList(path.getPathComponents(), cleanedPathComponents)) {
         List<NameSpaceContainer> containers =
-            namespace.getEntities(Collections.singletonList(new NamespaceKey(paths)));
+            userCatalog.getEntities(Collections.singletonList(new NamespaceKey(paths)));
         if (!containers.isEmpty()) {
           final NameSpaceContainer container = containers.get(0);
           if (container != null && container.getType() == Type.DATASET) {
@@ -582,15 +580,12 @@ public class QueryMetadata {
    * @param datasetConfig the DatasetConfig to inspect.
    * @return a list of source names found referenced in the DatasetConfig.
    */
-  public static List<String> getSources(DatasetConfig datasetConfig) {
-    final Set<String> sources = Sets.newHashSet();
-    if (datasetConfig.getType() == DatasetType.VIRTUAL_DATASET) {
-      getSourcesForVds(datasetConfig.getVirtualDataset(), sources);
-    } else if (datasetConfig.getFullPathList() != null
-        && datasetConfig.getFullPathList().size() > 0) {
-      sources.add(datasetConfig.getFullPathList().get(0));
-    }
-    return new ArrayList<>(sources);
+  public static List<String> getSources(Catalog userCatalog, DatasetConfig datasetConfig) {
+    return getSources(
+        userCatalog,
+        datasetConfig.getType(),
+        datasetConfig.getVirtualDataset(),
+        datasetConfig.getFullPathList());
   }
 
   /**
@@ -599,82 +594,48 @@ public class QueryMetadata {
    * @param datasetMetadata the DatasetMetadata to inspect.
    * @return a list of source names found referenced in the DatasetMetadata.
    */
-  public static List<String> getSources(DatasetMetadata datasetMetadata) {
-    final Set<String> sources = Sets.newHashSet();
-    if (datasetMetadata.getType() == DatasetType.VIRTUAL_DATASET) {
-      getSourcesForVds(datasetMetadata.getVirtualDataset(), sources);
-    } else if (datasetMetadata.getFullPathList() != null
-        && datasetMetadata.getFullPathList().size() > 0) {
-      sources.add(datasetMetadata.getFullPathList().get(0));
+  public static List<String> getSources(Catalog userCatalog, DatasetMetadata datasetMetadata) {
+    return getSources(
+        userCatalog,
+        datasetMetadata.getType(),
+        datasetMetadata.getVirtualDataset(),
+        datasetMetadata.getFullPathList());
+  }
+
+  private static List<String> getSources(
+      Catalog userCatalog,
+      DatasetType datasetType,
+      VirtualDataset virtualDataset,
+      List<String> fullPath) {
+    if (datasetType == null) {
+      return List.of();
     }
-    return new ArrayList<>(sources);
-  }
-
-  /**
-   * Checks vds for source references. It first checks for source references in the list of
-   * FieldOrigin. Then it checks for source references with external query usage in the parents and
-   * grandparents.
-   *
-   * @param vds the Virtual Dataset to inspect.
-   * @param sources the set of source names to add found source names to.
-   */
-  private static void getSourcesForVds(VirtualDataset vds, Set<String> sources) {
-    getSourcesForVdsWithFieldOriginList(vds, sources);
-    getSourcesForVdsWithExternalQuery(vds, sources);
-  }
-
-  /**
-   * Checks the vds for source references in the FieldOrigin list.
-   *
-   * @param vds the Virtual Dataset to inspect.
-   * @param sources the set of source names to add found source names to.
-   */
-  private static void getSourcesForVdsWithFieldOriginList(VirtualDataset vds, Set<String> sources) {
-    if (vds.getFieldOriginsList() != null) {
-      for (FieldOrigin fieldOrigin : vds.getFieldOriginsList()) {
-        for (Origin origin : listNotNull(fieldOrigin.getOriginsList())) {
-          sources.add(origin.getTableList().get(0));
+    switch (datasetType) {
+      case VIRTUAL_DATASET:
+        if (virtualDataset.getParentsList() == null) {
+          return List.of();
         }
-      }
-    }
-  }
-
-  /**
-   * Checks the vds for references of external query. It checks for references of external query in
-   * the parents list and grandparents list. It adds the source name referenced to the given set of
-   * sources if a reference to an external query dataset is found.
-   *
-   * @param vds the Virtual Dataset to inspect.
-   * @param sources the set of source names to add found source names to.
-   */
-  private static void getSourcesForVdsWithExternalQuery(VirtualDataset vds, Set<String> sources) {
-    // Find sources of ParentDataset(s) that are external queries.
-    final List<ParentDataset> parentDatasets = vds.getParentsList();
-    final List<ParentDataset> grandParentDatasets = vds.getGrandParentsList();
-
-    if (parentDatasets != null) {
-      getSourcesFromParentDatasetForExternalQuery(parentDatasets, sources);
-    }
-
-    if (grandParentDatasets != null) {
-      getSourcesFromParentDatasetForExternalQuery(grandParentDatasets, sources);
-    }
-  }
-
-  /**
-   * Iterates through the given list of ParentDataset. It adds the source name referenced to the
-   * given set of sources if a reference to an external query dataset is found.
-   *
-   * @param parentDatasets a list of parent dataset to inspect.
-   * @param sources the set of source names to add found source names to.
-   */
-  private static void getSourcesFromParentDatasetForExternalQuery(
-      List<ParentDataset> parentDatasets, Set<String> sources) {
-    for (ParentDataset parentDataset : parentDatasets) {
-      final List<String> pathList = parentDataset.getDatasetPathList();
-      if (pathList.size() > 1 && pathList.get(1).equalsIgnoreCase("external_query")) {
-        sources.add(pathList.get(0));
-      }
+        return virtualDataset.getParentsList().stream()
+            .map(ParentDataset::getDatasetPathList)
+            .map(NamespaceKey::new)
+            .map(userCatalog::getUpstreamSources)
+            .flatMap(List::stream)
+            .distinct()
+            .collect(Collectors.toList());
+      case PHYSICAL_DATASET: // Intentional fall-through
+      case PHYSICAL_DATASET_SOURCE_FILE: // Intentional fall-through
+      case PHYSICAL_DATASET_SOURCE_FOLDER: // Intentional fall-through
+      case PHYSICAL_DATASET_HOME_FILE: // Intentional fall-through
+      case PHYSICAL_DATASET_HOME_FOLDER:
+        if (fullPath != null && !fullPath.isEmpty()) {
+          return List.of(fullPath.get(0));
+        } else {
+          return List.of();
+        }
+      case INVALID_DATASET_TYPE: // Intentional fall-through
+      case OTHERS: // Intentional fall-through
+      default:
+        throw new IllegalStateException("Unexpected value: " + datasetType);
     }
   }
 

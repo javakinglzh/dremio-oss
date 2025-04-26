@@ -65,7 +65,7 @@ export class EntityIcon extends PureComponent {
     //connected
     sourceStatus: PropTypes.string, // available only for sources
     sourceType: PropTypes.string, // available only for sources
-    isManageAccessEnabled: PropTypes.string,
+    isManageAccessEnabled: PropTypes.bool,
   };
 
   render() {
@@ -88,7 +88,7 @@ export class PureEntityIcon extends PureComponent {
     sourceStatus: PropTypes.string,
     sourceType: PropTypes.string,
     style: PropTypes.object,
-    isManageAccessEnabled: PropTypes.string,
+    isManageAccessEnabled: PropTypes.bool,
     enableTooltip: PropTypes.bool,
     tooltipPortal: PropTypes.bool,
   };
@@ -103,6 +103,7 @@ export class PureEntityIcon extends PureComponent {
       enableTooltip = true,
       tooltipPortal,
     } = this.props;
+
     const isSource = entityType?.toLowerCase() === "source";
     const iconType = isSource
       ? getSourceStatusIcon(sourceStatus, sourceType)

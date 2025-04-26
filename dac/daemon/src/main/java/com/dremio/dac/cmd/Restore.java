@@ -23,7 +23,8 @@ import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.Parameters;
 import com.dremio.dac.server.DACConfig;
 import com.dremio.dac.util.BackupRestoreUtil;
-import com.dremio.datastore.LocalKVStoreProvider;
+import com.dremio.datastore.adapter.LegacyKVStoreProviderAdapter;
+import com.dremio.datastore.api.KVStoreProvider;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
@@ -128,13 +129,13 @@ public class Restore {
       System.exit(1);
     }
 
-    final Optional<LocalKVStoreProvider> providerOptional =
-        CmdUtils.getKVStoreProvider(dacConfig.getConfig());
+    final Optional<KVStoreProvider> providerOptional = CmdUtils.getStoreProvider(dacConfig);
     // clear searchLastRefresh so that search index can be rebuilt after restore
     if (providerOptional.isPresent()) {
-      try (LocalKVStoreProvider provider = providerOptional.get()) {
+      try (KVStoreProvider provider = providerOptional.get()) {
         provider.start();
-        final ConfigurationStore configStore = new ConfigurationStore(provider.asLegacy());
+        final ConfigurationStore configStore =
+            new ConfigurationStore(new LegacyKVStoreProviderAdapter(provider));
         configStore.delete(CONFIG_KEY);
       } catch (Exception e) {
         AdminLogger.log("Failed to clear catalog search index.", e);

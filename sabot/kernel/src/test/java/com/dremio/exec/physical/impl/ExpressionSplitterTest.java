@@ -23,6 +23,8 @@ import static com.dremio.sabot.Fixtures.tr;
 import static com.dremio.sabot.Fixtures.ts;
 import static org.junit.Assert.assertTrue;
 
+import com.dremio.exec.ExecConstants;
+import com.dremio.options.OptionValue;
 import com.dremio.sabot.Fixtures;
 import java.util.List;
 import org.junit.Test;
@@ -1046,5 +1048,65 @@ public class ExpressionSplitterTest extends BaseExpressionSplitterTest {
         };
 
     splitAndVerify(query, input, output, expSplits, annotator);
+  }
+
+  @Test
+  public void testBooleanOperatorToIfTree() throws Exception {
+    String query =
+        "(c0=10 OR c0=11 OR c0=12 OR c0=13 OR c0=14 OR c0=15 OR c0=16 OR c0=17 OR c0=18 OR c0=19 OR c0=20)";
+    Fixtures.Table input = Fixtures.split(th("c0"), 2, tr(18L), tr(9L), tr(24L));
+
+    Fixtures.Table output = t(th("out"), tr(true), tr(false), tr(false));
+
+    GandivaAnnotator annotator =
+        new GandivaAnnotator(
+            "booleanAnd", "greater_than", "less_than", "mod", "equal", "castBIGINT");
+    // or is not supported, but both the args are completely supported
+    // or gets translated to if-expr
+    Split[] splits = {
+      new Split(
+          true,
+          "_xxx0",
+          "(if(equal(c0,castbigint(10i)))then(true)else((if(equal(c0,castbigint(11i)))then(true)else((if(equal(c0,castbigint(12i)))then(true)else((if(equal(c0,castbigint(13i)))"
+              + "then(true)else((if(equal(c0,castbigint(14i)))then(true)else((if(equal(c0,castbigint(15i)))"
+              + "then(true)else((if(equal(c0,castbigint(16i)))then(true)else((if(equal(c0,castbigint(17i)))"
+              + "then(true)else((if(equal(c0,castbigint(18i)))then(true)else((if(equal(c0,castbigint(19i)))"
+              + "then(true)else(equal(c0,castbigint(20i)))end))end))end))end))end))end))end))end))end))end)",
+          1,
+          0)
+    };
+
+    splitAndVerify(query, input, output, splits, annotator);
+    super.cleanExpToExpSplitCache();
+    splits =
+        new Split[] {
+          new Split(
+              true,
+              "_xxx0",
+              "(if((if(equal(c0,castbigint(10i)))then(true)else((if(equal(c0,castbigint(11i)))"
+                  + "then(true)else((if(equal(c0,castbigint(12i)))then(true)else((if(equal(c0,castbigint(13i)))"
+                  + "then(true)else((if(equal(c0,castbigint(14i)))then(true)else(equal(c0,castbigint(15i)))end))end))end))end))end))"
+                  + "then(true)else((if(equal(c0,castbigint(16i)))then(true)else((if(equal(c0,castbigint(17i)))"
+                  + "then(true)else((if(equal(c0,castbigint(18i)))then(true)else((if(equal(c0,castbigint(19i)))"
+                  + "then(true)else(equal(c0,castbigint(20i)))end))end))end))end))end)",
+              1,
+              0)
+        };
+    try {
+      testContext
+          .getOptions()
+          .setOption(
+              OptionValue.createLong(
+                  OptionValue.OptionType.SYSTEM, ExecConstants.SPLIT_OR_TO_IF_BRANCH_SIZE, 5));
+      splitAndVerify(query, input, output, splits, annotator);
+    } finally {
+      testContext
+          .getOptions()
+          .setOption(
+              OptionValue.createLong(
+                  OptionValue.OptionType.SYSTEM,
+                  ExecConstants.SPLIT_OR_TO_IF_BRANCH_SIZE,
+                  ExecConstants.SPLIT_OR_TO_IF_BRANCH_SIZE_OPTION.getDefault().getNumVal()));
+    }
   }
 }

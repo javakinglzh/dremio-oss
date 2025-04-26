@@ -62,7 +62,7 @@ public class DeltaLakeGroupScan extends EasyGroupScan {
     }
     final List<String> partitionCols =
         Optional.ofNullable(getDataset().getReadDefinition().getPartitionColumnsList())
-            .orElse(Collections.EMPTY_LIST);
+            .orElse(Collections.emptyList());
     return new EasySubScan(
         props,
         getDataset().getFormatSettings(),
@@ -81,7 +81,7 @@ public class DeltaLakeGroupScan extends EasyGroupScan {
     try {
       String path =
           LegacyProtobufSerializer.parseFrom(
-                  EasyProtobuf.EasyDatasetSplitXAttr.PARSER,
+                  EasyProtobuf.EasyDatasetSplitXAttr.parser(),
                   split
                       .getSplitAndPartitionInfo()
                       .getDatasetSplitInfo()

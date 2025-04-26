@@ -15,13 +15,13 @@
  */
 package com.dremio.exec.planner.physical;
 
-import com.dremio.exec.catalog.MutablePlugin;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.config.copyinto.CopyIntoHistoryWriterCommitterPOP;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePlugin;
+import com.dremio.exec.store.iceberg.SupportsIcebergMutablePlugin;
 import com.dremio.options.Options;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import java.io.IOException;
@@ -61,7 +61,7 @@ public class CopyIntoHistoryWriterCommitterPrel extends WriterCommitterPrel {
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,
-      MutablePlugin plugin,
+      SupportsIcebergMutablePlugin plugin,
       String tempLocation,
       String finalLocation,
       String userName,
@@ -109,7 +109,7 @@ public class CopyIntoHistoryWriterCommitterPrel extends WriterCommitterPrel {
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,
-      MutablePlugin plugin,
+      SupportsIcebergMutablePlugin plugin,
       String tempLocation,
       String finalLocation,
       String userName,
@@ -144,7 +144,7 @@ public class CopyIntoHistoryWriterCommitterPrel extends WriterCommitterPrel {
         getCreateTableEntry().getDatasetPath(),
         getDatasetConfig(),
         getChildPhysicalOperator(creator),
-        getPlugin(),
+        (SupportsIcebergMutablePlugin) getPlugin(),
         null,
         isPartialRefresh(),
         isReadSignatureEnabled(),
@@ -159,7 +159,7 @@ public class CopyIntoHistoryWriterCommitterPrel extends WriterCommitterPrel {
         getCluster(),
         traitSet,
         sole(inputs),
-        getPlugin(),
+        (SupportsIcebergMutablePlugin) getPlugin(),
         getTempLocation(),
         getFinalLocation(),
         getUserName(),

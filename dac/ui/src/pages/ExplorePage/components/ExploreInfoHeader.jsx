@@ -46,10 +46,14 @@ import {
 } from "utils/iconUtils";
 
 import { getVersionContextFromId } from "dremio-ui-common/utilities/datasetReference.js";
-
+import { getSourceFromState } from "@inject/utils/sourceUtils";
+import { isLimitedVersionSource } from "@inject/utils/sourceUtils";
 import { getHistory, getExploreState } from "selectors/explore";
 import { getActiveScript } from "#oss/selectors/scripts";
 import { TagContent } from "#oss/pages/HomePage/components/BranchPicker/components/BranchPickerTag/BranchPickerTag";
+import { isScriptUrl } from "#oss/utils/explorePageTypeUtils";
+import { JoinPageHeader } from "./JoinPageHeader/JoinPageHeader";
+import { isNotSoftware } from "dyn-load/utils/versionUtils";
 
 import "./ExploreInfoHeader.less";
 
@@ -65,6 +69,7 @@ export class ExploreInfoHeader extends PureComponent {
     currentSql: PropTypes.string,
     activeScript: PropTypes.object,
     intl: PropTypes.object.isRequired,
+    sources: PropTypes.instanceOf(Immutable.Map),
   };
 
   static contextTypes = {
@@ -166,7 +171,7 @@ export class ExploreInfoHeader extends PureComponent {
   }
 
   renderDatasetLabel(dataset) {
-    const { activeScript, location, intl, currentSql, nessieState } =
+    const { activeScript, location, intl, currentSql, nessieState, sources } =
       this.props;
     const nameForDisplay = ExploreInfoHeader.getNameForDisplay(
       dataset,
@@ -174,10 +179,9 @@ export class ExploreInfoHeader extends PureComponent {
       location,
     );
     const isEditedDataset = this.isEditedDataset();
-    const isUnsavedScript = exploreUtils.isEditedScript(
-      activeScript,
-      currentSql,
-    );
+    const isUnsavedScript =
+      isScriptUrl(location) &&
+      exploreUtils.isEditedScript(activeScript, currentSql);
     const isSqlEditorTab = exploreUtils.isSqlEditorTab(location);
     const fullPath = ExploreInfoHeader.getFullPathListForDisplay(
       dataset,
@@ -216,6 +220,10 @@ export class ExploreInfoHeader extends PureComponent {
       type: versionContext.type,
       name: versionContext.value,
     };
+    const sourceType =
+      sources &&
+      fullPath &&
+      getSourceFromState(sources, fullPath.first())?.get("type");
 
     const nessieStateRef =
       nessieState?.reference ??
@@ -252,7 +260,7 @@ export class ExploreInfoHeader extends PureComponent {
                   fullPath={fullPath}
                   pathname={location.pathname}
                 />
-                {nessieStateRef && (
+                {nessieStateRef && !isLimitedVersionSource(sourceType) && (
                   <div className="referenceTag">
                     <TagContent
                       reference={nessieStateRef}
@@ -321,6 +329,7 @@ export class ExploreInfoHeader extends PureComponent {
 
     return (
       <DatasetItemLabel
+        showSummaryOverlay={false}
         customNode={
           <div className="flexbox-truncate-text-fix">
             <div
@@ -390,6 +399,16 @@ export class ExploreInfoHeader extends PureComponent {
       intl: { formatMessage },
     } = this.props;
     const isDataset = exploreUtils.isExploreDatasetPage(location);
+
+    const locationQuery = this.props.location?.query;
+    if (!isNotSoftware() && locationQuery?.type === "JOIN") {
+      return (
+        <div className="explore-info-header">
+          <JoinPageHeader />
+        </div>
+      );
+    }
+
     return (
       <div className="explore-info-header">
         {this.renderLeftPartOfHeader(dataset)}
@@ -416,6 +435,7 @@ function mapStateToProps(state, ownProps) {
     history: getHistory(state, ownProps.dataset.get("tipVersion")),
     currentSql: explorePageState.view.currentSql,
     activeScript: getActiveScript(state),
+    sources: state.resources.entities.get("source"),
   };
 }
 

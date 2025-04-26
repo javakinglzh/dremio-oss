@@ -115,7 +115,7 @@ public final class ClientCredentialsBasedTokenProviderImpl
   }
 
   @Override
-  public String getAuthzHeaderValue(Request req) {
+  public String getAuthorizationHeader(Request req) {
     checkAndUpdateToken();
 
     return String.format("Bearer %s", token.getAccessToken());

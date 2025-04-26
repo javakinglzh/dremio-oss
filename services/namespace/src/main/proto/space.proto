@@ -50,6 +50,8 @@ message FolderConfig {
   // job queue for this dataset
   optional string queue_id = 8;
   optional string engine_name = 9;
+  //storage Uri for the folder - applies to Dremio Catalog sources
+  optional string storageUri = 10;
 }
 
 message Spaces {

@@ -15,33 +15,31 @@
  */
 package com.dremio.plugins.dataplane.store;
 
-import static com.dremio.hadoop.security.alias.DremioCredentialProvider.DREMIO_SCHEME_PREFIX;
 import static com.dremio.plugins.azure.AbstractAzureStorageConf.AccountKind.STORAGE_V2;
-import static com.dremio.plugins.azure.AzureAuthenticationType.ACCESS_KEY;
-import static com.dremio.plugins.azure.AzureAuthenticationType.AZURE_ACTIVE_DIRECTORY;
 import static com.dremio.plugins.gcs.GoogleStoragePlugin.GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE_DEFAULT;
 
-import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.conf.AzureAuthenticationType;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.DoNotDisplay;
+import com.dremio.exec.catalog.conf.GCSAuthType;
 import com.dremio.exec.catalog.conf.NotMetadataImpacting;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.VersionedStoragePluginConfig;
+import com.dremio.exec.catalog.conf.StorageProviderType;
+import com.dremio.exec.store.SourceProvidedStoragePluginConfig;
 import com.dremio.exec.store.dfs.CacheProperties;
 import com.dremio.exec.store.dfs.FileSystemConf;
 import com.dremio.exec.store.dfs.SchemaMutability;
 import com.dremio.io.file.Path;
 import com.dremio.options.OptionManager;
-import com.dremio.plugins.azure.AzureAuthenticationType;
 import com.dremio.plugins.azure.AzureStorageFileSystem;
-import com.dremio.plugins.gcs.GCSConf.AuthMode;
 import com.dremio.plugins.gcs.GoogleBucketFileSystem;
 import com.dremio.plugins.s3.store.S3FileSystem;
+import com.dremio.plugins.utils.PluginCloudStorageProviderUtil;
 import com.google.cloud.hadoop.fs.gcs.GoogleHadoopFileSystemConfiguration;
 import com.google.common.base.Strings;
 import io.protostuff.Tag;
@@ -51,14 +49,13 @@ import javax.inject.Provider;
 import javax.validation.constraints.Max;
 import javax.validation.constraints.Min;
 import org.apache.hadoop.fs.azurebfs.services.SharedKeyCredentials;
-import org.apache.hadoop.fs.s3a.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public abstract class AbstractDataplanePluginConfig
     // TODO: DX-92696: Remove the inheritance of DataplanePlugins from FileSystemConf.
     extends FileSystemConf<AbstractDataplanePluginConfig, DataplanePlugin>
-    implements VersionedStoragePluginConfig {
+    implements SourceProvidedStoragePluginConfig {
 
   private static final Logger logger = LoggerFactory.getLogger(AbstractDataplanePluginConfig.class);
 
@@ -78,12 +75,6 @@ public abstract class AbstractDataplanePluginConfig
   @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
   // metadata impacting
   public SecretRef awsAccessSecret;
-
-  @Tag(5)
-  @DisplayMetadata(label = "AWS root path")
-  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
-  // metadata impacting
-  public String awsRootPath;
 
   @Tag(6)
   @DisplayMetadata(label = "Connection properties")
@@ -136,20 +127,6 @@ public abstract class AbstractDataplanePluginConfig
 
   // Tag 16 is used for secure only in Nessie
 
-  public enum StorageProviderType {
-    @Tag(1)
-    @DisplayMetadata(label = "AWS")
-    AWS,
-
-    @Tag(2)
-    @DisplayMetadata(label = "Azure")
-    AZURE,
-
-    @Tag(3)
-    @DisplayMetadata(label = "Google (Preview)")
-    GOOGLE,
-  }
-
   @Tag(17)
   @DisplayMetadata(label = "Storage provider")
   @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
@@ -163,12 +140,6 @@ public abstract class AbstractDataplanePluginConfig
   @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
   // metadata impacting
   public String azureStorageAccount;
-
-  @Tag(19)
-  @DisplayMetadata(label = "Azure root path")
-  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
-  // metadata impacting
-  public String azureRootPath;
 
   @Tag(20)
   @DisplayMetadata(label = "Authentication method")
@@ -206,17 +177,11 @@ public abstract class AbstractDataplanePluginConfig
   @DisplayMetadata(label = "Google project ID")
   public String googleProjectId;
 
-  @Tag(26)
-  @DisplayMetadata(label = "Google root path")
-  @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
-  // metadata impacting
-  public String googleRootPath;
-
   @Tag(27)
   @DisplayMetadata(label = "Authentication method")
   @NotMetadataImpacting // Dataplane plugins don't have metadata refresh, so all properties are not
   // metadata impacting
-  public AuthMode googleAuthenticationType;
+  public GCSAuthType googleAuthenticationType;
 
   @Tag(28)
   @DisplayMetadata(label = "Private key ID")
@@ -263,7 +228,9 @@ public abstract class AbstractDataplanePluginConfig
 
   @Override
   public abstract DataplanePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider);
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider);
 
   @Override
   public boolean isAsyncEnabled() {
@@ -279,18 +246,7 @@ public abstract class AbstractDataplanePluginConfig
     return storageProvider;
   }
 
-  public String getRootPath() {
-    switch (getStorageProvider()) {
-      case AWS:
-        return awsRootPath;
-      case AZURE:
-        return azureRootPath;
-      case GOOGLE:
-        return googleRootPath;
-      default:
-        throw new IllegalStateException("Unexpected value: " + getStorageProvider());
-    }
-  }
+  public abstract String getRootPath();
 
   @Override
   public Path getPath() {
@@ -340,146 +296,41 @@ public abstract class AbstractDataplanePluginConfig
 
     switch (getStorageProvider()) {
       case AWS:
-        properties.add(new Property("fs.dremioS3.impl", S3FileSystem.class.getName()));
-        properties.add(new Property("fs.dremioS3.impl.disable.cache", "true"));
-        // Disable features of S3AFileSystem which incur unnecessary performance overhead.
-        // User-provided values for these properties take precedence.
-        addPropertyIfNotPresent(
-            properties, new Property(Constants.CREATE_FILE_STATUS_CHECK, "false"));
-        addPropertyIfNotPresent(
-            properties,
-            new Property(
-                Constants.DIRECTORY_MARKER_POLICY, Constants.DIRECTORY_MARKER_POLICY_KEEP));
+        PluginCloudStorageProviderUtil.validateAndSetPropertiesForAws(
+            properties, S3FileSystem.class.getName());
         break;
       case AZURE:
-        if (Strings.isNullOrEmpty(azureStorageAccount)) {
-          throw UserException.validationError()
-              .message(
-                  "Failure creating an Azure connection. You must provide an Azure storage account name [azureStorageAccount].")
-              .build(logger);
-        }
-
-        properties.add(
-            new Property("fs.dremioAzureStorage.impl", AzureStorageFileSystem.class.getName()));
-        properties.add(new Property("fs.dremioAzureStorage.impl.disable.cache", "true"));
-        properties.add(new Property(AzureStorageFileSystem.MODE, STORAGE_V2.name()));
-        properties.add(new Property(AzureStorageFileSystem.ACCOUNT, azureStorageAccount));
-        properties.add(new Property(AzureStorageFileSystem.ROOT_PATH, azureRootPath));
-        applyAzureAuthenticationProperties(properties);
+        PluginCloudStorageProviderUtil.validateAndSetPropertiesForAzure(
+            properties,
+            AzureStorageFileSystem.class.getName(),
+            getRootPath(),
+            STORAGE_V2.name(),
+            azureStorageAccount,
+            azureAuthenticationType,
+            azureAccessKey,
+            azureClientSecret,
+            azureApplicationId,
+            azureOAuthTokenEndpoint,
+            SharedKeyCredentials.class.getName());
         break;
       case GOOGLE:
-        if (Strings.isNullOrEmpty(googleProjectId)) {
-          throw UserException.validationError()
-              .message(
-                  "Failure creating a GCS connection. You must provide a Google project ID [googleProjectId].")
-              .build(logger);
-        }
-
-        properties.add(new Property("fs.dremiogcs.impl", GoogleBucketFileSystem.class.getName()));
-        properties.add(new Property("fs.dremiogcs.impl.disable.cache", "true"));
-        addPropertyIfNotPresent(
+        PluginCloudStorageProviderUtil.validateAndSetPropertiesForGcs(
             properties,
-            new Property(
-                GoogleHadoopFileSystemConfiguration.GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE.getKey(),
-                GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE_DEFAULT));
-        properties.add(new Property(GoogleBucketFileSystem.DREMIO_PROJECT_ID, googleProjectId));
-        applyGoogleAuthenticationProperties(properties);
+            googleProjectId,
+            GoogleHadoopFileSystemConfiguration.GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE.getKey(),
+            GCS_OUTPUT_STREAM_UPLOAD_CHUNK_SIZE_DEFAULT,
+            GoogleBucketFileSystem.class.getName(),
+            googleAuthenticationType,
+            googleClientId,
+            googleClientEmail,
+            googlePrivateKeyId,
+            googlePrivateKey);
         break;
       default:
         throw new IllegalStateException("Unexpected value: " + getStorageProvider());
     }
 
     return properties;
-  }
-
-  private void applyAzureAuthenticationProperties(List<Property> properties) {
-    if (azureAuthenticationType == null) {
-      throw UserException.validationError()
-          .message(
-              "Failure creating an Azure connection. You must provide an authentication method [azureAuthenticationType].")
-          .build(logger);
-    }
-
-    switch (azureAuthenticationType) {
-      case ACCESS_KEY:
-        if (SecretRef.isNullOrEmpty(azureAccessKey)) {
-          throw UserException.validationError()
-              .message(
-                  "Failure creating an Azure connection. You must provide a shared access key [azureAccessKey].")
-              .build(logger);
-        }
-
-        properties.add(new Property(AzureStorageFileSystem.CREDENTIALS_TYPE, ACCESS_KEY.name()));
-        properties.add(
-            new Property(
-                AzureStorageFileSystem.KEY,
-                SecretRef.toConfiguration(azureAccessKey, DREMIO_SCHEME_PREFIX)));
-        properties.add(
-            new Property(
-                AzureStorageFileSystem.AZURE_SHAREDKEY_SIGNER_TYPE,
-                SharedKeyCredentials.class.getName()));
-        break;
-      case AZURE_ACTIVE_DIRECTORY:
-        if (Strings.isNullOrEmpty(azureApplicationId)
-            || SecretRef.isNullOrEmpty(azureClientSecret)
-            || Strings.isNullOrEmpty(azureOAuthTokenEndpoint)) {
-          throw UserException.validationError()
-              .message(
-                  "Failure creating an Azure connection. You must provide an application ID, client secret, and OAuth endpoint [azureApplicationId, azureClientSecret, azureOAuthTokenEndpoint].")
-              .build(logger);
-        }
-
-        properties.add(
-            new Property(AzureStorageFileSystem.CREDENTIALS_TYPE, AZURE_ACTIVE_DIRECTORY.name()));
-        properties.add(new Property(AzureStorageFileSystem.CLIENT_ID, azureApplicationId));
-        properties.add(
-            new Property(
-                AzureStorageFileSystem.CLIENT_SECRET,
-                SecretRef.toConfiguration(azureClientSecret, DREMIO_SCHEME_PREFIX)));
-        properties.add(
-            new Property(AzureStorageFileSystem.TOKEN_ENDPOINT, azureOAuthTokenEndpoint));
-        break;
-      default:
-        throw new IllegalStateException("Unrecognized credential type: " + azureAuthenticationType);
-    }
-  }
-
-  private void applyGoogleAuthenticationProperties(List<Property> properties) {
-    if (googleAuthenticationType == null) {
-      throw UserException.validationError()
-          .message(
-              "Failure creating a GCS connection. You must provide an authentication method [googleAuthenticationType].")
-          .build(logger);
-    }
-    switch (googleAuthenticationType) {
-      case SERVICE_ACCOUNT_KEYS:
-        if (Strings.isNullOrEmpty(googleClientId)
-            || Strings.isNullOrEmpty(googleClientEmail)
-            || Strings.isNullOrEmpty(googlePrivateKeyId)
-            || SecretRef.isNullOrEmpty(googlePrivateKey)) {
-          throw UserException.validationError()
-              .message(
-                  "Failure creating a GCS connection. You must provide a client email, client ID, private key ID, and private key [googleClientEmail, googleClientId, googlePrivateKeyId, googlePrivateKey].")
-              .build(logger);
-        }
-
-        properties.add(new Property(GoogleBucketFileSystem.DREMIO_KEY_FILE, "true"));
-        properties.add(new Property(GoogleBucketFileSystem.DREMIO_CLIENT_ID, googleClientId));
-        properties.add(new Property(GoogleBucketFileSystem.DREMIO_CLIENT_EMAIL, googleClientEmail));
-        properties.add(
-            new Property(GoogleBucketFileSystem.DREMIO_PRIVATE_KEY_ID, googlePrivateKeyId));
-        properties.add(
-            new Property(
-                GoogleBucketFileSystem.DREMIO_PRIVATE_KEY,
-                SecretRef.toConfiguration(googlePrivateKey, DREMIO_SCHEME_PREFIX)));
-        break;
-      case AUTO:
-        properties.add(new Property(GoogleBucketFileSystem.DREMIO_KEY_FILE, "false"));
-        break;
-      default:
-        throw new IllegalStateException(
-            "Unrecognized credential type: " + googleAuthenticationType);
-    }
   }
 
   @Override

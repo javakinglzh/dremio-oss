@@ -15,6 +15,12 @@
  */
 package com.dremio.exec.catalog;
 
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_FOLDERS_SUPPORTED;
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS;
+
+import com.dremio.catalog.exception.SourceMalfunctionException;
+import com.dremio.catalog.model.ImmutableCatalogFolder;
 import com.dremio.common.concurrent.AutoCloseableLock;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.util.Closeable;
@@ -30,11 +36,14 @@ import com.dremio.connector.metadata.SourceMetadata;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature.MetadataValidity;
+import com.dremio.connector.metadata.options.GetDatasetFilterOption;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.exec.catalog.CatalogInternalRPC.UpdateLastRefreshDateRequest;
-import com.dremio.exec.catalog.CatalogServiceImpl.UpdateType;
 import com.dremio.exec.catalog.DatasetCatalog.UpdateStatus;
 import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.server.SabotQueryContext;
 import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
@@ -52,8 +61,11 @@ import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
+import com.dremio.service.namespace.source.proto.SourceChangeState;
+import com.dremio.service.namespace.source.proto.SourceConfig;
 import com.dremio.service.namespace.source.proto.SourceInternalData;
 import com.dremio.service.namespace.source.proto.UpdateMode;
+import com.dremio.service.namespace.space.proto.FolderConfig;
 import com.dremio.service.scheduler.Cancellable;
 import com.dremio.service.scheduler.ModifiableSchedulerService;
 import com.dremio.service.scheduler.Schedule;
@@ -63,12 +75,14 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Stopwatch;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import io.opentelemetry.api.trace.Span;
 import io.protostuff.ByteString;
 import java.sql.Timestamp;
 import java.util.ConcurrentModificationException;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -79,6 +93,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiFunction;
 import java.util.function.LongSupplier;
+import java.util.stream.Collectors;
 import javax.inject.Provider;
 
 /**
@@ -104,9 +119,8 @@ class SourceMetadataManager implements AutoCloseable {
   private static final long MAXIMUM_CACHE_SIZE = 10_000L;
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(SourceMetadataManager.class);
-  private static final long WAKEUP_FREQUENCY_MS = 1000 * 60;
   private static final long SCHEDULER_GRANULARITY_MS = 1 * 1000;
-  private static final CounterWithOutcome METADATA_REFRESH_COUNTER =
+  private static final CounterWithOutcome BACKGROUND_METADATA_REFRESH_COUNTER =
       CounterWithOutcome.of("metadata_refresh");
   private static final String METADATA_REFRESH_TASK_NAME_PREFIX = "metadata-refresh-";
 
@@ -138,17 +152,21 @@ class SourceMetadataManager implements AutoCloseable {
   private volatile boolean initialized = false;
   private final Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider;
   private ClusterCoordinator clusterCoordinator;
+  // Do not use this SabotQueryContext. This is only necessary for passing to MetadataSynchronizer
+  // and will be replaced by proper dependency injection in the future.
+  private final SabotQueryContext sabotQueryContextDoNotUse;
 
   public SourceMetadataManager(
       NamespaceKey sourceName,
       ModifiableSchedulerService modifiableScheduler,
-      boolean isMaster,
+      boolean isVirtualMaster,
       LegacyKVStore<NamespaceKey, SourceInternalData> sourceDataStore,
       final ManagedStoragePlugin.MetadataBridge bridge,
       final OptionManager options,
       final CatalogServiceMonitor monitor,
       final Provider<MetadataRefreshInfoBroadcaster> broadcasterProvider,
-      final ClusterCoordinator clusterCoordinator) {
+      final ClusterCoordinator clusterCoordinator,
+      final SabotQueryContext sabotQueryContext) {
     this.sourceKey = sourceName;
     this.sourceDataStore = sourceDataStore;
     this.bridge = bridge;
@@ -159,12 +177,13 @@ class SourceMetadataManager implements AutoCloseable {
         new RefreshInfo(() -> bridge.getMetadataPolicy().getDatasetDefinitionRefreshAfterMs());
     this.broadcasterProvider = broadcasterProvider;
 
-    if (isMaster) {
+    if (isVirtualMaster) {
       // we can schedule on all nodes since this is a clustered singleton and will only run on a
       // single node.
       this.wakeupTask =
           modifiableScheduler.schedule(
-              Schedule.Builder.everyMillis(WAKEUP_FREQUENCY_MS)
+              Schedule.Builder.everyMillis(
+                      options.getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS))
                   .asClusteredSingleton(METADATA_REFRESH_TASK_NAME_PREFIX + sourceKey)
                   .build(),
               new WakeupWorker());
@@ -172,6 +191,7 @@ class SourceMetadataManager implements AutoCloseable {
       wakeupTask = null;
     }
     this.clusterCoordinator = clusterCoordinator;
+    this.sabotQueryContextDoNotUse = sabotQueryContext;
   }
 
   @VisibleForTesting
@@ -193,6 +213,7 @@ class SourceMetadataManager implements AutoCloseable {
         options,
         monitor,
         broadcasterProvider,
+        null,
         null);
   }
 
@@ -213,8 +234,7 @@ class SourceMetadataManager implements AutoCloseable {
         new Timestamp(namesRefresh.getLastStart()));
   }
 
-  boolean refresh(UpdateType updateType, MetadataPolicy policy, boolean throwOnFailure)
-      throws NamespaceException {
+  boolean refresh(SourceUpdateType updateType, MetadataPolicy policy, boolean throwOnFailure) {
     try {
 
       if (!runLock.tryLock(30, TimeUnit.SECONDS)) {
@@ -246,7 +266,9 @@ class SourceMetadataManager implements AutoCloseable {
     @Override
     public void run() {
       logger.debug("Invoked WakeupWorker {}", sourceKey.getRoot());
-      wakeup();
+      RequestContext.current()
+          .with(UserContext.CTX_KEY, UserContext.SYSTEM_USER_CONTEXT)
+          .run(() -> wakeup());
     }
 
     @Override
@@ -277,6 +299,8 @@ class SourceMetadataManager implements AutoCloseable {
       // plugin is first starting.
       return;
     }
+
+    updateSourceChangeStateIfNeeded();
 
     try {
       bridge.refreshState();
@@ -322,6 +346,23 @@ class SourceMetadataManager implements AutoCloseable {
     } catch (RuntimeException e) {
       logger.warn(
           "Source '{}' metadata refresh failed to complete due to an exception.", sourceKey, e);
+    }
+  }
+
+  private void updateSourceChangeStateIfNeeded() {
+    try {
+      SourceConfig sourceConfig = bridge.getNamespaceService().getSource(sourceKey);
+      if (!monitor.isActiveSourceChange()
+          && sourceConfig.getSourceChangeState() != SourceChangeState.SOURCE_CHANGE_STATE_NONE) {
+        bridge
+            .getNamespaceService()
+            .addOrUpdateSource(
+                sourceKey,
+                sourceConfig.setSourceChangeState(SourceChangeState.SOURCE_CHANGE_STATE_NONE));
+      }
+    } catch (NamespaceException ignored) {
+      // Exceptions will be ignored.
+      logger.warn("Failed to update source change state for source '{}'", sourceKey, ignored);
     }
   }
 
@@ -500,64 +541,148 @@ class SourceMetadataManager implements AutoCloseable {
 
     private final NamespaceService systemNamespace = bridge.getNamespaceService();
 
-    boolean refreshDatasetNames() throws NamespaceException {
+    boolean refreshNames(List<List<String>> folders) {
       logger.info("Name-only update for source '{}'", sourceKey);
       final Set<NamespaceKey> existingDatasets =
           Sets.newHashSet(systemNamespace.getAllDatasets(sourceKey));
 
-      final SyncStatus syncStatus = new SyncStatus(false);
+      final MetadataSynchronizerStatus metadataSynchronizerStatus =
+          new MetadataSynchronizerStatus(false);
 
       final Stopwatch stopwatch = Stopwatch.createStarted();
       try {
         verifySourceExistence(systemNamespace);
 
-        final SourceMetadata sourceMetadata = bridge.getMetadata();
-        if (sourceMetadata instanceof SupportsListingDatasets) {
-          final SupportsListingDatasets listingProvider = (SupportsListingDatasets) sourceMetadata;
-          final GetDatasetOption[] options =
-              bridge.getDefaultRetrievalOptions().asGetDatasetOptions(null);
+        Optional<SourceMetadata> sourceMetadata = bridge.getMetadata();
+        if (sourceMetadata.isEmpty()) {
+          throw new SourceMalfunctionException(sourceKey.getName());
+        }
 
-          logger.debug("Source '{}' names sync started", sourceKey);
-          try (DatasetHandleListing listing = listingProvider.listDatasetHandles(options)) {
-            final Iterator<? extends DatasetHandle> iterator = listing.iterator();
-            while (iterator.hasNext()) {
-              final DatasetHandle handle = iterator.next();
-              final NamespaceKey datasetKey =
-                  MetadataObjectsUtils.toNamespaceKey(handle.getDatasetPath());
-              // names are only added, removal happens in full sync
-              if (existingDatasets.remove(datasetKey)) {
-                syncStatus.incrementShallowUnchanged();
-                continue;
-              }
+        // Refreshing folders to get all metadata for it prior to refreshing datasets; Currently
+        // Refreshing datasets doesn't fetch all metadata about the folder
+        if (sourceMetadata.get() instanceof SupportsFolderIngestion) {
+          handleFolderListing(
+              metadataSynchronizerStatus, (SupportsFolderIngestion) sourceMetadata.get());
+        }
 
-              final DatasetConfig newConfig = MetadataObjectsUtils.newShallowConfig(handle);
-              try {
-                systemNamespace.addOrUpdateDataset(datasetKey, newConfig);
-                syncStatus.setRefreshed();
-                syncStatus.incrementShallowAdded();
-                logger.debug("Dataset '{}' added", datasetKey);
-              } catch (ConcurrentModificationException ignored) {
-                // race condition
-                logger.debug("Dataset '{}' add failed (CME)", datasetKey);
-              }
-            }
-          }
+        if (sourceMetadata.get() instanceof SupportsListingDatasets) {
+          handleDatasetListing(
+              folders,
+              existingDatasets,
+              metadataSynchronizerStatus,
+              (SupportsListingDatasets) sourceMetadata.get());
         }
 
         logger.info(
             "Source '{}' refreshed names in {} seconds. Details:\n{}",
             sourceKey,
             stopwatch.elapsed(TimeUnit.SECONDS),
-            syncStatus);
+            metadataSynchronizerStatus);
       } catch (Exception ex) {
         logger.warn(
             "Source '{}' shallow probe failed. Dataset listing maybe incomplete", sourceKey, ex);
       }
 
-      return syncStatus.isRefreshed();
+      return metadataSynchronizerStatus.wasSyncSuccessful();
     }
 
-    boolean refreshFull(MetadataPolicy metadataPolicy) throws NamespaceException {
+    private void handleDatasetListing(
+        List<List<String>> folders,
+        Set<NamespaceKey> existingDatasets,
+        MetadataSynchronizerStatus metadataSynchronizerStatus,
+        SupportsListingDatasets sourceMetadata)
+        throws NamespaceException, ConnectorException {
+      final SupportsListingDatasets listingProvider = sourceMetadata;
+      final GetDatasetOption[] defaultOptions =
+          bridge.getDefaultRetrievalOptions().asGetDatasetOptions(null);
+      GetDatasetFilterOption foldersOption = new GetDatasetFilterOption(folders);
+      List<GetDatasetOption> optionsList = Lists.newArrayList(defaultOptions);
+      optionsList.add(foldersOption);
+      GetDatasetOption[] options = optionsList.toArray(new GetDatasetOption[optionsList.size()]);
+
+      logger.debug("Source '{}' names sync started", sourceKey);
+      try (DatasetHandleListing listing = listingProvider.listDatasetHandles(options)) {
+        final Iterator<? extends DatasetHandle> iterator = listing.iterator();
+        while (iterator.hasNext()) {
+          final DatasetHandle handle = iterator.next();
+          final NamespaceKey datasetKey =
+              MetadataObjectsUtils.toNamespaceKey(handle.getDatasetPath());
+          if (existingDatasets.remove(datasetKey)) {
+            metadataSynchronizerStatus.incrementDatasetShallowUnchanged();
+            continue;
+          }
+
+          final DatasetConfig newConfig = MetadataObjectsUtils.newShallowConfig(handle);
+          try {
+            systemNamespace.addOrUpdateDataset(datasetKey, newConfig);
+            metadataSynchronizerStatus.setWasSuccessfullyRefreshed();
+            metadataSynchronizerStatus.incrementDatasetShallowAdded();
+            logger.debug("Dataset '{}' added", datasetKey);
+          } catch (ConcurrentModificationException ignored) {
+            logger.debug("Dataset '{}' add failed (CME)", datasetKey);
+          }
+        }
+      }
+    }
+
+    private void handleFolderListing(
+        MetadataSynchronizerStatus metadataSynchronizerStatus,
+        SupportsFolderIngestion sourceMetadata)
+        throws NamespaceException {
+      if (!optionManager.getOption(RESTCATALOG_FOLDERS_SUPPORTED)) {
+        return;
+      }
+      Set<FolderConfig> existingFolders = Sets.newHashSet(systemNamespace.getFolders(sourceKey));
+      Set<NamespaceKey> existingFolderPaths =
+          existingFolders.stream()
+              .map(folder -> new NamespaceKey(folder.getFullPathList()))
+              .collect(Collectors.toSet());
+
+      FolderListing folderListing = sourceMetadata.getFolderListing();
+      final Iterator<ImmutableCatalogFolder> iterator = folderListing.iterator();
+      while (iterator.hasNext()) {
+        final ImmutableCatalogFolder folderFromPlugin = iterator.next();
+        final NamespaceKey folderKey = new NamespaceKey(folderFromPlugin.fullPath());
+        Set<FolderConfig> existingSubFolders =
+            Sets.newHashSet(systemNamespace.getFolders(folderKey));
+        Set<NamespaceKey> existingSubFolderPaths =
+            existingSubFolders.stream()
+                .map(folder -> new NamespaceKey(folder.getFullPathList()))
+                .collect(Collectors.toSet());
+        existingFolderPaths.addAll(existingSubFolderPaths);
+        if (existingFolderPaths.contains(folderKey)) {
+          metadataSynchronizerStatus.incrementDatasetShallowUnchanged();
+          existingFolderPaths.remove(folderKey);
+          continue;
+        }
+        try {
+          systemNamespace.addOrUpdateFolder(
+              folderKey, CatalogFolderUtils.convertToNS(folderFromPlugin));
+        } catch (NamespaceException | ConcurrentModificationException e) {
+          logger.warn(
+              "There was a NamespaceException while trying to add folder '{}' in NamespaceService cache.",
+              folderKey,
+              e);
+        }
+      }
+      removeFoldersThatNoLongerFound(existingFolderPaths);
+    }
+
+    private void removeFoldersThatNoLongerFound(Set<NamespaceKey> existingFolderPaths) {
+      for (NamespaceKey folderKey : existingFolderPaths) {
+        try {
+          FolderConfig config = systemNamespace.getFolder(folderKey);
+          systemNamespace.deleteFolder(folderKey, config.getTag());
+        } catch (NamespaceException | ConcurrentModificationException e) {
+          logger.warn(
+              "There was a NamespaceException while trying to delete folder '{}' in NamespaceService cache.",
+              folderKey,
+              e);
+        }
+      }
+    }
+
+    boolean refreshFull(MetadataPolicy metadataPolicy) {
       logger.info("Full update for source '{}'", sourceKey);
       final DatasetRetrievalOptions retrievalOptions;
       if (metadataPolicy == null) {
@@ -572,6 +697,7 @@ class SourceMetadataManager implements AutoCloseable {
       retrievalOptions.withFallback(DatasetRetrievalOptions.DEFAULT);
 
       if (metadataPolicy.getDatasetUpdateMode() == UpdateMode.UNKNOWN) {
+        logger.warn("Skipping full metadata refresh because update mode is unknown.");
         return false;
       }
 
@@ -586,17 +712,18 @@ class SourceMetadataManager implements AutoCloseable {
               metadataPolicy,
               getSaver(),
               retrievalOptions,
-              optionManager);
-      synchronizeRun.setup();
-      final SyncStatus syncStatus = synchronizeRun.go();
+              optionManager,
+              sabotQueryContextDoNotUse);
+
+      final MetadataSynchronizerStatus metadataSynchronizerStatus = synchronizeRun.go();
 
       logger.info(
           "Source '{}' refreshed details in {} seconds. Details:\n{}",
           sourceKey,
           stopwatch.elapsed(TimeUnit.SECONDS),
-          syncStatus);
+          metadataSynchronizerStatus);
 
-      return syncStatus.isRefreshed();
+      return metadataSynchronizerStatus.wasSyncSuccessful();
     }
 
     void saveRefreshData() {
@@ -642,38 +769,43 @@ class SourceMetadataManager implements AutoCloseable {
   /** A refresh run based on an adhoc request. */
   private class AdhocRefresh extends RefreshRunner {
 
-    private final UpdateType updateType;
+    private final SourceUpdateType updateType;
     private final MetadataPolicy policy;
 
-    public AdhocRefresh(UpdateType updateType, MetadataPolicy policy) {
+    public AdhocRefresh(SourceUpdateType updateType, MetadataPolicy policy) {
       super();
       this.updateType = updateType;
       this.policy = policy;
     }
 
-    public boolean run() throws NamespaceException {
+    public boolean run() {
       monitor.startAdhocRefresh();
 
       try {
         monitor.startAdhocRefreshWithLock();
-        switch (updateType) {
+        final boolean didRefresh;
+        switch (updateType.getType()) {
           case FULL:
             try (Closeable time = fullRefresh.start()) {
-              return refreshFull(policy);
+              didRefresh = refreshFull(policy);
             }
+            saveRefreshData();
+            return didRefresh;
           case NAMES:
             try (Closeable time = namesRefresh.start()) {
-              return refreshDatasetNames();
+              didRefresh = refreshNames(null);
             }
+            saveRefreshData();
+            return didRefresh;
+          case NAMES_IN_FOLDERS:
+            // Don't update last refresh time since we probably only refreshed some names
+            return refreshNames(updateType.getFolders());
           case NONE:
             return false;
-
           default:
             throw new IllegalArgumentException("Unknown type: " + updateType);
         }
       } finally {
-        // save post timer close.
-        saveRefreshData();
         monitor.finishAdhocRefresh();
       }
     }
@@ -707,14 +839,13 @@ class SourceMetadataManager implements AutoCloseable {
             if (fullRefresh) {
               refreshFull(null);
             } else {
-              refreshDatasetNames();
+              refreshNames(null);
             }
           }
 
           // save post timer close.
           saveRefreshData();
-
-          METADATA_REFRESH_COUNTER.succeeded();
+          BACKGROUND_METADATA_REFRESH_COUNTER.succeeded();
         } catch (Exception e) {
           // Exception while updating the metadata. Ignore, and try again later
           logger.warn(
@@ -722,7 +853,7 @@ class SourceMetadataManager implements AutoCloseable {
               sourceKey,
               e);
 
-          METADATA_REFRESH_COUNTER.errored();
+          BACKGROUND_METADATA_REFRESH_COUNTER.errored();
         }
 
       } finally {
@@ -742,7 +873,7 @@ class SourceMetadataManager implements AutoCloseable {
    * @throws UserException
    */
   UpdateStatus refreshDataset(NamespaceKey datasetKey, DatasetRetrievalOptions options)
-      throws ConnectorException, NamespaceException {
+      throws ConnectorException, NamespaceException, SourceMalfunctionException {
     options.withFallback(bridge.getDefaultRetrievalOptions());
     final NamespaceService namespace = bridge.getNamespaceService();
     DatasetConfig knownConfig = null;
@@ -754,11 +885,15 @@ class SourceMetadataManager implements AutoCloseable {
       // Try to get the fully resolved name (by referring to the source) of the provided dataset key
       // and check again if there is an entry already
       // in the namespace or if it's really a new one or a shortened version (hive default case)
-      final SourceMetadata sourceMetadata = bridge.getMetadata();
+      Optional<SourceMetadata> sourceMetadata = bridge.getMetadata();
+      if (sourceMetadata.isEmpty()) {
+        throw new SourceMalfunctionException(sourceKey.getName());
+      }
       entityPath = MetadataObjectsUtils.toEntityPath(datasetKey);
-      handle = sourceMetadata.getDatasetHandle((entityPath), options.asGetDatasetOptions(null));
+      handle =
+          sourceMetadata.get().getDatasetHandle((entityPath), options.asGetDatasetOptions(null));
 
-      if (!handle.isPresent()) { // dataset is not in the source either
+      if (handle.isEmpty()) { // dataset is not in the source either
         throw new DatasetNotFoundException(
             String.format("Dataset [%s] not found.", datasetKey), entityPath);
       }
@@ -775,8 +910,12 @@ class SourceMetadataManager implements AutoCloseable {
     final boolean exists = currentConfig != null;
     final boolean isExtended = exists && currentConfig.getReadDefinition() != null;
     final boolean isView = exists && currentConfig.getType() == DatasetType.VIRTUAL_DATASET;
+    final boolean isIcebergView =
+        exists
+            && DatasetHelper.isIcebergView(currentConfig)
+            && optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED);
 
-    if (isView) {
+    if (isView && !isIcebergView) {
       throw UserException.validationError()
           .message("Only tables can be refreshed. Dataset %s is a view.", datasetKey)
           .buildSilently();
@@ -793,14 +932,19 @@ class SourceMetadataManager implements AutoCloseable {
         datasetKey,
         exists,
         isExtended);
-    final SourceMetadata sourceMetadata = bridge.getMetadata();
-
-    if (!handle.isPresent()) { // not already retrieved above
-      handle =
-          sourceMetadata.getDatasetHandle(entityPath, options.asGetDatasetOptions(currentConfig));
+    Optional<SourceMetadata> sourceMetadata = bridge.getMetadata();
+    if (sourceMetadata.isEmpty()) {
+      throw new SourceMalfunctionException(sourceKey.getName());
     }
 
-    if (!handle.isPresent()) { // dataset is not in the source
+    if (handle.isEmpty()) { // not already retrieved above
+      handle =
+          sourceMetadata
+              .get()
+              .getDatasetHandle(entityPath, options.asGetDatasetOptions(currentConfig));
+    }
+
+    if (handle.isEmpty()) { // dataset is not in the source
       if (!options.deleteUnavailableDatasets()) {
         logger.debug("Dataset '{}' unavailable, but not deleted", datasetKey);
         return UpdateStatus.UNCHANGED;
@@ -837,18 +981,24 @@ class SourceMetadataManager implements AutoCloseable {
    */
   public UpdateStatus saveDatasetAndMetadataInNamespace(
       DatasetConfig datasetConfig, DatasetHandle datasetHandle, DatasetRetrievalOptions options)
-      throws ConnectorException {
+      throws ConnectorException, SourceMalfunctionException {
     options.withFallback(bridge.getDefaultRetrievalOptions());
     final DatasetSaver saver = getSaver();
-    SourceMetadata sourceMetadata = bridge.getMetadata();
+
     final boolean isExtended = datasetConfig.getReadDefinition() != null;
     String user = SystemUser.SYSTEM_USERNAME;
     if (options.datasetRefreshQuery().isPresent()) {
       user = options.datasetRefreshQuery().get().getUser();
     }
+
+    Optional<SourceMetadata> sourceMetadata = bridge.getMetadata();
+    if (sourceMetadata.isEmpty()) {
+      throw new SourceMalfunctionException(sourceKey.getName());
+    }
+
     boolean supportsIcebergMetadata =
-        (sourceMetadata instanceof SupportsUnlimitedSplits)
-            && ((SupportsUnlimitedSplits) sourceMetadata)
+        (sourceMetadata.get() instanceof SupportsUnlimitedSplits)
+            && ((SupportsUnlimitedSplits) sourceMetadata.get())
                 .allowUnlimitedSplits(datasetHandle, datasetConfig, user);
     final boolean isIcebergMetadata =
         datasetConfig.getPhysicalDataset() != null
@@ -859,8 +1009,9 @@ class SourceMetadataManager implements AutoCloseable {
     if (forceUpdateNotRequired
         && !options.forceUpdate()
         && isExtended
-        && sourceMetadata instanceof SupportsReadSignature) {
-      final SupportsReadSignature supportsReadSignature = (SupportsReadSignature) sourceMetadata;
+        && sourceMetadata.get() instanceof SupportsReadSignature) {
+      final SupportsReadSignature supportsReadSignature =
+          (SupportsReadSignature) sourceMetadata.get();
       final DatasetMetadata currentExtended = new DatasetMetadataAdapter(datasetConfig);
 
       final ByteString readSignature = datasetConfig.getReadDefinition().getReadSignature();
@@ -891,7 +1042,8 @@ class SourceMetadataManager implements AutoCloseable {
       prevModified = datasetConfig.getLastModified();
     }
 
-    saver.save(datasetConfig, datasetHandle, sourceMetadata, false, options);
+    // DX-100186: once we decide what to do for SQL command ALTER VIEW, we should follow up here.
+    saver.save(datasetConfig, datasetHandle, sourceMetadata.get(), false, options);
 
     if (datasetConfig.getPhysicalDataset() != null) {
       if (datasetConfig.getPhysicalDataset().getIcebergMetadataEnabled() != null

@@ -21,6 +21,7 @@ import FormSection from "components/Forms/FormSection";
 import FormElement from "components/Forms/FormElement";
 import Radio from "components/Fields/Radio";
 import FieldWithError from "components/Fields/FieldWithError";
+import { HoverHelp } from "dremio-ui-lib";
 
 import Select from "#oss/components/Fields/Select";
 import {
@@ -55,6 +56,21 @@ export default class ContainerSelection extends Component {
         {label && !this.props.hidden && <div className="topLabel">{label}</div>}
         <div className={this.props.hidden ? "" : className}>
           {elementConfig.getOptions().map((option, index) => {
+            if (option?.tooltip) {
+              return (
+                <div className="flex">
+                  <Radio
+                    {...(this.props.hidden && { style: { display: "none" } })}
+                    radioValue={option.value}
+                    value={selectedValue}
+                    key={index}
+                    label={option.label || option.value}
+                    {...radioProps}
+                  />
+                  <HoverHelp content={option.tooltip} className="mt-1" />
+                </div>
+              );
+            }
             return (
               <Radio
                 {...(this.props.hidden && { style: { display: "none" } })}

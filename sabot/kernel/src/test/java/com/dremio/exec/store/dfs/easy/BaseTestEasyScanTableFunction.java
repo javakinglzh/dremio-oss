@@ -20,22 +20,20 @@ import static com.dremio.sabot.RecordSet.r;
 import static com.dremio.sabot.RecordSet.rs;
 import static com.dremio.sabot.RecordSet.st;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.logical.FormatPluginConfig;
 import com.dremio.common.util.FileUtils;
 import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.expr.fn.impl.DecimalFunctions;
-import com.dremio.exec.hadoop.HadoopCompressionCodecFactory;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.physical.config.EasyScanTableFunctionContext;
 import com.dremio.exec.physical.config.ExtendedFormatOptions;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.PhysicalDatasetUtils;
@@ -43,12 +41,13 @@ import com.dremio.exec.store.easy.EasyFormatUtils;
 import com.dremio.exec.store.easy.json.JSONFormatPlugin;
 import com.dremio.exec.store.easy.text.TextFormatPlugin;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
-import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.parquet.ParquetScanTableFunction;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
 import com.dremio.sabot.BaseTestTableFunction;
+import com.dremio.sabot.RecordBatchValidatorDefaultImpl;
 import com.dremio.sabot.RecordSet;
 import com.dremio.sabot.exec.store.easy.proto.EasyProtobuf;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
@@ -74,16 +73,11 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
   private static final List<String> PARTITION_COLUMNS = ImmutableList.of();
   protected static final int BATCH_SIZE = 67;
 
-  private final SabotContext sobotContex = mock(SabotContext.class);
+  private final PluginSabotContext pluginSabotContext = mock(PluginSabotContext.class);
   private FileSystem fs;
   @Mock private StoragePluginId pluginId;
 
-  @Mock(
-      extraInterfaces = {
-        SupportsIcebergRootPointer.class,
-        SupportsInternalIcebergTable.class,
-        MutablePlugin.class
-      })
+  @Mock(extraInterfaces = {SupportsIcebergRootPointer.class, MutablePlugin.class})
   private FileSystemPlugin plugin;
 
   @Before
@@ -91,12 +85,9 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
     fs = HadoopFileSystem.get(Path.of("/"), new Configuration());
     when(fec.getStoragePlugin(pluginId)).thenReturn(plugin);
     SupportsIcebergRootPointer sirp = plugin;
-    when(sirp.createFSWithAsyncOptions(anyString(), anyString(), any())).thenReturn(fs);
-    SupportsInternalIcebergTable siit = plugin;
-    when(plugin.createFS(any(), any(), any())).thenReturn(fs);
-    when(plugin.getCompressionCodecFactory())
-        .thenReturn(new HadoopCompressionCodecFactory(new Configuration()));
-    when(siit.createScanTableFunction(any(), any(), any(), any()))
+    when(sirp.createFS(any())).thenReturn(fs);
+    when(plugin.createFS(any(SupportsFsCreation.Builder.class))).thenReturn(fs);
+    when(sirp.createScanTableFunction(any(), any(), any(), any()))
         .thenAnswer(
             i ->
                 new ParquetScanTableFunction(
@@ -106,7 +97,7 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
 
   protected void mockJsonFormatPlugin() {
     when(plugin.getFormatPlugin((FormatPluginConfig) any()))
-        .thenReturn(new JSONFormatPlugin("json", sobotContex, plugin));
+        .thenReturn(new JSONFormatPlugin("json", pluginSabotContext, plugin));
   }
 
   protected void mockTextFormatPlugin() throws Exception {
@@ -114,7 +105,7 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
         .thenReturn(
             new TextFormatPlugin(
                 "text",
-                sobotContex,
+                pluginSabotContext,
                 (TextFormatPlugin.TextFormatConfig)
                     PhysicalDatasetUtils.toFormatPlugin(
                         getFileConfig(FileType.TEXT), Collections.emptyList()),
@@ -172,7 +163,8 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
         isHeader = false;
         continue;
       }
-      String[] colValues = line.split(valueDelimiter);
+      // Using negative limit to parse empty string at the last column
+      String[] colValues = line.split(valueDelimiter, -1);
       rows.add(getRecord(colValues, recordType));
     }
     return rs(batchSchema, rows.toArray(new RsRecord[0]));
@@ -216,8 +208,10 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
    * their corresponding Java data types. The method processes each column value based on its
    * position in the array and applies the appropriate conversion logic. If a column value is
    * considered as "null" according to the {@link #isNull(String)} method, it will be set to null in
-   * the result array. Otherwise, the method converts the column value to the appropriate data type
-   * based on the column's position and data type.
+   * the result array. If a column value is considered as {@link
+   * RecordBatchValidatorDefaultImpl#IGNORE_VALUE} according to the {@link #isIgnoreValue(String)}
+   * method, the related actual values will be ignored. Otherwise, the method converts the column
+   * value to the appropriate data type based on the column's position and data type.
    *
    * @param colValues The array of column values represented as strings.
    * @return An array of objects representing the converted values with corresponding Java data
@@ -231,6 +225,10 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
       String colValue = colValues[i];
       if (isNull(colValue)) {
         result[i] = null;
+        continue;
+      }
+      if (isIgnoreValue(colValue)) {
+        result[i] = RecordBatchValidatorDefaultImpl.IGNORE_VALUE;
         continue;
       }
       switch (i) {
@@ -275,6 +273,14 @@ public abstract class BaseTestEasyScanTableFunction extends BaseTestTableFunctio
    */
   private boolean isNull(String colValue) {
     return "null".equalsIgnoreCase(colValue);
+  }
+
+  /**
+   * Returns whether the specified string value shall be handled as a {@link
+   * RecordBatchValidatorDefaultImpl#IGNORE_VALUE} expected object.
+   */
+  private boolean isIgnoreValue(String colValue) {
+    return "!IGNORE_VALUE!".equals(colValue);
   }
 
   private Object getDecimalValue(String value) {

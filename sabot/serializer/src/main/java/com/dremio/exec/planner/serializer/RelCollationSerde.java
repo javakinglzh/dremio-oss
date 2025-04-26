@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.serializer;
 
+import com.dremio.exec.planner.serializer.core.RelFieldCollationSerde;
 import com.dremio.plan.serialization.PRelCollation;
 import com.dremio.plan.serialization.PRelCollationImpl;
 import com.dremio.plan.serialization.PRelFieldCollation;
@@ -54,7 +55,7 @@ public final class RelCollationSerde {
 
     List<PRelFieldCollation> pRelFieldCollations =
         relCollation.getFieldCollations().stream()
-            .map(collation -> RelFieldCollationSerde.toProto(collation))
+            .map(RelFieldCollationSerde::toProto)
             .collect(Collectors.toList());
     return PRelCollation.newBuilder()
         .setImpl(PRelCollationImpl.newBuilder().addAllFieldCollations(pRelFieldCollations))

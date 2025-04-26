@@ -56,7 +56,6 @@ public class EasySplitReaderCreator extends SplitReaderCreator implements AutoCl
   private final OperatorContext context;
   private final List<SchemaPath> columns;
   private final EasyFormatPlugin formatPlugin;
-  private final CompressionCodecFactory compressionCodecFactory;
   private final ExtendedFormatOptions extendedFormatOptions;
   private final ByteString extendedProperty;
 
@@ -92,7 +91,6 @@ public class EasySplitReaderCreator extends SplitReaderCreator implements AutoCl
     this.fs = fs;
     this.columns = columns;
     this.formatPlugin = (EasyFormatPlugin) formatPlugin;
-    this.compressionCodecFactory = compressionCodecFactory;
     this.extendedFormatOptions = extendedFormatOptions;
     this.extendedProperty = extendedProperty;
   }

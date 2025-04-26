@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { CredentialProvider } from "../../common/credentials/CredentialProvider.ts";
+
 export interface LogFn {
   <T extends object>(obj: T, msg?: string, ...args: any[]): void;
   (obj: unknown, msg?: string, ...args: any[]): void;
@@ -37,15 +39,13 @@ export type Config = {
    */
   origin: string;
 
-  /**
-   * Dremio API token
-   */
-  token?: string | (() => string);
-
   logger?: {
+    warn: LogFn;
     debug: LogFn;
     info: LogFn;
   };
+
+  credentials?: CredentialProvider;
 };
 
 export type ResourceConfig = {

@@ -29,6 +29,7 @@ import org.apache.calcite.sql.parser.SqlParser;
  * not.
  */
 class SqlCleanser {
+
   private static final org.slf4j.Logger LOGGER =
       org.slf4j.LoggerFactory.getLogger(SqlCleanser.class);
   private static final ParserConfig CONFIG = new ParserConfig(Quoting.DOUBLE_QUOTE, 1000);
@@ -38,6 +39,9 @@ class SqlCleanser {
     SqlParser parser = SqlParser.create(sql, CONFIG);
     try {
       SqlNodeList sqlNodeList = parser.parseStmtList();
+      if (ObfuscationUtils.shouldSkipObfuscation(sqlNodeList)) {
+        return sql;
+      }
       SqlNode cleansedTree = ObfuscationRegistry.obfuscate(sqlNodeList);
       cleansedSql = SqlNodes.toSQLString(cleansedTree);
     } catch (Exception e) {

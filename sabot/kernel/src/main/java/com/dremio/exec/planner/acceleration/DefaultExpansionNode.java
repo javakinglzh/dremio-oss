@@ -24,6 +24,7 @@ import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rex.RexNode;
 
 /** Represents a location where the query was expanded from a VDS to a default reflection */
 public class DefaultExpansionNode extends ExpansionNode {
@@ -36,6 +37,28 @@ public class DefaultExpansionNode extends ExpansionNode {
       TableVersionContext versionContext,
       ViewTable viewTable) {
     super(path, rowType, cluster, traits, input, versionContext, viewTable);
+  }
+
+  private DefaultExpansionNode(
+      NamespaceKey path,
+      RelDataType rowType,
+      RelOptCluster cluster,
+      RelTraitSet traits,
+      RelNode input,
+      TableVersionContext versionContext,
+      ViewTable viewTable,
+      List<RexNode> pushedDownFilters,
+      boolean considerForPullUpPredicate) {
+    super(
+        path,
+        rowType,
+        cluster,
+        traits,
+        input,
+        versionContext,
+        viewTable,
+        pushedDownFilters,
+        considerForPullUpPredicate);
   }
 
   public static DefaultExpansionNode wrap(
@@ -62,7 +85,9 @@ public class DefaultExpansionNode extends ExpansionNode {
         traitSet,
         inputs.get(0),
         getVersionContext(),
-        getViewTable());
+        getViewTable(),
+        getPushedDownFilters(),
+        considerForPullUpPredicate());
   }
 
   @Override
@@ -74,6 +99,37 @@ public class DefaultExpansionNode extends ExpansionNode {
         copier.copyOf(getTraitSet()),
         getInput().accept(copier),
         getVersionContext(),
-        getViewTable());
+        getViewTable(),
+        getPushedDownFilters(),
+        considerForPullUpPredicate());
+  }
+
+  @Override
+  public DefaultExpansionNode copy(
+      RelTraitSet traitSet, RelNode input, List<RexNode> pushedDownFilters) {
+    return new DefaultExpansionNode(
+        getPath(),
+        rowType,
+        this.getCluster(),
+        traitSet,
+        input,
+        getVersionContext(),
+        getViewTable(),
+        pushedDownFilters,
+        considerForPullUpPredicate());
+  }
+
+  @Override
+  public DefaultExpansionNode considerForPullUpPredicate(boolean considerForPullUpPredicate) {
+    return new DefaultExpansionNode(
+        getPath(),
+        rowType,
+        this.getCluster(),
+        traitSet,
+        input,
+        getVersionContext(),
+        getViewTable(),
+        this.getPushedDownFilters(),
+        considerForPullUpPredicate);
   }
 }

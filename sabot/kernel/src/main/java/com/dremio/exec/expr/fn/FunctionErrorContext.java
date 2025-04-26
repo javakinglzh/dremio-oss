@@ -44,6 +44,14 @@ public interface FunctionErrorContext {
   void registerOutputFieldId(int fieldId);
 
   /**
+   * Returns the output field ID registered in this error context.
+   *
+   * @return the output field ID if present, {@code -1} otherwise
+   * @see #registerOutputFieldId(int)
+   */
+  int getOutputFieldId();
+
+  /**
    * @return a builder for an exception carrying the error context
    */
   ExceptionBuilder error();

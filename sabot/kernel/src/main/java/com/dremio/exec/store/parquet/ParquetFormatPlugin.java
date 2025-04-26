@@ -20,13 +20,13 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.physical.base.AbstractWriter;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.RecordWriter;
 import com.dremio.exec.store.dfs.BaseFormatPlugin;
@@ -38,6 +38,7 @@ import com.dremio.exec.store.dfs.FormatMatcher;
 import com.dremio.exec.store.dfs.MagicString;
 import com.dremio.exec.store.dfs.PreviousDatasetInfo;
 import com.dremio.exec.store.file.proto.FileProtobuf.FileUpdateKey;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.parquet2.ParquetRowiseReader;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
@@ -77,38 +78,33 @@ public class ParquetFormatPlugin extends BaseFormatPlugin {
   private static final List<MagicString> MAGIC_STRINGS =
       Lists.newArrayList(new MagicString(0, ParquetFileWriter.MAGIC));
 
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final ParquetFormatMatcher formatMatcher;
   private final ParquetFormatConfig config;
   private final String name;
-  private FileSystemPlugin<?> fsPlugin;
 
-  public ParquetFormatPlugin(String name, SabotContext context, FileSystemPlugin<?> fsPlugin) {
-    this(name, context, new ParquetFormatConfig(), fsPlugin);
-    this.fsPlugin = fsPlugin;
+  // Note: This constructor is used by FormatCreator through classpath scanning.
+  public ParquetFormatPlugin(
+      String name, PluginSabotContext context, SupportsFsCreation supportsFsCreation) {
+    this(name, context, new ParquetFormatConfig(), supportsFsCreation);
   }
 
+  // Note: This constructor is used by FormatCreator through classpath scanning.
   public ParquetFormatPlugin(
       String name,
-      SabotContext context,
+      PluginSabotContext context,
       ParquetFormatConfig formatConfig,
-      FileSystemPlugin<?> fsPlugin) {
-    super(context, fsPlugin);
+      SupportsFsCreation supportsFsCreation) {
+    super();
     this.context = context;
     this.config = formatConfig;
     this.formatMatcher = new ParquetFormatMatcher(this, config);
     this.name = name == null ? DEFAULT_NAME : name;
-    this.fsPlugin = fsPlugin;
   }
 
   @Override
   public ParquetFormatConfig getConfig() {
     return config;
-  }
-
-  @Override
-  public boolean supportsRead() {
-    return true;
   }
 
   @Override
@@ -119,7 +115,7 @@ public class ParquetFormatPlugin extends BaseFormatPlugin {
       WriterOptions options,
       OpProps props)
       throws IOException {
-    return new ParquetWriter(props, child, location, options, plugin);
+    return new ParquetWriter(props, child, location, options, plugin, null);
   }
 
   public RecordWriter getRecordWriter(OperatorContext context, ParquetWriter writer)
@@ -304,17 +300,7 @@ public class ParquetFormatPlugin extends BaseFormatPlugin {
   }
 
   @Override
-  public boolean supportsWrite() {
-    return false;
-  }
-
-  @Override
-  public boolean supportsAutoPartitioning() {
-    return true;
-  }
-
-  @Override
-  public SabotContext getContext() {
+  public PluginSabotContext getContext() {
     return context;
   }
 
@@ -323,16 +309,9 @@ public class ParquetFormatPlugin extends BaseFormatPlugin {
     return formatMatcher;
   }
 
-  //       ParquetReaderUtility.DateCorruptionStatus containsCorruptDates =
-  // ParquetReaderUtility.detectCorruptDates(footer, columns, autoCorrectCorruptDates);
-
   private static class ParquetFormatMatcher extends BasicFormatMatcher {
-
-    private final ParquetFormatConfig formatConfig;
-
     public ParquetFormatMatcher(ParquetFormatPlugin plugin, ParquetFormatConfig formatConfig) {
       super(plugin, PATTERNS, MAGIC_STRINGS);
-      this.formatConfig = formatConfig;
     }
   }
 

@@ -18,13 +18,18 @@ package com.dremio.plugins.elastic.planning.rules;
 import static java.lang.String.format;
 import static org.apache.calcite.plan.RelOptUtil.conjunctions;
 import static org.apache.calcite.rex.RexUtil.composeConjunction;
-import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
-import static org.elasticsearch.index.query.QueryBuilders.existsQuery;
-import static org.elasticsearch.index.query.QueryBuilders.queryStringQuery;
-import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
-import static org.elasticsearch.index.query.QueryBuilders.regexpQuery;
-import static org.elasticsearch.index.query.QueryBuilders.scriptQuery;
 
+import co.elastic.clients.elasticsearch._types.FieldValue;
+import co.elastic.clients.elasticsearch._types.Script;
+import co.elastic.clients.elasticsearch._types.query_dsl.BoolQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.ExistsQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.MatchQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.Query;
+import co.elastic.clients.elasticsearch._types.query_dsl.QueryStringQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.RangeQuery;
+import co.elastic.clients.elasticsearch._types.query_dsl.RegexpQuery;
+import co.elastic.clients.json.JsonData;
+import co.elastic.clients.json.JsonpUtils;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.SchemaPath;
@@ -37,23 +42,21 @@ import com.dremio.exec.expr.fn.impl.RegexpUtil;
 import com.dremio.lucene.queryparser.classic.QueryConverter;
 import com.dremio.plugins.elastic.ElasticsearchConf;
 import com.dremio.plugins.elastic.ElasticsearchConstants;
-import com.dremio.plugins.elastic.ElasticsearchStoragePlugin;
 import com.dremio.plugins.elastic.mapping.FieldAnnotation;
 import com.dremio.plugins.elastic.planning.rels.ElasticIntermediateScanPrel;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.collect.FluentIterable;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.GregorianCalendar;
 import java.util.List;
 import java.util.Map;
+import java.util.TimeZone;
 import org.apache.calcite.linq4j.Ord;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
@@ -76,16 +79,6 @@ import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.sql.type.SqlTypeFamily;
 import org.apache.calcite.sql.type.SqlTypeName;
 import org.apache.calcite.util.ImmutableBitSet;
-import org.elasticsearch.common.xcontent.ToXContent;
-import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.query.BoolQueryBuilder;
-import org.elasticsearch.index.query.MatchQueryBuilder;
-import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryBuilders;
-import org.elasticsearch.index.query.RangeQueryBuilder;
-import org.elasticsearch.script.Script;
-import org.elasticsearch.script.ScriptType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -104,6 +97,9 @@ public class PredicateAnalyzer {
   }
 
   private static final Logger logger = LoggerFactory.getLogger(PredicateAnalyzer.class);
+
+  private static final String DATE_TIME_FORMAT = "date_time";
+  private static final String ISO_DATEFORMAT_UTC = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'";
 
   public static final class Residue {
     public static final Residue NONE = new Residue(ImmutableBitSet.of());
@@ -192,7 +188,7 @@ public class PredicateAnalyzer {
    * <p>Callers should catch ExpressionNotAnalyzableException and fall back to not using push-down
    * filters.
    */
-  public static QueryBuilder analyze(
+  public static Query analyze(
       ElasticIntermediateScanPrel scan, RexNode originalExpression, boolean variationDetected)
       throws ExpressionNotAnalyzableException {
     try { // guard SchemaField conversion.
@@ -208,13 +204,24 @@ public class PredicateAnalyzer {
               .accept(new NotLikeConverter(scan.getCluster().getRexBuilder()));
 
       try {
-        QueryExpression e =
-            (QueryExpression)
-                expression.accept(
-                    new Visitor(
-                        scan.getCluster().getRexBuilder(),
-                        ElasticsearchConf.createElasticsearchConf(
-                            scan.getPluginId().getConnectionConf())));
+        Expression e0 =
+            expression.accept(
+                new Visitor(
+                    scan.getCluster().getRexBuilder(),
+                    ElasticsearchConf.createElasticsearchConf(
+                        scan.getPluginId().getConnectionConf())));
+
+        QueryExpression e = null;
+
+        if (e0 instanceof QueryExpression) {
+          e = (QueryExpression) e0;
+        } else if (e0 instanceof NamedFieldExpression
+            && ((NamedFieldExpression) e0).getType().isBoolean()) {
+          // Found boolean filter, will be converted to query expression.
+          e = new SimpleQueryExpression((NamedFieldExpression) e0).isTrue();
+        } else {
+          logger.error("Type isn't QueryExpression {}", e0.getClass());
+        }
 
         if (e != null && e.isPartial()) {
           e =
@@ -222,10 +229,15 @@ public class PredicateAnalyzer {
                   e, genScriptFilter(expression, scan.getPluginId(), variationDetected, null));
         }
         if (logger.isDebugEnabled()) {
+          if (e == null) {
+            throw new IllegalArgumentException("e should not be null");
+          }
           logger.debug(
-              "Predicate: [{}] converted to: [\n{}]", expression, queryAsJson(e.builder()));
+              "Predicate: [{}] converted to: [\n{}]",
+              expression,
+              JsonpUtils.toString(e.query(), new StringBuilder()));
         }
-        return e != null ? e.builder() : null;
+        return e == null ? null : e.query();
       } catch (Throwable e) {
         // For now, run the old expression conversion to convert a filter into a native elastic
         // construct
@@ -243,7 +255,7 @@ public class PredicateAnalyzer {
 
   /** Converts expressions of the form NOT(LIKE(...)) into NOT_LIKE(...) */
   private static class NotLikeConverter extends RexShuttle {
-    final RexBuilder rexBuilder;
+    private final RexBuilder rexBuilder;
 
     NotLikeConverter(RexBuilder rexBuilder) {
       this.rexBuilder = rexBuilder;
@@ -271,25 +283,23 @@ public class PredicateAnalyzer {
     }
   }
 
-  private static QueryBuilder genScriptFilter(
+  private static Query genScriptFilter(
       RexNode expression, StoragePluginId pluginId, boolean variationDetected, Throwable cause)
       throws ExpressionNotAnalyzableException {
     try {
-      final boolean supportsV5Features =
-          pluginId.getCapabilities().getCapability(ElasticsearchStoragePlugin.ENABLE_V5_FEATURES);
       final ElasticsearchConf config =
           ElasticsearchConf.createElasticsearchConf(pluginId.getConnectionConf());
-      final Script script =
+      final co.elastic.clients.elasticsearch._types.Script script =
           ProjectAnalyzer.getScript(
               expression,
               config.isUsePainless(),
-              supportsV5Features,
               config.isScriptsEnabled(),
               false, /* _source is not available in filter context */
               config.isAllowPushdownOnNormalizedOrAnalyzedFields(),
               variationDetected);
-      QueryBuilder builder = scriptQuery(script);
-      return builder;
+
+      // Wrap the script in a script and return as a query
+      return Query.of(q -> q.script(s -> s.script(script)));
     } catch (Throwable t) {
       cause.addSuppressed(t);
       throw new ExpressionNotAnalyzableException(
@@ -299,15 +309,10 @@ public class PredicateAnalyzer {
     }
   }
 
-  public static Script getScript(String script, StoragePluginId pluginId) {
-    if (pluginId.getCapabilities().getCapability(ElasticsearchStoragePlugin.ENABLE_V5_FEATURES)) {
-      // when returning a painless script, let's make sure we cast to a valid output type.
-      return new Script(
-          ScriptType.INLINE, "painless", String.format("(def) (%s)", script), ImmutableMap.of());
-    } else {
-      // keeping this so plan matching tests will pass
-      return new Script(ScriptType.INLINE, "groovy", script, ImmutableMap.of());
-    }
+  public static Script getScript(String script) {
+    // when returning a painless script, let's make sure we cast to a valid output type.
+    return Script.of(
+        s -> s.inline(i -> i.lang("painless").source(String.format("(def) (%s)", script))));
   }
 
   private static class Visitor extends RexVisitorImpl<Expression> {
@@ -442,7 +447,7 @@ public class PredicateAnalyzer {
                     operands.subList(0, operands.size() - 1), operands.get(operands.size() - 1));
             return QueryExpression.create(new NamedFieldExpression(null, false)).queryString(query);
           }
-          // fall through
+        // fall through
         default:
           throw new PredicateAnalyzerException(
               format("Unsupported syntax [%s] for call: [%s]", syntax, call));
@@ -675,9 +680,9 @@ public class PredicateAnalyzer {
     }
 
     private static class SwapResult {
-      final boolean swapped;
-      final TerminalExpression terminal;
-      final LiteralExpression literal;
+      private final boolean swapped;
+      private final TerminalExpression terminal;
+      private final LiteralExpression literal;
 
       public SwapResult(boolean swapped, TerminalExpression terminal, LiteralExpression literal) {
         super();
@@ -742,7 +747,7 @@ public class PredicateAnalyzer {
 
       if (exp instanceof CastExpression) {
         if (((CastExpression) exp).isCastFromLiteral()) {
-          return (LiteralExpression) ((CastExpression) exp).argument;
+          return (LiteralExpression) ((CastExpression) exp).getArgument();
         }
       }
 
@@ -786,7 +791,7 @@ public class PredicateAnalyzer {
 
   public abstract static class QueryExpression implements Expression {
 
-    public abstract QueryBuilder builder();
+    public abstract Query query();
 
     public boolean isPartial() {
       return false;
@@ -829,13 +834,15 @@ public class PredicateAnalyzer {
   public static final class CompoundQueryExpression extends QueryExpression {
 
     private final boolean partial;
-    private BoolQueryBuilder builder = boolQuery();
+    private Query query;
 
     public static CompoundQueryExpression or(QueryExpression... expressions) {
       CompoundQueryExpression bqe = new CompoundQueryExpression(false);
+      BoolQuery.Builder builderBool = new BoolQuery.Builder();
       for (QueryExpression expression : expressions) {
-        bqe.builder.should(expression.builder());
+        builderBool.should(expression.query());
       }
+      bqe.query = builderBool.build()._toQuery();
       return bqe;
     }
 
@@ -844,28 +851,30 @@ public class PredicateAnalyzer {
      *
      * @param partial whether we partially converted a and for push down purposes.
      * @param expressions
-     * @return
+     * @return bqe
      */
     public static CompoundQueryExpression and(boolean partial, QueryExpression... expressions) {
       CompoundQueryExpression bqe = new CompoundQueryExpression(partial);
+      BoolQuery.Builder builderBool = new BoolQuery.Builder();
       for (QueryExpression expression : expressions) {
         if (expression != null) { // partial expressions have nulls for missing nodes
-          bqe.builder.must(expression.builder());
+          builderBool.must(expression.query());
         }
       }
+      bqe.query = builderBool.build()._toQuery();
       return bqe;
     }
 
     /**
      * @param expression the incomplete expression (but faster using indices)
-     * @param builder the full expression (for correctness)
-     * @return
+     * @param query the full expression (for correctness)
+     * @return bqe
      */
-    public static CompoundQueryExpression completeAnd(
-        QueryExpression expression, QueryBuilder builder) {
+    public static CompoundQueryExpression completeAnd(QueryExpression expression, Query query) {
+      BoolQuery.Builder builderBool = new BoolQuery.Builder();
       CompoundQueryExpression bqe = new CompoundQueryExpression(false);
-      bqe.builder.must(expression.builder());
-      bqe.builder.must(builder);
+      builderBool.must(expression.query(), query);
+      bqe.query = builderBool.build()._toQuery();
       return bqe;
     }
 
@@ -879,8 +888,8 @@ public class PredicateAnalyzer {
     }
 
     @Override
-    public QueryBuilder builder() {
-      return Preconditions.checkNotNull(builder);
+    public Query query() {
+      return Preconditions.checkNotNull(query);
     }
 
     @Override
@@ -957,8 +966,11 @@ public class PredicateAnalyzer {
 
   public static class SimpleQueryExpression extends QueryExpression {
 
+    // The maximum limit of expansions in a match query.
+    public static final int MAX_EXPANSIONS = 50000;
+
     private final NamedFieldExpression rel;
-    private QueryBuilder builder;
+    private Query query;
 
     private String getFieldReference() {
       return rel.getReference();
@@ -969,13 +981,13 @@ public class PredicateAnalyzer {
     }
 
     @Override
-    public QueryBuilder builder() {
-      return Preconditions.checkNotNull(builder);
+    public Query query() {
+      return Preconditions.checkNotNull(query);
     }
 
     @Override
     public QueryExpression exists() {
-      builder = existsQuery(getFieldReference());
+      query = ExistsQuery.of(eq -> eq.field(getFieldReference()))._toQuery();
       return this;
     }
 
@@ -983,24 +995,34 @@ public class PredicateAnalyzer {
     public QueryExpression notExists() {
       // Even though Lucene doesn't allow a stand alone mustNot boolean query,
       // Elasticsearch handles this problem transparently on its end
-      builder = boolQuery().mustNot(existsQuery(getFieldReference()));
+      query =
+          BoolQuery.of(bq -> bq.mustNot(mn -> mn.exists(ex -> ex.field(getFieldReference()))))
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression like(LiteralExpression literal) {
-      builder = regexpQuery(getFieldReference(), literal.stringValue());
+      query =
+          RegexpQuery.of(rx -> rx.field(getFieldReference()).value(literal.stringValue()))
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression notLike(LiteralExpression literal) {
-      builder =
-          boolQuery()
-              .must(
-                  existsQuery(
-                      getFieldReference())) // NOT LIKE should return false when field is NULL
-              .mustNot(regexpQuery(getFieldReference(), literal.stringValue()));
+      query =
+          BoolQuery.of(
+                  bq ->
+                      bq.must(mu -> mu.exists(ExistsQuery.of(ex -> ex.field(getFieldReference()))))
+                          .mustNot(
+                              mn ->
+                                  mn.regexp(
+                                      RegexpQuery.of(
+                                          rq ->
+                                              rq.field(getFieldReference())
+                                                  .value(literal.stringValue())))))
+              ._toQuery();
       return this;
     }
 
@@ -1008,12 +1030,12 @@ public class PredicateAnalyzer {
     public QueryExpression equals(LiteralExpression literal) {
       Object value = literal.value();
       if (value instanceof GregorianCalendar) {
-        builder =
-            boolQuery()
-                .must(addFormatIfNecessary(literal, rangeQuery(getFieldReference()).gte(value)))
-                .must(addFormatIfNecessary(literal, rangeQuery(getFieldReference()).lte(value)));
+        RangeQuery gte = RangeQuery.of(r -> r.gte(toJsonData(value)).format(DATE_TIME_FORMAT));
+        RangeQuery lte = RangeQuery.of(r -> r.lte(toJsonData(value)).format(DATE_TIME_FORMAT));
+
+        query = BoolQuery.of(bq -> bq.must(g -> g.range(gte)).must(g2 -> g2.range(lte)))._toQuery();
       } else {
-        builder = matchQuery(getFieldReference(), value);
+        query = matchQuery(getFieldReference(), value);
       }
       return this;
     }
@@ -1022,17 +1044,18 @@ public class PredicateAnalyzer {
     public QueryExpression notEquals(LiteralExpression literal) {
       Object value = literal.value();
       if (value instanceof GregorianCalendar) {
-        builder =
-            boolQuery()
-                .should(addFormatIfNecessary(literal, rangeQuery(getFieldReference()).gt(value)))
-                .should(addFormatIfNecessary(literal, rangeQuery(getFieldReference()).lt(value)));
+        RangeQuery gt = RangeQuery.of(r -> r.gt(toJsonData(value)).format(DATE_TIME_FORMAT));
+        RangeQuery lt = RangeQuery.of(r -> r.lt(toJsonData(value)).format(DATE_TIME_FORMAT));
+
+        query =
+            BoolQuery.of(bq -> bq.should(g -> g.range(gt)).should(g2 -> g2.range(lt)))._toQuery();
       } else {
-        builder =
-            boolQuery()
-                .must(
-                    existsQuery(
-                        getFieldReference())) // NOT LIKE should return false when field is NULL
-                .mustNot(matchQuery(getFieldReference(), value));
+        query =
+            BoolQuery.of(
+                    bq ->
+                        bq.must(ExistsQuery.of(e -> e.field(getFieldReference()))._toQuery())
+                            .mustNot(matchQuery(getFieldReference(), value)))
+                ._toQuery();
       }
       return this;
     }
@@ -1044,41 +1067,68 @@ public class PredicateAnalyzer {
      * @param value
      * @return
      */
-    public MatchQueryBuilder matchQuery(String name, Object value) {
-      return QueryBuilders.matchQuery(name, value).maxExpansions(50000).fuzzyTranspositions(false);
+    public Query matchQuery(String name, Object value) {
+
+      MatchQuery.Builder mqb =
+          new MatchQuery.Builder()
+              .field(name)
+              .maxExpansions(MAX_EXPANSIONS)
+              .fuzzyTranspositions(false)
+              .query(FieldValue.of(value));
+      return mqb.build()._toQuery();
     }
 
     @Override
     public QueryExpression gt(LiteralExpression literal) {
       Object value = literal.value();
-      builder = addFormatIfNecessary(literal, rangeQuery(getFieldReference()).gt(value));
+      query =
+          addFormatIfNecessary(
+                  literal,
+                  new RangeQuery.Builder().field(getFieldReference()).gt(toJsonData(value)))
+              .build()
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression gte(LiteralExpression literal) {
       Object value = literal.value();
-      builder = addFormatIfNecessary(literal, rangeQuery(getFieldReference()).gte(value));
+      query =
+          addFormatIfNecessary(
+                  literal,
+                  new RangeQuery.Builder().field(getFieldReference()).gte(toJsonData(value)))
+              .build()
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression lt(LiteralExpression literal) {
       Object value = literal.value();
-      builder = addFormatIfNecessary(literal, rangeQuery(getFieldReference()).lt(value));
+      query =
+          addFormatIfNecessary(
+                  literal,
+                  new RangeQuery.Builder().field(getFieldReference()).lt(toJsonData(value)))
+              .build()
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression lte(LiteralExpression literal) {
       Object value = literal.value();
-      builder = addFormatIfNecessary(literal, rangeQuery(getFieldReference()).lte(value));
+      query =
+          addFormatIfNecessary(
+                  literal,
+                  new RangeQuery.Builder().field(getFieldReference()).lte(toJsonData(value)))
+              .build()
+              ._toQuery();
       return this;
     }
 
     @Override
     public QueryExpression queryString(String query) {
-      builder = queryStringQuery(query);
+      this.query = QueryStringQuery.of(q -> q.query(query))._toQuery();
       return this;
     }
 
@@ -1088,7 +1138,7 @@ public class PredicateAnalyzer {
         throw new PredicateAnalyzerException(
             String.format("%s is not a boolean type", rel.getReference()));
       }
-      builder = matchQuery(getFieldReference(), true);
+      query = matchQuery(getFieldReference(), true);
       return this;
     }
   }
@@ -1101,12 +1151,28 @@ public class PredicateAnalyzer {
    * @param rangeQueryBuilder
    * @return
    */
-  private static RangeQueryBuilder addFormatIfNecessary(
-      LiteralExpression literal, RangeQueryBuilder rangeQueryBuilder) {
+  private static RangeQuery.Builder addFormatIfNecessary(
+      LiteralExpression literal, RangeQuery.Builder rangeQueryBuilder) {
     if (literal.value() instanceof GregorianCalendar) {
-      rangeQueryBuilder.format("date_time");
+      rangeQueryBuilder.format(DATE_TIME_FORMAT);
     }
     return rangeQueryBuilder;
+  }
+
+  private static JsonData toJsonData(Object value) {
+    if (value instanceof GregorianCalendar) {
+      Date time = ((GregorianCalendar) value).getTime();
+      // Convert the date to a format that Elasticsearch supports without timezone conversion
+      // and is compatible with our existing tests (Date and time in UTC to ISO8601).
+
+      final SimpleDateFormat dateFormat = new SimpleDateFormat(ISO_DATEFORMAT_UTC);
+      dateFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+      String date = dateFormat.format(time);
+
+      return JsonData.of(date);
+    } else {
+      return JsonData.of(value);
+    }
   }
 
   /** Empty interface; exists only to define type hierarchy */
@@ -1157,8 +1223,8 @@ public class PredicateAnalyzer {
 
   public static final class CastExpression implements TerminalExpression {
 
-    public final MajorType target;
-    public final TerminalExpression argument;
+    private final MajorType target;
+    private final TerminalExpression argument;
 
     public CastExpression(MajorType target, TerminalExpression argument) {
       this.target = target;
@@ -1166,24 +1232,32 @@ public class PredicateAnalyzer {
     }
 
     public boolean isCastFromLiteral() {
-      return argument instanceof LiteralExpression;
+      return getArgument() instanceof LiteralExpression;
     }
 
     public static TerminalExpression unpack(TerminalExpression exp) {
       if (!(exp instanceof CastExpression)) {
         return exp;
       }
-      return ((CastExpression) exp).argument;
+      return ((CastExpression) exp).getArgument();
     }
 
     public static boolean isCastExpression(Expression exp) {
       return (exp instanceof CastExpression);
     }
+
+    public MajorType getTarget() {
+      return target;
+    }
+
+    public TerminalExpression getArgument() {
+      return argument;
+    }
   }
 
   public static final class LiteralExpression implements TerminalExpression {
 
-    public final RexLiteral literal;
+    private final RexLiteral literal;
 
     public LiteralExpression(RexLiteral literal) {
       this.literal = literal;
@@ -1239,16 +1313,6 @@ public class PredicateAnalyzer {
     public Object rawValue() {
       return literal.getValue();
     }
-  }
-
-  public static String queryAsJson(QueryBuilder query) throws IOException {
-    final ByteArrayOutputStream baos = new ByteArrayOutputStream();
-    XContentBuilder x = XContentFactory.jsonBuilder(baos);
-    x.prettyPrint().lfAtEnd();
-    query.toXContent(x, ToXContent.EMPTY_PARAMS);
-    x.close();
-
-    return baos.toString(StandardCharsets.UTF_8);
   }
 
   /**

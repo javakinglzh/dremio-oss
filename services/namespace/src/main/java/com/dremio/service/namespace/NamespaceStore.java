@@ -30,10 +30,13 @@ import com.dremio.datastore.api.StoreBuildingFactory;
 import com.dremio.datastore.api.options.ImmutableVersionOption;
 import com.dremio.datastore.format.Format;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.base.Supplier;
 import com.google.common.base.Suppliers;
+import com.google.common.collect.Iterables;
+import java.time.Clock;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -52,6 +55,8 @@ public class NamespaceStore {
       org.slf4j.LoggerFactory.getLogger(NamespaceStore.class);
   public static final String DAC_NAMESPACE = "dac-namespace";
 
+  private final Clock clock;
+
   private static final NameSpaceContainerVersionExtractor CONTAINER_VERSION_EXTRACTOR =
       new NameSpaceContainerVersionExtractor();
 
@@ -59,13 +64,19 @@ public class NamespaceStore {
   private final List<NamespaceDmlCallback> callbacks;
 
   public NamespaceStore(Provider<KVStoreProvider> provider) {
-    this(provider, List.of(), false);
+    this(provider, List.of(), false, Clock.systemUTC());
+  }
+
+  @VisibleForTesting
+  public NamespaceStore(Provider<KVStoreProvider> provider, Clock clock) {
+    this(provider, List.of(), false, clock);
   }
 
   public NamespaceStore(
       Provider<KVStoreProvider> provider,
       List<NamespaceDmlCallback> callbacks,
-      boolean useCachingStore) {
+      boolean useCachingStore,
+      Clock clock) {
     Preconditions.checkNotNull(provider, "store.get() provider required");
     this.store =
         Suppliers.memoize(
@@ -75,6 +86,7 @@ public class NamespaceStore {
               return useCachingStore ? new CachingNamespaceStore(kvStore) : kvStore;
             });
     this.callbacks = callbacks;
+    this.clock = clock;
   }
 
   /** Creator for namespace KVStore. */
@@ -103,9 +115,7 @@ public class NamespaceStore {
 
   public Iterable<Document<String, NameSpaceContainer>> find(
       FindByCondition find, KVStore.FindOption... options) {
-    return StreamSupport.stream(store.get().find(find, options).spliterator(), false)
-        .map(NamespaceStore::addTag)
-        .collect(Collectors.toUnmodifiableList());
+    return Iterables.transform(store.get().find(find, options), NamespaceStore::addTag);
   }
 
   public List<Integer> getCounts(SearchTypes.SearchQuery... conditions) {
@@ -125,6 +135,11 @@ public class NamespaceStore {
   }
 
   public Document<String, NameSpaceContainer> put(String key, NameSpaceContainer container) {
+    return put(key, container, false);
+  }
+
+  private Document<String, NameSpaceContainer> put(
+      String key, NameSpaceContainer container, boolean isMove) {
     try (AutoCloseables.RollbackCloseable rollback = new AutoCloseables.RollbackCloseable()) {
       String tag = CONTAINER_VERSION_EXTRACTOR.getTag(container);
 
@@ -136,16 +151,24 @@ public class NamespaceStore {
               ? KVStore.PutOption.CREATE
               : new ImmutableVersionOption.Builder().setTag(tag).build();
 
+      // Set timestamps centrally for all NamespaceStore objects
+      Long now = clock.millis();
+      if (isCreate && !isMove) {
+        NameSpaceTimestampExtractor.setCreatedAt(container, now);
+      }
+      NameSpaceTimestampExtractor.setLastModifiedAt(container, now);
+
       Document<String, NameSpaceContainer> document =
           addTag(store.get().put(key, container, putOption));
       CONTAINER_VERSION_EXTRACTOR.setTag(container, document.getTag());
 
+      List<String> path = container.getFullPathList();
+      String entityId = NamespaceUtils.getIdOrNull(container);
       for (NamespaceDmlCallback callback : callbacks) {
-        List<String> path = container.getFullPathList();
         if (isCreate) {
-          callback.onAdd(path);
+          callback.onAdd(path, entityId);
         } else {
-          callback.onUpdate(path);
+          callback.onUpdate(path, entityId);
         }
       }
 
@@ -158,6 +181,14 @@ public class NamespaceStore {
       logger.warn("Failure to put (other)", e);
       throw new DatastoreException(e);
     }
+  }
+
+  public Document<String, NameSpaceContainer> move(
+      NamespaceKey oldKey, NamespaceKey newKey, NameSpaceContainer container) {
+    Document<String, NameSpaceContainer> document =
+        put(new NamespaceInternalKey(newKey).getKey(), container, true);
+    delete(oldKey);
+    return document;
   }
 
   /* Not exposed outside the package since NamespaceInternalKey is a namespace-internal concept */
@@ -179,15 +210,11 @@ public class NamespaceStore {
 
   public Iterable<Document<String, NameSpaceContainer>> find(
       FindByRange<String> find, KVStore.FindOption... options) {
-    return StreamSupport.stream(store.get().find(find, options).spliterator(), false)
-        .map(NamespaceStore::addTag)
-        .collect(Collectors.toUnmodifiableList());
+    return Iterables.transform(store.get().find(find, options), NamespaceStore::addTag);
   }
 
   public Iterable<Document<String, NameSpaceContainer>> find(KVStore.FindOption... options) {
-    return StreamSupport.stream(store.get().find(options).spliterator(), false)
-        .map(NamespaceStore::addTag)
-        .collect(Collectors.toUnmodifiableList());
+    return Iterables.transform(store.get().find(options), NamespaceStore::addTag);
   }
 
   public void invalidateNamespaceCache(String key) {

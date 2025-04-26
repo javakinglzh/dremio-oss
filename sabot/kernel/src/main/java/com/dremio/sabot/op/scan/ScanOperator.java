@@ -99,7 +99,7 @@ public class ScanOperator implements ProducerOperator {
   protected static final ControlsInjector injector =
       ControlsInjectorFactory.getInjector(ScanOperator.class);
   public long warnThreshold;
-  private long maxAvgRowSize = 0;
+  private long maxAvgRowSize;
 
   /** Main collection of fields' value vectors. */
   protected final VectorContainer outgoing;
@@ -297,6 +297,8 @@ public class ScanOperator implements ProducerOperator {
   private List<RuntimeFilter> runtimeFilters = new ArrayList<>();
 
   private final FragmentExecutionContext fec;
+  private final boolean rowLimitEnabled;
+  private final long rowSizeLimit;
 
   public ScanOperator(
       FragmentExecutionContext fec,
@@ -352,8 +354,11 @@ public class ScanOperator implements ProducerOperator {
 
     this.foremanEndpoint = foremanEndpoint;
     this.queryContextInfo = queryContextInformation;
-    this.warnThreshold =
-        context.getOptions().getOption(ExecConstants.WARN_MAX_BATCH_SIZE_THRESHOLD);
+    this.warnThreshold = context.getOptions().getOption(ExecConstants.LIMIT_BATCH_ROW_SIZE_BYTES);
+    this.maxAvgRowSize = warnThreshold;
+    this.rowLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimit = context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES);
   }
 
   @Override
@@ -478,9 +483,7 @@ public class ScanOperator implements ProducerOperator {
     checkAndLearnSchema();
     outgoing.setAllCount(recordCount);
     int incomingBatchAvgRowSize = Sizer.getAverageRowSize(outgoing, recordCount);
-    if (recordCount > 0
-        && incomingBatchAvgRowSize > warnThreshold
-        && incomingBatchAvgRowSize > maxAvgRowSize) {
+    if (!rowLimitEnabled && recordCount > 0 && incomingBatchAvgRowSize > maxAvgRowSize) {
       maxRowSize = Math.max(maxRowSize, sizer.getMaxRowLengthInBatch(recordCount));
       maxAvgRowSize = incomingBatchAvgRowSize;
     }

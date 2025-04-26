@@ -93,10 +93,10 @@ public final class CatalogOptions {
       new TypeValidators.BooleanValidator("arctic.wikilabel.defaultbranch.enabled", true);
   // User-Defined Functions for versioned sources
   public static final BooleanValidator VERSIONED_SOURCE_UDF_ENABLED =
-      new BooleanValidator("versioned.source.udf.enabled", false);
+      new BooleanValidator("versioned.source.udf.enabled", true);
   // View delegation for a versioned source
   public static final BooleanValidator VERSIONED_SOURCE_VIEW_DELEGATION_ENABLED =
-      new BooleanValidator("versioned.source.view_delegation.enabled", false);
+      new BooleanValidator("versioned.source.view_delegation.enabled", true);
 
   public static final BooleanValidator RETRY_CONNECTION_ON_FAILURE =
       new TypeValidators.BooleanValidator("store.plugin.retry_connection_on_failure", true);
@@ -111,6 +111,30 @@ public final class CatalogOptions {
   // Support key for UDFs API.
   public static final BooleanValidator SUPPORT_UDF_API =
       new BooleanValidator("catalog.udf.api.enabled", true);
+  public static final BooleanValidator SOURCE_ASYNC_MODIFICATION_ENABLED =
+      new BooleanValidator("source.async.modification.enable", true);
+
+  public static final PositiveLongValidator SOURCE_ASYNC_MODIFICATION_WAIT_SECONDS =
+      new PositiveLongValidator("source.async.modification.wait.seconds", Long.MAX_VALUE, 2);
+  public static final PositiveLongValidator SOURCE_ASYNC_MODIFICATION_TIMEOUT_MINUTES =
+      new PositiveLongValidator("source.async.modification.timeout.minutes", Long.MAX_VALUE, 30);
+
+  // Seamless update of source allowed databases
+  public static final BooleanValidator SOURCE_SEAMLESS_UPDATE_ALLOWED_DATABASES =
+      new BooleanValidator("source.seamless.update.allowed.databases", true);
+
+  public static final TypeValidators.BooleanValidator DREMIO_CATALOG_STORAGE_URI_FOR_FOLDER =
+      new TypeValidators.BooleanValidator("dremio.catalog.storage.uri.folder", true);
+
+  public static final PositiveLongValidator SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS =
+      new PositiveLongValidator(
+          "source.metadata.manager.wakeup.frequency.ms", Long.MAX_VALUE, 1000 * 60);
+  public static final TypeValidators.BooleanValidator RESTCATALOG_VIEWS_SUPPORTED =
+      new TypeValidators.BooleanValidator("plugins.restcatalog.views_supported", true);
+  public static final TypeValidators.BooleanValidator RESTCATALOG_FOLDERS_SUPPORTED =
+      new TypeValidators.BooleanValidator("plugins.restcatalog.folders_supported", true);
+  public static final TypeValidators.BooleanValidator RESTCATALOG_LINEAGE_CALCULATION =
+      new TypeValidators.BooleanValidator("plugins.restcatalog.lineage_calculation", true);
 
   // Do not instantiate
   private CatalogOptions() {}

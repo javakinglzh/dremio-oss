@@ -40,7 +40,7 @@ public final class MajorTypeHelper {
     switch (minorType) {
       case LATE:
         return MinorType.NULL;
-      case TIMESTAMP:
+      case TIMESTAMPMILLI:
         return MinorType.TIMESTAMPMILLI;
       case TIME:
         return MinorType.TIMEMILLI;
@@ -55,14 +55,15 @@ public final class MajorTypeHelper {
     if (field.getType() instanceof ObjectType) {
       return Types.required(TypeProtos.MinorType.GENERIC_OBJECT);
     }
-    return getMajorTypeForArrowType(field.getType(), field.getChildren());
+    return getMajorTypeForArrowType(field.getType(), field.isNullable(), field.getChildren());
   }
 
-  public static MajorType getMajorTypeForArrowType(ArrowType arrowType, List<Field> children) {
+  public static MajorType getMajorTypeForArrowType(
+      ArrowType arrowType, boolean isNullable, List<Field> children) {
     MajorType.Builder builder =
         MajorType.newBuilder()
             .setMinorType(getMinorTypeFromArrowMinorType(getMinorTypeForArrowType(arrowType)))
-            .setMode(DataMode.OPTIONAL);
+            .setMode(isNullable ? DataMode.OPTIONAL : DataMode.REQUIRED);
     ArrowTypeID fieldType = arrowType.getTypeID();
     switch (fieldType) {
       case Decimal:
@@ -110,7 +111,8 @@ public final class MajorTypeHelper {
     try {
       return new Field(
           name,
-          new FieldType(true, getArrowTypeForMajorType(majorType), null),
+          new FieldType(
+              majorType.getMode() == DataMode.OPTIONAL, getArrowTypeForMajorType(majorType), null),
           getChildrenForMajorType(majorType));
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(
@@ -151,7 +153,7 @@ public final class MajorTypeHelper {
   public static TypeProtos.MinorType getMinorTypeFromArrowMinorType(MinorType arrowMinorType) {
     switch (arrowMinorType) {
       case TIMESTAMPMILLI:
-        return TypeProtos.MinorType.TIMESTAMP;
+        return TypeProtos.MinorType.TIMESTAMPMILLI;
       case TIMESTAMPMILLITZ:
         return TypeProtos.MinorType.TIMESTAMPTZ;
       case TIMEMILLI:

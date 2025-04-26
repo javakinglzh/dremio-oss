@@ -248,4 +248,14 @@ public final class NamespaceUtils {
         && datasetConfig.getVirtualDataset() != null
         && datasetConfig.getVirtualDataset().getSchemaOutdated() == Boolean.TRUE;
   }
+
+  public static final String HOME_PREFIX = "@";
+
+  public static boolean isHomeSpace(String name) {
+    return name.startsWith(HOME_PREFIX);
+  }
+
+  public static String getHomeSpaceUserName(String homeSpace) {
+    return homeSpace.substring(1);
+  }
 }

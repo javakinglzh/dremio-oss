@@ -15,7 +15,9 @@
  */
 package com.dremio.exec.store.hive;
 
+import com.dremio.exec.catalog.SourceNameRefreshAction;
 import com.dremio.exec.catalog.conf.ConnectionConf;
+import com.dremio.exec.catalog.conf.ConnectionConfUtils;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.DoNotDisplay;
@@ -24,6 +26,7 @@ import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.dfs.MutablePluginConf;
+import com.google.common.base.Preconditions;
 import io.protostuff.Tag;
 import java.util.List;
 import javax.annotation.Nullable;
@@ -129,4 +132,16 @@ public abstract class BaseHiveStoragePluginConfig<
    */
   @Nullable
   public abstract String getPf4jPluginId();
+
+  @Override
+  public List<SourceNameRefreshAction> getNameRefreshActionsForNewConf(
+      String source, ConnectionConf<?, ?> other) {
+    Preconditions.checkNotNull(other, "other ConnectionConf cannot be null");
+    Preconditions.checkArgument(
+        this.getClass().isInstance(other), "other ConnectionConf must be the same class");
+
+    BaseHiveStoragePluginConfig otherConfig = (BaseHiveStoragePluginConfig) other;
+    return ConnectionConfUtils.getNameRefreshActionsForFoldersChange(
+        source, allowedDatabases, otherConfig.allowedDatabases);
+  }
 }

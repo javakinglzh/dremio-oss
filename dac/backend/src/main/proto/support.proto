@@ -67,10 +67,17 @@ message ClusterInfo {
   optional string javaVmVersion = 6;
   optional string jreVersion = 7;
   optional string edition = 8;
+  repeated EnvironmentVariable environment = 9;
 }
 
 message SystemProperty {
   optional string name = 1;
+  optional string value = 2;
+}
+
+// Matches naming of protobuf maps by using name "key".
+message EnvironmentVariable {
+  optional string key = 1;
   optional string value = 2;
 }
 

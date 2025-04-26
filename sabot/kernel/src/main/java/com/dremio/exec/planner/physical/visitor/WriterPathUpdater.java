@@ -15,111 +15,81 @@
  */
 package com.dremio.exec.planner.physical.visitor;
 
-import static com.dremio.exec.planner.physical.PlannerSettings.QUERY_RESULTS_STORE_TABLE;
+import static com.dremio.exec.planner.ResultWriterUtils.buildCreateTableEntryForResults;
 
-import com.dremio.common.utils.protos.QueryIdHelper;
-import com.dremio.exec.catalog.CatalogUser;
-import com.dremio.exec.ops.QueryContext;
-import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.WriterCommitterPrel;
 import com.dremio.exec.planner.physical.WriterPrel;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.store.easy.arrow.ArrowFormatPlugin;
-import com.dremio.options.OptionManager;
-import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.users.SystemUser;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.base.Preconditions;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.commons.lang3.text.StrTokenizer;
 
-public class WriterPathUpdater extends BasePrelVisitor<Prel, CreateTableEntry, RuntimeException> {
-  private final SqlHandlerConfig sqlConfig;
+public final class WriterPathUpdater {
 
-  private WriterPathUpdater(SqlHandlerConfig config) {
-    sqlConfig = config;
-  }
+  private WriterPathUpdater() {}
 
   public static Prel update(Prel prel, SqlHandlerConfig config) {
-    return prel.accept(new WriterPathUpdater(config), null);
+    return prel.accept(new Visitor(config), null);
   }
 
-  @Override
-  public Prel visitWriterCommitter(WriterCommitterPrel prel, CreateTableEntry tableEntry)
-      throws RuntimeException {
-    final SqlParser.Config config = sqlConfig.getConverter().getParserConfig();
-    final QueryContext context = sqlConfig.getContext();
-    final OptionManager options = context.getOptions();
-    final String storeTablePath =
-        options.getOption(QUERY_RESULTS_STORE_TABLE.getOptionName()).getStringVal();
-    final List<String> storeTable =
-        new StrTokenizer(storeTablePath, '.', config.quoting().string.charAt(0))
-            .setIgnoreEmptyTokens(true)
-            .getTokenList();
-    // QueryId is same as attempt id. Using its string form for the table name
-    storeTable.add(QueryIdHelper.getQueryId(context.getQueryId()));
-    // Query results are stored in arrow format. If need arises, we can change this to a
-    // configuration option.
-    final Map<String, Object> storageOptions =
-        ImmutableMap.<String, Object>of("type", ArrowFormatPlugin.ARROW_DEFAULT_NAME);
+  private static class Visitor extends BasePrelVisitor<Prel, CreateTableEntry, RuntimeException> {
 
-    WriterOptions writerOptions = WriterOptions.DEFAULT;
-    if (options.getOption(PlannerSettings.ENABLE_OUTPUT_LIMITS)) {
-      writerOptions =
-          WriterOptions.DEFAULT
-              .withOutputLimitEnabled(options.getOption(PlannerSettings.ENABLE_OUTPUT_LIMITS))
-              .withOutputLimitSize(options.getOption(PlannerSettings.OUTPUT_LIMIT_SIZE));
+    private final SqlHandlerConfig sqlConfig;
+
+    private Visitor(SqlHandlerConfig config) {
+      sqlConfig = config;
     }
 
-    // store table as system user.
-    final CreateTableEntry createTableEntry =
-        context
-            .getCatalog()
-            .resolveCatalog(CatalogUser.from(SystemUser.SYSTEM_USERNAME))
-            .createNewTable(
-                new NamespaceKey(storeTable), null, writerOptions, storageOptions, true);
+    @Override
+    public Prel visitWriterCommitter(WriterCommitterPrel prel, CreateTableEntry tableEntry)
+        throws RuntimeException {
+      Preconditions.checkArgument(null == tableEntry);
 
-    WriterCommitterPrel committerPrel =
-        new WriterCommitterPrel(
-            prel.getCluster(),
-            prel.getTraitSet(),
-            ((Prel) prel.getInput(0)).accept(this, createTableEntry),
-            createTableEntry.getPlugin(),
-            null,
-            createTableEntry.getLocation(),
-            createTableEntry.getUserName(),
-            createTableEntry,
-            Optional.empty(),
-            prel.isPartialRefresh(),
-            prel.isReadSignatureEnabled());
-    return committerPrel;
-  }
+      // Rebuild the CreateTableEntry.  Assume it is for results.
+      final CreateTableEntry createTableEntry = buildCreateTableEntryForResults(sqlConfig);
 
-  @Override
-  public Prel visitPrel(Prel prel, CreateTableEntry tableEntry) throws RuntimeException {
+      Prel input = ((Prel) prel.getInput(0)).accept(this, createTableEntry);
 
-    List<RelNode> newInputs = new ArrayList<>();
-    for (Prel input : prel) {
-      newInputs.add(input.accept(this, tableEntry));
+      WriterCommitterPrel committerPrel =
+          new WriterCommitterPrel(
+              prel.getCluster(),
+              prel.getTraitSet(),
+              input,
+              createTableEntry.getPlugin(),
+              null,
+              createTableEntry.getLocation(),
+              createTableEntry.getUserName(),
+              createTableEntry,
+              Optional.empty(),
+              prel.isPartialRefresh(),
+              prel.isReadSignatureEnabled(),
+              null);
+      return committerPrel;
     }
 
-    return (Prel) prel.copy(prel.getTraitSet(), newInputs);
-  }
+    @Override
+    public Prel visitPrel(Prel prel, CreateTableEntry tableEntry) throws RuntimeException {
 
-  @Override
-  public Prel visitWriter(WriterPrel prel, CreateTableEntry tableEntry) throws RuntimeException {
-    return new WriterPrel(
-        prel.getCluster(),
-        prel.getTraitSet(),
-        prel.getInput(),
-        tableEntry,
-        prel.getExpectedInboundRowType());
+      List<RelNode> newInputs = new ArrayList<>();
+      for (Prel input : prel) {
+        newInputs.add(input.accept(this, tableEntry));
+      }
+
+      return (Prel) prel.copy(prel.getTraitSet(), newInputs);
+    }
+
+    @Override
+    public Prel visitWriter(WriterPrel prel, CreateTableEntry tableEntry) throws RuntimeException {
+      return new WriterPrel(
+          prel.getCluster(),
+          prel.getTraitSet(),
+          prel.getInput(),
+          tableEntry,
+          prel.getExpectedInboundRowType());
+    }
   }
 }

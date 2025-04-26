@@ -103,7 +103,7 @@ public class TestLegacyProtobufSerializer {
                             .setTerm(Term.newBuilder().setField("foo").setValue("baz"))))
             .build();
 
-    assertThat(LegacyProtobufSerializer.parseFrom(SearchQuery.PARSER, query.toByteString()))
+    assertThat(LegacyProtobufSerializer.parseFrom(SearchQuery.parser(), query.toByteString()))
         .isEqualTo(expected);
   }
 }

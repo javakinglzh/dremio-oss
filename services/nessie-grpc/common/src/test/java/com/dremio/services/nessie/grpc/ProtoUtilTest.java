@@ -539,6 +539,25 @@ public class ProtoUtilTest {
             .addParentCommitHashes("1122334455667702")
             .build();
     assertThat(fromProto(toProto(commitMetaWithParents))).isEqualTo(commitMetaWithParents);
+
+    CommitMeta commitMetaWithAuthors =
+        CommitMeta.builder()
+            .from(minimalCommitMeta)
+            .addAllAuthors("author 1")
+            .addAllAuthors("author 2")
+            .addAllSignedOffBy("signed off 1")
+            .addAllSignedOffBy("signed off 2")
+            .build();
+    assertThat(fromProto(toProto(commitMetaWithAuthors))).isEqualTo(commitMetaWithAuthors);
+
+    CommitMeta commitMetaMultipleProps =
+        CommitMeta.builder()
+            .from(minimalCommitMeta)
+            .putAllProperties("p1", List.of("v1"))
+            .putAllProperties("p2", List.of("v2a", "v2b"))
+            .putProperties("p3", "v3")
+            .build();
+    assertThat(fromProto(toProto(commitMetaMultipleProps))).isEqualTo(commitMetaMultipleProps);
   }
 
   @Test

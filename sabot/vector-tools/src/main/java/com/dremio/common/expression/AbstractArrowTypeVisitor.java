@@ -18,6 +18,7 @@ package com.dremio.common.expression;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeVisitor;
 import org.apache.arrow.vector.types.pojo.ArrowType.Binary;
+import org.apache.arrow.vector.types.pojo.ArrowType.BinaryView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Bool;
 import org.apache.arrow.vector.types.pojo.ArrowType.Date;
 import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
@@ -28,14 +29,18 @@ import org.apache.arrow.vector.types.pojo.ArrowType.Int;
 import org.apache.arrow.vector.types.pojo.ArrowType.Interval;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeBinary;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeList;
+import org.apache.arrow.vector.types.pojo.ArrowType.LargeListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.LargeUtf8;
 import org.apache.arrow.vector.types.pojo.ArrowType.List;
+import org.apache.arrow.vector.types.pojo.ArrowType.ListView;
 import org.apache.arrow.vector.types.pojo.ArrowType.Null;
+import org.apache.arrow.vector.types.pojo.ArrowType.RunEndEncoded;
 import org.apache.arrow.vector.types.pojo.ArrowType.Struct;
 import org.apache.arrow.vector.types.pojo.ArrowType.Time;
 import org.apache.arrow.vector.types.pojo.ArrowType.Timestamp;
 import org.apache.arrow.vector.types.pojo.ArrowType.Union;
 import org.apache.arrow.vector.types.pojo.ArrowType.Utf8;
+import org.apache.arrow.vector.types.pojo.ArrowType.Utf8View;
 
 public abstract class AbstractArrowTypeVisitor<T> implements ArrowTypeVisitor<T> {
 
@@ -55,6 +60,11 @@ public abstract class AbstractArrowTypeVisitor<T> implements ArrowTypeVisitor<T>
 
   @Override
   public T visit(List type) {
+    return visitGeneric(type);
+  }
+
+  @Override
+  public T visit(ListView type) {
     return visitGeneric(type);
   }
 
@@ -79,7 +89,17 @@ public abstract class AbstractArrowTypeVisitor<T> implements ArrowTypeVisitor<T>
   }
 
   @Override
+  public T visit(Utf8View type) {
+    return visitGeneric(type);
+  }
+
+  @Override
   public T visit(Binary type) {
+    return visitGeneric(type);
+  }
+
+  @Override
+  public T visit(BinaryView type) {
     return visitGeneric(type);
   }
 
@@ -135,6 +155,16 @@ public abstract class AbstractArrowTypeVisitor<T> implements ArrowTypeVisitor<T>
 
   @Override
   public T visit(LargeUtf8 type) {
+    return visitGeneric(type);
+  }
+
+  @Override
+  public T visit(LargeListView type) {
+    return visitGeneric(type);
+  }
+
+  @Override
+  public T visit(RunEndEncoded type) {
     return visitGeneric(type);
   }
 

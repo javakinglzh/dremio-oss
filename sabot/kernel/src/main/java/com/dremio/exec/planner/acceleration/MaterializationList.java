@@ -15,11 +15,12 @@
  */
 package com.dremio.exec.planner.acceleration;
 
+import com.dremio.common.config.SabotConfig;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
 import com.dremio.exec.planner.acceleration.substitution.MaterializationProvider;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
 import com.dremio.exec.planner.logical.ViewTable;
-import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.server.MaterializationDescriptorProvider;
 import com.dremio.sabot.rpc.user.UserSession;
@@ -28,7 +29,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -47,48 +48,72 @@ import org.apache.calcite.rel.RelNode;
  * and logical planning phases from {@link MaterializationDescriptor} instances.
  */
 public class MaterializationList implements MaterializationProvider {
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(MaterializationList.class);
+  private static final String HINT_CHECKER = "dremio.reflection.acceleration.hint-checker.class";
 
   private final Map<NamespaceKey, MaterializationDescriptor> materializationDescriptors =
       Maps.newHashMap();
-  private List<DremioMaterialization> materializations = ImmutableList.of();
+  private List<DremioMaterialization> materializations;
 
   private final MaterializationDescriptorProvider provider;
   private final SqlConverter converter;
   private final UserSession session;
+  private final AttemptObserver observer;
+  private final SabotConfig config;
 
   public MaterializationList(
       final SqlConverter converter,
       final UserSession session,
-      final MaterializationDescriptorProvider provider) {
+      final MaterializationDescriptorProvider provider,
+      final AttemptObserver observer,
+      final SabotConfig config) {
     this.provider = Preconditions.checkNotNull(provider, "provider is required");
     this.converter = Preconditions.checkNotNull(converter, "converter is required");
     this.session = Preconditions.checkNotNull(session, "session is required");
+    this.observer = Preconditions.checkNotNull(observer, "observer is required");
+    this.config = Preconditions.checkNotNull(config, "config is required");
   }
 
   @Override
   public List<DremioMaterialization> getConsideredMaterializations() {
-    return Preconditions.checkNotNull(materializations);
+    return materializations == null ? ImmutableList.of() : materializations;
+  }
+
+  @Override
+  public List<DremioMaterialization> getMaterializationsByHash(String hash) {
+    HintChecker hintChecker = getHintChecker();
+    List<DremioMaterialization> matches = new ArrayList<>();
+    for (MaterializationDescriptor descriptor : provider.get()) {
+      if (hintChecker.isExcluded(descriptor)) {
+        continue;
+      }
+      if (hash.equals(descriptor.getMatchingHash())) {
+        // Prune the reflection if the descriptor should be excluded due to staleness
+        if (hintChecker.isExcludedDueToStaleness(descriptor, true)) {
+          continue;
+        }
+        materializationDescriptors.put(new NamespaceKey(descriptor.getPath()), descriptor);
+        matches.add(descriptor.getMaterializationFor(converter));
+      }
+    }
+    return matches;
   }
 
   @Override
   public java.util.Optional<DremioMaterialization> getDefaultRawMaterialization(ViewTable table) {
 
-    if (isNoReflections()) {
-      return java.util.Optional.empty();
-    }
-    final Set<String> exclusions = getExclusions();
-    final Set<String> inclusions = getInclusions();
-    final boolean hasInclusions = !inclusions.isEmpty();
     final java.util.Optional<MaterializationDescriptor> opt =
         provider.getDefaultRawMaterialization(table);
 
     if (opt.isPresent()) {
       MaterializationDescriptor descriptor = opt.get();
-      if ((hasInclusions && !inclusions.contains(descriptor.getLayoutId()))
-          || exclusions.contains(descriptor.getLayoutId())
-          || (isCurrentIcebergDataOnly() && descriptor.isStale())) {
+      HintChecker hintChecker = getHintChecker();
+      if (hintChecker.isExcluded(descriptor)) {
+        return java.util.Optional.empty();
+      } else if (hintChecker.isExcludedDueToStaleness(descriptor, true)) {
+        // Prune the reflection if the descriptor should be excluded due to staleness
         return java.util.Optional.empty();
       } else {
         try {
@@ -108,6 +133,11 @@ public class MaterializationList implements MaterializationProvider {
     return provider.isMaterializationCacheInitialized();
   }
 
+  @Override
+  public List<String> dumpMaterializationStateToJson() {
+    return provider.dumpMaterializationStateToJson();
+  }
+
   public Optional<MaterializationDescriptor> getDescriptor(final List<String> path) {
     final MaterializationDescriptor descriptor =
         materializationDescriptors.get(new NamespaceKey(path));
@@ -116,8 +146,8 @@ public class MaterializationList implements MaterializationProvider {
 
   @Override
   public List<DremioMaterialization> buildConsideredMaterializations(RelNode userQueryNode) {
-    if (isNoReflections()) {
-      return ImmutableList.of();
+    if (materializations != null) {
+      return materializations;
     }
 
     final Set<SubstitutionUtils.VersionedPath> queryTablesUsed =
@@ -127,18 +157,12 @@ public class MaterializationList implements MaterializationProvider {
     final Set<SubstitutionUtils.ExternalQueryDescriptor> externalQueries =
         SubstitutionUtils.findExternalQueries(userQueryNode);
 
-    final Set<String> exclusions = getExclusions();
-    final Set<String> inclusions = getInclusions();
-    final boolean hasInclusions = !inclusions.isEmpty();
+    HintChecker hintChecker = getHintChecker();
     final List<DremioMaterialization> materializations = Lists.newArrayList();
     for (final MaterializationDescriptor descriptor : provider.get()) {
-
-      if ((hasInclusions && !inclusions.contains(descriptor.getLayoutId()))
-          || exclusions.contains(descriptor.getLayoutId())
-          || (isCurrentIcebergDataOnly() && descriptor.isStale())) {
+      if (hintChecker.isExcluded(descriptor)) {
         continue;
       }
-
       try {
         // Only allow a field based incremental reflection to accelerate another
         // incremental reflection refresh
@@ -151,6 +175,12 @@ public class MaterializationList implements MaterializationProvider {
         if (!descriptor.isApplicable(queryTablesUsed, queryVdsUsed, externalQueries)) {
           continue;
         }
+
+        // Prune the reflection if the descriptor should be excluded due to staleness
+        if (hintChecker.isExcludedDueToStaleness(descriptor, false)) {
+          continue;
+        }
+
         final DremioMaterialization materialization = descriptor.getMaterializationFor(converter);
         if (materialization == null) {
           continue;
@@ -171,43 +201,20 @@ public class MaterializationList implements MaterializationProvider {
     return materializations;
   }
 
-  public Set<String> getInclusions() {
-    Set<String> inclusions = Sets.newHashSet(session.getSubstitutionSettings().getInclusions());
-    inclusions.addAll(
-        parseReflectionIds(
-            converter
-                .getFunctionContext()
-                .getOptions()
-                .getOption(PlannerSettings.CONSIDER_REFLECTIONS)));
-    return inclusions;
-  }
-
-  public Set<String> getExclusions() {
-    Set<String> exclusions = Sets.newHashSet(session.getSubstitutionSettings().getExclusions());
-    exclusions.addAll(
-        parseReflectionIds(
-            converter
-                .getFunctionContext()
-                .getOptions()
-                .getOption(PlannerSettings.EXCLUDE_REFLECTIONS)));
-    return exclusions;
-  }
-
-  public boolean isNoReflections() {
-    return converter.getFunctionContext().getOptions().getOption(PlannerSettings.NO_REFLECTIONS);
-  }
-
-  public boolean isCurrentIcebergDataOnly() {
-    return converter
-        .getFunctionContext()
-        .getOptions()
-        .getOption(PlannerSettings.CURRENT_ICEBERG_DATA_ONLY);
-  }
-
   public static Set<String> parseReflectionIds(String value) {
     return Arrays.asList(value.split(",")).stream()
         .map(x -> x.trim())
         .filter(x -> !x.isEmpty())
         .collect(Collectors.toSet());
+  }
+
+  private HintChecker getHintChecker() {
+    HintChecker defaultHintChecker =
+        new HintChecker(
+            converter.getFunctionContext().getOptions(),
+            session.getSubstitutionSettings(),
+            observer);
+    return config.getInstance(
+        HINT_CHECKER, HintChecker.class, defaultHintChecker, defaultHintChecker);
   }
 }

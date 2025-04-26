@@ -16,6 +16,7 @@
 package com.dremio.exec.planner;
 
 import static com.dremio.exec.store.parquet.ParquetFormatDatasetAccessor.ACCELERATOR_STORAGEPLUGIN_NAME;
+import static java.util.Collections.emptyMap;
 
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.google.common.base.Function;
@@ -58,8 +59,7 @@ public class CheapestPlanWithReflectionVisitor {
   private Set<RelNode> currentlyVisiting = new HashSet<>();
   private Set<String> reflectionsToSearch;
 
-  private static final Map<String, RelCostPair> EMPTY_MAP = ImmutableMap.of();
-  private static final Result EMPTY_RESULT = new Result(null, null, EMPTY_MAP);
+  private static final Result EMPTY_RESULT = new Result(null, null, emptyMap());
 
   private boolean tooDeepFailure = false;
   private int MAX_DEPTH = PlannerSettings.MAX_RECURSION_STACK_DEPTH;
@@ -172,7 +172,7 @@ public class CheapestPlanWithReflectionVisitor {
         }
       }
 
-      result = new Result(p, cost, EMPTY_MAP);
+      result = new Result(p, cost, emptyMap());
       map.put(p, result);
       return result;
     }

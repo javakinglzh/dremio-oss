@@ -24,7 +24,6 @@ import static com.dremio.exec.store.metadatarefresh.MetadataRefreshUtils.metadat
 import static java.lang.Math.toIntExact;
 import static org.apache.hadoop.hive.metastore.api.hive_metastoreConstants.META_TABLE_STORAGE;
 
-import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.ExecutionSetupException;
@@ -54,33 +53,34 @@ import com.dremio.connector.metadata.extensions.SupportsMetadataVerify;
 import com.dremio.connector.metadata.extensions.SupportsReadSignature;
 import com.dremio.connector.metadata.extensions.ValidateMetadataOption;
 import com.dremio.connector.metadata.options.AlterMetadataOption;
+import com.dremio.connector.metadata.options.GetDatasetFilterOption;
 import com.dremio.connector.metadata.options.InternalMetadataTableOption;
 import com.dremio.connector.metadata.options.MetadataVerifyRequest;
 import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.AlterTableOption;
+import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogOptions;
+import com.dremio.exec.catalog.CreateTableOptions;
 import com.dremio.exec.catalog.DatasetSplitsPointer;
-import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.MetadataRequestOptions;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.RollbackOption;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.catalog.TableMutationOptions;
-import com.dremio.exec.dotfile.View;
 import com.dremio.exec.physical.base.OpProps;
-import com.dremio.exec.physical.base.PhysicalOperator;
-import com.dremio.exec.physical.base.ViewOptions;
-import com.dremio.exec.physical.base.Writer;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
 import com.dremio.exec.planner.logical.CreateTableEntry;
-import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.refresh.AbstractRefreshPlanBuilder;
 import com.dremio.exec.planner.sql.handlers.refresh.UnlimitedSplitsMetadataProvider;
+import com.dremio.exec.planner.sql.parser.SqlGrant;
 import com.dremio.exec.planner.sql.parser.SqlRefreshDataset;
+import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.BlockBasedSplitGenerator;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.SplitsPointer;
@@ -97,6 +97,7 @@ import com.dremio.exec.store.dfs.DropColumn;
 import com.dremio.exec.store.dfs.DropPrimaryKey;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.IcebergTableProps;
+import com.dremio.exec.store.dfs.PrimaryKeyOperations;
 import com.dremio.exec.store.hive.deltalake.DeltaHiveInputFormat;
 import com.dremio.exec.store.hive.exec.AsyncReaderUtils;
 import com.dremio.exec.store.hive.exec.HadoopFsCacheWrapperPluginClassLoader;
@@ -148,7 +149,6 @@ import com.dremio.exec.store.metadatarefresh.footerread.FooterReadTableFunction;
 import com.dremio.exec.store.parquet.ParquetScanTableFunction;
 import com.dremio.exec.store.parquet.ParquetSplitCreator;
 import com.dremio.exec.store.parquet.ScanTableFunction;
-import com.dremio.exec.store.sys.udf.UserDefinedFunction;
 import com.dremio.hive.proto.HiveReaderProto.FileSystemCachedEntity;
 import com.dremio.hive.proto.HiveReaderProto.FileSystemPartitionUpdateKey;
 import com.dremio.hive.proto.HiveReaderProto.HiveReadSignature;
@@ -169,6 +169,7 @@ import com.dremio.service.namespace.SourceState.MessageLevel;
 import com.dremio.service.namespace.SourceState.SourceStatus;
 import com.dremio.service.namespace.capabilities.BooleanCapabilityValue;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
+import com.dremio.service.namespace.dataset.DatasetNamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.dremio.service.namespace.dirlist.proto.DirListInputSplitProto;
@@ -211,7 +212,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 import javax.inject.Provider;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.lang3.StringUtils;
@@ -246,7 +249,7 @@ import org.pf4j.PluginManager;
 
 public class Hive3StoragePlugin extends BaseHiveStoragePlugin
     implements StoragePluginCreator.PF4JStoragePlugin,
-        MutablePlugin,
+        SupportsFsMutablePlugin,
         SupportsReadSignature,
         SupportsListingDatasets,
         SupportsAlteringDatasetMetadata,
@@ -283,7 +286,7 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
   private final HiveSettings hiveSettings;
   private final OptionManager optionManager;
   private final Provider<StoragePluginId> pluginIdProvider;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final String confUniqueIdentifier;
   private final Set<String> allowedDbsList;
 
@@ -296,14 +299,14 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       hadoopFsSupplierProviderPluginClassLoader = new HadoopFsCacheWrapperPluginClassLoader();
 
   @VisibleForTesting
-  public Hive3StoragePlugin(HiveConf hiveConf, SabotContext context, String name) {
+  public Hive3StoragePlugin(HiveConf hiveConf, PluginSabotContext context, String name) {
     this(hiveConf, null, context, name, null);
   }
 
   public Hive3StoragePlugin(
       HiveConf hiveConf,
       PluginManager pf4jManager,
-      SabotContext context,
+      PluginSabotContext context,
       String name,
       Provider<StoragePluginId> pluginIdProvider) {
     super(context, name);
@@ -437,22 +440,19 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
         hdfsC3CacheEnabled);
   }
 
-  @Override
   public FileSystem createFS(String filePath, String userName, OperatorContext operatorContext)
       throws IOException {
     return createFileSystem(filePath, userName, operatorContext, false, false);
   }
 
   @Override
-  public FileSystem createFSWithAsyncOptions(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFileSystem(filePath, userName, operatorContext, true, false);
-  }
-
-  @Override
-  public FileSystem createFSWithoutHDFSCache(
-      String filePath, String userName, OperatorContext operatorContext) throws IOException {
-    return createFileSystem(filePath, userName, operatorContext, false, true);
+  public FileSystem createFS(Builder b) throws IOException {
+    return createFileSystem(
+        b.filePath(),
+        b.userName(),
+        b.operatorContext(),
+        b.isWithAsyncOptions(),
+        b.isWithoutHDFSCache());
   }
 
   @Override
@@ -640,7 +640,10 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
 
   @Override
   public TableOperations createIcebergTableOperations(
-      FileIO fileIO, String queryUserName, IcebergTableIdentifier tableIdentifier) {
+      FileIO fileIO,
+      IcebergTableIdentifier tableIdentifier,
+      @Nullable String queryUserName,
+      @Nullable String queryUserId) {
     IcebergHiveTableIdentifier hiveTableIdentifier = (IcebergHiveTableIdentifier) tableIdentifier;
     if (hiveConf.getBoolean(HiveConfFactory.ENABLE_DML_TESTS_WITHOUT_LOCKING, false)) {
       try (ManagedHiveClient wrapper = getClient(SystemUser.SYSTEM_USERNAME)) {
@@ -736,11 +739,6 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
     }
   }
 
-  @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    return null;
-  }
-
   public HiveConf getHiveConf() {
     return hiveConf;
   }
@@ -752,7 +750,7 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       IcebergTableProps icebergTableProps,
       WriterOptions writerOptions,
       Map<String, Object> storageOptions,
-      boolean isResultsTable) {
+      CreateTableOptions createTableOptions) {
     Preconditions.checkArgument(icebergTableProps != null, "Iceberg properties are not provided");
     final HiveMetadataUtils.SchemaComponents schemaComponents =
         HiveMetadataUtils.resolveSchemaComponents(tableSchemaPath.getPathComponents());
@@ -817,6 +815,7 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
 
     return new CreateParquetTableEntry(
         schemaConfig.getUserName(),
+        null,
         this,
         tableFolderPath.toString(),
         icebergTableProps,
@@ -1182,24 +1181,31 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       SchemaConfig schemaConfig,
       ResolvedVersionContext versionContext,
       boolean saveInKvStore) {
-    if (datasetConfig.getPhysicalDataset() == null
-        || // PK only supported for physical datasets
-        datasetConfig.getPhysicalDataset().getIcebergMetadata()
-            == null) { // Physical dataset not Iceberg format
+    if (!IcebergUtils.isPrimaryKeySupported(datasetConfig)) {
       return null;
     }
+    if (datasetConfig.getPhysicalDataset().getPrimaryKey() != null) {
+      return datasetConfig.getPhysicalDataset().getPrimaryKey().getColumnList();
+    }
 
-    return IcebergUtils.validateAndGeneratePrimaryKey(
-        this, context, table, datasetConfig, schemaConfig, versionContext, saveInKvStore);
-  }
+    // Cache the PK in the KV store.
+    try {
+      if (saveInKvStore) { // If we are not going to save in KV store, no point of validating this
+        // Verify if the user has permission to write to the KV store.
+        MetadataRequestOptions options = MetadataRequestOptions.of(schemaConfig);
 
-  @Override
-  public List<String> getPrimaryKeyFromMetadata(
-      NamespaceKey table,
-      DatasetConfig datasetConfig,
-      SchemaConfig schemaConfig,
-      ResolvedVersionContext versionContext,
-      boolean saveInKvStore) {
+        Catalog catalog = context.getCatalogService().getCatalog(options);
+        catalog.validatePrivilege(table, SqlGrant.Privilege.ALTER);
+      }
+    } catch (UserException | java.security.AccessControlException ex) {
+      if (ex instanceof java.security.AccessControlException
+          || ((UserException) ex).getErrorType()
+              == UserBitShared.DremioPBError.ErrorType.PERMISSION) {
+        return null; // The user does not have permission.
+      }
+      throw ex;
+    }
+
     final String userName = schemaConfig.getUserName();
     final HiveMetadataUtils.SchemaComponents schemaComponents =
         HiveMetadataUtils.resolveSchemaComponents(table.getPathComponents());
@@ -1228,23 +1234,21 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       return null;
     }
 
-    return IcebergUtils.getPrimaryKey(
-        icebergModel, path, table, datasetConfig, userName, this, context, saveInKvStore);
-  }
+    List<String> primaryKey =
+        IcebergUtils.getPrimaryKey(
+            icebergModel, path, datasetConfig.getPhysicalDataset().getIcebergMetadata());
 
-  @Override
-  public Writer getWriter(
-      PhysicalOperator child, String location, WriterOptions options, OpProps props)
-      throws IOException {
-    throw new UnsupportedOperationException(
-        getRealSourceTypeName() + " plugin doesn't support table creation via CTAS.");
-  }
+    // This can happen if the table already had PK in the metadata, and we just promoted this table.
+    // The key will not be in the KV store for that.
+    // Even if PK is empty, we need to save to KV, so next time we know PK is unset and don't check
+    // from metadata again.
+    if (saveInKvStore) {
+      DatasetNamespaceService userNamespaceService = context.getNamespaceService(userName);
+      PrimaryKeyOperations.updatePrimaryKeyInNamespaceService(
+          table, datasetConfig, userNamespaceService, primaryKey);
+    }
 
-  @Override
-  public boolean toggleSchemaLearning(
-      NamespaceKey table, SchemaConfig schemaConfig, boolean enableSchemaLearning) {
-    throw new UnsupportedOperationException(
-        getRealSourceTypeName() + " plugin doesn't support schema update.");
+    return primaryKey;
   }
 
   @Override
@@ -1301,22 +1305,6 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       icebergModel.updateTableProperties(
           icebergModel.getTableIdentifier(metadataLocation), tableProperties);
     }
-  }
-
-  @Override
-  public boolean createOrUpdateView(
-      NamespaceKey tableSchemaPath, SchemaConfig schemaConfig, View view, ViewOptions viewOptions)
-      throws IOException {
-    throw new UnsupportedOperationException(
-        getRealSourceTypeName() + " plugin doesn't support view creation via CREATE VIEW.");
-  }
-
-  @Override
-  public void dropView(
-      NamespaceKey tableSchemaPath, ViewOptions viewOptions, SchemaConfig schemaConfig)
-      throws IOException {
-    throw new UnsupportedOperationException(
-        getRealSourceTypeName() + " plugin doesn't support view drop via DROP VIEW.");
   }
 
   @Override
@@ -2034,11 +2022,29 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
   public DatasetHandleListing listDatasetHandles(GetDatasetOption... options)
       throws ConnectorException {
 
+    Set<String> refreshDbsList = null;
+    for (GetDatasetOption option : options) {
+      if (option instanceof GetDatasetFilterOption
+          && ((GetDatasetFilterOption) option).getFolders() != null) {
+        refreshDbsList =
+            ((GetDatasetFilterOption) option)
+                .getFolders().stream()
+                    .map(
+                        filter -> {
+                          Preconditions.checkArgument(
+                              filter.size() == 2,
+                              "Filter only supports top level database under a source in Hive plugin.");
+                          return filter.get(1);
+                        })
+                    .collect(Collectors.toSet());
+      }
+    }
+
     try (ManagedHiveClient wrapper = getClient(SystemUser.SYSTEM_USERNAME)) {
       return new HiveDatasetHandleListing(
           wrapper.client(),
           this.getName(),
-          allowedDbsList,
+          refreshDbsList != null ? refreshDbsList : allowedDbsList,
           HiveMetadataUtils.isIgnoreAuthzErrors(options));
     } catch (TException e) {
       throw new ConnectorException(
@@ -2694,26 +2700,6 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
     try (Closeable ccls = HivePf4jPlugin.swapClassLoader()) {
       return new HiveFooterReaderTableFunction(fec, context, props, functionConfig);
     }
-  }
-
-  @Override
-  public boolean createFunction(
-      CatalogEntityKey key, SchemaConfig schemaConfig, UserDefinedFunction userDefinedFunction) {
-    throw new UnsupportedOperationException(
-        "Hive3 plugin doesn't support function creation via CREATE FUNCTION.");
-  }
-
-  @Override
-  public boolean updateFunction(
-      CatalogEntityKey key, SchemaConfig schemaConfig, UserDefinedFunction userDefinedFunction) {
-    throw new UnsupportedOperationException(
-        "Hive3 plugin doesn't support function update via CREATE OR REPLACE FUNCTION.");
-  }
-
-  @Override
-  public void dropFunction(CatalogEntityKey key, SchemaConfig schemaconfig) {
-    throw new UnsupportedOperationException(
-        "Hive3 plugin doesn't support function drop via DROP FUNCTION.");
   }
 
   /**

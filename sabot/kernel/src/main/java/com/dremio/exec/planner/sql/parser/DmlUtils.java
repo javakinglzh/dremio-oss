@@ -143,8 +143,7 @@ public final class DmlUtils {
     return new NamespaceKey(tableIdentifier.names);
   }
 
-  private static void addColumn(
-      SqlNodeList nodes, SqlParserPos pos, String name, SqlTypeName type) {
+  public static void addColumn(SqlNodeList nodes, SqlParserPos pos, String name, SqlTypeName type) {
     nodes.add(new SqlIdentifier(name, pos));
     nodes.add(new SqlDataTypeSpec(new SqlBasicTypeNameSpec(type, -1, null, pos), pos));
   }

@@ -51,8 +51,8 @@ public interface AccelerationListManager extends Service {
     public final String measures;
     public final String displayColumns;
     public final String externalReflection;
-    public final boolean arrow_cache;
     public final String refreshStatus;
+    public final String reflectionMode;
     public final String accelerationStatus;
     public final long recordCount;
     public final long currentFootprintBytes;
@@ -85,8 +85,8 @@ public interface AccelerationListManager extends Service {
         String measures,
         String displayColumns,
         String externalReflection,
-        boolean arrowCachingEnabled,
         String refreshStatus,
+        String reflectionMode,
         String accelerationStatus,
         long recordCount,
         long currentFootprintBytes,
@@ -117,8 +117,8 @@ public interface AccelerationListManager extends Service {
       this.measures = measures;
       this.displayColumns = displayColumns;
       this.externalReflection = externalReflection;
-      this.arrow_cache = arrowCachingEnabled;
       this.refreshStatus = refreshStatus;
+      this.reflectionMode = reflectionMode;
       this.accelerationStatus = accelerationStatus;
       this.recordCount = recordCount;
       this.currentFootprintBytes = currentFootprintBytes;
@@ -196,8 +196,6 @@ public interface AccelerationListManager extends Service {
         protoReflectionInfo.setMeasures(measures);
       }
 
-      protoReflectionInfo.setArrowCache(arrow_cache);
-
       if (refreshStatus != null) {
         protoReflectionInfo.setRefreshStatus(refreshStatus);
       }
@@ -205,6 +203,7 @@ public interface AccelerationListManager extends Service {
         protoReflectionInfo.setAccelerationStatus(accelerationStatus);
       }
 
+      protoReflectionInfo.setReflectionMode(reflectionMode);
       protoReflectionInfo.setRecordCount(recordCount);
       protoReflectionInfo.setCurrentFootprintBytes(currentFootprintBytes);
       protoReflectionInfo.setTotalFootprintBytes(totalFootprintBytes);
@@ -252,8 +251,8 @@ public interface AccelerationListManager extends Service {
           reflectionInfoProto.getMeasures(),
           reflectionInfoProto.getDisplayColumns(),
           reflectionInfoProto.getExternalReflection(),
-          reflectionInfoProto.getArrowCache(),
           reflectionInfoProto.getRefreshStatus(),
+          reflectionInfoProto.getReflectionMode(),
           reflectionInfoProto.getAccelerationStatus(),
           reflectionInfoProto.getRecordCount(),
           reflectionInfoProto.getCurrentFootprintBytes(),
@@ -333,7 +332,6 @@ public interface AccelerationListManager extends Service {
     public final String join_analysis;
     public final String state;
     public final String failure_msg;
-    public final String data_partitions;
     public final Timestamp last_refresh_from_pds;
     public final Timestamp last_refresh_finished;
     public final Long last_refresh_duration;
@@ -350,7 +348,6 @@ public interface AccelerationListManager extends Service {
         String joinAnalysis,
         String state,
         String failureMsg,
-        String dataPartitions,
         Timestamp lastRefreshFromPds,
         Timestamp lastRefreshFinished,
         Long lastRefreshDuration) {
@@ -365,7 +362,6 @@ public interface AccelerationListManager extends Service {
       this.join_analysis = joinAnalysis;
       this.state = state;
       this.failure_msg = failureMsg;
-      this.data_partitions = dataPartitions;
       this.last_refresh_from_pds = lastRefreshFromPds;
       this.last_refresh_finished = lastRefreshFinished;
       this.last_refresh_duration = lastRefreshDuration;
@@ -422,10 +418,6 @@ public interface AccelerationListManager extends Service {
         protoMaterializationInfo.setFailureMsg(failure_msg);
       }
 
-      if (data_partitions != null) {
-        protoMaterializationInfo.setDataPartitions(data_partitions);
-      }
-
       if (last_refresh_from_pds != null) {
         protoMaterializationInfo.setLastRefreshFromPds(
             com.google.protobuf.Timestamp.newBuilder().setSeconds(last_refresh_from_pds.getTime()));
@@ -457,7 +449,6 @@ public interface AccelerationListManager extends Service {
           materializationInfoProto.getJoinAnalysis(),
           materializationInfoProto.getState(),
           materializationInfoProto.getFailureMsg(),
-          materializationInfoProto.getDataPartitions(),
           new Timestamp(materializationInfoProto.getLastRefreshFromPds().getSeconds()),
           new Timestamp(materializationInfoProto.getLastRefreshFinished().getSeconds()),
           materializationInfoProto.getLastRefreshDurationMillis());

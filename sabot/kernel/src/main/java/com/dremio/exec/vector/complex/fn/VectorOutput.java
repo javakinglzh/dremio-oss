@@ -21,10 +21,17 @@ import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import java.io.IOException;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.Map;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ListWriter;
 import org.apache.arrow.vector.complex.writer.BaseWriter.StructWriter;
 import org.apache.arrow.vector.complex.writer.BigIntWriter;
 import org.apache.arrow.vector.complex.writer.DateMilliWriter;
+import org.apache.arrow.vector.complex.writer.DecimalWriter;
+import org.apache.arrow.vector.complex.writer.Float4Writer;
+import org.apache.arrow.vector.complex.writer.Float8Writer;
+import org.apache.arrow.vector.complex.writer.IntWriter;
 import org.apache.arrow.vector.complex.writer.TimeMilliWriter;
 import org.apache.arrow.vector.complex.writer.TimeStampMilliWriter;
 import org.apache.arrow.vector.complex.writer.VarBinaryWriter;
@@ -34,6 +41,8 @@ import org.apache.arrow.vector.holders.TimeMilliHolder;
 import org.apache.arrow.vector.holders.TimeStampMilliHolder;
 import org.apache.arrow.vector.holders.VarBinaryHolder;
 import org.apache.arrow.vector.holders.VarCharHolder;
+import org.apache.arrow.vector.types.pojo.ArrowType.Decimal;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.lang3.StringUtils;
 import org.joda.time.DateTime;
 import org.joda.time.LocalDateTime;
@@ -111,8 +120,34 @@ abstract class VectorOutput {
           writeInteger(checkNextToken(JsonToken.VALUE_STRING, JsonToken.VALUE_NUMBER_INT));
           checkNextToken(JsonToken.END_OBJECT);
           return true;
+        case ExtendedTypeName.LONG:
+          writeBigInt(checkNextToken(JsonToken.VALUE_STRING, JsonToken.VALUE_NUMBER_INT));
+          checkNextToken(JsonToken.END_OBJECT);
+          return true;
+        case ExtendedTypeName.DOUBLE:
+          writeDouble(
+              checkNextToken(
+                  JsonToken.VALUE_STRING,
+                  JsonToken.VALUE_NUMBER_FLOAT,
+                  JsonToken.VALUE_NUMBER_INT));
+          checkNextToken(JsonToken.END_OBJECT);
+          return true;
+        case ExtendedTypeName.FLOAT:
+          writeFloat(
+              checkNextToken(
+                  JsonToken.VALUE_STRING,
+                  JsonToken.VALUE_NUMBER_FLOAT,
+                  JsonToken.VALUE_NUMBER_INT));
+          checkNextToken(JsonToken.END_OBJECT);
+          return true;
         case ExtendedTypeName.DECIMAL:
-          throw new UnsupportedOperationException("Decimal type not supported");
+          writeDecimal(
+              checkNextToken(
+                  JsonToken.VALUE_STRING,
+                  JsonToken.VALUE_NUMBER_FLOAT,
+                  JsonToken.VALUE_NUMBER_INT));
+          checkNextToken(JsonToken.END_OBJECT);
+          return true;
       }
     }
     return false;
@@ -125,7 +160,7 @@ abstract class VectorOutput {
     if (parser.getCurrentToken() == JsonToken.START_OBJECT) {
       parser.nextToken();
       String parserValue = parser.getValueAsString();
-      if (!ExtendedTypeName.INTEGER.equals(parserValue)) {
+      if (!ExtendedTypeName.LONG.equals(parserValue)) {
         throw UserException.validationError()
             .message(String.format("Invalid token %s", parserValue))
             .build(LOG);
@@ -152,22 +187,34 @@ abstract class VectorOutput {
     }
   }
 
-  public boolean checkNextToken(final JsonToken expected) throws IOException {
-    return checkNextToken(expected, expected);
+  public boolean checkNextToken(
+      final JsonToken expected1, final JsonToken expected2, final JsonToken expected3)
+      throws IOException {
+    return checkToken(parser.nextToken(), expected1, expected2, expected3);
   }
 
-  public boolean checkCurrentToken(final JsonToken expected) throws IOException {
-    return checkCurrentToken(expected, expected);
+  public boolean checkCurrentToken(
+      final JsonToken expected1, final JsonToken expected2, final JsonToken expected3)
+      throws IOException {
+    return checkToken(parser.getCurrentToken(), expected1, expected2, expected3);
   }
 
   public boolean checkNextToken(final JsonToken expected1, final JsonToken expected2)
       throws IOException {
-    return checkToken(parser.nextToken(), expected1, expected2);
+    return checkToken(parser.nextToken(), expected1, expected2, expected2);
   }
 
   public boolean checkCurrentToken(final JsonToken expected1, final JsonToken expected2)
       throws IOException {
-    return checkToken(parser.getCurrentToken(), expected1, expected2);
+    return checkToken(parser.getCurrentToken(), expected1, expected2, expected2);
+  }
+
+  public boolean checkNextToken(final JsonToken expected1) throws IOException {
+    return checkToken(parser.nextToken(), expected1, expected1, expected1);
+  }
+
+  public boolean checkCurrentToken(final JsonToken expected1) throws IOException {
+    return checkToken(parser.getCurrentToken(), expected1, expected1, expected1);
   }
 
   boolean hasType() throws JsonParseException, IOException {
@@ -192,13 +239,15 @@ abstract class VectorOutput {
         parser.getCurrentLocation());
   }
 
-  public boolean checkToken(final JsonToken t, final JsonToken expected1, final JsonToken expected2)
+  public boolean checkToken(
+      final JsonToken t,
+      final JsonToken expected1,
+      final JsonToken expected2,
+      final JsonToken expected3)
       throws IOException {
     if (t == JsonToken.VALUE_NULL) {
       return true;
-    } else if (t == expected1) {
-      return false;
-    } else if (t == expected2) {
+    } else if (t == expected1 || t == expected2 || t == expected3) {
       return false;
     } else {
       throw new JsonParseException(
@@ -220,13 +269,26 @@ abstract class VectorOutput {
 
   public abstract void writeInteger(boolean isNull) throws IOException;
 
+  public abstract void writeBigInt(boolean isNull) throws IOException;
+
+  public abstract void writeDecimal(boolean isNull) throws IOException;
+
+  public abstract void writeDouble(boolean isNull) throws IOException;
+
+  public abstract void writeFloat(boolean isNull) throws IOException;
+
   static class ListVectorOutput extends VectorOutput {
     private ListWriter writer;
     private boolean enforceValidJsonDateFormat;
+    Map<String, Field> fieldDecimalMap;
 
-    public ListVectorOutput(WorkingBuffer work, boolean enforceValidJsonDateFormat) {
+    public ListVectorOutput(
+        WorkingBuffer work,
+        boolean enforceValidJsonDateFormat,
+        Map<String, Field> fieldDecimalMap) {
       super(work, enforceValidJsonDateFormat);
       this.enforceValidJsonDateFormat = enforceValidJsonDateFormat;
+      this.fieldDecimalMap = fieldDecimalMap;
     }
 
     public boolean run(ListWriter writer) throws IOException {
@@ -310,9 +372,41 @@ abstract class VectorOutput {
 
     @Override
     public void writeInteger(boolean isNull) throws IOException {
+      IntWriter intWriter = writer.integer();
+      if (!isNull) {
+        intWriter.writeInt(Integer.parseInt(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeBigInt(boolean isNull) throws IOException {
       BigIntWriter intWriter = writer.bigInt();
       if (!isNull) {
         intWriter.writeBigInt(Long.parseLong(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeDecimal(boolean isNull) throws IOException {
+      DecimalWriter decimalWriter = writer.decimal();
+      if (!isNull) {
+        decimalWriter.writeDecimal(parser.getDecimalValue());
+      }
+    }
+
+    @Override
+    public void writeDouble(boolean isNull) throws IOException {
+      Float8Writer float8Writer = writer.float8();
+      if (!isNull) {
+        float8Writer.writeFloat8(Double.parseDouble(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeFloat(boolean isNull) throws IOException {
+      Float4Writer float4Writer = writer.float4();
+      if (!isNull) {
+        float4Writer.writeFloat4(Float.parseFloat(parser.getValueAsString()));
       }
     }
   }
@@ -322,10 +416,15 @@ abstract class VectorOutput {
     private StructWriter writer;
     private String fieldName;
     boolean enforceValidJsonDateFormat;
+    Map<String, Field> fieldDecimalMap;
 
-    public MapVectorOutput(WorkingBuffer work, boolean enforceValidJsonDateFormat) {
+    public MapVectorOutput(
+        WorkingBuffer work,
+        boolean enforceValidJsonDateFormat,
+        Map<String, Field> fieldDecimalMap) {
       super(work, enforceValidJsonDateFormat);
       this.enforceValidJsonDateFormat = enforceValidJsonDateFormat;
+      this.fieldDecimalMap = fieldDecimalMap;
     }
 
     public boolean run(StructWriter writer, String fieldName) throws IOException {
@@ -437,9 +536,52 @@ abstract class VectorOutput {
 
     @Override
     public void writeInteger(boolean isNull) throws IOException {
+      IntWriter intWriter = writer.integer(fieldName);
+      if (!isNull) {
+        intWriter.writeInt(Integer.parseInt(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeBigInt(boolean isNull) throws IOException {
       BigIntWriter intWriter = writer.bigInt(fieldName);
       if (!isNull) {
         intWriter.writeBigInt(Long.parseLong(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeDecimal(boolean isNull) throws IOException {
+      if (!isNull) {
+        BigDecimal value = parser.getDecimalValue();
+        Field type = fieldDecimalMap.get(fieldName);
+        DecimalWriter decimalWriter;
+        if (type != null) {
+          Decimal decimalType = (Decimal) type.getType();
+          decimalWriter =
+              writer.decimal(fieldName, decimalType.getScale(), decimalType.getPrecision());
+          // scale should be the same as the scale of the vector
+          value = value.setScale(decimalType.getScale(), RoundingMode.HALF_UP);
+        } else {
+          decimalWriter = writer.decimal(fieldName);
+        }
+        decimalWriter.writeDecimal(value);
+      }
+    }
+
+    @Override
+    public void writeDouble(boolean isNull) throws IOException {
+      Float8Writer float8Writer = writer.float8(fieldName);
+      if (!isNull) {
+        float8Writer.writeFloat8(Double.parseDouble(parser.getValueAsString()));
+      }
+    }
+
+    @Override
+    public void writeFloat(boolean isNull) throws IOException {
+      Float4Writer float4Writer = writer.float4(fieldName);
+      if (!isNull) {
+        float4Writer.writeFloat4(Float.parseFloat(parser.getValueAsString()));
       }
     }
   }

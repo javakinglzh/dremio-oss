@@ -16,10 +16,11 @@ import { isCME } from "dyn-load/utils/versionUtils";
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { browserHistory } from "react-router";
 export default function (input) {
   Object.assign(input.prototype, {
     getSpaceSettingsButtons() {
-      const { location } = this.context;
+      const location = browserHistory.getCurrentLocation();
       const { entity } = this.props;
       const buttons = [];
 
@@ -48,7 +49,7 @@ export default function (input) {
     },
 
     getSourceSettingsButtons() {
-      const { location } = this.context;
+      const location = browserHistory.getCurrentLocation();
       const { entity, isVersionedSource } = this.props;
       const buttons = [];
 

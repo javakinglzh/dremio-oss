@@ -62,8 +62,10 @@ public abstract class VacuumTablePruleBase extends Prule {
               internalStoragePlugin,
               storagePluginId,
               tableMetadata.getUser(),
+              vacuumTableRel.getCreateTableEntry().getUserId(),
               vacuumTableRel.getCreateTableEntry(),
-              icebergTable.location());
+              icebergTable.location(),
+              vacuumTableRel.getTable().getQualifiedName());
     } else {
       planBuilder =
           new VacuumTableExpireSnapshotsPlanGenerator(
@@ -75,7 +77,10 @@ public abstract class VacuumTablePruleBase extends Prule {
               internalStoragePlugin,
               storagePluginId,
               tableMetadata.getUser(),
-              icebergTable.location());
+              vacuumTableRel.getCreateTableEntry().getUserId(),
+              icebergTable.location(),
+              context,
+              vacuumTableRel.getTable().getQualifiedName());
     }
 
     return planBuilder.buildPlan();

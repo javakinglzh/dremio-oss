@@ -192,7 +192,7 @@ public class TestDatasetTool {
   private DatasetTool buildDatasetTool(DatasetVersionMutator datasetVersionMutator) {
     final Catalog catalog = mock(Catalog.class);
     when(datasetVersionMutator.getCatalog()).thenReturn(catalog);
-    when(catalog.getSource(any())).thenReturn(mock(StoragePlugin.class));
+    when(catalog.getSource(any(String.class))).thenReturn(mock(StoragePlugin.class));
 
     JobsService jobsService = mock(JobsService.class);
     when(jobsService.searchJobs(any())).thenReturn(Collections.emptyList());

@@ -29,9 +29,8 @@ import io.netty.handler.codec.socksx.v5.Socks5CommandRequest;
 import io.netty.handler.codec.socksx.v5.Socks5InitialRequest;
 import io.netty.handler.codec.socksx.v5.Socks5Message;
 import io.netty.handler.codec.socksx.v5.Socks5PasswordAuthRequest;
-import io.netty.util.internal.ObjectUtil;
-import io.netty.util.internal.StringUtil;
 import java.util.List;
+import java.util.Objects;
 import java.util.RandomAccess;
 
 /** Encodes a client-side {@link Socks5Message} into a {@link ByteBuf}. */
@@ -48,7 +47,7 @@ public class DremioSocks5ClientEncoder extends MessageToByteEncoder<Socks5Messag
 
   /** Creates a new instance with the specified {@link Socks5AddressEncoder}. */
   public DremioSocks5ClientEncoder(Socks5AddressEncoder addressEncoder) {
-    this.addressEncoder = ObjectUtil.checkNotNull(addressEncoder, "addressEncoder");
+    this.addressEncoder = Objects.requireNonNull(addressEncoder, "addressEncoder");
   }
 
   /** Returns the {@link Socks5AddressEncoder} of this encoder. */
@@ -66,7 +65,8 @@ public class DremioSocks5ClientEncoder extends MessageToByteEncoder<Socks5Messag
     } else if (msg instanceof Socks5CommandRequest) {
       encodeCommandRequest((Socks5CommandRequest) msg, out);
     } else {
-      throw new EncoderException("unsupported message type: " + StringUtil.simpleClassName(msg));
+      throw new EncoderException(
+          "unsupported message type: " + (msg == null ? "null" : msg.getClass()));
     }
   }
 

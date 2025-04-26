@@ -17,7 +17,6 @@ package com.dremio.service.jobs;
 
 import static com.dremio.dac.options.UIOptions.JOBS_UI_CHECK;
 import static com.dremio.options.OptionValue.OptionType.SYSTEM;
-import static com.dremio.service.reflection.ReflectionOptions.LOAD_MATERIALIZATION_JOB_ENABLED;
 import static com.google.common.collect.Iterables.isEmpty;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -315,11 +314,7 @@ public class TestReflectionJob extends BaseTestReflection {
     Iterable<JobSummary> jobSummaries = searchJobs(reflectionId.getId(), DEFAULT_USERNAME);
     jobSummaries.forEach(
         jobSummary -> assertTrue(jobSummary.getSql().contains(reflectionId.getId())));
-    if (getOptionManager().getOption(LOAD_MATERIALIZATION_JOB_ENABLED)) {
-      assertEquals(2, Iterables.size(jobSummaries));
-    } else {
-      assertEquals(1, Iterables.size(jobSummaries));
-    }
+    assertEquals(1, Iterables.size(jobSummaries));
   }
 
   @Test

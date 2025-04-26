@@ -40,7 +40,7 @@ public class IcebergGlueModel extends IcebergBaseModel {
       String queryUserName,
       OperatorContext operatorContext,
       SupportsIcebergMutablePlugin plugin) {
-    super(namespace, plugin.getFsConfCopy(), fileIO, operatorContext, null, plugin);
+    super(namespace, plugin.getFsConfCopy(), fileIO, operatorContext, null);
     this.queryUserName = queryUserName;
     this.plugin = plugin;
     this.tableName = tableName;
@@ -50,7 +50,7 @@ public class IcebergGlueModel extends IcebergBaseModel {
   protected IcebergCommand getIcebergCommand(
       IcebergTableIdentifier tableIdentifier, @Nullable IcebergCommitOrigin commitOrigin) {
     TableOperations tableOperations =
-        plugin.createIcebergTableOperations(fileIO, queryUserName, tableIdentifier);
+        plugin.createIcebergTableOperations(fileIO, tableIdentifier, queryUserName, null);
     return new IcebergGlueCommand(
         configuration,
         ((IcebergGlueTableIdentifier) tableIdentifier).getTableFolder(),
@@ -64,7 +64,7 @@ public class IcebergGlueModel extends IcebergBaseModel {
       String tableLocation,
       @Nullable IcebergCommitOrigin commitOrigin) {
     TableOperations tableOperations =
-        plugin.createIcebergTableOperations(fileIO, queryUserName, tableIdentifier);
+        plugin.createIcebergTableOperations(fileIO, tableIdentifier, queryUserName, null);
     return new IcebergGlueCommand(configuration, tableLocation, tableOperations, currentQueryId());
   }
 

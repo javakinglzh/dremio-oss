@@ -93,6 +93,14 @@ public class IncrementalUpdateServiceUtils {
     public String getFullRefreshReason() {
       return fullRefreshReason;
     }
+
+    public boolean getFileMtimeBasedUpdate() {
+      return refreshMethod == RefreshMethod.INCREMENTAL && refreshField == null && !snapshotBased;
+    }
+
+    public boolean getFieldBasedUpdate() {
+      return refreshMethod == RefreshMethod.INCREMENTAL && refreshField != null && !snapshotBased;
+    }
   }
 
   /** compute acceleration settings from refresh details */
@@ -118,9 +126,11 @@ public class IncrementalUpdateServiceUtils {
       incremental = false;
       fullRefreshReason.value =
           "Cannot do incremental update because the reflection has dynamic function(s): "
-              + nonIncrementalRefreshFunctions.stream()
-                  .map(SqlOperator::getName)
-                  .collect(Collectors.joining(", "));
+              + String.join(
+                  ", ",
+                  nonIncrementalRefreshFunctions.stream()
+                      .map(SqlOperator::getName)
+                      .collect(Collectors.toSet()));
     } else {
       incremental =
           getIncremental(
@@ -136,8 +146,18 @@ public class IncrementalUpdateServiceUtils {
       return new RefreshDetails(
           RefreshMethod.FULL, null, false, null, null, fullRefreshReason.value);
     } else {
-      return findIncrementalRefreshDetails(
-          normalizedPlan, reflectionSettings, service, optionManager);
+      RefreshDetails refreshDetails =
+          findIncrementalRefreshDetails(normalizedPlan, reflectionSettings, service, optionManager);
+
+      IncrementalChecker defaultChecker =
+          new IncrementalChecker(reflectionSettings, service, optionManager);
+      IncrementalChecker checker =
+          sabotConfig.getInstance(
+              INCREMENTAL_CHECKER, IncrementalChecker.class, defaultChecker, defaultChecker);
+
+      refreshDetails =
+          checker.performFinalChecks(refreshDetails, normalizedPlan, fullRefreshReason);
+      return refreshDetails;
     }
   }
 

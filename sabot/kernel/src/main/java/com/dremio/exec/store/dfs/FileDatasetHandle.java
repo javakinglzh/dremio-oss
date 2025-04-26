@@ -112,7 +112,7 @@ public interface FileDatasetHandle extends DatasetTypeHandle {
     try {
       fileUpdateKey =
           LegacyProtobufSerializer.parseFrom(
-              FileProtobuf.FileUpdateKey.PARSER, MetadataProtoUtils.toProtobuf(readSignature));
+              FileProtobuf.FileUpdateKey.parser(), MetadataProtoUtils.toProtobuf(readSignature));
     } catch (InvalidProtocolBufferException e) {
       // Wrap protobuf exception for consistency
       throw new RuntimeException(e);

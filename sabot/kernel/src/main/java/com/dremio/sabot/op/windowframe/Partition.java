@@ -29,10 +29,7 @@ public class Partition {
       length; // size of this partition (if partial is true, then this is a partial length of the
   // partition)
   private long remaining; // remaining non-processed rows in this partition
-
   private long peers; // remaining non-processed peers in current frame
-
-  // we keep these attributes public because the generated code needs to access them
   public int row_number = 1;
   public int rank;
   public int dense_rank;
@@ -40,6 +37,7 @@ public class Partition {
   public double cume_dist;
   public int firstRowInPartition;
   public int currentRowInPartition;
+  public int rowsInSkipedBatch;
 
   /**
    * @return number of rows not yet aggregated in this partition
@@ -130,5 +128,29 @@ public class Partition {
   public String toString() {
     return String.format(
         "{length: %d, remaining partition: %d, remaining peers: %d}", length, remaining, peers);
+  }
+
+  /**
+   * Calculates the index of a row for LAG in previous batch. The LAG function retrieves data from a
+   * previous row in the same result set.
+   *
+   * @param offset The number of rows to look back from the current row.
+   * @param recordCount The total number of records in the current batch.
+   * @return The calculated index for the LAG operation.
+   */
+  public int lagIndex(int offset, int recordCount) {
+    return (int) (recordCount + currentRowInPartition + rowsInSkipedBatch - offset);
+  }
+
+  /**
+   * Calculates the index of a row in the next batch within this partition for a LEAD operation. The
+   * LEAD function retrieves data from a subsequent row in the same result set.
+   *
+   * @param offset The number of rows to look forward from the current row.
+   * @param recordCount The total number of records in the current batch.
+   * @return The calculated index for the LEAD operation.
+   */
+  public int leadIndex(int offset, int recordCount) {
+    return (int) (offset + currentRowInPartition - rowsInSkipedBatch - recordCount);
   }
 }

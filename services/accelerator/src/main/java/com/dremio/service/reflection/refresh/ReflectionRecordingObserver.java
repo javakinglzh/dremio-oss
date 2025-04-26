@@ -29,6 +29,7 @@ import com.dremio.exec.proto.GeneralRPCProtos.Ack;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
 import com.dremio.exec.proto.UserBitShared.FragmentRpcSizeStats;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
 import com.dremio.exec.proto.UserBitShared.QueryProfile;
 import com.dremio.exec.record.BatchSchema;
@@ -100,8 +101,8 @@ public class ReflectionRecordingObserver implements AttemptObserver {
   }
 
   @Override
-  public void planCacheUsed(int count) {
-    calls.add(observer -> observer.planCacheUsed(count));
+  public void planStepLogging(String phaseName, String text, long millisTaken) {
+    calls.add(observer -> observer.planStepLogging(phaseName, text, millisTaken));
   }
 
   @Override
@@ -160,8 +161,8 @@ public class ReflectionRecordingObserver implements AttemptObserver {
   }
 
   @Override
-  public void planText(String text, long millisTaken) {
-    calls.add(observer -> observer.planText(text, millisTaken));
+  public void planFinalPhysical(String text, long millisTaken, List<PlannerPhaseRulesStats> stats) {
+    calls.add(observer -> observer.planFinalPhysical(text, millisTaken, stats));
   }
 
   @Override
@@ -197,6 +198,11 @@ public class ReflectionRecordingObserver implements AttemptObserver {
   @Override
   public void planSubstituted(long millisTaken) {
     calls.add(observer -> observer.planSubstituted(millisTaken));
+  }
+
+  @Override
+  public void planConsidered(LayoutMaterializedViewProfile profile, RelWithInfo target) {
+    calls.add(observer -> observer.planConsidered(profile, target));
   }
 
   @Override
@@ -245,6 +251,21 @@ public class ReflectionRecordingObserver implements AttemptObserver {
   @Override
   public void attemptCompletion(UserResult result) {
     calls.add(observer -> observer.attemptCompletion(result));
+  }
+
+  @Override
+  public void putExecutorProfile(String nodeEndpoint) {
+    calls.add(observer -> observer.putExecutorProfile(nodeEndpoint));
+  }
+
+  @Override
+  public void removeExecutorProfile(String nodeEndpoint) {
+    calls.add(observer -> observer.removeExecutorProfile(nodeEndpoint));
+  }
+
+  @Override
+  public void queryClosed() {
+    calls.add(AttemptObserver::queryClosed);
   }
 
   @Override
@@ -320,6 +341,11 @@ public class ReflectionRecordingObserver implements AttemptObserver {
   @Override
   public void putProfileFailed() {
     calls.add(observer -> observer.putProfileFailed());
+  }
+
+  @Override
+  public void putProfileUpdateComplete() {
+    calls.add(observer -> observer.putProfileUpdateComplete());
   }
 
   public void replay(AttemptObserver observer) {

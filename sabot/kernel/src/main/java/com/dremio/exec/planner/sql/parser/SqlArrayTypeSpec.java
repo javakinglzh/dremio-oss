@@ -16,7 +16,6 @@
 package com.dremio.exec.planner.sql.parser;
 
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.parser.SqlParserPos;
 import org.apache.calcite.sql.type.SqlTypeName;
@@ -34,12 +33,6 @@ public final class SqlArrayTypeSpec extends SqlTypeNameSpec implements Validatab
   public SqlArrayTypeSpec(SqlParserPos pos, SqlComplexDataTypeSpec spec) {
     super(SqlTypeName.ARRAY.name(), pos);
     this.spec = spec;
-  }
-
-  @Override
-  public RelDataType deriveType(RelDataTypeFactory typeFactory) {
-    RelDataType type = spec.deriveType(new DremioSqlValidator(typeFactory));
-    return typeFactory.createArrayType(type, -1);
   }
 
   @Override

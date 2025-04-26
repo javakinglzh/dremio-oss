@@ -246,9 +246,9 @@ public class HiveUtilities {
         return MinorType.FLOAT8;
       case FLOAT:
         return MinorType.FLOAT4;
-        // TODO (DRILL-2470)
-        // Byte and short (tinyint and smallint in SQL types) are currently read as integers
-        // as these smaller integer types are not fully supported in Dremio today.
+      // TODO (DRILL-2470)
+      // Byte and short (tinyint and smallint in SQL types) are currently read as integers
+      // as these smaller integer types are not fully supported in Dremio today.
       case SHORT:
       case BYTE:
       case INT:

@@ -15,18 +15,32 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createExpireSnapshotLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
+
+import com.dremio.common.logging.StructuredLogger;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.catalog.VacuumOptions;
 import com.dremio.exec.physical.base.OpProps;
+import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf;
 import com.dremio.sabot.exec.store.iceberg.proto.IcebergProtobuf.IcebergDatasetSplitXAttr;
+import java.io.IOException;
+import java.util.List;
+import java.util.stream.Collectors;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableMetadataParser;
 
 public class SingleTableIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsReader {
 
+  private static final StructuredLogger vacuumLogger = getVacuumLogger();
+
+  private final String queryId;
   private final IcebergProtobuf.IcebergDatasetSplitXAttr splitXAttr;
   private final String schemeVariate;
+  private final String userId;
+  private final List<String> dataset;
 
   public SingleTableIcebergExpirySnapshotsReader(
       OperatorContext context,
@@ -34,17 +48,23 @@ public class SingleTableIcebergExpirySnapshotsReader extends IcebergExpirySnapsh
       SupportsIcebergMutablePlugin icebergMutablePlugin,
       OpProps props,
       SnapshotsScanOptions snapshotsScanOptions,
-      String schemeVariate) {
+      String schemeVariate,
+      String userId,
+      List<String> dataset) {
     super(context, icebergMutablePlugin, props, snapshotsScanOptions);
+    this.queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
     this.splitXAttr = splitXAttr;
     this.schemeVariate = schemeVariate;
+    this.userId = userId;
+    this.dataset = dataset;
   }
 
   @Override
   protected void setupNextExpiryAction() {
-    super.setupFsIfNecessary(splitXAttr.getPath());
+    String metadataPath = splitXAttr.getPath();
+    super.setupFsIfNecessary(metadataPath, dataset);
 
-    TableMetadata tableMetadata = TableMetadataParser.read(io, splitXAttr.getPath());
+    TableMetadata tableMetadata = TableMetadataParser.read(io, metadataPath);
     boolean commitExpiry = true;
     boolean isExpireSnapshots = true;
     boolean isRemoveOrphanFiles = false;
@@ -71,13 +91,46 @@ public class SingleTableIcebergExpirySnapshotsReader extends IcebergExpirySnapsh
             context,
             options,
             tableMetadata,
-            splitXAttr.getTableName(),
+            splitXAttr.getTableName() != null
+                ? splitXAttr.getTableName()
+                : String.join(".", dataset),
             splitXAttr.getDbName(),
             null,
             io,
             commitExpiry,
             schemeVariate,
-            fs.getScheme());
+            fs.getScheme(),
+            userId);
     noMoreActions = true;
+
+    if (commitExpiry) {
+      createVacuumExpiryLog(currentExpiryAction, snapshotsScanOptions, metadataPath);
+    }
+  }
+
+  private void createVacuumExpiryLog(
+      IcebergExpiryAction currentExpiryAction,
+      SnapshotsScanOptions snapshotsScanOptions,
+      String metadataPath) {
+    vacuumLogger.info(
+        createExpireSnapshotLog(
+            queryId,
+            currentExpiryAction.getTableName(),
+            metadataPath,
+            snapshotsScanOptions,
+            currentExpiryAction.getExpiredSnapshots().stream()
+                .map(snapshotEntry -> String.valueOf(snapshotEntry.getSnapshotId()))
+                .collect(Collectors.toList())),
+        "");
+  }
+
+  @Override
+  protected FileSystem getFsFromPlugin(String filePath, List<String> dataset) throws IOException {
+    return icebergMutablePlugin.createFS(
+        SupportsFsCreation.builder()
+            .filePath(filePath)
+            .userName(props.getUserName())
+            .operatorContext(context)
+            .dataset(dataset));
   }
 }

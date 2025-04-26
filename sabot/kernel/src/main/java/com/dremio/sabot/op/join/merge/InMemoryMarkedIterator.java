@@ -241,7 +241,8 @@ class InMemoryMarkedIterator implements MarkedAsyncIterator {
         throw new UnsupportedOperationException(
             "Record batch data can't be created based on a hyper batch.");
       }
-      TransferPair tp = v.getValueVector().getTransferPair(allocator);
+      ValueVector valueVector = v.getValueVector();
+      TransferPair tp = valueVector.getTransferPair(valueVector.getField(), allocator);
       tp.transfer();
       vectors.add(tp.getTo());
     }

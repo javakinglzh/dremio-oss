@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.dataplane.store;
 
+import static com.dremio.exec.ExecConstants.FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AWS_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AZURE_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_GCS_STORAGE_ENABLED;
@@ -37,6 +38,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.NessieAuthType;
 import com.dremio.exec.catalog.conf.SecretRef;
+import com.dremio.exec.catalog.conf.StorageProviderType;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.InvalidNessieApiVersionException;
 import com.dremio.exec.store.InvalidSpecificationVersionException;
@@ -48,7 +50,6 @@ import com.dremio.nessiemetadata.cache.NessieDataplaneCaffeineCacheProvider;
 import com.dremio.options.OptionManager;
 import com.dremio.plugins.NessieClient;
 import com.dremio.plugins.UsernameAwareNessieClientImpl;
-import com.dremio.plugins.dataplane.store.AbstractDataplanePluginConfig.StorageProviderType;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.users.UserService;
 import java.net.URI;
@@ -63,6 +64,9 @@ import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.projectnessie.client.api.NessieApiV2;
 import org.projectnessie.client.http.NessieApiCompatibilityException;
+import org.projectnessie.error.ErrorCode;
+import org.projectnessie.error.ImmutableNessieError;
+import org.projectnessie.error.NessieForbiddenException;
 import org.projectnessie.model.NessieConfiguration;
 
 @ExtendWith(MockitoExtension.class)
@@ -94,6 +98,9 @@ public class TestNessiePlugin {
     doReturn(BYPASS_DATAPLANE_CACHE.getDefault().getBoolVal())
         .when(optionManager)
         .getOption(BYPASS_DATAPLANE_CACHE);
+    doReturn(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS.getDefault().getBoolVal())
+        .when(optionManager)
+        .getOption(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS);
     when(nessiePluginConfig.getNessieEndpoint()).thenReturn("http://localhost:19120/api/v2");
     when(nessiePluginConfig.getNessieAuthType()).thenReturn(NessieAuthType.NONE);
     when(sabotContext.isCoordinator()).thenReturn(true);
@@ -272,6 +279,24 @@ public class TestNessiePlugin {
     }
 
     @Test
+    public void testNessieForbiddenException() {
+      String message = "FORBIDDEN: not allowed";
+      NessieForbiddenException nessieForbiddenException =
+          new NessieForbiddenException(
+              ImmutableNessieError.builder()
+                  .status(403)
+                  .reason(message)
+                  .message(message)
+                  .errorCode(ErrorCode.UNKNOWN)
+                  .build());
+      when(nessieClient.getDefaultBranch()).thenThrow(nessieForbiddenException);
+      SourceState sourceState = nessiePluginInCoordinator.getState(nessieClient, "", null);
+      assertThat(sourceState.getStatus()).isEqualTo(SourceState.SourceStatus.bad);
+      assertThat(sourceState.getSuggestedUserAction())
+          .isEqualTo(nessieForbiddenException.getMessage());
+    }
+
+    @Test
     public void testInvalidLowerNessieSpecificationVersion() {
       setupNessieSpecVersion("1.0.0");
       assertThatThrownBy(
@@ -338,6 +363,12 @@ public class TestNessiePlugin {
       assertThatThrownBy(() -> nessiePluginInCoordinator.validatePluginEnabled(sabotContext))
           .isInstanceOf(UserException.class)
           .hasMessageContaining("Nessie Source is not supported");
+    }
+
+    @Test
+    public void testValidatePluginValidationExecutor() {
+      when(sabotContext.isExecutor()).thenReturn(true);
+      assertDoesNotThrow(() -> nessiePluginInExecutor.validatePluginEnabled(sabotContext));
     }
 
     @Test

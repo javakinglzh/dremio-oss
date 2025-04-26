@@ -24,8 +24,10 @@ import static java.util.stream.Collectors.toList;
 
 import com.dremio.catalog.exception.SourceDoesNotExistException;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.common.expression.CaseExpression;
 import com.dremio.common.expression.CastExpression;
 import com.dremio.common.expression.FunctionCall;
+import com.dremio.common.expression.IfExpression;
 import com.dremio.common.expression.LogicalExpression;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.utils.PathUtils;
@@ -75,6 +77,7 @@ import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePlugin;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePluginConfig;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
 import com.dremio.exec.store.metadatarefresh.RefreshExecTableMetadata;
 import com.dremio.exec.store.metadatarefresh.dirlisting.DirListingScanPrel;
@@ -115,6 +118,14 @@ import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.rex.RexCall;
+import org.apache.calcite.rex.RexInputRef;
+import org.apache.calcite.rex.RexLiteral;
+import org.apache.calcite.rex.RexNode;
+import org.apache.calcite.sql.SqlKind;
+import org.apache.calcite.sql.SqlOperator;
+import org.apache.calcite.sql.fun.SqlCaseOperator;
+import org.apache.calcite.sql.type.SqlTypeName;
 
 public abstract class CopyIntoTablePlanBuilderBase {
   private static final org.slf4j.Logger logger =
@@ -134,6 +145,9 @@ public abstract class CopyIntoTablePlanBuilderBase {
   private final String userName;
   private Path datasetPath;
   private final SupportsInternalIcebergTable plugin;
+  private final RexBuilder rexBuilder;
+  private final SqlOperator sqlEqualsOperator;
+  private final RexLiteral nullLiteral;
   private boolean isFileDataset = false;
   protected final FileConfig format;
 
@@ -232,14 +246,38 @@ public abstract class CopyIntoTablePlanBuilderBase {
                   false));
     }
 
+    this.rexBuilder = cluster.getRexBuilder();
+    this.sqlEqualsOperator =
+        rexBuilder.getOpTab().getOperatorList().stream()
+            .filter(op -> op.getKind().equals(SqlKind.EQUALS))
+            .findFirst()
+            .get();
+    this.nullLiteral =
+        rexBuilder.makeNullLiteral(rexBuilder.getTypeFactory().createSqlType(SqlTypeName.NULL));
+
     this.transformationProperties =
         getTransformationProperties(
             context,
             copyIntoTableContext,
             relNode,
             transformationsRowType,
-            copyIntoTableContext.getMappings(),
-            cluster.getRexBuilder());
+            copyIntoTableContext.getMappings());
+
+    ensureNoUnsupportedFormatProperties();
+  }
+
+  protected void ensureNoUnsupportedFormatProperties() {
+    if (this.transformationProperties != null) {
+      if (copyIntoTableContext.getFormatOptions().keySet().stream()
+          .anyMatch(
+              o -> CopyIntoTableContext.FORBIDDEN_FORMAT_OPTIONS_FOR_TRANSFORMATIONS.contains(o))) {
+        throw UserException.unsupportedError()
+            .message(
+                CopyIntoTableContext.FORBIDDEN_FORMAT_OPTIONS_FOR_TRANSFORMATIONS
+                    + " are unsupported when transformations are defined in a COPY INTO statement.")
+            .buildSilently();
+      }
+    }
   }
 
   /**
@@ -252,7 +290,6 @@ public abstract class CopyIntoTablePlanBuilderBase {
    * @param relNode The {@link RelNode} representing the relational expression.
    * @param transformationRowType The {@link RelDataType} representing the transformation row type.
    * @param mappings The list of column mappings.
-   * @param rexBuilder The {@link RexBuilder} for creating expressions.
    * @return The {@link CopyIntoTransformationProperties} containing the transformation properties,
    *     or {@code null} if transformations are not applicable.
    * @throws UserException If transformations are not supported, if the file format is not Parquet,
@@ -263,8 +300,7 @@ public abstract class CopyIntoTablePlanBuilderBase {
       CopyIntoTableContext copyIntoTableContext,
       RelNode relNode,
       RelDataType transformationRowType,
-      List<String> mappings,
-      RexBuilder rexBuilder) {
+      List<String> mappings) {
 
     if (copyIntoTableContext.getSerializedTransformationProperties() != null) {
       if (!context.getOptions().getOption(ExecConstants.COPY_INTO_ENABLE_TRANSFORMATIONS)) {
@@ -282,21 +318,18 @@ public abstract class CopyIntoTablePlanBuilderBase {
       return null;
     }
 
-    if (!context.getOptions().getOption(ExecConstants.COPY_INTO_ENABLE_TRANSFORMATIONS)) {
+    if (!((QueryContext) context)
+        .getSession()
+        .getOptions()
+        .getOption(ExecConstants.COPY_INTO_ENABLE_TRANSFORMATIONS)) {
       throw UserException.unsupportedError()
           .message("Copy Into with transformations is not supported")
           .buildSilently();
     }
 
-    if (format.getType() != FileType.PARQUET) {
+    if (format.getType() != FileType.PARQUET && format.getType() != FileType.TEXT) {
       throw UserException.unsupportedError()
-          .message("Copy Into transformations is only supported for Parquet inputs")
-          .buildSilently();
-    }
-
-    if (copyIntoTableContext.getCopyOptions().get(ON_ERROR) == CONTINUE) {
-      throw UserException.unsupportedError()
-          .message("Copy Into transformations with ON_ERROR 'continue' is not supported")
+          .message("Copy Into transformations is only supported for Parquet and text inputs")
           .buildSilently();
     }
 
@@ -310,6 +343,17 @@ public abstract class CopyIntoTablePlanBuilderBase {
               "Incorrect transformation mapping definition. Some column names are not found in target table schema.")
           .buildSilently();
     }
+
+    // check if wrapping will be needed for EMPTY_AS_NULL
+    boolean isCsvEmptyAsNull =
+        FileType.TEXT.equals(copyIntoTableContext.getFileFormat())
+            && (boolean)
+                copyIntoTableContext
+                    .getFormatOptions()
+                    .getOrDefault(
+                        CopyIntoTableContext.FormatOption.EMPTY_AS_NULL,
+                        new ExtendedFormatOptions().getEmptyAsNull());
+
     // convert relation expressions to logical expressions
     List<LogicalExpression> logicalExpressions =
         ((LogicalProject) relNode)
@@ -320,7 +364,7 @@ public abstract class CopyIntoTablePlanBuilderBase {
                             new ParseContext(context.getPlannerSettings()),
                             transformationRowType,
                             rexBuilder,
-                            rexNode))
+                            isCsvEmptyAsNull ? wrapInputRefIntoEmptyAsNull(rexNode) : rexNode))
                 .collect(toList());
 
     // mapping was not provided, we should map the outcome of the transformations to the first n
@@ -353,6 +397,29 @@ public abstract class CopyIntoTablePlanBuilderBase {
     return props;
   }
 
+  // Rebuilds the RexNode tree by swapping RexInputRef's with a wrapping CASE RexCall:
+  // e.g. $4 -> CASE(=($4, '':VARCHAR(0)), null:NULL, $4)
+  // so that empty string values are considered NULLs
+  private RexNode wrapInputRefIntoEmptyAsNull(RexNode node) {
+    if (node instanceof RexInputRef) {
+      RexInputRef inputRef = (RexInputRef) node;
+      List<RexNode> caseOperands =
+          ImmutableList.of(
+              rexBuilder.makeCall(sqlEqualsOperator, inputRef, rexBuilder.makeLiteral("")),
+              nullLiteral,
+              inputRef);
+      return rexBuilder.makeCall(inputRef.getType(), SqlCaseOperator.INSTANCE, caseOperands);
+    } else if (node instanceof RexCall) {
+      RexCall call = (RexCall) node;
+      return rexBuilder.makeCall(
+          call.getType(),
+          call.getOperator(),
+          call.getOperands().stream().map(op -> wrapInputRefIntoEmptyAsNull(op)).collect(toList()));
+    } else {
+      return node;
+    }
+  }
+
   /**
    * Extracts the source column names from a list of logical expressions.
    *
@@ -376,6 +443,22 @@ public abstract class CopyIntoTablePlanBuilderBase {
         result.addAll(
             getTransformationSourceColNames(
                 ImmutableList.of(((CastExpression) logicalExpression).getInput())));
+      } else if (logicalExpression instanceof IfExpression) {
+        IfExpression ifExpression = (IfExpression) logicalExpression;
+        result.addAll(
+            getTransformationSourceColNames(
+                ImmutableList.of(
+                    ifExpression.ifCondition.expression,
+                    ifExpression.ifCondition.condition,
+                    ifExpression.elseExpression)));
+      } else if (logicalExpression instanceof CaseExpression) {
+        CaseExpression caseExpression = (CaseExpression) logicalExpression;
+        result.addAll(getTransformationSourceColNames(ImmutableList.of(caseExpression.elseExpr)));
+        for (CaseExpression.CaseConditionNode caseCondition : caseExpression.caseConditions) {
+          result.addAll(
+              getTransformationSourceColNames(
+                  ImmutableList.of(caseCondition.whenExpr, caseCondition.thenExpr)));
+        }
       }
     }
     return result;
@@ -586,7 +669,7 @@ public abstract class CopyIntoTablePlanBuilderBase {
     if (fullPath.isEmpty()) {
       return Optional.empty();
     }
-    FileSystem fs = plugin.createFS(user);
+    FileSystem fs = plugin.createFS(SupportsFsCreation.builder().userName(user));
     FileSelection fileSelection = FileSelection.createNotExpanded(fs, fullPath);
     return Optional.of(fileSelection);
   }
@@ -827,7 +910,13 @@ public abstract class CopyIntoTablePlanBuilderBase {
   private void checkAndUpdateIsFileDataset() {
     try {
       this.isFileDataset =
-          this.plugin.createFS(datasetPath.toString(), userName, null).isFile(datasetPath);
+          this.plugin
+              .createFS(
+                  SupportsFsCreation.builder()
+                      .filePath(datasetPath.toString())
+                      .userName(userName)
+                      .dataset(targetTable.getQualifiedName()))
+              .isFile(datasetPath);
     } catch (IOException e) {
       throw new IllegalArgumentException(
           String.format("Failed to parse datasetPath to File. %s", datasetPath.toString()), e);

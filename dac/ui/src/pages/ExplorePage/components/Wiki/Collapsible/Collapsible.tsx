@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import clsx from "clsx";
 import { useState, ReactNode } from "react";
 import * as classes from "./Collapsible.module.less";
 
@@ -27,19 +28,21 @@ type CollapsibleProps = {
   }[];
   bodyClass?: string;
   bodyStyle?: Record<string, any>;
+  className?: string;
 };
 
 const Collapsible = ({
   title,
   body,
   toolbar,
+  className,
   bodyClass,
   bodyStyle = {},
 }: CollapsibleProps) => {
   const [open, setOpen] = useState(true);
   return (
     <div
-      className={classes["collapsibleContainer"]}
+      className={clsx(classes["collapsibleContainer"], className)}
       style={{ flex: open ? "1" : "0", ...bodyStyle }}
     >
       <div className={classes["collapsibleTitleRow"]}>
@@ -49,12 +52,15 @@ const Collapsible = ({
             setOpen(open ? false : true);
           }}
           tabIndex={0}
-          onKeyPress={(e) => {
+          role="button"
+          onKeyDown={(e) => {
             if (e.code === "Enter" || e.code === "Space") {
               setOpen(open ? false : true);
             }
           }}
-          aria-label={`${open ? "Collapse" : "Expand"} ${title}`}
+          aria-label={title}
+          aria-expanded={open}
+          aria-controls={title}
         >
           <dremio-icon
             name={open ? "interface/down-chevron" : "interface/up-chevron"}
@@ -93,7 +99,10 @@ const Collapsible = ({
         </div>
       </div>
       {open && (
-        <div className={bodyClass ? bodyClass : classes["collapsibleBody"]}>
+        <div
+          className={bodyClass ? bodyClass : classes["collapsibleBody"]}
+          id={title}
+        >
           {body}
         </div>
       )}

@@ -373,7 +373,7 @@ public class ConstExecutor implements RexExecutor {
                         typeFactory, SqlTypeName.TIME, false, null),
                     false));
             break;
-          case TIMESTAMP:
+          case TIMESTAMPMILLI:
             long timestampValue;
             if (output instanceof TimeStampMilliHolder) {
               timestampValue = ((TimeStampMilliHolder) output).value;
@@ -447,11 +447,11 @@ public class ConstExecutor implements RexExecutor {
                     typeFactory.createSqlType(SqlTypeName.DECIMAL, precision, scale),
                     false));
             break;
-            // The list of known unsupported types is used to trigger this behavior of re-using the
-            // input expression
-            // before the expression is even attempted to be evaluated, this is just here as a last
-            // precaution a
-            // as new types may be added in the future.
+          // The list of known unsupported types is used to trigger this behavior of re-using the
+          // input expression
+          // before the expression is even attempted to be evaluated, this is just here as a last
+          // precaution a
+          // as new types may be added in the future.
           default:
             logger.debug(
                 "Constant expression not folded due to return type {}, complete expression: {}",

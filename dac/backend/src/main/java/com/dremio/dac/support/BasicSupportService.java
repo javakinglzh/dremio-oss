@@ -29,6 +29,7 @@ import com.dremio.config.DremioConfig;
 import com.dremio.dac.proto.model.source.ClusterIdentity;
 import com.dremio.dac.proto.model.source.ClusterInfo;
 import com.dremio.dac.proto.model.source.ClusterVersion;
+import com.dremio.dac.proto.model.source.EnvironmentVariable;
 import com.dremio.dac.proto.model.source.Node;
 import com.dremio.dac.proto.model.source.SoftwareVersion;
 import com.dremio.dac.proto.model.source.Source;
@@ -83,6 +84,7 @@ import com.dremio.services.fabric.simple.ProtocolBuilder;
 import com.dremio.services.fabric.simple.SendEndpointCreator;
 import com.dremio.services.fabric.simple.SentResponseMessage;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.ImmutableList;
 import com.google.common.io.ByteStreams;
 import com.google.common.net.MediaType;
 import io.protostuff.ByteString;
@@ -135,7 +137,7 @@ public class BasicSupportService implements SupportService {
   private final Provider<UserService> userService;
   private final Provider<ClusterCoordinator> clusterCoordinatorProvider;
   private final Provider<OptionManager> optionManagerProvider;
-  private final Provider<NamespaceService> namespaceServiceProvider;
+  private final Provider<NamespaceService> systemUserNamespaceServiceProvider;
   private final Provider<CatalogService> catalogServiceProvider;
   private final Provider<FabricService> fabricServiceProvider;
   private Path supportPath;
@@ -153,7 +155,7 @@ public class BasicSupportService implements SupportService {
       Provider<UserService> userService,
       Provider<ClusterCoordinator> clusterCoordinatorProvider,
       Provider<OptionManager> optionManagerProvider,
-      Provider<NamespaceService> namespaceServiceProvider,
+      Provider<NamespaceService> systemUserNamespaceServiceProvider,
       Provider<CatalogService> catalogServiceProvider,
       Provider<FabricService> fabricServiceProvider,
       BufferAllocator allocator) {
@@ -162,7 +164,7 @@ public class BasicSupportService implements SupportService {
     this.userService = userService;
     this.clusterCoordinatorProvider = clusterCoordinatorProvider;
     this.optionManagerProvider = optionManagerProvider;
-    this.namespaceServiceProvider = namespaceServiceProvider;
+    this.systemUserNamespaceServiceProvider = systemUserNamespaceServiceProvider;
     this.catalogServiceProvider = catalogServiceProvider;
     this.fabricServiceProvider = fabricServiceProvider;
     this.allocator = allocator;
@@ -441,7 +443,7 @@ public class BasicSupportService implements SupportService {
         // this is a new cluster, generating a new cluster identifier.
         id =
             new ClusterIdentity()
-                .setIdentity(UUID.randomUUID().toString())
+                .setIdentity(new ClusterIdSupplier().get())
                 .setVersion(toClusterVersion(VERSION))
                 .setCreated(System.currentTimeMillis());
         id = storeIdentity(id);
@@ -767,7 +769,7 @@ public class BasicSupportService implements SupportService {
     SoftwareVersion version = new SoftwareVersion().setVersion(DremioVersionInfo.getVersion());
 
     List<Source> sources = new ArrayList<>();
-    final NamespaceService ns = namespaceServiceProvider.get();
+    final NamespaceService ns = systemUserNamespaceServiceProvider.get();
     for (SourceConfig source : ns.getSources()) {
       String type =
           source.getType() == null ? source.getLegacySourceTypeEnum().name() : source.getType();
@@ -782,6 +784,20 @@ public class BasicSupportService implements SupportService {
       nodes.add(new Node().setName(ep.getAddress()).setRole("coordinator"));
     }
 
+    ImmutableList<String> collectedEnvironmentVariables =
+        ImmutableList.of(
+            "DREMIO_HELM_VERSION",
+            "DREMIO_MAX_HEAP_MEMORY_SIZE_MB",
+            "DREMIO_MAX_DIRECT_MEMORY_SIZE_MB");
+    List<EnvironmentVariable> environmentVariables = new ArrayList<>();
+    for (String environmentVariable : collectedEnvironmentVariables) {
+      String environmentValue = System.getenv(environmentVariable);
+      if (environmentValue != null) {
+        environmentVariables.add(
+            new EnvironmentVariable().setKey(environmentVariable).setValue(environmentValue));
+      }
+    }
+
     return new ClusterInfo()
         .setIdentity(identity)
         .setVersion(version)
@@ -789,7 +805,8 @@ public class BasicSupportService implements SupportService {
         .setNodeList(nodes)
         .setJavaVmVersion(System.getProperty("java.vm.version"))
         .setJreVersion(System.getProperty("java.specification.version"))
-        .setEdition(getEditionInfo());
+        .setEdition(getEditionInfo())
+        .setEnvironmentList(environmentVariables);
   }
 
   @Override

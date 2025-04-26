@@ -22,34 +22,34 @@ import com.google.common.collect.ImmutableList;
 import java.util.List;
 import java.util.Objects;
 
+/** Simple POJO for reporting a reflection definition to query profiles. */
 public class ReflectionInfo {
   private final String reflectionId;
   private final ReflectionType type;
   private final String name;
-  private final boolean arrowCachingEnabled;
   private final List<String> sortColumns;
   private final List<String> partitionColumns;
   private final List<String> distributionColumns;
   private final List<String> dimensions;
   private final List<MeasureColumn> measures;
   private final List<String> displayColumns;
+  private final String reflectionMode;
 
   public ReflectionInfo(
       String reflectionId,
       ReflectionType type,
       String name,
-      boolean arrowCachingEnabled,
       List<String> sortColumns,
       List<String> partitionColumns,
       List<String> distributionColumns,
       List<String> dimensions,
       List<MeasureColumn> measures,
-      List<String> displayColumns) {
+      List<String> displayColumns,
+      String reflectionMode) {
     super();
     this.name = name;
     this.type = type;
     this.reflectionId = reflectionId;
-    this.arrowCachingEnabled = arrowCachingEnabled;
     this.sortColumns = sortColumns == null ? ImmutableList.of() : ImmutableList.copyOf(sortColumns);
     this.partitionColumns =
         partitionColumns == null ? ImmutableList.of() : ImmutableList.copyOf(partitionColumns);
@@ -61,6 +61,7 @@ public class ReflectionInfo {
     this.measures = measures == null ? ImmutableList.of() : ImmutableList.copyOf(measures);
     this.displayColumns =
         displayColumns == null ? ImmutableList.of() : ImmutableList.copyOf(displayColumns);
+    this.reflectionMode = reflectionMode;
   }
 
   public String getReflectionId() {
@@ -87,10 +88,6 @@ public class ReflectionInfo {
     return name;
   }
 
-  public boolean isArrowCachingEnabled() {
-    return arrowCachingEnabled;
-  }
-
   public ReflectionType getType() {
     return type;
   }
@@ -101,6 +98,10 @@ public class ReflectionInfo {
 
   public List<String> getDistributionColumns() {
     return distributionColumns;
+  }
+
+  public String getReflectionMode() {
+    return reflectionMode;
   }
 
   @Override
@@ -118,11 +119,13 @@ public class ReflectionInfo {
         && Objects.equals(distributionColumns, that.distributionColumns)
         && Objects.equals(dimensions, that.dimensions)
         && Objects.equals(measures, that.measures)
-        && Objects.equals(name, that.name);
+        && Objects.equals(name, that.name)
+        && Objects.equals(reflectionMode, that.reflectionMode);
   }
 
   @Override
   public int hashCode() {
-    return Objects.hash(reflectionId, sortColumns, partitionColumns, distributionColumns, name);
+    return Objects.hash(
+        reflectionId, sortColumns, partitionColumns, distributionColumns, name, reflectionMode);
   }
 }

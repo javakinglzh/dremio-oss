@@ -46,15 +46,19 @@ public class ParquetSplitCreator implements BlockBasedSplitGenerator.SplitCreato
 
     String splitPath = splitIdentity.getPath();
     Preconditions.checkArgument(fileFormat.equalsIgnoreCase(PARQUET.toString()));
-    ParquetProtobuf.ParquetBlockBasedSplitXAttr splitExtended =
+    ParquetProtobuf.ParquetBlockBasedSplitXAttr.Builder splitExtendedBuilder =
         ParquetProtobuf.ParquetBlockBasedSplitXAttr.newBuilder()
             .setPath(splitPath)
             .setStart(splitIdentity.getOffset())
             .setLength(splitIdentity.getLength())
             .setFileLength(fileSize)
-            .setLastModificationTime(currentModTime)
-            .build();
+            .setLastModificationTime(currentModTime);
 
+    if (splitIdentity.getFileGroupIndex() != null) {
+      splitExtendedBuilder.setFileGroupIndex(splitIdentity.getFileGroupIndex());
+    }
+
+    ParquetProtobuf.ParquetBlockBasedSplitXAttr splitExtended = splitExtendedBuilder.build();
     PartitionProtobuf.NormalizedDatasetSplitInfo.Builder splitInfo =
         PartitionProtobuf.NormalizedDatasetSplitInfo.newBuilder()
             .setPartitionId(filePartitionInfo.getId())

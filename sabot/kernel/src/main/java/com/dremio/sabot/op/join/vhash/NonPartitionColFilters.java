@@ -41,7 +41,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 
 public class NonPartitionColFilters implements AutoCloseable {
-  private final org.slf4j.Logger logger =
+  private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(NonPartitionColFilters.class);
   static final int MAX_VAL_LIST_FILTER_KEY_SIZE = 17;
 

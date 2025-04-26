@@ -19,6 +19,7 @@ import static com.dremio.exec.store.iceberg.IcebergUtils.getPartitionColumns;
 
 import com.carrotsearch.hppc.cursors.ObjectLongCursor;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.common.util.DateTimes;
 import com.dremio.connector.metadata.BytesOutput;
 import com.dremio.connector.metadata.DatasetSplit;
 import com.dremio.connector.metadata.DatasetSplitAffinity;
@@ -63,7 +64,6 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.transforms.Transforms;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
-import org.joda.time.DateTimeConstants;
 
 /**
  * Wrapper around iceberg table to build all the metadata details. The current implementation
@@ -265,7 +265,7 @@ public class IcebergTableWrapper {
               if (ival == null) {
                 partitionValue = PartitionValue.of(partitionColumnFromSchema.name());
               } else {
-                long dateInMillis = (long) ival * DateTimeConstants.MILLIS_PER_DAY;
+                long dateInMillis = (long) ival * DateTimes.MILLIS_PER_DAY;
                 partitionValue = PartitionValue.of(partitionColumnFromSchema.name(), dateInMillis);
               }
               break;

@@ -21,6 +21,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableSchedulerThreadPool;
 import com.dremio.common.concurrent.NamedThreadFactory;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
+import com.dremio.options.TypeValidators;
 import com.dremio.service.coordinator.CoordinatorLostHandle;
 import com.dremio.service.coordinator.DistributedSemaphore;
 import com.dremio.service.coordinator.ElectionListener;
@@ -126,7 +127,7 @@ public class ZKClusterClient implements com.dremio.service.Service {
   private int currentNumberOfSupervisorProbeFailures = 0;
   private final String clusterIdPath;
 
-  private final Predicate<String> featureEvaluator;
+  private final Predicate<TypeValidators.BooleanValidator> featureEvaluator;
 
   public ZKClusterClient(ZKClusterConfig config, String connect) throws IOException {
     this(config, connect, null, new ZKClientFactory());
@@ -252,8 +253,7 @@ public class ZKClusterClient implements com.dremio.service.Service {
   }
 
   private void runSupervisorCheck() {
-    if (featureEvaluator != null
-        && featureEvaluator.test(COORDINATOR_ZK_SUPERVISOR.getOptionName())) {
+    if (featureEvaluator != null && featureEvaluator.test(COORDINATOR_ZK_SUPERVISOR)) {
       boolean isProbeSucceeded = false;
       if (isConnected == null || !isConnected) {
         logger.error("ZKClusterClient: Not connected to ZK.");

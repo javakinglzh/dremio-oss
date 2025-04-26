@@ -32,11 +32,6 @@ import static com.dremio.service.jobs.JobsConstant.__ACCELERATOR;
 import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.SearchTypes.SearchQuery;
 import com.dremio.datastore.indexed.IndexKey;
-import com.dremio.exec.physical.base.AbstractPhysicalVisitor;
-import com.dremio.exec.physical.base.PhysicalOperator;
-import com.dremio.exec.physical.base.Writer;
-import com.dremio.exec.planner.fragment.PlanningSet;
-import com.dremio.exec.planner.fragment.Wrapper;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.AttemptEvent;
@@ -48,7 +43,6 @@ import com.dremio.exec.proto.UserBitShared.QueryResult.QueryState;
 import com.dremio.exec.proto.beans.NodeEndpoint;
 import com.dremio.exec.record.RecordBatchHolder;
 import com.dremio.exec.store.easy.arrow.ArrowFileMetadata;
-import com.dremio.exec.store.parquet.ParquetWriter;
 import com.dremio.service.job.ActiveJobSummary;
 import com.dremio.service.job.JobAndUserStat;
 import com.dremio.service.job.JobCountByQueryType;
@@ -73,6 +67,7 @@ import com.dremio.service.job.proto.JobResult;
 import com.dremio.service.job.proto.JobState;
 import com.dremio.service.job.proto.ParentDatasetInfo;
 import com.dremio.service.job.proto.QueryType;
+import com.dremio.service.job.proto.ResourceSchedulingInfo;
 import com.dremio.service.job.proto.TableDatasetProfile;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.DatasetVersion;
@@ -81,7 +76,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -124,6 +118,9 @@ public final class JobsServiceUtil {
   public static final ImmutableSet<JobState> nonFinalJobStates =
       ImmutableSet.copyOf(Sets.difference(EnumSet.allOf(JobState.class), finalJobStates));
 
+  public static final ImmutableSet<QueryState> finalProfileStates =
+      Sets.immutableEnumSet(QueryState.CANCELED, QueryState.COMPLETED, QueryState.FAILED);
+
   private static final SearchQuery apparentlyAbandonedQuery;
 
   static {
@@ -154,7 +151,7 @@ public final class JobsServiceUtil {
     LinkedBuffer buffer = LinkedBuffer.allocate();
     byte[] bytes = ProtobufIOUtil.toByteArray(stuf, stuf.cachedSchema(), buffer);
     try {
-      return CoordinationProtos.NodeEndpoint.PARSER.parseFrom(bytes);
+      return CoordinationProtos.NodeEndpoint.parser().parseFrom(bytes);
     } catch (InvalidProtocolBufferException e) {
       throw new IllegalArgumentException("Cannot convert from protostuff to protobuf");
     }
@@ -362,51 +359,6 @@ public final class JobsServiceUtil {
     return attemptEvent;
   }
 
-  /** Returns a list of partitions into which CTAS files got written. */
-  static List<String> getPartitions(final PlanningSet planningSet) {
-    final ImmutableSet.Builder<String> builder = ImmutableSet.builder();
-    // visit every single major fragment and check to see if there is a PDFSWriter
-    // if so add address of every minor fragment as a data partition to builder.
-    for (final Wrapper majorFragment : planningSet) {
-      majorFragment
-          .getNode()
-          .getRoot()
-          .accept(
-              new AbstractPhysicalVisitor<Void, Void, RuntimeException>() {
-                @Override
-                public Void visitOp(final PhysicalOperator op, Void value) throws RuntimeException {
-                  // override to prevent throwing exception, super class throws an exception
-                  visitChildren(op, value);
-                  return null;
-                }
-
-                @Override
-                public Void visitWriter(final Writer writer, Void value) throws RuntimeException {
-                  // we only want to get partitions for the lower writer, since this is the actual
-                  // data
-                  // there may be a second writer that writes the metadata "results", but we don't
-                  // care about that one
-                  super.visitWriter(writer, null);
-                  // TODO DX-5438: Remove PDFS specific code
-                  if (writer instanceof ParquetWriter
-                      && ACCELERATOR_STORAGEPLUGIN_NAME.equals(
-                          ((ParquetWriter) writer).getPluginId().getName())
-                      && ((ParquetWriter) writer).isPdfs()) {
-                    final List<String> addresses =
-                        Lists.transform(
-                            majorFragment.getAssignedEndpoints(),
-                            CoordinationProtos.NodeEndpoint::getAddress);
-                    builder.addAll(addresses);
-                  }
-                  return null;
-                }
-              },
-              null);
-    }
-
-    return ImmutableList.copyOf(builder.build());
-  }
-
   static JobFailureInfo toFailureInfo(String verboseError, DremioPBError.ErrorType rootErrorType) {
     // TODO: Would be easier if profile had structured error too
     String[] lines = verboseError.split("\n");
@@ -580,7 +532,9 @@ public final class JobsServiceUtil {
             .addAllDatasetPath(lastJobAttemptInfo.getDatasetPathList())
             .setRequestType(JobsProtoUtil.toBuf(lastJobAttemptInfo.getRequestType()))
             .setQueryType(JobsProtoUtil.toBuf(lastJobAttemptInfo.getQueryType()))
-            .setAccelerated(chosenReflectionIds != null && !chosenReflectionIds.isEmpty())
+            .setAccelerated(
+                (chosenReflectionIds != null && !chosenReflectionIds.isEmpty())
+                    || lastJobAttemptInfo.getResultsCacheUsed() != null)
             .setDatasetVersion(firstJobAttemptInfo.getDatasetVersion())
             .setSnowflakeAccelerated(false)
             .setSpilled(lastJobAttemptInfo.getSpillJobDetails() != null)
@@ -811,6 +765,8 @@ public final class JobsServiceUtil {
     final JobInfo firstJobAttemptInfo = firstJobAttempt.getInfo();
     final JobAttempt lastJobAttempt = job.getAttemptsList().get(attemptsSize - 1);
     final JobInfo lastJobAttemptInfo = lastJobAttempt.getInfo();
+    final ResourceSchedulingInfo resourceSchedulingInfo =
+        lastJobAttemptInfo.getResourceSchedulingInfo();
 
     RecentJobSummary.Builder builder =
         RecentJobSummary.newBuilder()
@@ -904,18 +860,39 @@ public final class JobsServiceUtil {
       builder.setScannedDatasets(getScannedDatasets(lastJobAttempt));
     }
 
-    if (lastJobAttemptInfo.getResourceSchedulingInfo() != null) {
-      if (lastJobAttemptInfo.getResourceSchedulingInfo().getQueueName() != null) {
-        builder.setQueueName(lastJobAttemptInfo.getResourceSchedulingInfo().getQueueName());
+    if (resourceSchedulingInfo != null) {
+      if (resourceSchedulingInfo.getQueueName() != null) {
+        builder.setQueueName(resourceSchedulingInfo.getQueueName());
       }
-      if (lastJobAttemptInfo.getResourceSchedulingInfo().getEngineName() != null) {
-        builder.setEngine(lastJobAttemptInfo.getResourceSchedulingInfo().getEngineName());
+      if (resourceSchedulingInfo.getEngineName() != null) {
+        builder.setEngine(resourceSchedulingInfo.getEngineName());
+      }
+      if (resourceSchedulingInfo.getQueryCost() != null) {
+        builder.setQueryCost(resourceSchedulingInfo.getQueryCost());
       }
     }
 
+    if (lastJobAttemptInfo.getExecutionCpuTimeNs() != null) {
+      builder.setExecutionCpuTimeNs(lastJobAttemptInfo.getExecutionCpuTimeNs());
+    }
+    if (lastJobAttemptInfo.getSetupTimeNs() != null) {
+      builder.setSetupTimeNs(lastJobAttemptInfo.getSetupTimeNs());
+    }
+    if (lastJobAttemptInfo.getWaitTimeNs() != null) {
+      builder.setWaitTimeNs(lastJobAttemptInfo.getWaitTimeNs());
+    }
+    if (lastJobAttemptInfo.getMemoryAllocated() != null) {
+      builder.setMemoryAllocated(lastJobAttemptInfo.getMemoryAllocated());
+    }
     if (lastJobAttemptInfo.getFailureInfo() != null) {
       builder.setErrorMsg(lastJobAttemptInfo.getFailureInfo());
     }
+
+    final List<String> contextList = lastJobAttemptInfo.getContextList();
+    if (contextList != null) {
+      builder.setContext(contextList.toString());
+    }
+
     builder.setIsProfileIncomplete(lastJobAttempt.getIsProfileIncomplete());
 
     if (lastJobAttempt.getDetails() != null

@@ -22,6 +22,14 @@
   border: 1px solid var(--border--focused);
 }
 
+.focus-visible-outline:focus-visible {
+  outline: -webkit-focus-ring-color auto 1px;
+}
+
+.force-focus-visible-outline:focus-visible {
+  outline: -webkit-focus-ring-color auto 1px !important;
+}
+
 .focus-within:focus-within {
   border: 1px solid var(--border--focused);
 }

@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.sql.hive;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.store.hive.HiveTestDataGenerator.HIVE_TEST_PLUGIN_NAME;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertTrue;
@@ -77,9 +76,6 @@ public class ITBasicDMLSupportOnHiveTables extends LazyDataGeneratingHiveTestBas
 
   @Test
   public void testCTASCreateNewIcebergTable() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName = "iceberg_test_ctas";
     final String newTableName = "iceberg_test_ctas1";
     final String tableNameWithCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName  ;
@@ -127,9 +123,6 @@ public class ITBasicDMLSupportOnHiveTables extends LazyDataGeneratingHiveTestBas
 
   @Test
   public void testCTASCreateNewIcebergTableWithLocation() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName = "iceberg_test_ctas1";
     final String tableNameWithCatalog = HIVE_TEST_PLUGIN_NAME + "." + tableName;
     final String tableLocationFolder = Paths.get(temporaryFolder.getRoot().getAbsolutePath(), "default", "location").toString();
@@ -506,8 +499,6 @@ public class ITBasicDMLSupportOnHiveTables extends LazyDataGeneratingHiveTestBas
 
   @Test
   public void testDropPartitionColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
     final String tableName = "iceberg_test_testDropPartitionColumn";
 
     try {

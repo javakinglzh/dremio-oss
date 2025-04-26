@@ -34,28 +34,44 @@ import org.apache.calcite.rex.RexFieldAccess;
 import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexShuttle;
 import org.apache.calcite.util.ImmutableBitSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
- * If we have a query plan like:
+ * This class exists as a stop gap solution for the bugs in SqlToRel where the CorrelVariable
+ * doesn't have the schema of the base query.
  *
- * <p>LogicalProject(DEPTNO=[$0], names=[$SCALAR_QUERY($cor0, { LogicalAggregate(group=[{}],
- * EXPR$0=[ARRAY_AGG($0)]) LogicalProject(ENAME=[$1]) LogicalFilter(condition=[AND(=($6,
- * $cor0.DEPTNO), =($2, 'SALESMAN'))]) LogicalSort(sort0=[$1], dir0=[ASC])
- * LogicalProject(EMPNO=[$0], ..., COMM=[$7]) ScanCrel(table=[cp.scott."EMP.json"],
- * columns=[`EMPNO`, ..., `COMM`], splits=[1]) })]) LogicalAggregate(group=[{0}])
- * LogicalProject(DEPTNO=[$6]) ScanCrel(table=[cp.scott."EMP.json"], columns=[`EMPNO`, ..., `COMM`],
- * splits=[1])
+ * <p>Basically we can have:
  *
- * <p>Then we need to correct the reldatatype of cor0.DEPTNO, since the correlated variable is just
- * a single column instead of the whole table
+ * <p>Correlate BaseQuery SomeOperation(correlatedVariable)
+ *
+ * <p>And correlatedVariable should by definition have the schema of the BaseQuery.
  */
 public class RexCorrelVariableSchemaFixer extends StatelessRelShuttleImpl {
+  private static final Logger LOGGER = LoggerFactory.getLogger(RexCorrelVariableSchemaFixer.class);
   private static final RexCorrelVariableSchemaFixer INSTANCE = new RexCorrelVariableSchemaFixer();
 
   private RexCorrelVariableSchemaFixer() {}
 
   public static RelNode fixSchema(RelNode relNode) {
-    return relNode.accept(INSTANCE);
+    try {
+      // This method is "best effort" to begin with.
+      // If this fails, then we shouldn't stop the whole query.
+      // This method is known to fail, since SqlToRel doesn't preserve the field names in all
+      // scenarios
+      // We should eventually fix those scenarios, but we don't want to stop the query in the
+      // meantime.
+      return relNode.accept(INSTANCE);
+    } catch (NameNotFoundException ex) {
+      LOGGER.error(
+          "Failed to fix up the schema on correlated variables due to being unable to find the name in the target schema.",
+          ex);
+      return relNode;
+    } catch (Throwable ex) {
+      LOGGER.error(
+          "Failed to fix up the schema on correlated variables due to unknown reason.", ex);
+      return relNode;
+    }
   }
 
   @Override
@@ -86,10 +102,8 @@ public class RexCorrelVariableSchemaFixer extends StatelessRelShuttleImpl {
           correlateVariableSchema.getFieldList().stream()
               .filter(field -> field.getName().equals(fieldName))
               .findFirst();
-      assert optionalNewField.isPresent();
       if (optionalNewField.isEmpty()) {
-        // We have a bug, so just go with the original query plan to avoid a regression.
-        return super.visit(correlate);
+        throw new NameNotFoundException(fieldName, left.getRowType());
       }
 
       RelDataTypeField newField = optionalNewField.get();
@@ -127,12 +141,20 @@ public class RexCorrelVariableSchemaFixer extends StatelessRelShuttleImpl {
       }
 
       RexCorrelVariable rexCorrelVariable = (RexCorrelVariable) rexFieldAccess.getReferenceExpr();
-      if (!rexCorrelVariable.id.equals(targetCorrelationId)) {
+      if (rexCorrelVariable.id.getId() != (targetCorrelationId.getId())) {
         return rexFieldAccess;
       }
 
       if (RelDataTypeEqualityComparer.areEqual(rexCorrelVariable.getType(), newDataType)) {
         return rexFieldAccess;
+      }
+
+      boolean nameNotFound =
+          newDataType.getFieldList().stream()
+              .map(RelDataTypeField::getName)
+              .noneMatch(name -> name.equals(rexFieldAccess.getField().getName()));
+      if (nameNotFound) {
+        throw new NameNotFoundException(rexFieldAccess.getField().getName(), newDataType);
       }
 
       correlateVariableReplaced = Optional.of(rexCorrelVariable);
@@ -144,6 +166,12 @@ public class RexCorrelVariableSchemaFixer extends StatelessRelShuttleImpl {
 
     public Optional<RexCorrelVariable> getCorrelateVariableReplaced() {
       return correlateVariableReplaced;
+    }
+  }
+
+  private static final class NameNotFoundException extends RuntimeException {
+    public NameNotFoundException(String name, RelDataType relDataType) {
+      super(String.format("%s not found in %s", name, relDataType));
     }
   }
 }

@@ -81,6 +81,7 @@ message MaterializationSummary {
   optional string reflectionName = 5;
   optional string reflectionType = 6;
   optional string layoutVersion = 7;
+  optional string reflectionMode = 8;
 }
 
 message ScanPath {
@@ -118,6 +119,7 @@ message JobFailureInfo {
 
 message JobCancellationInfo {
   optional string message = 1;
+  optional exec.shared.CancelType type = 2;
 }
 
 message SpillJobDetails {
@@ -152,7 +154,7 @@ message JobInfo {
   optional string description = 21; // it'll be 'NA' in case of RUN_SQL jobrequest types, as same data can be found in sql=2 above
   optional MaterializationSummary materializationFor = 22;
   optional double original_cost = 23 [default = 1.0];
-  repeated string partitions = 24;
+  repeated string partitions = 24 [deprecated = true];
   repeated ScanPath scanPaths = 25;
   optional JoinAnalysis joinAnalysis = 27;
   repeated string context = 28;
@@ -181,6 +183,7 @@ message JobInfo {
   optional QueryLabel queryLabel = 49 [default = NONE];
   optional bool is_truncated_sql = 50 [default = false];
   optional int64 ttl_expire_at = 51;
+  optional ResultsCacheUsed results_cache_used = 52;
 }
 
 message ResourceSchedulingInfo {
@@ -321,6 +324,7 @@ message JobAttempt {
   repeated ExtraInfo extra_info = 10;
   repeated exec.shared.AttemptEvent state_list = 11;
   optional bool is_profile_incomplete = 12 [default = false];
+  optional bool is_profile_update_complete = 13 [default = false];
 }
 
 message ExtraInfo {
@@ -490,4 +494,9 @@ message DatasetGraph {
   optional DataSet dataSet = 4;
   optional string sql = 5;
   optional string description = 6;
+}
+
+message ResultsCacheUsed {
+  required int64 cacheAge = 1; // unit: second
+  required int64 cacheFileSize = 2; // unit: byte
 }

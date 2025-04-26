@@ -16,7 +16,10 @@
 package com.dremio.exec.store.easy.json.reader;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.store.easy.json.JsonProcessor;
+import com.dremio.exec.util.RowSizeUtil;
+import com.dremio.sabot.exec.context.OperatorContext;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -24,6 +27,7 @@ import com.fasterxml.jackson.databind.node.TreeTraversingParser;
 import java.io.IOException;
 import java.io.InputStream;
 import org.apache.arrow.vector.complex.writer.BaseWriter;
+import org.apache.arrow.vector.types.Types.MinorType;
 import org.apache.calcite.util.Pair;
 
 public abstract class BaseJsonProcessor implements JsonProcessor {
@@ -34,6 +38,20 @@ public abstract class BaseJsonProcessor implements JsonProcessor {
           .configure(JsonParser.Feature.ALLOW_UNQUOTED_FIELD_NAMES, true);
 
   protected JsonParser parser;
+  protected final int rowSizeLimit;
+  protected boolean rowSizeLimitEnabled;
+  protected int currentRowSize;
+  protected int fixedDataLenPerRow;
+
+  public BaseJsonProcessor(OperatorContext context) {
+    if (context != null) {
+      this.rowSizeLimit =
+          Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+    } else {
+      this.rowSizeLimit =
+          Math.toIntExact(ExecConstants.LIMIT_ROW_SIZE_BYTES.getDefault().getNumVal());
+    }
+  }
 
   @Override
   public void setSource(InputStream is) throws IOException {
@@ -86,5 +104,18 @@ public abstract class BaseJsonProcessor implements JsonProcessor {
   public int writeSuccessfulParseEvent(BaseWriter.ComplexWriter writer) throws IOException {
     // Do nothing
     return 0;
+  }
+
+  protected void incrementCurrentRowSize(MinorType type, byte[] bytes) {
+    if (!rowSizeLimitEnabled) {
+      return;
+    }
+    if (type == MinorType.VARCHAR || type == MinorType.VARBINARY) {
+      currentRowSize += RowSizeUtil.getFieldSizeForVariableWidthType(bytes);
+    }
+  }
+
+  protected void resetRowSize() {
+    currentRowSize = 0;
   }
 }

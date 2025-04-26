@@ -17,7 +17,7 @@ package com.dremio.exec.catalog;
 
 import static com.dremio.test.DremioTest.CLASSPATH_SCAN_RESULT;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.anyString;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -71,7 +71,6 @@ import com.dremio.test.DremioTest;
 import com.dremio.test.TemporarySystemProperties;
 import com.google.common.collect.Sets;
 import java.util.EnumSet;
-import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.RootAllocatorFactory;
@@ -89,6 +88,9 @@ public class TestMasterLessCatalogServiceImpl {
   private static final long RESERVATION = 0;
   private static final long MAX_ALLOCATION = Long.MAX_VALUE;
   private static final int TIMEOUT = 0;
+
+  private final CloseableThreadPool executor =
+      new CloseableThreadPool("test-master-less-catalog-service-impl");
 
   static final String MOCK_UP_MASTER_LESS = "mockup_masterless_source";
 
@@ -108,7 +110,9 @@ public class TestMasterLessCatalogServiceImpl {
 
     @Override
     public TestCatalogServiceImpl.MockUpPlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return plugin;
     }
   }
@@ -195,10 +199,9 @@ public class TestMasterLessCatalogServiceImpl {
           @Override
           public void close() throws Exception {}
         };
-    when(sabotContext.getNamespaceServiceFactory()).thenReturn(namespaceServiceFactory);
-    when(sabotContext.getNamespaceService(anyString())).thenReturn(namespaceService);
     when(sabotContext.getOrphanageFactory()).thenReturn(orphanageFactory);
     when(sabotContext.getViewCreatorFactoryProvider()).thenReturn(() -> viewCreatorFactory);
+    when(sabotContext.getNamespaceService(anyString())).thenReturn(namespaceService);
 
     datasetListingService =
         new DatasetListingServiceImpl(DirectProvider.wrap(namespaceServiceFactory));
@@ -285,7 +288,8 @@ public class TestMasterLessCatalogServiceImpl {
                     false),
             () -> new VersionedDatasetAdapterFactory(),
             () -> new CatalogStatusEventsImpl(),
-            () -> mock(ExecutorService.class));
+            () -> executor,
+            DirectProvider.wrap(namespaceServiceFactory));
     catalogService.start();
     mockUpPlugin = new TestCatalogServiceImpl.MockUpPlugin();
   }
@@ -297,7 +301,8 @@ public class TestMasterLessCatalogServiceImpl {
         fabricService,
         pool,
         allocator,
-        storeProvider);
+        storeProvider,
+        executor);
   }
 
   // On source deletion, its data from ZK should also be deleted
@@ -317,10 +322,11 @@ public class TestMasterLessCatalogServiceImpl {
         new SourceConfig()
             .setName(pluginName)
             .setMetadataPolicy(rapidRefreshPolicy)
-            .setCtime(100L)
             .setConnectionConf(new TestMasterLessCatalogServiceImpl.MockUpConfig());
 
-    catalogService.getSystemUserCatalog().createSource(mockUpConfig);
+    catalogService
+        .getSystemUserCatalog()
+        .createSource(mockUpConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     Assert.assertNotNull(localClusterCoordinator.getServiceSet(metadataRefreshTaskName));
     catalogService.deleteSource(pluginName);
     Assert.assertNull(localClusterCoordinator.getServiceSet(metadataRefreshTaskName));

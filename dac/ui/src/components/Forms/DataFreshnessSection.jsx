@@ -30,7 +30,6 @@ import { intl } from "#oss/utils/intl";
 import { getSupportFlag } from "#oss/exports/endpoints/SupportFlags/getSupportFlag";
 import {
   LIVE_REFLECTION_ENABLED,
-  REFLECTION_SCHEDULER_POLICY,
   SUBHOUR_ACCELERATION_POLICY,
 } from "#oss/exports/endpoints/SupportFlags/supportFlagConstants";
 import { getMaxDistanceOfDays } from "#oss/utils/scheduleRefreshUtils";
@@ -60,7 +59,6 @@ class DataFreshnessSection extends Component {
     datasetId: PropTypes.string,
     elementConfig: PropTypes.object,
     editing: PropTypes.bool,
-    isSchedulerEnabled: PropTypes.bool,
     isLiveReflectionEnabled: PropTypes.bool,
     tableSourceType: PropTypes.string,
     fileFormat: PropTypes.instanceOf(Immutable.Map),
@@ -130,16 +128,6 @@ class DataFreshnessSection extends Component {
         );
       }
     } else if (
-      !window.schedulerEnabled &&
-      !values.accelerationNeverRefresh &&
-      !values.accelerationNeverExpire &&
-      values.accelerationRefreshPeriod > values.accelerationGracePeriod
-    ) {
-      errors.accelerationGracePeriod = laDeprecated(
-        "Reflections cannot be configured to expire faster than they refresh.",
-      );
-    } else if (
-      window.schedulerEnabled &&
       !values.accelerationNeverRefresh &&
       !values.accelerationNeverExpire &&
       ((values.accelerationActivePolicyType === "PERIOD" &&
@@ -182,14 +170,11 @@ class DataFreshnessSection extends Component {
     }
 
     if (!isCommunity?.()) {
-      this.props.fetchSupportFlags(REFLECTION_SCHEDULER_POLICY);
       this.props.fetchSupportFlags(LIVE_REFLECTION_ENABLED);
     }
   }
 
   componentDidUpdate(prevProps) {
-    window.schedulerEnabled = this.props.isSchedulerEnabled;
-
     const { value: prevPolicy } = prevProps.fields.accelerationActivePolicyType;
     const { value: curPolicy } = this.props.fields.accelerationActivePolicyType;
     if (prevPolicy !== curPolicy) {
@@ -296,101 +281,16 @@ class DataFreshnessSection extends Component {
         />
         <span style={styles.label}>{laDeprecated("Refresh Policy")}</span>
         <div style={styles.info}>{helpContent}</div>
-        {this.props.isSchedulerEnabled ? (
-          <ReflectionRefresh
-            entityType={entityType}
-            refreshAll={this.refreshAll}
-            isRefreshAllowed={this.isRefreshAllowed()}
-            fields={fields}
-            minDuration={this.state.minDuration}
-            refreshingReflections={this.state.refreshingReflections}
-            isLiveReflectionEnabled={isLiveReflectionEnabled}
-            fileFormatType={fileFormatType}
-          />
-        ) : (
-          <table>
-            <tbody>
-              <tr>
-                <td colSpan={2}>
-                  <div style={styles.inputLabel}>
-                    <Checkbox
-                      {...accelerationNeverRefresh}
-                      label={laDeprecated("Never refresh")}
-                    />
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <div style={styles.inputLabel}>
-                    {laDeprecated("Refresh every")}
-                  </div>
-                </td>
-                {/* todo: ax: <label> */}
-                <td>
-                  <FieldWithError
-                    errorPlacement="right"
-                    {...accelerationRefreshPeriod}
-                  >
-                    <div style={{ display: "flex" }}>
-                      <DurationField
-                        {...accelerationRefreshPeriod}
-                        min={this.state.minDuration}
-                        style={styles.durationField}
-                        disabled={!!accelerationNeverRefresh.value}
-                      />
-                      {this.isRefreshAllowed() && entityType === "dataset" && (
-                        <Button
-                          disabled={this.state.refreshingReflections}
-                          onClick={this.refreshAll}
-                          variant="secondary"
-                          style={{
-                            marginLeft: 10,
-                          }}
-                        >
-                          {intl.formatMessage({
-                            id: "Reflection.Refresh.Now",
-                          })}
-                        </Button>
-                      )}
-                    </div>
-                  </FieldWithError>
-                </td>
-              </tr>
-              <tr>
-                <td colSpan={2}>
-                  <div style={styles.inputLabel}>
-                    <Checkbox
-                      {...accelerationNeverExpire}
-                      label={laDeprecated("Never expire")}
-                    />
-                  </div>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <div style={styles.inputLabel}>
-                    {laDeprecated("Expire after")}
-                  </div>{" "}
-                  {/* todo: ax: <label> */}
-                </td>
-                <td>
-                  <FieldWithError
-                    errorPlacement="right"
-                    {...accelerationGracePeriod}
-                  >
-                    <DurationField
-                      {...accelerationGracePeriod}
-                      min={this.state.minDuration}
-                      style={styles.durationField}
-                      disabled={!!accelerationNeverExpire.value}
-                    />
-                  </FieldWithError>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        )}
+        <ReflectionRefresh
+          entityType={entityType}
+          refreshAll={this.refreshAll}
+          isRefreshAllowed={this.isRefreshAllowed()}
+          fields={fields}
+          minDuration={this.state.minDuration}
+          refreshingReflections={this.state.refreshingReflections}
+          isLiveReflectionEnabled={isLiveReflectionEnabled}
+          fileFormatType={fileFormatType}
+        />
         {message && (
           <Message
             style={{ marginTop: 5 }}
@@ -405,7 +305,6 @@ class DataFreshnessSection extends Component {
 
 const mapStateToProps = (state) => {
   return {
-    isSchedulerEnabled: getSupportFlags(state)[REFLECTION_SCHEDULER_POLICY],
     isLiveReflectionEnabled: getSupportFlags(state)[LIVE_REFLECTION_ENABLED],
   };
 };

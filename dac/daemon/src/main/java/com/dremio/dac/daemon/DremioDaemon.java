@@ -25,10 +25,15 @@ import com.dremio.common.perf.Timer;
 import com.dremio.common.perf.Timer.TimedBlock;
 import com.dremio.common.scanner.ClassPathScanner;
 import com.dremio.common.scanner.persistence.ScanResult;
+import com.dremio.config.DremioConfig;
 import com.dremio.dac.cmd.upgrade.Upgrade;
+import com.dremio.dac.model.common.DeploymentConfigurationException;
 import com.dremio.dac.server.DACConfig;
 import com.dremio.exec.proto.beans.DremioExitCodes;
 import com.google.common.base.Preconditions;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 /** Starts the Dremio daemon and inject dependencies */
 public class DremioDaemon {
@@ -90,14 +95,32 @@ public class DremioDaemon {
       final SabotConfig sabotConfig = config.getConfig().getSabotConfig();
       final ScanResult classPathScan = ClassPathScanner.fromPrescan(sabotConfig);
 
+      final DACModule module =
+          sabotConfig.getInstance(DAEMON_MODULE_CLASS, DACModule.class, DACDaemonModule.class);
+
+      try {
+        module.validateDeploymentConfiguration(classPathScan, config);
+      } catch (DeploymentConfigurationException e) {
+        System.err.println(e.getMessage());
+        ProcessExit.exit("", e.getExitCode());
+      }
+
       if (config.isMaster) {
+        // Check if the datastore path exists, add an upgrade marker in a file.
+        Path dbPath = Paths.get(config.getConfig().getString(DremioConfig.DB_PATH_STRING));
+        Path upgradeMarker = dbPath.resolve("./.upgrading");
+        if (Files.isDirectory(dbPath) && Files.notExists(upgradeMarker)) {
+          Files.createFile(upgradeMarker);
+        }
+
         // Try autoupgrade before starting daemon
         AutoUpgrade autoUpgrade = new AutoUpgrade(config, classPathScan);
         autoUpgrade.run(false);
+
+        // Clear the marker upon completion.
+        Files.deleteIfExists(upgradeMarker);
       }
 
-      final DACModule module =
-          sabotConfig.getInstance(DAEMON_MODULE_CLASS, DACModule.class, DACDaemonModule.class);
       try (final DACDaemon daemon = DACDaemon.newDremioDaemon(config, classPathScan, module)) {
         daemon.init();
         daemon.closeOnJVMShutDown();

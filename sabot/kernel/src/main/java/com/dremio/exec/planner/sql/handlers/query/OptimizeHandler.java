@@ -15,19 +15,24 @@
  */
 package com.dremio.exec.planner.sql.handlers.query;
 
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
 import static com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler.refreshDataset;
-import static com.dremio.exec.store.iceberg.IcebergUtils.hasClusteringColumns;
+import static com.dremio.exec.store.iceberg.IcebergUtils.convertListTablePropertiesToMap;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.common.exceptions.UserException;
+import com.dremio.context.ContextUtil;
+import com.dremio.context.RequestContext;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.calcite.logical.TableOptimizeCrel;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.ops.PlannerCatalog;
+import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.PhysicalPlan;
+import com.dremio.exec.physical.base.ClusteringOptions;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.planner.logical.Rel;
@@ -38,7 +43,6 @@ import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.planner.sql.handlers.DrelTransformer;
 import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DremioHint;
@@ -103,19 +107,29 @@ public class OptimizeHandler extends TableManagementHandler {
       throws Exception {
 
     DremioTable table = catalog.getTableWithSchema(path);
+    IcebergMetadata metadata = table.getDatasetConfig().getPhysicalDataset().getIcebergMetadata();
+
     OptimizeOptions optimizeOptions =
         OptimizeOptions.createInstance(
-            config.getContext().getOptions(), (SqlOptimize) sqlNode, false);
+            convertListTablePropertiesToMap(metadata.getTablePropertiesList()),
+            config.getContext().getOptions(),
+            (SqlOptimize) sqlNode,
+            false);
 
+    ClusteringOptions clusteringInfo =
+        getClusteringOptions(config.getContext(), table, (SqlOptimize) sqlNode);
     CreateTableEntry createTableEntry =
         IcebergUtils.getIcebergCreateTableEntry(
-            config, config.getContext().getCatalog(), table, getSqlOperator(), optimizeOptions);
+            config,
+            config.getContext().getCatalog(),
+            table,
+            getSqlOperator(),
+            optimizeOptions,
+            clusteringInfo);
 
     Rel convertedRelNode =
         DrelTransformer.convertToDrel(config, createTableEntryShuttle(relNode, createTableEntry));
-    convertedRelNode =
-        SqlHandlerUtil.storeQueryResultsIfNeeded(
-            config.getConverter().getParserConfig(), config.getContext(), convertedRelNode);
+    convertedRelNode = storeQueryResultsIfNeeded(config, convertedRelNode);
     return new ScreenRel(
         convertedRelNode.getCluster(), convertedRelNode.getTraitSet(), convertedRelNode);
   }
@@ -126,15 +140,23 @@ public class OptimizeHandler extends TableManagementHandler {
     try {
       final PlannerCatalog catalog = config.getConverter().getPlannerCatalog();
       Runnable refresh = null;
+      RequestContext currentContext = RequestContext.current();
       if (!CatalogUtil.requestedPluginSupportsVersionedTables(
           path, config.getContext().getCatalog())) {
-        refresh = () -> refreshDataset(config.getContext().getCatalog(), path, false);
+        refresh =
+            () ->
+                ContextUtil.runWithUserContext(
+                    currentContext,
+                    () -> refreshDataset(config.getContext().getCatalog(), path, false));
         // Always use the latest snapshot before optimize.
         refresh.run();
       }
 
       final Prel prel = getNonPhysicalPlan(catalog, config, sqlNode, path);
-      final PhysicalOperator pop = PrelTransformer.convertToPop(config, prel);
+      PhysicalOperator pop = PrelTransformer.convertToPop(config, prel);
+
+      // rewrite if necessary
+      pop = rewritePhysicalPlan(pop);
 
       return PrelTransformer.convertToPlan(config, pop, refresh, refresh);
     } catch (Exception e) {
@@ -145,11 +167,6 @@ public class OptimizeHandler extends TableManagementHandler {
   public Prel getNonPhysicalPlan(
       PlannerCatalog catalog, SqlHandlerConfig config, SqlNode sqlNode, NamespaceKey path)
       throws Exception {
-    DremioTable table = catalog.getTableWithSchema(path);
-    boolean withWriteAsClustering = hasClusteringColumns(table);
-    if (withWriteAsClustering) {
-      // TODO: add AutoClustering logic for OPTIMIZE
-    }
 
     // Prohibit reflections on OPTIMIZE operations
     config
@@ -165,16 +182,35 @@ public class OptimizeHandler extends TableManagementHandler {
         SqlToRelTransformer.validateAndConvert(config, sqlNode);
     final RelNode relNode = convertedRelNode.getConvertedNode();
 
+    IcebergMetadata metadata =
+        catalog
+            .getTableWithSchema(path)
+            .getDatasetConfig()
+            .getPhysicalDataset()
+            .getIcebergMetadata();
+
     final RelNode optimizeRelNode =
         ((TableOptimizeCrel) relNode)
             .createWith(
                 OptimizeOptions.createInstance(
-                    config.getContext().getOptions(), (SqlOptimize) sqlNode, false));
+                    convertListTablePropertiesToMap(metadata.getTablePropertiesList()),
+                    config.getContext().getOptions(),
+                    (SqlOptimize) sqlNode,
+                    false));
 
     drel = convertToDrel(config, sqlNode, path, catalog, optimizeRelNode);
     final Pair<Prel, String> prelAndTextPlan = PrelTransformer.convertToPrel(config, drel);
     textPlan = prelAndTextPlan.getValue();
     return prelAndTextPlan.getKey();
+  }
+
+  protected ClusteringOptions getClusteringOptions(
+      QueryContext context, DremioTable table, SqlOptimize sqlOptimizeCall) {
+    return null;
+  }
+
+  protected PhysicalOperator rewritePhysicalPlan(PhysicalOperator pop) throws Exception {
+    return pop;
   }
 
   private void validateCompatibleTableFormat(

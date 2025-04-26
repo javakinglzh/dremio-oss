@@ -29,6 +29,7 @@ import com.dremio.exec.catalog.SimpleCatalog;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils.VersionedPath;
 import com.dremio.exec.planner.logical.ConvertedViewTable;
 import com.dremio.exec.planner.logical.ViewTable;
+import com.dremio.exec.planner.sql.SqlValidatorAndToRelContext;
 import com.dremio.exec.planner.sql.ViewExpander;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.dremio.exec.tablefunctions.TimeTravelTableMacro;
@@ -46,11 +47,14 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import org.apache.calcite.adapter.java.JavaTypeFactory;
+import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
+import org.apache.calcite.rel.logical.LogicalProject;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rel.type.RelRecordType;
+import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.schema.Function;
 import org.apache.calcite.util.Pair;
 
@@ -189,7 +193,23 @@ public class PlannerCatalogImpl implements PlannerCatalog {
       } else {
         validatedRowTypeWithNames = root.validatedRowType;
       }
-      convertedViewTable = ConvertedViewTable.of(viewTable, validatedRowTypeWithNames, root.rel);
+      // fetch input of the expansion node.
+      RelNode input = root.rel.getInput(0);
+      if (!input.getRowType().equals(validatedRowTypeWithNames)) {
+        // add a project to compensate the row type difference.
+        List<RexNode> projections = new ArrayList<>();
+
+        for (int i = 0; i < validatedRowTypeWithNames.getFieldCount(); i++) {
+          projections.add(input.getCluster().getRexBuilder().makeInputRef(input, i));
+        }
+
+        input = LogicalProject.create(input, List.of(), projections, validatedRowTypeWithNames);
+      }
+      convertedViewTable =
+          ConvertedViewTable.of(
+              viewTable,
+              validatedRowTypeWithNames,
+              root.rel.copy(root.rel.getTraitSet(), List.of(input)));
       if (optionResolver.getOption(VDS_CACHE_ENABLED)) {
         convertedViewTables.put(viewCacheKey, convertedViewTable);
       }
@@ -287,5 +307,10 @@ public class PlannerCatalogImpl implements PlannerCatalog {
     context = null;
     metadataCatalog = null;
     convertedViewTables = null;
+  }
+
+  @Override
+  public SqlValidatorAndToRelContext getSqlValidatorAndToRelContext() {
+    return viewExpander.getSqlValidatorAndToRelContext();
   }
 }

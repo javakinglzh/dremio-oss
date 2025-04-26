@@ -16,10 +16,10 @@
 package com.dremio.exec.store.hive;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.TableFunctionConfig;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.hive.exec.HiveProxyingSubScan;
 import com.dremio.exec.store.hive.proxy.HiveProxiedOrcScanFilter;
@@ -67,7 +67,7 @@ public interface StoragePluginCreator extends ExtensionPoint {
   PF4JStoragePlugin createStoragePlugin(
       PluginManager pf4jManager,
       HiveStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       String name,
       Provider<StoragePluginId> pluginIdProvider);
 }

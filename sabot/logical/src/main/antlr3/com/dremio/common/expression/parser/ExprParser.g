@@ -125,7 +125,7 @@ scale returns [Integer value]
 
 dateType returns [MajorType type]
     : DATE { $type = Types.optional(TypeProtos.MinorType.DATE); }
-    | TIMESTAMP { $type = Types.optional(TypeProtos.MinorType.TIMESTAMP); }
+    | TIMESTAMP { $type = Types.optional(TypeProtos.MinorType.TIMESTAMPMILLI); }
     | TIME { $type = Types.optional(TypeProtos.MinorType.TIME); }
     | INTERVALYEAR { $type = Types.optional(TypeProtos.MinorType.INTERVALYEAR); }
     | INTERVALDAY { $type = Types.optional(TypeProtos.MinorType.INTERVALDAY); }

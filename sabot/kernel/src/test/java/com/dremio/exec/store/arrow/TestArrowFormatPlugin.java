@@ -16,8 +16,11 @@
 package com.dremio.exec.store.arrow;
 
 import static com.dremio.TestBuilder.mapOf;
+import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 import com.dremio.PlanTestBase;
+import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.store.easy.arrow.ArrowFormatPlugin;
 import java.io.BufferedWriter;
@@ -64,6 +67,33 @@ public class TestArrowFormatPlugin extends PlanTestBase {
         .sqlQuery(query)
         .sqlBaselineQuery("SELECT * FROM cp.\"region.json\"")
         .go();
+  }
+
+  @Test
+  public void rowSizeLimitCheckEnabled() throws Exception {
+    try (AutoCloseable c = withOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true)) {
+      final String query = "SELECT * FROM TABLE(dfs_test.arrowRegion(type => 'arrow'))";
+      test(query);
+      testBuilder()
+          .unOrdered()
+          .sqlQuery(query)
+          .sqlBaselineQuery("SELECT * FROM cp.\"region.json\"")
+          .go();
+    }
+  }
+
+  @Test
+  public void rowSizeLimitException() throws Exception {
+    try (AutoCloseable c = withOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable c2 = withOption(ExecConstants.LIMIT_ROW_SIZE_BYTES, 15); ) {
+      final String query = "SELECT * FROM TABLE(dfs_test.arrowRegion(type => 'arrow'))";
+      UserException exception = assertThrows(UserException.class, () -> test(query));
+      assertTrue(
+          exception
+              .getMessage()
+              .contains(
+                  "UNSUPPORTED_OPERATION ERROR: Exceeded maximum allowed row size of 15 bytes reading data."));
+    }
   }
 
   @Test
@@ -153,7 +183,7 @@ public class TestArrowFormatPlugin extends PlanTestBase {
     String query =
         "SELECT t.a.\"Tuesday\" as col FROM TABLE(dfs_test.complexPpd(type => 'arrow')) as t";
 
-    testPlanMatchingPatterns(query, new String[] {"columns=\\[`a`\\]"}, null);
+    testPlanMatchingPatterns(query, new String[] {"columns=\\[`a`.`Tuesday`\\]"}, null);
 
     testBuilder()
         .unOrdered()
@@ -176,7 +206,7 @@ public class TestArrowFormatPlugin extends PlanTestBase {
 
     String query = "SELECT t.a[0].b as col FROM TABLE(dfs_test.complexPpd2(type => 'arrow')) as t";
 
-    testPlanMatchingPatterns(query, new String[] {"columns=\\[`a`\\]"}, null);
+    testPlanMatchingPatterns(query, new String[] {"columns=\\[`a`\\[0\\].`b`\\]"}, null);
 
     testBuilder().unOrdered().sqlQuery(query).baselineColumns("col").baselineValues(1L).go();
   }

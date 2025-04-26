@@ -109,4 +109,10 @@ abstract class TextOutput {
         .message("Unsupported operation \"setCurrentDataPointer\"")
         .buildSilently();
   }
+
+  abstract int currentFieldIndex();
+
+  abstract int currentBatchIndex();
+
+  abstract boolean hasSelectedColumns();
 }

@@ -626,11 +626,12 @@ public class ParquetRowiseReader extends AbstractParquetReader {
       return type;
     } else {
       Preconditions.checkState(!type.isPrimitive());
-      return new GroupType(
-          type.getRepetition(),
-          type.getName(),
-          type.getOriginalType(),
-          getType(pathSegments, depth + 1, schema));
+      org.apache.parquet.schema.Types.GroupBuilder<GroupType> groupBuilder;
+      groupBuilder =
+          org.apache.parquet.schema.Types.buildGroup(type.getRepetition())
+              .as(type.getLogicalTypeAnnotation())
+              .addFields(getType(pathSegments, depth + 1, schema));
+      return groupBuilder.named(type.getName());
     }
   }
 

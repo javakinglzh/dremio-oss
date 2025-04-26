@@ -29,6 +29,8 @@ public class FragmentTicket implements AutoCloseable {
   private final FragmentHandle handle;
   private final SchedulingGroup<AsyncTaskWrapper> schedulingGroup;
   private boolean closed;
+  private long peakSpillableMemoryConsumption;
+  private long peakNonSpillableMemoryConsumption;
 
   public FragmentTicket(
       PhaseTicket phaseTicket,
@@ -37,6 +39,8 @@ public class FragmentTicket implements AutoCloseable {
     this.phaseTicket = Preconditions.checkNotNull(phaseTicket, "PhaseTicket should not be null");
     this.handle = handle;
     this.schedulingGroup = schedulingGroup;
+    this.peakSpillableMemoryConsumption = 0;
+    this.peakNonSpillableMemoryConsumption = 0;
     phaseTicket.reserve(this);
   }
 
@@ -52,11 +56,48 @@ public class FragmentTicket implements AutoCloseable {
     return schedulingGroup;
   }
 
+  boolean isSpillable(BufferAllocator allocator) {
+    String name = allocator.getName();
+    if ("HashJoinPOPSpill".equals(name)
+        || "HashAggregate".equals(name)
+        || "ExternalSort".equals(name)) {
+      return true;
+    }
+    return false;
+  }
+
+  public void updateMemoryConsumption() {
+    BufferAllocator allocator = phaseTicket.getAllocator();
+    for (BufferAllocator child : allocator.getChildAllocators()) {
+      if (child.getName().contains("frag:")) {
+        for (BufferAllocator operatorAllocator : child.getChildAllocators()) {
+          long peakMemoryAllocation = operatorAllocator.getPeakMemoryAllocation();
+          if (isSpillable(operatorAllocator)) {
+            if (peakMemoryAllocation > peakSpillableMemoryConsumption) {
+              peakSpillableMemoryConsumption = peakMemoryAllocation;
+            }
+          } else {
+            if (peakMemoryAllocation > peakNonSpillableMemoryConsumption) {
+              peakNonSpillableMemoryConsumption = peakMemoryAllocation;
+            }
+          }
+        }
+      } else {
+        long peakMemoryAllocation = child.getPeakMemoryAllocation();
+        if (peakMemoryAllocation > peakNonSpillableMemoryConsumption) {
+          peakNonSpillableMemoryConsumption = peakMemoryAllocation;
+        }
+      }
+    }
+  }
+
   @Override
   public void close() throws Exception {
     Preconditions.checkState(!closed, "Trying to close FragmentTicket more than once");
     closed = true;
 
+    phaseTicket.addPeakNonSpillableMemoryAcrossFragments(peakNonSpillableMemoryConsumption);
+    phaseTicket.addPeakSpillableMemoryAcrossFragments(peakSpillableMemoryConsumption);
     if (phaseTicket.release(this)) {
       // NB: The query ticket removes itself from the queries clerk when its last phase ticket is
       // removed

@@ -134,6 +134,8 @@ export default class FormSection extends Component {
           <div>
             <div className={titleElementWithIcon}>
               <SourceIcon
+                // Send source as this could be ARP connector that doesn't use dremio-icon
+                src={sectionConfig.getConfig().icon}
                 dremioIcon={`sources/${formIcon.split(".")[0]}`}
                 style={styles.sourceIcon}
               />
@@ -145,7 +147,11 @@ export default class FormSection extends Component {
       } else {
         return (
           <div className={sectionWithIcon}>
-            <SourceIcon dremioIcon={`sources/${formIcon.split(".")[0]}`} />
+            <SourceIcon
+              // Send source as this could be ARP connector that doesn't use dremio-icon
+              src={sectionConfig.getConfig().icon}
+              dremioIcon={`sources/${formIcon.split(".")[0]}`}
+            />
             <div className={elementsWithIcon}>
               {this.renderElements(sectionConfig, fields)}
             </div>

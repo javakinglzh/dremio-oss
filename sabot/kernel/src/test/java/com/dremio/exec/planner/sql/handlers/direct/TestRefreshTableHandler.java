@@ -31,7 +31,6 @@ import com.dremio.exec.store.DatasetRetrievalOptions;
 import com.dremio.exec.store.DatasetRetrievalPartitionOptions;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
-import com.dremio.service.namespace.NamespaceService;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -51,7 +50,6 @@ import org.mockito.stubbing.Answer;
 public class TestRefreshTableHandler {
   private RefreshTableHandler refreshTableHandler;
   @Mock private Catalog catalog;
-  @Mock private NamespaceService namespaceService;
 
   private static final String TABLE_NAME = "my_table";
   private static final String USER_NAME = "user";
@@ -59,7 +57,7 @@ public class TestRefreshTableHandler {
 
   @Before
   public void setup() throws NamespaceException {
-    refreshTableHandler = new RefreshTableHandler(catalog, namespaceService, false);
+    refreshTableHandler = new RefreshTableHandler(catalog, false);
 
     when(catalog.resolveSingle(any(NamespaceKey.class)))
         .thenAnswer(
@@ -73,7 +71,7 @@ public class TestRefreshTableHandler {
                   return null;
                 });
 
-    when(namespaceService.getDataset((any(NamespaceKey.class)))).thenReturn(null);
+    when(catalog.getDataset((any(NamespaceKey.class)))).thenReturn(null);
   }
 
   @Test(expected = UserException.class)

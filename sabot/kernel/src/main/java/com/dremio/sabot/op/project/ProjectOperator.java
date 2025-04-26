@@ -18,6 +18,8 @@ package com.dremio.sabot.op.project;
 import com.carrotsearch.hppc.IntHashSet;
 import com.dremio.common.AutoCloseables;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper;
+import com.dremio.common.exceptions.RowSizeLimitExceptionHelper.RowSizeLimitExceptionType;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.ConvertExpression;
@@ -50,6 +52,7 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.util.ColumnUtils;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.project.Projector.ComplexWriterCreator;
 import com.dremio.sabot.op.project.ProjectorStats.Metric;
 import com.dremio.sabot.op.spi.SingleInputOperator;
@@ -72,9 +75,11 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.AllocationHelper;
 import org.apache.arrow.vector.ValueVector;
+import org.apache.arrow.vector.VectorContainerHelper;
 import org.apache.arrow.vector.complex.impl.ComplexWriterImpl;
 import org.apache.arrow.vector.complex.writer.BaseWriter.ComplexWriter;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -82,11 +87,13 @@ import org.apache.arrow.vector.util.TransferPair;
 
 public class ProjectOperator implements SingleInputOperator {
   static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(ProjectOperator.class);
+  private static final long INT_SIZE = 4;
 
   private final Project config;
   private final OperatorContext context;
   private final ExpressionEvaluationOptions projectorOptions;
   private final VectorContainer outgoing;
+  private final int rowSizeLimit;
 
   private VectorAccessible incoming;
   private State state = State.NEEDS_SETUP;
@@ -98,6 +105,11 @@ public class ProjectOperator implements SingleInputOperator {
   private BatchSchema initialSchema;
   private Stopwatch javaCodeGenWatch = Stopwatch.createUnstarted();
   private Stopwatch gandivaCodeGenWatch = Stopwatch.createUnstarted();
+  private ArrowBuf rowSizeAccumulator;
+  private int fixedDataLenPerRow;
+  private CombinedSizer variableVectorSizer;
+  private final boolean rowSizeLimitEnabled;
+  private boolean rowSizeLimitEnabledForThisOperator;
 
   public static enum EvalMode {
     DIRECT,
@@ -118,6 +130,11 @@ public class ProjectOperator implements SingleInputOperator {
             .getOption(ExecConstants.QUERY_EXEC_OPTION.getOptionName())
             .getStringVal());
     this.outgoing = context.createOutputVectorContainer();
+    this.rowSizeLimitEnabled =
+        context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
+    this.rowSizeLimit =
+        Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
   }
 
   @Override
@@ -195,6 +212,22 @@ public class ProjectOperator implements SingleInputOperator {
       // evaluated is also determined by
       // other direct transfer expressions (if it is already transfered the expression is evaluated)
       cacheExpressions(exprs);
+    }
+
+    if (rowSizeLimitEnabled) {
+      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+      // do row size check only in case when EvalMode is Complex or Eval (for VarChar and VarBinary
+      // output type)
+      if (!splitter.isVarLengthOutputPresent()) {
+        rowSizeLimitEnabledForThisOperator = false;
+        if (fixedDataLenPerRow > rowSizeLimit) {
+          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+        }
+      } else {
+        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      }
     }
     return outgoing;
   }
@@ -286,6 +319,7 @@ public class ProjectOperator implements SingleInputOperator {
           .build(logger);
     }
 
+    checkForRowSizeOverLimit(recordsConsumedCurrentBatch);
     return recordsConsumedCurrentBatch;
   }
 
@@ -314,6 +348,10 @@ public class ProjectOperator implements SingleInputOperator {
             Metric.GANDIVA_EVALUATE_TIME, gandivaCodeGenWatch.elapsed(TimeUnit.MILLISECONDS));
     javaCodeGenWatch.reset();
     gandivaCodeGenWatch.reset();
+    if (rowSizeAccumulator != null) {
+      rowSizeAccumulator.close();
+      rowSizeAccumulator = null;
+    }
   }
 
   private void allocateNew() {
@@ -517,6 +555,7 @@ public class ProjectOperator implements SingleInputOperator {
             if (nonDirectExprs != null) {
               nonDirectExprs.add(namedExpression);
             }
+            splitter.setVarLengthOutputPresent(true);
             break;
           }
 
@@ -544,6 +583,10 @@ public class ProjectOperator implements SingleInputOperator {
             if (nonDirectExprs != null) {
               nonDirectExprs.add(namedExpression);
             }
+            if (materializedExp.getCompleteType() == CompleteType.VARCHAR
+                || materializedExp.getCompleteType() == CompleteType.VARBINARY) {
+              splitter.setVarLengthOutputPresent(true);
+            }
             break;
           }
         default:
@@ -551,6 +594,34 @@ public class ProjectOperator implements SingleInputOperator {
       }
     }
     return splitter;
+  }
+
+  private void createNewRowLengthAccumulatorIfRequired(int batchSize) {
+    if (rowSizeAccumulator != null) {
+      if (rowSizeAccumulator.capacity() < (long) batchSize * INT_SIZE) {
+        rowSizeAccumulator.close();
+        rowSizeAccumulator = null;
+      } else {
+        return;
+      }
+    }
+    rowSizeAccumulator = context.getAllocator().buffer((long) batchSize * INT_SIZE);
+  }
+
+  private void checkForRowSizeOverLimit(int recordCount) {
+    if (!rowSizeLimitEnabledForThisOperator) {
+      return;
+    }
+    createNewRowLengthAccumulatorIfRequired(recordCount);
+    VectorContainerHelper.checkForRowSizeOverLimit(
+        outgoing,
+        recordCount,
+        rowSizeLimit - fixedDataLenPerRow,
+        rowSizeLimit,
+        rowSizeAccumulator,
+        variableVectorSizer,
+        RowSizeLimitExceptionType.PROCESSING,
+        logger);
   }
 
   class ExpressionHashKey {

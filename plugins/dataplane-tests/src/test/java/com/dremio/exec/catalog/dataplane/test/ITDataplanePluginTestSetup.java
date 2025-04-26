@@ -44,6 +44,7 @@ import com.dremio.exec.catalog.ConnectionReader;
 import com.dremio.exec.catalog.DatasetCatalogServiceImpl;
 import com.dremio.exec.catalog.InformationSchemaServiceImpl;
 import com.dremio.exec.catalog.MetadataRefreshInfoBroadcaster;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.catalog.VersionedDatasetAdapterFactory;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
@@ -228,7 +229,8 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
                         getProvider(ModifiableSchedulerService.class),
                         getProvider(VersionedDatasetAdapterFactory.class),
                         getProvider(CatalogStatusEvents.class),
-                        () -> mock(ExecutorService.class)));
+                        getProvider(ExecutorService.class),
+                        getProvider(NamespaceService.Factory.class)));
           }
         });
     setupDefaultTestCluster();
@@ -248,7 +250,7 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
             .setName(DATAPLANE_PLUGIN_NAME)
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
     catalog = getCatalogService().getSystemUserCatalog();
-    catalog.createSource(sourceConfig);
+    catalog.createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     dataplanePlugin = catalog.getSource(DATAPLANE_PLUGIN_NAME);
 
     namespaceService = getSabotContext().getNamespaceService(SystemUser.SYSTEM_USERNAME);
@@ -264,7 +266,8 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
             .setConnectionConf(prepareConnectionConf(PRIMARY_BUCKET))
             .setName(DATAPLANE_PLUGIN_NAME_FOR_REFLECTION_TEST)
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
-    catalog.createSource(sourceConfigForReflectionTest);
+    catalog.createSource(
+        sourceConfigForReflectionTest, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
   }
 
   /** Defaulted to use DataplanePlugin Connection configuration if not passed */
@@ -290,7 +293,9 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
                       .setName(sourceName)
                       .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
             }
-            catalogService.getSystemUserCatalog().createSource(sourceConfig);
+            catalogService
+                .getSystemUserCatalog()
+                .createSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
           }
         });
   }
@@ -304,21 +309,16 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
           if (catalogService
               .getAllVersionedPlugins()
               .anyMatch(s -> s.getName().equals(sourceName))) {
-            SourceConfig sourceConfig;
-            if (connectionConf != null) {
-              sourceConfig =
-                  new SourceConfig()
-                      .setConnectionConf(connectionConf)
-                      .setName(sourceName)
-                      .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
-            } else {
-              sourceConfig =
-                  new SourceConfig()
-                      .setConnectionConf(prepareConnectionConf(PRIMARY_BUCKET))
-                      .setName(sourceName)
-                      .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY);
+            try {
+              // Get up-to-date source config as managed plugin checks for tag when closing.
+              SourceConfig sourceConfig = namespaceService.getSource(new NamespaceKey(sourceName));
+              catalogService
+                  .getSystemUserCatalog()
+                  .deleteSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
+            } catch (NamespaceException e) {
+              // Ignore exception to continue closing remaining sources.
+              LOGGER.warn("Failed to get source config", e);
             }
-            catalogService.getSystemUserCatalog().deleteSource(sourceConfig);
           }
         });
   }
@@ -363,7 +363,7 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
     SourceConfig sourceConfig = namespaceService.getSource(new NamespaceKey(DATAPLANE_PLUGIN_NAME));
     sourceConfig.setConnectionConf(prepareConnectionConf(bucketSelection));
     Catalog systemUserCatalog = getCatalogService().getSystemUserCatalog();
-    systemUserCatalog.updateSource(sourceConfig);
+    systemUserCatalog.updateSource(sourceConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
 
     // get ref to new DataplanePlugin (old one was closed during ManagedStoragePlugin.replacePlugin)
     dataplanePlugin = systemUserCatalog.getSource(DATAPLANE_PLUGIN_NAME);
@@ -445,10 +445,6 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
   public void setDataplaneDefaultSessionSettings() throws Exception {
     resetSessionSettings();
     setSystemOption(DATAPLANE_AZURE_STORAGE_ENABLED, true);
-  }
-
-  public static AutoCloseable enableVersionedSourceUdf() {
-    return withSystemOption(CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED, true);
   }
 
   public static AutoCloseable disableVersionedSourceUdf() {

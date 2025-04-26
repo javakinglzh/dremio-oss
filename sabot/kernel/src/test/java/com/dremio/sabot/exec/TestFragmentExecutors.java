@@ -16,7 +16,6 @@
 package com.dremio.sabot.exec;
 
 import static com.dremio.sabot.task.single.DedicatedTaskPool.DUMMY_GROUP_MANAGER;
-import static com.dremio.test.DremioTest.CLASSPATH_SCAN_RESULT;
 import static com.dremio.test.DremioTest.DEFAULT_SABOT_CONFIG;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -26,7 +25,6 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 import com.dremio.common.utils.protos.QueryIdHelper;
-import com.dremio.config.DremioConfig;
 import com.dremio.exec.planner.fragment.PlanFragmentFull;
 import com.dremio.exec.proto.CoordExecRPC;
 import com.dremio.exec.proto.CoordExecRPC.ActiveQueriesOnForeman;
@@ -35,12 +33,12 @@ import com.dremio.exec.proto.CoordExecRPC.InitializeFragments;
 import com.dremio.exec.proto.CoordExecRPC.PlanFragmentMajor;
 import com.dremio.exec.proto.CoordExecRPC.PlanFragmentMinor;
 import com.dremio.exec.proto.CoordExecRPC.PlanFragmentSet;
+import com.dremio.exec.proto.CoordExecRPC.SchedulingInfo;
 import com.dremio.exec.proto.CoordinationProtos.NodeEndpoint;
 import com.dremio.exec.proto.ExecProtos;
 import com.dremio.exec.proto.ExecProtos.FragmentHandle;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserBitShared.QueryId;
-import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.options.OptionManager;
 import com.dremio.options.TypeValidators;
@@ -66,6 +64,7 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.memory.RootAllocatorFactory;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -151,18 +150,16 @@ public class TestFragmentExecutors {
     }
   }
 
-  private static BootStrapContext bootStrapContext;
+  private static BufferAllocator rootAllocator;
 
   @BeforeClass
   public static void setupClass() {
-    bootStrapContext =
-        new BootStrapContext(
-            DremioConfig.create(null, DEFAULT_SABOT_CONFIG), CLASSPATH_SCAN_RESULT);
+    rootAllocator = RootAllocatorFactory.newRoot(DEFAULT_SABOT_CONFIG);
   }
 
   @AfterClass
   public static void teardownClass() {
-    bootStrapContext.close();
+    rootAllocator.close();
   }
 
   @SuppressWarnings("unchecked") // needed for the unchecked cast below
@@ -237,19 +234,20 @@ public class TestFragmentExecutors {
         .execute(any());
 
     final MaestroProxy mockMaestroProxy = mock(MaestroProxy.class);
-    when(mockMaestroProxy.tryStartQuery(any(), any(), any())).thenReturn(true);
+    when(mockMaestroProxy.tryStartQuery(any(), any(), any(), any())).thenReturn(true);
     when(mockTaskPool.getTaskMonitor()).thenReturn(TaskPool.NO_OP_TASK_MONITOR);
 
     WorkloadTicketDepot ticketDepot =
-        new WorkloadTicketDepot(
-            bootStrapContext.getAllocator(), bootStrapContext.getConfig(), DUMMY_GROUP_MANAGER);
+        new WorkloadTicketDepot(rootAllocator, DEFAULT_SABOT_CONFIG, DUMMY_GROUP_MANAGER);
+
+    QueriesClerk queriesClerk = mock(QueriesClerk.class);
 
     final FragmentExecutors fe =
         new FragmentExecutors(
-            bootStrapContext,
+            rootAllocator,
             mock(SabotContext.NodeDebugContextProviderImpl.class),
-            bootStrapContext.getConfig(),
-            new QueriesClerk(ticketDepot),
+            DEFAULT_SABOT_CONFIG,
+            queriesClerk,
             mockMaestroProxy,
             mock(FragmentWorkManager.ExitCallback.class),
             mockTaskPool,
@@ -262,6 +260,10 @@ public class TestFragmentExecutors {
     // (i.e., major ID + minor ID == fragment index)
 
     InitializeFragments.Builder initializeFragmentsBuilder = InitializeFragments.newBuilder();
+
+    SchedulingInfo.Builder scheduleB = initializeFragmentsBuilder.getSchedulingInfoBuilder();
+    scheduleB.setWorkloadClass(UserBitShared.WorkloadClass.BACKGROUND);
+
     PlanFragmentSet.Builder setBuilder = initializeFragmentsBuilder.getFragmentSetBuilder();
 
     for (int i = 0; i < numFragments; i++) {
@@ -295,7 +297,6 @@ public class TestFragmentExecutors {
 
     final NodeEndpoint nodeEndpoint = NodeEndpoint.newBuilder().build();
 
-    final FragmentExecutorBuilder mockFragmentExecutorBuilder = mock(FragmentExecutorBuilder.class);
     doAnswer(
             (Answer<Object>)
                 invocation -> {
@@ -303,7 +304,7 @@ public class TestFragmentExecutors {
                   queryStarter.buildAndStartQuery(mock(QueryTicket.class));
                   return null;
                 })
-        .when(mockFragmentExecutorBuilder)
+        .when(queriesClerk)
         .buildAndStartQuery(any(), any(), any());
 
     FragmentExecutor[] fragmentExecutors = new FragmentExecutor[numFragments];
@@ -332,6 +333,7 @@ public class TestFragmentExecutors {
           .fillFragmentStats(any(), any(), anyBoolean());
     }
 
+    final FragmentExecutorBuilder mockFragmentExecutorBuilder = mock(FragmentExecutorBuilder.class);
     doAnswer(
             (Answer<FragmentExecutor>)
                 invocation -> {
@@ -368,7 +370,6 @@ public class TestFragmentExecutors {
   }
 
   private Answer<Void> getStatsAnswer(FragmentHandle fragmentHandles) {
-    BufferAllocator rootAllocator = bootStrapContext.getAllocator();
     FragmentStats stats = new FragmentStats(rootAllocator, fragmentHandles, null, 10);
     stats.newOperatorStats(
         new OpProfileDef(1, UserBitShared.CoreOperatorType.HASH_JOIN.getNumber(), 2, 0),

@@ -35,14 +35,13 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogOptions;
 import com.dremio.exec.catalog.CurrentSchemaOption;
 import com.dremio.exec.catalog.MetadataObjectsUtils;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.conf.EncryptionValidationMode;
 import com.dremio.exec.catalog.conf.Host;
-import com.dremio.exec.planner.logical.ViewTable;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
 import com.dremio.exec.record.BatchSchema;
-import com.dremio.exec.server.SabotContext;
-import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.options.OptionManager;
@@ -59,7 +58,7 @@ import com.dremio.plugins.elastic.mapping.SchemaMerger;
 import com.dremio.plugins.elastic.planning.ElasticRulesFactory;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.SourceState;
-import com.dremio.service.namespace.capabilities.BooleanCapability;
+import com.dremio.service.namespace.capabilities.BooleanCapabilityValue;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.google.common.base.Function;
@@ -99,22 +98,19 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
 
   private static final Logger logger = LoggerFactory.getLogger(ElasticsearchStoragePlugin.class);
 
-  public static final BooleanCapability ENABLE_V7_FEATURES =
-      new BooleanCapability("enable_elastic_v7_feature", false);
-  public static final BooleanCapability ENABLE_V5_FEATURES =
-      new BooleanCapability("enable_elastic_v5_feature", false);
-  public static final BooleanCapability SUPPORTS_NEW_FEATURES =
-      new BooleanCapability("supports_new_features", false);
-
   private final String name;
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final ElasticsearchConf config;
   private final ElasticConnectionPool connectionPool;
+  private final boolean isValuesCastEnabled;
 
-  public ElasticsearchStoragePlugin(ElasticsearchConf config, SabotContext context, String name) {
+  public ElasticsearchStoragePlugin(
+      ElasticsearchConf config, PluginSabotContext context, String name) {
     this.config = config;
     this.context = context;
     this.name = name;
+    this.isValuesCastEnabled =
+        context.getOptionManager().getOption(PlannerSettings.VALUES_CAST_ENABLED);
 
     final TLSValidationMode tlsMode;
     if (!config.isSslEnabled()) {
@@ -168,7 +164,7 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
     }
   }
 
-  public SabotContext getContext() {
+  public PluginSabotContext getContext() {
     return context;
   }
 
@@ -207,7 +203,10 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
 
   @Override
   public SourceCapabilities getSourceCapabilities() {
-    return connectionPool.getCapabilities();
+    // Lets the sabot kernel, and in turn the planner, know that this source supports CONTAINS
+    // (by default, support for CONTAINS is not enabled)
+    return new SourceCapabilities(
+        new BooleanCapabilityValue(SourceCapabilities.SUPPORTS_CONTAINS, true));
   }
 
   @Override
@@ -347,7 +346,11 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
 
         Preconditions.checkArgument(
             indices.size() == 1, "More than one Index returned for alias %s.", schema);
-        logger.debug("Found mapping: {} for {}:{}", filteredIndex.getMergedMapping(), schema, type);
+        logger.debug(
+            "Found mapping: {} for {}:{}",
+            filteredIndex.getMergedMapping(isValuesCastEnabled),
+            schema,
+            type);
 
         return Optional.of(
             new ElasticDatasetHandle(
@@ -355,7 +358,7 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
                 connection,
                 context,
                 config,
-                filteredIndex.getMergedMapping(),
+                filteredIndex.getMergedMapping(isValuesCastEnabled),
                 ImmutableList.<String>of(),
                 false));
       } else {
@@ -364,7 +367,7 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
         if (ems.isEmpty()) {
           return Optional.empty();
         }
-        final ElasticMapping mapping = ems.getMergedMapping();
+        final ElasticMapping mapping = ems.getMergedMapping(isValuesCastEnabled);
         final List<String> indicesList =
             indices.stream().map(ElasticIndex::getName).collect(Collectors.toList());
 
@@ -416,7 +419,7 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
       final List<String> indicesList =
           indices.stream().map(ElasticIndex::getName).collect(Collectors.toList());
       final ElasticMappingSet mappingSet = new ElasticMappingSet(indices);
-      final ElasticMapping mapping = mappingSet.getMergedMapping();
+      final ElasticMapping mapping = mappingSet.getMergedMapping(isValuesCastEnabled);
       final EntityPath key =
           new EntityPath(ImmutableList.of(name, alias.getAlias(), mapping.getName()));
       builder.add(
@@ -509,7 +512,7 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
         if (ems.isEmpty()) {
           return null;
         }
-        return ems.getMergedMapping();
+        return ems.getMergedMapping(isValuesCastEnabled);
       }
     } catch (Exception ex) {
       logger.info("Failure while attempting to retrieve dataset {}", datasetPath, ex);
@@ -551,16 +554,8 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
         String clusterHealth = result.getAsJsonObject().get("status").getAsString();
         switch (clusterHealth) {
           case "green":
-            if (connectionPool.getCapabilities().getCapability(SUPPORTS_NEW_FEATURES)) {
-              return SourceState.goodState(
-                  String.format("Elastic version %s.", connectionPool.getMinVersionInCluster()));
-            } else {
-              return SourceState.warnState(
-                  String.format(
-                      "Detected Elastic version %s. Full query pushdown in Dremio requires version %s or above.",
-                      connectionPool.getMinVersionInCluster(),
-                      ElasticsearchConstants.MIN_VERSION_TO_ENABLE_NEW_FEATURES));
-            }
+            return SourceState.goodState(
+                String.format("Elastic version %s.", connectionPool.getMinVersionInCluster()));
           case "yellow":
             return SourceState.warnState(
                 "Elastic cluster health is yellow: more nodes are needed for replicas.",
@@ -624,11 +619,6 @@ public class ElasticsearchStoragePlugin implements StoragePlugin, SupportsListin
   @Override
   public boolean hasAccessPermission(String user, NamespaceKey key, DatasetConfig datasetConfig) {
     return true;
-  }
-
-  @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
-    return null;
   }
 
   @Override

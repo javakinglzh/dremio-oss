@@ -211,7 +211,9 @@ public class TestHashTableMultiThread extends BaseTestOperator {
                   false,
                   MAX_VALUES_PER_BATCH,
                   null,
-                  true);
+                  true,
+                  false,
+                  false);
           hashTable = HashTable.getInstance(SabotConfig.create(), options, hashTableCreateArgs);
         }
         ArrowBuf hashkey8B = allocator.buffer(8 * records);

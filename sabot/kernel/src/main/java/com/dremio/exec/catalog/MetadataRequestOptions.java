@@ -145,6 +145,7 @@ public abstract class MetadataRequestOptions {
             .optionManager(getSchemaConfig().getOptions())
             .setViewExpansionContext(getSchemaConfig().getViewExpansionContext())
             .setDatasetValidityChecker(getSchemaConfig().getDatasetValidityChecker())
+            .setCatalogAccessListener(getSchemaConfig().getCatalogAccessListener())
             .build();
 
     return new ImmutableMetadataRequestOptions.Builder()

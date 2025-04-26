@@ -116,8 +116,14 @@ public class HomeFileTool {
     FilePath uniquePath =
         filePath.rename(
             format("%s_%s-%s", filePath.getFileName().toString(), extension, UUID.randomUUID()));
-    return Path.mergePaths(
-        config.getStagingPath(hostNameProvider.get()), PathUtils.toFSPath(uniquePath.toPathList()));
+    Path stagingLocation =
+        Path.mergePaths(
+            config.getStagingPath(hostNameProvider.get()),
+            PathUtils.toFSPath(uniquePath.toPathList()));
+    if (!validStagingLocation(stagingLocation)) {
+      throw new IllegalArgumentException("Invalid staging location provided");
+    }
+    return stagingLocation;
   }
 
   public HomeFileConf getConfForBackup() {
@@ -138,8 +144,13 @@ public class HomeFileTool {
   private Path getUploadLocation(FilePath filePath, String extension) {
     FilePath filePathWithExtension =
         filePath.rename(format("%s_%s", filePath.getFileName().getName(), extension));
-    return Path.mergePaths(
-        config.getInnerUploads(), PathUtils.toFSPath(filePathWithExtension.toPathList()));
+    Path uploadPath =
+        Path.mergePaths(
+            config.getInnerUploads(), PathUtils.toFSPath(filePathWithExtension.toPathList()));
+    if (!validUploadLocation(uploadPath)) {
+      throw new IllegalArgumentException("Invalid upload location provided");
+    }
+    return uploadPath;
   }
 
   /**
@@ -183,13 +194,35 @@ public class HomeFileTool {
   public Path saveFile(Path stagingLocation, FilePath filePath, String extension)
       throws IOException {
     if (!validStagingLocation(stagingLocation)) {
-      throw new IllegalArgumentException("Invalid staging location provided");
+      throw new IllegalArgumentException("Invalid save location provided");
     }
 
     final Path uploadLocation = getUploadLocation(filePath, extension);
     fs.mkdirs(uploadLocation.getParent());
     fs.rename(stagingLocation, uploadLocation);
     return uploadLocation;
+  }
+
+  private boolean validBaseLocation(Path location) {
+    final Path pathToValidate = fs.makeQualified(location);
+
+    final Path validBasePath = fs.makeQualified(config.getBaseUploadsPath());
+
+    return pathToValidate.toURI().getScheme().equals(validBasePath.toURI().getScheme())
+        && PathUtils.checkNoAccessOutsideBase(validBasePath, pathToValidate);
+  }
+
+  private boolean validUploadLocation(Path uploadLocation) {
+    final Path pathToValidate = fs.makeQualified(uploadLocation);
+
+    // the path to validate against should include the username
+    final HomeName userHomePath =
+        HomeName.getUserHomePath(securityContext.getUserPrincipal().getName());
+    final Path validBasePath =
+        fs.makeQualified(config.getInnerUploads().resolve(userHomePath.getName()));
+
+    return pathToValidate.toURI().getScheme().equals(validBasePath.toURI().getScheme())
+        && PathUtils.checkNoAccessOutsideBase(validBasePath, pathToValidate);
   }
 
   /**
@@ -200,7 +233,7 @@ public class HomeFileTool {
    */
   @WithSpan
   public boolean validStagingLocation(Path stagingLocation) {
-    final Path stagingPath = fs.makeQualified(stagingLocation);
+    final Path pathToValidate = fs.makeQualified(stagingLocation);
 
     // the path to validate against should include the username
     final HomeName userHomePath =
@@ -209,24 +242,27 @@ public class HomeFileTool {
         fs.makeQualified(
             config.getStagingPath(hostNameProvider.get()).resolve(userHomePath.getName()));
 
-    return stagingPath.toURI().getScheme().equals(validBasePath.toURI().getScheme())
-        && PathUtils.checkNoAccessOutsideBase(validBasePath, stagingPath);
+    return pathToValidate.toURI().getScheme().equals(validBasePath.toURI().getScheme())
+        && PathUtils.checkNoAccessOutsideBase(validBasePath, pathToValidate);
   }
 
   /**
    * Delete file uploaded by user
    *
+   * @throws IllegalArgumentException - If the file location is invalid.
    * @throws IOException - An exception if the file system cannot be written to.
    */
   @WithSpan
-  public void deleteFile(String fileLocation) throws IOException {
-    if (fileLocation != null) {
+  public void deleteUploadedFile(String fileLocation) throws IOException {
+    Preconditions.checkNotNull(fileLocation);
+
+    if (!validUploadLocation(Path.of(fileLocation))) {
+      throw new IllegalArgumentException("Invalid delete location provided");
+    }
+
+    if (fs.exists(Path.of(fileLocation))) {
       fs.delete(Path.of(fileLocation), true);
     }
-  }
-
-  public boolean fileExists(String fileLocation) throws IOException {
-    return fs.exists(Path.of(fileLocation));
   }
 
   /**
@@ -239,6 +275,11 @@ public class HomeFileTool {
   @WithSpan
   public boolean deleteHomeAndContents(String userHome) throws IOException {
     final Path homePath = config.getInnerUploads().resolve(userHome);
+
+    if (!validBaseLocation(homePath)) {
+      throw new IllegalArgumentException("Invalid delete home location provided");
+    }
+
     if (fs.exists(homePath)) {
       return fs.delete(homePath, true);
     }

@@ -99,7 +99,7 @@
       javaType: "java.sql.Timestamp",
       type: "TimeStampMilli",
       needOIForType: true,
-      minorType: "TIMESTAMP"
+      minorType: "TIMESTAMPMILLI"
     },
     {
       hiveType: "DECIMAL",

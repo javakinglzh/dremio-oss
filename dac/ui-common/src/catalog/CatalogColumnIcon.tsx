@@ -15,11 +15,11 @@
  */
 
 import { type FC } from "react";
-import type { CommunityDataset } from "@dremio/dremio-js/interfaces";
+import type { DatasetCatalogObject } from "@dremio/dremio-js/oss";
 import { TableColumns, TableColumnsIcons } from "../types/TableColumns.types";
 
 export const CatalogColumnIcon: FC<{
-  tableColumn: CommunityDataset["fields"][number];
+  tableColumn: DatasetCatalogObject["fields"][number];
 }> = (props) => {
   return (
     <dremio-icon

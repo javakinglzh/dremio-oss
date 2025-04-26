@@ -41,7 +41,8 @@ public final class PlanProperties {
     public static enum ResultMode {
       EXEC,
       LOGICAL,
-      PHYSICAL;
+      PHYSICAL,
+      CONVERT_ONLY
     }
 
     private Generator(@JsonProperty("type") String type, @JsonProperty("info") String info) {

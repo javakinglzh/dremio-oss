@@ -15,6 +15,8 @@
  */
 package com.dremio.service.reflection.refresh;
 
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
+import static com.dremio.exec.planner.physical.PlannerSettings.MANUAL_REFLECTION_MODE;
 import static com.dremio.exec.planner.sql.CalciteArrowHelper.fromCalciteRowType;
 import static com.dremio.exec.store.iceberg.IcebergSerDe.serializedSchemaAsJson;
 import static com.dremio.exec.store.iceberg.IcebergUtils.getIcebergPartitionSpecFromTransforms;
@@ -52,6 +54,7 @@ import com.dremio.exec.planner.logical.IncrementalRefreshByPartitionWriterRel;
 import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.logical.ScreenRel;
 import com.dremio.exec.planner.logical.WriterRel;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.sql.PartitionTransform;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
@@ -59,7 +62,6 @@ import com.dremio.exec.planner.sql.handlers.DrelTransformer;
 import com.dremio.exec.planner.sql.handlers.PlanLogUtil;
 import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
-import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.handlers.query.SqlToPlanHandler;
 import com.dremio.exec.planner.sql.parser.SqlRefreshReflection;
@@ -136,9 +138,15 @@ public class RefreshHandler implements SqlToPlanHandler {
 
   private String textPlan;
   private Rel drel;
+  private RelNode relPlanForExplain;
 
   public RefreshHandler() {
     this.writerOptionManager = WriterOptionManager.Instance;
+  }
+
+  @Override
+  public RelNode getPlanForExplain() {
+    return relPlanForExplain;
   }
 
   @Override
@@ -158,7 +166,9 @@ public class RefreshHandler implements SqlToPlanHandler {
       final SqlRefreshReflection materialize =
           SqlNodeUtil.unwrap(sqlNode, SqlRefreshReflection.class);
 
-      boolean isLogicalExplainOnly = config.getResultMode().equals(ResultMode.LOGICAL);
+      boolean isLogicalExplainOnly =
+          config.getResultMode().equals(ResultMode.LOGICAL)
+              || config.getResultMode().equals(ResultMode.CONVERT_ONLY);
       if (!SystemUser.SYSTEM_USERNAME.equals(config.getContext().getQueryUserName())
           && !isLogicalExplainOnly) {
         throw SqlExceptionHelper.parseError(
@@ -219,7 +229,7 @@ public class RefreshHandler implements SqlToPlanHandler {
               goal,
               entry,
               materialization,
-              service.getExcludedReflectionsProvider(),
+              service.getExcludedReflectionsProvider(isLogicalExplainOnly),
               catalogService,
               config.getContext().getConfig(),
               reflectionSettings,
@@ -227,9 +237,14 @@ public class RefreshHandler implements SqlToPlanHandler {
               dependenciesStore,
               refreshDecisions,
               snapshotDiffContextPointer);
+      if (config.getResultMode().equals(ResultMode.CONVERT_ONLY)) {
+        relPlanForExplain = initial;
+        return null;
+      }
       final BatchSchema batchSchema = fromCalciteRowType(initial.getRowType());
       drel = DrelTransformer.convertToDrelMaintainingNames(config, initial);
       if (isLogicalExplainOnly) {
+        relPlanForExplain = drel;
         // we only want to do logical planning,
         // there is no point going further in the plan generation
         return null;
@@ -251,7 +266,7 @@ public class RefreshHandler implements SqlToPlanHandler {
 
       ByteString extendedByteString = null;
       DremioTable oldReflection = null;
-      if (!isCreate && materialization.getIsIcebergDataset()) {
+      if (!isCreate) {
         Materialization lastDoneMaterialization =
             Preconditions.checkNotNull(
                 materializationStore.getLastMaterializationDone(reflectionId),
@@ -275,7 +290,7 @@ public class RefreshHandler implements SqlToPlanHandler {
               0,
               goal,
               fields,
-              materialization.getIsIcebergDataset(),
+              true,
               isCreate,
               extendedByteString,
               snapshotDiffContextPointer[0],
@@ -285,16 +300,14 @@ public class RefreshHandler implements SqlToPlanHandler {
           buildReflectionPartitionInfo(materialization, config, goal, batchSchema);
 
       IcebergTableProps icebergTableProps =
-          materialization.getIsIcebergDataset()
-              ? getIcebergTableProps(
-                  materialization,
-                  refreshDecisions,
-                  attemptId,
-                  writerOptions.getPartitionColumns(),
-                  writerOptions,
-                  reflectionPartitionInfo,
-                  snapshotDiffContextPointer[0])
-              : null;
+          getIcebergTableProps(
+              materialization,
+              refreshDecisions,
+              attemptId,
+              writerOptions.getPartitionColumns(),
+              writerOptions,
+              reflectionPartitionInfo,
+              snapshotDiffContextPointer[0]);
 
       Rel writerDrel = null;
       if (snapshotDiffContextPointer[0] != null
@@ -333,15 +346,14 @@ public class RefreshHandler implements SqlToPlanHandler {
                 initial.getRowType());
       }
 
-      final RelNode doubleWriter =
-          SqlHandlerUtil.storeQueryResultsIfNeeded(
-              config.getConverter().getParserConfig(), config.getContext(), writerDrel);
+      final RelNode doubleWriter = storeQueryResultsIfNeeded(config, writerDrel);
 
       final ScreenRel screen =
           new ScreenRel(writerDrel.getCluster(), writerDrel.getTraitSet(), doubleWriter);
 
       final Pair<Prel, String> convertToPrel = PrelTransformer.convertToPrel(config, screen);
       final Prel prel = convertToPrel.getKey();
+      relPlanForExplain = prel;
       this.textPlan = convertToPrel.getValue();
       PhysicalOperator pop = PrelTransformer.convertToPop(config, prel);
       PhysicalPlan plan = PrelTransformer.convertToPlan(config, pop);
@@ -354,7 +366,12 @@ public class RefreshHandler implements SqlToPlanHandler {
       final Catalog catalog = config.getContext().getCatalog();
       ReflectionRoutingManager reflectionRoutingManager =
           config.getContext().getReflectionRoutingManager();
-      if (reflectionRoutingManager != null) {
+      if (reflectionRoutingManager != null
+          && (config
+              .getContext()
+              .getQueryOptionManager()
+              .getOption(PlannerSettings.REFRESH_MODE_STRING)
+              .equals(MANUAL_REFLECTION_MODE))) {
         DatasetConfig datasetConfig = catalog.getTable(datasetId).getDatasetConfig();
         boolean inheritanceEnabled =
             config
@@ -391,7 +408,6 @@ public class RefreshHandler implements SqlToPlanHandler {
           }
         }
       }
-
       return plan;
 
     } catch (Exception ex) {
@@ -495,10 +511,8 @@ public class RefreshHandler implements SqlToPlanHandler {
           .build(logger);
     }
     final NamespaceKey namespaceKey = oldReflection.getPath();
-    String previousReflectionSnapshotID = null;
-    if (latestRefresh.getIsIcebergRefresh() != null && latestRefresh.getIsIcebergRefresh()) {
-      previousReflectionSnapshotID = String.valueOf(materialization.getPreviousIcebergSnapshot());
-    }
+    String previousReflectionSnapshotID =
+        String.valueOf(materialization.getPreviousIcebergSnapshot());
     if (previousReflectionSnapshotID == null) {
       throw SqlExceptionHelper.parseError(
               "Could not find the Iceberg table and latest SnapshotID of a reflection to incrementally update.",
@@ -796,12 +810,6 @@ public class RefreshHandler implements SqlToPlanHandler {
     if (firstNonIdentity.isPresent()) {
       ReflectionUtils.validateNonIdentityTransformAllowed(
           sqlHandlerConfig.getContext().getOptions(), firstNonIdentity.get().getType().getName());
-      if (!materialization.getIsIcebergDataset()) {
-        throw new UnsupportedOperationException(
-            String.format(
-                "[%s] partition transform is present, but the reflection uses a non-Iceberg materialization.",
-                firstNonIdentity.get().getType().getName()));
-      }
     }
     final SchemaConverter schemaConverter = SchemaConverter.getBuilder().build();
     final Schema icebergSchema;
@@ -830,8 +838,7 @@ public class RefreshHandler implements SqlToPlanHandler {
 
   private static boolean isIcebergInsertRefresh(
       Materialization materialization, RefreshDecision refreshDecision) {
-    return materialization.getIsIcebergDataset()
-        && !refreshDecision.getInitialRefresh()
+    return !refreshDecision.getInitialRefresh()
         && materialization.getBasePath() != null
         && !materialization.getBasePath().isEmpty();
   }
@@ -888,6 +895,10 @@ public class RefreshHandler implements SqlToPlanHandler {
                 getForceFullRefresh(materialization),
                 false);
         normalizedPlan = planGenerator.generateNormalizedPlan();
+        if (sqlHandlerConfig.getResultMode().equals(ResultMode.LOGICAL)
+            || sqlHandlerConfig.getResultMode().equals(ResultMode.CONVERT_ONLY)) {
+          return normalizedPlan;
+        }
       } catch (Exception e) {
         recordingObserver.replay(sqlHandlerConfig.getObserver());
         throw e;
@@ -950,7 +961,6 @@ public class RefreshHandler implements SqlToPlanHandler {
 
       // Save the materialization plan without default raw reflections for reflection matching.
       sqlHandlerConfig
-          .getConverter()
           .getObserver()
           .recordExtraInfo(
               DECISION_NAME, ABSTRACT_SERIALIZER.serialize(noDefaultReflectionDecision));

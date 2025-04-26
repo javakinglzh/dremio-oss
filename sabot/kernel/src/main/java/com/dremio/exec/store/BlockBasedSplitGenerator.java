@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.store;
 
-import com.dremio.exec.store.iceberg.SupportsInternalIcebergTable;
+import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.google.protobuf.InvalidProtocolBufferException;
@@ -31,7 +31,7 @@ public class BlockBasedSplitGenerator {
 
   public BlockBasedSplitGenerator(
       OperatorContext context,
-      SupportsInternalIcebergTable plugin,
+      SupportsIcebergRootPointer plugin,
       byte[] extendedBytes,
       boolean isInternalIcebergTable) {
     this(context, plugin, extendedBytes, isInternalIcebergTable, false);
@@ -39,7 +39,7 @@ public class BlockBasedSplitGenerator {
 
   public BlockBasedSplitGenerator(
       OperatorContext context,
-      SupportsInternalIcebergTable plugin,
+      SupportsIcebergRootPointer plugin,
       byte[] extendedBytes,
       boolean isInternalIcebergTable,
       boolean isOneSplitPerFile) {
@@ -61,6 +61,29 @@ public class BlockBasedSplitGenerator {
       String fileFormat,
       List<SplitIdentity> splitsIdentity)
       throws InvalidProtocolBufferException {
+    return getSplitAndPartitionInfo(
+        maxOutputCount,
+        filePartitionInfo,
+        filePath,
+        offset,
+        fileSize,
+        currentModTime,
+        fileFormat,
+        null,
+        splitsIdentity);
+  }
+
+  public List<SplitAndPartitionInfo> getSplitAndPartitionInfo(
+      int maxOutputCount,
+      PartitionProtobuf.NormalizedPartitionInfo filePartitionInfo,
+      String filePath,
+      long offset,
+      long fileSize,
+      long currentModTime,
+      String fileFormat,
+      Long fileGroupIndex,
+      List<SplitIdentity> splitsIdentity)
+      throws InvalidProtocolBufferException {
     int splitCount = 0;
     currentOffset = offset;
     List<SplitAndPartitionInfo> splits = new ArrayList<>();
@@ -70,7 +93,7 @@ public class BlockBasedSplitGenerator {
     while (splitCount < maxOutputCount && currentOffset < fileSize) {
       long curBlockSize = Math.min(targetSplitSize, fileSize - currentOffset);
       SplitIdentity splitIdentity =
-          new SplitIdentity(filePath, currentOffset, curBlockSize, fileSize);
+          new SplitIdentity(filePath, currentOffset, curBlockSize, fileSize, fileGroupIndex);
       splits.add(
           splitCreator.createSplit(
               filePartitionInfo, splitIdentity, fileFormat, fileSize, currentModTime));

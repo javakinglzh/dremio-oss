@@ -16,7 +16,7 @@
 package com.dremio.service.sqlrunner;
 
 import com.dremio.options.OptionManager;
-import com.dremio.service.script.ScriptService;
+import com.dremio.service.scripts.ScriptService;
 import com.dremio.service.sqlrunner.proto.SQLRunnerSessionProto;
 import com.dremio.service.sqlrunner.store.SQLRunnerSessionStore;
 import com.google.common.collect.Lists;

@@ -255,6 +255,14 @@ class GenericExceptionMapper implements ExceptionMapper<Throwable> {
               throwable.toString(),
               throwable);
           return newGenericErrorMessage(NOT_IMPLEMENTED, throwable, stackTrace);
+        case ALREADY_EXISTS:
+          logger.debug(
+              "Conflict for {} {} : {}",
+              request.getMethod(),
+              uriInfo.getRequestUri(),
+              throwable.toString(),
+              throwable);
+          return newGenericErrorMessage(CONFLICT, throwable, stackTrace);
         default:
       }
     }

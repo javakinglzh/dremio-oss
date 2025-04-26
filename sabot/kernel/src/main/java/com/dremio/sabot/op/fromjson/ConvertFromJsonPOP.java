@@ -78,6 +78,7 @@ public class ConvertFromJsonPOP extends AbstractSingle {
     private final String originField;
     private final CompleteType type;
     private final String inputField;
+    private final ConvertFromErrorMode errorMode;
 
     @JsonCreator
     public ConversionColumn(
@@ -85,13 +86,15 @@ public class ConvertFromJsonPOP extends AbstractSingle {
         @JsonProperty("originTable") List<String> originTable,
         @JsonProperty("originField") String originField,
         @JsonProperty("inputField") String inputField,
-        @JsonProperty("type") CompleteType type) {
+        @JsonProperty("type") CompleteType type,
+        @JsonProperty("errorMode") ConvertFromErrorMode errorMode) {
       super();
       this.originType = originType;
       this.originTable = originTable;
       this.originField = originField;
       this.inputField = inputField;
       this.type = type;
+      this.errorMode = errorMode;
     }
 
     public OriginType getOriginType() {
@@ -114,8 +117,16 @@ public class ConvertFromJsonPOP extends AbstractSingle {
       return type;
     }
 
+    public ConvertFromErrorMode getErrorMode() {
+      return errorMode;
+    }
+
     public Field asField(String name) {
       return type.toField(name);
+    }
+
+    public boolean hasDummySchema() {
+      return type.isStruct() && type.getChildren().isEmpty();
     }
 
     @Override

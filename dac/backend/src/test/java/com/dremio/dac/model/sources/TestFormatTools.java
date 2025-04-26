@@ -26,6 +26,7 @@ import com.dremio.dac.server.BaseTestServer;
 import com.dremio.dac.server.FamilyExpectation;
 import com.dremio.dac.server.UserExceptionMapper;
 import com.dremio.dac.service.source.SourceService;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.NASConf;
 import com.dremio.exec.store.iceberg.IcebergTestTables;
@@ -69,7 +70,8 @@ public class TestFormatTools extends BaseTestServer {
       source.setConfig(nas);
       source.setMetadataPolicy(
           UIMetadataPolicy.of(CatalogService.DEFAULT_METADATA_POLICY_WITH_AUTO_PROMOTE));
-      sourceService.registerSourceWithRuntime(source);
+      sourceService.registerSourceWithRuntime(
+          source, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 

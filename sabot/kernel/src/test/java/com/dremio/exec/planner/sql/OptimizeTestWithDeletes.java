@@ -262,14 +262,14 @@ public class OptimizeTestWithDeletes extends BaseTestQuery {
 
   public static void testV2OptimizeUnpartitioned(BufferAllocator allocator) throws Exception {
     TableInfo tableInfo =
-        setupUnpartitionedV2Table(Collections.EMPTY_LIST, l(DF1, DF2, DF3), l(DEL_F1));
+        setupUnpartitionedV2Table(Collections.emptyList(), l(DF1, DF2, DF3), l(DEL_F1));
     assertOptimize(allocator, tableInfo.getTableName(), "MIN_INPUT_FILES=2", 3L, 1L, 1L);
     fs.delete(new Path(tableInfo.getMetadataLocation()), true);
   }
 
   public static void testV2OptimizeMinInputFiles(BufferAllocator allocator) throws Exception {
     TableInfo tableInfo =
-        setupUnpartitionedV2Table(Collections.EMPTY_LIST, l(DF1, DF2, DF3, DF4), l(DEL_F1));
+        setupUnpartitionedV2Table(Collections.emptyList(), l(DF1, DF2, DF3, DF4), l(DEL_F1));
     assertOptimize(allocator, tableInfo.getTableName(), "MIN_INPUT_FILES=5", 4L, 1L, 1L);
     fs.delete(new Path(tableInfo.getMetadataLocation()), true);
   }

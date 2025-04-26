@@ -16,13 +16,16 @@
 import { Component } from "react";
 import PropTypes from "prop-types";
 import { connect } from "react-redux";
-
+import { Iterable } from "immutable";
 import Modal from "components/Modals/Modal";
-
+import { isURISupportedSource } from "@inject/utils/sourceUtils";
 import ApiUtils from "utils/apiUtils/apiUtils";
 import { addNewFolderForSpace } from "actions/resources/spaceDetails";
-import { intl } from "#oss/utils/intl";
+import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
+import { getSupportFlags } from "#oss/selectors/supportFlags";
+import { STORAGE_URI_FOLDER } from "@inject/endpoints/SupportFlags/supportFlagConstants";
 
+import AddUriFolderForm from "../forms/UriFolder/AddUriFolderForm";
 import AddFolderForm from "../forms/AddFolderForm";
 
 import "./Modal.less";
@@ -50,21 +53,38 @@ export class AddFolderModal extends Component {
   };
 
   render() {
-    const { isOpen, hide, disabled } = this.props;
+    const { isOpen, hide, disabled, entity, sources, isStorageUriEnabled } =
+      this.props;
+    const { t } = getIntlContext();
+    const isIterable = Iterable.isIterable(entity);
+    const finalEntity = isIterable ? entity.toJS() : entity;
+    const rootName = finalEntity?.fullPathList[0];
+    const source =
+      sources && sources.find((item) => item.get("name") === rootName);
+    const isUriSupported = source && isURISupportedSource(source.get("type"));
+
     return (
       <Modal
         size="small"
-        title={intl.formatMessage({ id: "Folder.AddFolder" })}
+        title={t("Folder.Create.Modal.Title")}
         isOpen={isOpen}
         hide={hide}
-        style={{ height: 250, top: "30%" }}
+        style={
+          isUriSupported && isStorageUriEnabled
+            ? { height: "fit-content", top: "10%" }
+            : { height: 250, top: "30%" }
+        }
         className="--newModalStyles"
       >
-        <AddFolderForm
-          onFormSubmit={this.submit}
-          onCancel={hide}
-          disabled={disabled}
-        />
+        {isUriSupported && isStorageUriEnabled ? (
+          <AddUriFolderForm entity={finalEntity} hide={hide} source={source} />
+        ) : (
+          <AddFolderForm
+            onFormSubmit={this.submit}
+            onCancel={hide}
+            disabled={disabled}
+          />
+        )}
       </Modal>
     );
   }
@@ -74,6 +94,8 @@ export default connect(
   (state) => {
     return {
       disabled: !state.form.addFolder?.name?.value,
+      sources: state.resources.entities.get("source"),
+      isStorageUriEnabled: getSupportFlags(state)[STORAGE_URI_FOLDER],
     };
   },
   { addNewFolderForSpace },

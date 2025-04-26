@@ -18,13 +18,19 @@ package com.dremio.exec.planner;
 import static com.dremio.exec.store.SystemSchemas.FILE_PATH;
 import static com.dremio.exec.store.SystemSchemas.FILE_TYPE;
 import static com.dremio.exec.store.SystemSchemas.RECORDS;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createTableSkipLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
 import static org.apache.calcite.sql.fun.SqlStdOperatorTable.CASE;
 import static org.apache.calcite.sql.fun.SqlStdOperatorTable.EQUALS;
 import static org.apache.calcite.sql.type.SqlTypeName.BIGINT;
 import static org.apache.calcite.sql.type.SqlTypeName.VARCHAR;
 
+import com.dremio.common.logging.StructuredLogger;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.VacuumOptions;
+import com.dremio.exec.ops.OptimizerRulesContext;
+import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.cost.iceberg.IcebergCostEstimates;
 import com.dremio.exec.planner.physical.DistributionTrait;
 import com.dremio.exec.planner.physical.Prel;
@@ -35,10 +41,10 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.IcebergFileType;
 import com.dremio.exec.store.iceberg.IcebergOrphanFileDeletePrel;
 import com.dremio.exec.store.iceberg.SnapshotsScanOptions;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ErrorType;
 import com.dremio.service.namespace.PartitionChunkMetadata;
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -59,7 +65,10 @@ import org.apache.calcite.util.ImmutableBitSet;
 
 /** Expand plans for VACUUM TABLE EXPIRE SNAPSHOTS flow. */
 public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator {
+  private static final StructuredLogger vacuumLogger = getVacuumLogger();
+
   private final String tableLocation; // This table location should have path scheme info.
+  private final String queryId;
 
   public VacuumTableExpireSnapshotsPlanGenerator(
       RelOptCluster cluster,
@@ -69,8 +78,11 @@ public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator
       VacuumOptions vacuumOptions,
       StoragePluginId internalStoragePlugin,
       StoragePluginId storagePluginId,
-      String user,
-      String tableLocation) {
+      String userName,
+      String userId,
+      String tableLocation,
+      OptimizerRulesContext context,
+      List<String> qualifiedTableName) {
     super(
         cluster,
         traitSet,
@@ -79,8 +91,11 @@ public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator
         vacuumOptions,
         internalStoragePlugin,
         storagePluginId,
-        user);
+        userName,
+        userId,
+        qualifiedTableName);
     this.tableLocation = tableLocation;
+    this.queryId = QueryIdHelper.getQueryId(((QueryContext) context).getQueryId());
   }
 
   @Override
@@ -135,12 +150,25 @@ public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator
     try {
       if (icebergCostEstimates.getSnapshotsCount() == 1
           || vacuumOptions.getRetainLast() >= icebergCostEstimates.getSnapshotsCount()) {
+
+        String tableName = String.join(".", qualifiedTableName);
+        String message =
+            String.format(
+                "Skipping %s because snapshot count %s < %s",
+                tableName, icebergCostEstimates.getSnapshotsCount(), vacuumOptions.getRetainLast());
+        vacuumLogger.info(
+            createTableSkipLog(
+                queryId, tableName, ErrorType.VACUUM_EXCEPTION, message, vacuumOptions),
+            "");
         return outputZerosPlan();
       }
       Prel expiredSnapshotFilesPlan =
-          filePathAndTypeScanPlan(snapshotsScanPlan(SnapshotsScanOptions.Mode.EXPIRED_SNAPSHOTS));
+          filePathAndTypeScanPlan(
+              liveSnapshotsScanPlan(
+                  SnapshotsScanOptions.Mode.EXPIRED_SNAPSHOTS, qualifiedTableName));
       Prel liveSnapshotsFilesPlan =
-          deDupFilePathAndTypeScanPlan(snapshotsScanPlan(SnapshotsScanOptions.Mode.LIVE_SNAPSHOTS));
+          deDupFilePathAndTypeScanPlan(
+              liveSnapshotsScanPlan(SnapshotsScanOptions.Mode.LIVE_SNAPSHOTS, qualifiedTableName));
       Prel orphanFilesPlan = orphanFilesPlan(expiredSnapshotFilesPlan, liveSnapshotsFilesPlan);
       Prel deleteOrphanFilesPlan = deleteOrphanFilesPlan(orphanFilesPlan);
       return outputSummaryPlan(deleteOrphanFilesPlan);
@@ -168,8 +196,9 @@ public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator
         outSchema,
         input,
         icebergCostEstimates.getEstimatedRows(),
-        user,
-        tableLocation);
+        userName,
+        tableLocation,
+        qualifiedTableName);
   }
 
   @Override
@@ -221,13 +250,7 @@ public class VacuumTableExpireSnapshotsPlanGenerator extends VacuumPlanGenerator
             .collect(Collectors.toList());
     Prel agg =
         StreamAggPrel.create(
-            cluster,
-            project.getTraitSet(),
-            project,
-            ImmutableBitSet.of(),
-            Collections.EMPTY_LIST,
-            aggs,
-            null);
+            cluster, project.getTraitSet(), project, ImmutableBitSet.of(), aggs, null);
 
     // Project: return 0 as row count in case there is no Agg record (i.e., no orphan files to
     // delete)

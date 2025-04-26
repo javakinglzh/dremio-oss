@@ -15,6 +15,9 @@
  */
 package com.dremio.service.embedded.catalog;
 
+import static com.dremio.service.embedded.catalog.EmbeddedContent.Type.ICEBERG_TABLE;
+import static com.dremio.service.embedded.catalog.EmbeddedContent.Type.NAMESPACE;
+
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.ImmutableDocument;
 import com.dremio.datastore.api.KVStore;
@@ -24,15 +27,10 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
-import org.projectnessie.model.Content;
-import org.projectnessie.model.ContentKey;
-import org.projectnessie.model.IcebergTable;
-import org.projectnessie.model.Namespace;
 
 /** Manages the Metadata Pointer KV store for the embedded (internal) Iceberg tables. */
 public class EmbeddedPointerStore {
 
-  private static final String NAMESPACE_LOCATION = "<namespace>";
   private static final String ID_VALUE_SEPARATOR = ":";
 
   private final KVStore<String, String> store;
@@ -41,60 +39,58 @@ public class EmbeddedPointerStore {
     this.store = storeProvider.getStore(EmbeddedPointerStoreBuilder.class);
   }
 
-  public void delete(ContentKey key) {
+  public void delete(EmbeddedContentKey key) {
     store.delete(key.toPathString());
   }
 
-  public Content get(ContentKey key) {
+  public EmbeddedContent get(EmbeddedContentKey key) {
     Document<String, String> doc = store.get(key.toPathString());
     return toContent(doc);
   }
 
-  public void put(ContentKey key, Content content) {
+  public void put(EmbeddedContentKey key, EmbeddedContent content) {
     String id;
-    String loc;
-    if (content instanceof IcebergTable) {
+    String loc = content.location();
+    if (content.type() == ICEBERG_TABLE) {
       id = UUID.randomUUID().toString(); // new ID for every commit
-      loc = ((IcebergTable) content).getMetadataLocation();
-    } else if (content instanceof Namespace) {
+    } else if (content.type() == NAMESPACE) {
       id = asNamespaceId(key);
-      loc = NAMESPACE_LOCATION;
     } else {
-      throw new IllegalArgumentException("Unsupported content type: " + content.getType());
+      throw new IllegalArgumentException("Unsupported content type: " + content.type());
     }
 
     put(key, id, loc);
   }
 
-  private void put(ContentKey key, String id, String metadataLocation) {
+  private void put(EmbeddedContentKey key, String id, String metadataLocation) {
     store.put(key.toPathString(), id + ID_VALUE_SEPARATOR + metadataLocation);
   }
 
-  public Stream<Document<ContentKey, Content>> findAll() {
+  public Stream<Document<EmbeddedContentKey, EmbeddedContent>> findAll() {
     return StreamSupport.stream(store.find().spliterator(), false)
         .map(this::toContentDoc)
         .filter(Objects::nonNull);
   }
 
-  private Document<ContentKey, Content> toContentDoc(Document<String, String> doc) {
-    Content content = toContent(doc);
+  private Document<EmbeddedContentKey, EmbeddedContent> toContentDoc(Document<String, String> doc) {
+    EmbeddedContent content = toContent(doc);
     if (content == null) {
       return null;
     }
 
-    ContentKey key = ContentKey.fromPathString(doc.getKey());
-    return new ImmutableDocument.Builder<ContentKey, Content>()
+    EmbeddedContentKey key = EmbeddedContentKey.fromPathString(doc.getKey());
+    return new ImmutableDocument.Builder<EmbeddedContentKey, EmbeddedContent>()
         .setKey(key)
         .setValue(content)
         .build();
   }
 
-  private Content toContent(Document<String, String> doc) {
+  private EmbeddedContent toContent(Document<String, String> doc) {
     if (doc == null) {
       return null;
     }
 
-    ContentKey key = ContentKey.fromPathString(doc.getKey());
+    EmbeddedContentKey key = EmbeddedContentKey.fromPathString(doc.getKey());
     String value = doc.getValue();
     int idx = value.indexOf(ID_VALUE_SEPARATOR);
     if (idx <= 0) {
@@ -103,14 +99,10 @@ public class EmbeddedPointerStore {
 
     String id = value.substring(0, idx);
     String metadataLocation = value.substring(idx + 1);
-    if (NAMESPACE_LOCATION.equals(metadataLocation)) {
-      return Namespace.builder().elements(key.getElements()).id(id).build();
-    } else {
-      return IcebergTable.of(metadataLocation, 0, 0, 0, 0, id);
-    }
+    return EmbeddedContent.fromLocation(metadataLocation, key, id);
   }
 
-  public static String asNamespaceId(ContentKey key) {
+  public static String asNamespaceId(EmbeddedContentKey key) {
     return UUID.nameUUIDFromBytes(key.toPathString().getBytes(StandardCharsets.UTF_8)).toString();
   }
 }

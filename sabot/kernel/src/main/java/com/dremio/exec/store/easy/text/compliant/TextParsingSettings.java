@@ -28,6 +28,11 @@ public class TextParsingSettings {
 
   public static final TextParsingSettings DEFAULT = new TextParsingSettings();
 
+  public enum ColumnNameGenerationType {
+    EXCEL,
+    COLUMN_NUM
+  }
+
   private String emptyValue = null;
   private boolean parseUnescapedQuotes = true;
   private byte[] quote = {b('"')};
@@ -43,6 +48,7 @@ public class TextParsingSettings {
   private boolean skipEmptyLine = false;
   private boolean skipFirstLine = false;
   private boolean autoGenerateColumnNames = false;
+  private ColumnNameGenerationType columnNameGenerationLogic = ColumnNameGenerationType.EXCEL;
   private boolean trimHeader = false;
 
   private boolean headerExtractionEnabled = false;
@@ -94,6 +100,10 @@ public class TextParsingSettings {
 
   public boolean isAutoGenerateColumnNames() {
     return autoGenerateColumnNames;
+  }
+
+  public void setAutoGenerateColumnNames(boolean autoGenerateColumnNames) {
+    this.autoGenerateColumnNames = autoGenerateColumnNames;
   }
 
   public void setUseRepeatedVarChar(boolean useRepeatedVarChar) {
@@ -347,5 +357,13 @@ public class TextParsingSettings {
 
   public void setTrimHeader(boolean trimHeaders) {
     this.trimHeader = trimHeaders;
+  }
+
+  public ColumnNameGenerationType getColumnNameGenerationLogic() {
+    return columnNameGenerationLogic;
+  }
+
+  public void setColumnNameGenerationLogic(ColumnNameGenerationType columnNameGenerationLogic) {
+    this.columnNameGenerationLogic = columnNameGenerationLogic;
   }
 }

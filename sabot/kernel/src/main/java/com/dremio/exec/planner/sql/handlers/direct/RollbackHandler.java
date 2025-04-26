@@ -65,7 +65,7 @@ public class RollbackHandler extends SimpleDirectHandler {
 
     // Table is modified and invalidate the cached plan that refers this table.
     String datasetId = table.getDataset().getDatasetConfig().getId().getId();
-    config.getContext().getPlanCache().invalidateCacheOnDataset(datasetId);
+    config.getContext().getPlanCacheCreator().invalidateCacheOnDataset(datasetId);
 
     // Refresh the dataset to update table's metadata.
     refreshDataset(catalog, path, false);

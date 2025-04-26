@@ -15,17 +15,11 @@
  */
 package com.dremio.catalog;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
-import com.dremio.service.scheduler.Schedule;
-import com.dremio.service.scheduler.SchedulerService;
+import com.dremio.options.OptionManager;
 import com.google.common.collect.ImmutableList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -34,46 +28,27 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 @ExtendWith(MockitoExtension.class)
 public class TestCatalogMaintenanceService {
-  private static final String RUNNABLE_NAME = "test";
-  private final ExecutorService executorService = Executors.newWorkStealingPool(1);
+  @Mock private OptionManager optionManager;
 
-  @Mock private SchedulerService schedulerService;
-
-  @Mock private Runnable runnable;
+  @Mock private CatalogMaintenanceTask task;
 
   private CatalogMaintenanceService service;
 
   @BeforeEach
   public void setUp() {
-    ImmutableList<CatalogMaintenanceRunnable> runnables =
-        ImmutableList.of(
-            CatalogMaintenanceRunnable.builder()
-                .setName(RUNNABLE_NAME)
-                .setRunnable(runnable)
-                .setSchedule(Schedule.Builder.everyMillis(1).build())
-                .build());
-    service =
-        new CatalogMaintenanceService(() -> schedulerService, () -> executorService, runnables);
+    service = new CatalogMaintenanceService(() -> optionManager, () -> ImmutableList.of(task));
   }
 
   @Test
-  public void testRunnableInvoked() throws Exception {
-    // Mock schedule service.
-    doAnswer(
-            invocationOnMock -> {
-              ((Runnable) invocationOnMock.getArgument(1)).run();
-              return null;
-            })
-        .when(schedulerService)
-        .schedule(any(), any());
-
+  public void testTaskInvoked() throws Exception {
     service.start();
+    verify(task, times(1)).start();
+  }
 
-    // Wait for any runnable to finish.
-    executorService.shutdown();
-    executorService.awaitTermination(100, TimeUnit.MILLISECONDS);
-
-    // Check that the runnable was invoked.
-    verify(runnable, times(1)).run();
+  @Test
+  public void testTaskStopped() throws Exception {
+    service.start();
+    service.close();
+    verify(task, times(1)).stop();
   }
 }

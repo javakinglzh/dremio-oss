@@ -72,16 +72,15 @@ public class HashAggPrel extends AggregatePrel implements Prel {
   private Boolean canVectorize;
   private Boolean canUseSpill;
 
-  private HashAggPrel(
+  public HashAggPrel(
       RelOptCluster cluster,
       RelTraitSet traits,
       RelNode child,
       ImmutableBitSet groupSet,
-      List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls,
       OperatorPhase phase)
       throws InvalidRelException {
-    super(cluster, traits, child, groupSet, groupSets, aggCalls, phase);
+    super(cluster, traits, child, groupSet, aggCalls, phase);
   }
 
   public static HashAggPrel create(
@@ -89,12 +88,11 @@ public class HashAggPrel extends AggregatePrel implements Prel {
       RelTraitSet traits,
       RelNode child,
       ImmutableBitSet groupSet,
-      List<ImmutableBitSet> groupSets,
       List<AggregateCall> aggCalls,
       OperatorPhase phase)
       throws InvalidRelException {
     final RelTraitSet adjustedTraits = AggregatePrel.adjustTraits(traits, child, groupSet);
-    return new HashAggPrel(cluster, adjustedTraits, child, groupSet, groupSets, aggCalls, phase);
+    return new HashAggPrel(cluster, adjustedTraits, child, groupSet, aggCalls, phase);
   }
 
   @Override
@@ -106,7 +104,7 @@ public class HashAggPrel extends AggregatePrel implements Prel {
       List<AggregateCall> aggCalls) {
     try {
       return HashAggPrel.create(
-          getCluster(), traitSet, input, groupSet, groupSets, aggCalls, this.getOperatorPhase());
+          getCluster(), traitSet, input, groupSet, aggCalls, this.getOperatorPhase());
     } catch (InvalidRelException e) {
       throw new AssertionError(e);
     }
@@ -249,7 +247,7 @@ public class HashAggPrel extends AggregatePrel implements Prel {
         case INTERVALDAY:
         case INTERVALYEAR:
         case TIME:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case VARBINARY:
         case VARCHAR:
         case DECIMAL:
@@ -305,8 +303,14 @@ public class HashAggPrel extends AggregatePrel implements Prel {
         return false;
       }
 
+      if ("single_value".equals(func.getName())
+          && !creator
+              .getContext()
+              .getOptions()
+              .getOption(ExecConstants.ENABLE_SINGLE_VALUE_VECTORIZED)) {
+        return false;
+      }
       final CompleteType inputType = exprs.get(0).getCompleteType();
-
       switch (func.getName()) {
         case "$sum0":
         case "sum":
@@ -324,13 +328,14 @@ public class HashAggPrel extends AggregatePrel implements Prel {
 
         case "min":
         case "max":
+        case "single_value":
           switch (inputType.toMinorType()) {
             case VARCHAR:
             case VARBINARY:
               if (!enabledSpillVarchar && !enabledVarcharNdv) {
                 return false;
               }
-              // fall through
+            // fall through
             case BIGINT:
             case FLOAT4:
             case FLOAT8:
@@ -340,7 +345,7 @@ public class HashAggPrel extends AggregatePrel implements Prel {
             case INTERVALDAY:
             case INTERVALYEAR:
             case TIME:
-            case TIMESTAMP:
+            case TIMESTAMPMILLI:
             case DECIMAL:
               continue;
             default:

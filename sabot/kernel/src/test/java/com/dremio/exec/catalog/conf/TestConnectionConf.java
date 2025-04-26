@@ -18,8 +18,8 @@ package com.dremio.exec.catalog.conf;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.services.credentials.CredentialsService;
 import io.protostuff.Tag;
@@ -34,7 +34,9 @@ public class TestConnectionConf {
       extends ConnectionConf<TestingConnectionConf, StoragePlugin> {
     @Override
     public StoragePlugin newPlugin(
-        SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+        PluginSabotContext pluginSabotContext,
+        String name,
+        Provider<StoragePluginId> pluginIdProvider) {
       return null;
     }
 

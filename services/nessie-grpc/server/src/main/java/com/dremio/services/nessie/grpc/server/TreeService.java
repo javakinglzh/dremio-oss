@@ -61,6 +61,7 @@ import org.projectnessie.model.Detached;
 import org.projectnessie.model.LogResponse;
 import org.projectnessie.model.Tag;
 import org.projectnessie.services.spi.PagedCountingResponseHandler;
+import org.projectnessie.versioned.RequestMeta;
 
 /** The gRPC service implementation for the Tree-API. */
 public class TreeService extends TreeServiceGrpc.TreeServiceImplBase {
@@ -361,7 +362,8 @@ public class TreeService extends TreeServiceGrpc.TreeServiceImplBase {
                     .commitMultipleOperations(
                         request.getBranch(),
                         Strings.emptyToNull(request.getHash()),
-                        fromProto(request.getCommitOperations()))),
+                        fromProto(request.getCommitOperations()),
+                        RequestMeta.API_WRITE)),
         observer);
   }
 

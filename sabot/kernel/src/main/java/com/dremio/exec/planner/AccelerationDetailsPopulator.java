@@ -19,6 +19,7 @@ import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.RelWithInfo;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
 import com.dremio.exec.proto.UserBitShared.AccelerationProfile;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.reflection.hints.ReflectionExplanationsAndQueryDistance;
 import java.util.Collections;
 import java.util.List;
@@ -26,6 +27,9 @@ import org.apache.calcite.rel.RelNode;
 
 /** populates AccelerationDetails as a serialized byte array */
 public interface AccelerationDetailsPopulator {
+
+  /** Report consideration */
+  void planConsidered(LayoutMaterializedViewProfile profile);
 
   /**
    * Report substitution
@@ -73,6 +77,10 @@ public interface AccelerationDetailsPopulator {
 
   AccelerationDetailsPopulator NO_OP =
       new AccelerationDetailsPopulator() {
+
+        @Override
+        public void planConsidered(LayoutMaterializedViewProfile profile) {}
+
         @Override
         public void planSubstituted(
             DremioMaterialization materialization,

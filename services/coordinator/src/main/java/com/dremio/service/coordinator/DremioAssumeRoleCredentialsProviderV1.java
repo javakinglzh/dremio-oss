@@ -19,7 +19,7 @@ import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.AWSCredentialsProvider;
 import com.amazonaws.auth.AWSSessionCredentials;
 import com.dremio.common.AutoCloseables;
-import com.dremio.common.utils.AssumeRoleCredentialsProvider;
+import com.dremio.common.aws.AssumeRoleCredentialsProvider;
 import java.util.HashMap;
 import java.util.Map;
 import javax.inject.Provider;

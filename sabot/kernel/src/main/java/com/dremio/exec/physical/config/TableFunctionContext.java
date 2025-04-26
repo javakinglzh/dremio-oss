@@ -63,7 +63,11 @@ import java.util.Map;
   @JsonSubTypes.Type(value = SplitProducerTableFunctionContext.class, name = "split-production"),
   @JsonSubTypes.Type(
       value = MergeOnReadRowSplitterTableFunctionContext.class,
-      name = "merge-on-read-row-splitter")
+      name = "merge-on-read-row-splitter"),
+  @JsonSubTypes.Type(
+      value = DataFileGroupingTableFunctionContext.class,
+      name = "data-file-grouping"),
+  @JsonSubTypes.Type(value = ClusteringInfoTableFunctionContext.class, name = "clustering-info")
 })
 public class TableFunctionContext {
   private final List<SchemaPath> columns;

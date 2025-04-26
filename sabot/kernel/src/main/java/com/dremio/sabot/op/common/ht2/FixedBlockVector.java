@@ -45,6 +45,14 @@ public class FixedBlockVector implements AutoCloseable {
     resetPositions();
   }
 
+  public FixedBlockVector(ArrowBuf arrowBuffer, int blockWidth) {
+    this.allocator = arrowBuffer.getReferenceManager().getAllocator();
+    this.blockWidth = blockWidth;
+    this.allowExpansion = false;
+    this.buf = arrowBuffer;
+    this.capacity = LargeMemoryUtil.checkedCastToInt(arrowBuffer.readableBytes());
+  }
+
   public ArrowBuf getBuf() {
     return buf;
   }
@@ -78,7 +86,11 @@ public class FixedBlockVector implements AutoCloseable {
 
   // Compute the direct memory required for one fixed block.
   public static int computeSizeForSingleBlock(final int batchSize, final int blockWidth) {
-    return Numbers.nextPowerOfTwo(Numbers.nextPowerOfTwo(batchSize) * blockWidth);
+    int estimatedSize = Numbers.nextPowerOfTwo(Numbers.nextPowerOfTwo(batchSize) * blockWidth);
+    if (estimatedSize < HashTable.PAGE_SIZE) {
+      estimatedSize = HashTable.PAGE_SIZE;
+    }
+    return estimatedSize;
   }
 
   private void resizeBuffer(int newCapacity) {
@@ -121,7 +133,7 @@ public class FixedBlockVector implements AutoCloseable {
   }
 
   @VisibleForTesting
-  ArrowBuf getUnderlying() {
+  public ArrowBuf getUnderlying() {
     return buf;
   }
 

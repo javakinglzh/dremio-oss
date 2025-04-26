@@ -81,7 +81,7 @@ public class TestFragmentExecutor {
           new OutOfBandMessage(
               UserBitShared.QueryId.newBuilder().build(),
               1,
-              Collections.EMPTY_LIST,
+              Collections.emptyList(),
               101,
               1,
               1,

@@ -23,6 +23,8 @@ import com.dremio.telemetry.api.metrics.SimpleCounter;
 import com.dremio.telemetry.api.metrics.SimpleDistributionSummary;
 import com.google.common.base.Joiner;
 import com.google.common.base.Stopwatch;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
 import java.util.concurrent.TimeUnit;
@@ -61,7 +63,13 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
   }
 
   private Tags getTaskNameTag() {
-    return Tags.of(Tag.of("task_name", schedule.getTaskName().toLowerCase()));
+    if (schedule.getTaskName().toLowerCase().startsWith("metadata-refresh")) {
+      // The metadata-refresh task names include the table name.
+      // We don't want that as part of the tag, so remove it here.
+      return Tags.of(Tag.of("task_name", "metadata-refresh"));
+    } else {
+      return Tags.of(Tag.of("task_name", schedule.getTaskName().toLowerCase()));
+    }
   }
 
   private static String getMetricsName(String metricName) {
@@ -92,6 +100,12 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
   @Override
   public void bookingLost() {
     bookingStats.bookingLost();
+    runStats.runsUnlikely();
+  }
+
+  @Override
+  public void bookingPaused() {
+    bookingStats.bookingPaused();
     runStats.runsUnlikely();
   }
 
@@ -249,6 +263,7 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
     private final SimpleCounter totalLostBookings;
     private final SimpleCounter totalRecheckedBookings;
     private final SimpleCounter totalRegainedBookings;
+    private final SimpleCounter totalPausedBookings;
 
     private PerTaskBookingCollector(Tags taskNameTag) {
       totalBookingAttempts =
@@ -268,6 +283,9 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
           SimpleCounter.of(bookName("rechecked"), "Tracks ownership rechecked count", taskNameTag);
       totalRegainedBookings =
           SimpleCounter.of(bookName("regained"), "Tracks ownership regained count", taskNameTag);
+      totalPausedBookings =
+          SimpleCounter.of(
+              bookName("paused"), "Tracks ownership paused due to disconnect count", taskNameTag);
     }
 
     private static String bookName(String metricName) {
@@ -288,6 +306,10 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
 
     public void bookingLost() {
       totalLostBookings.increment();
+    }
+
+    public void bookingPaused() {
+      totalPausedBookings.increment();
     }
 
     public void bookingRechecked() {
@@ -317,6 +339,9 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
           + System.lineSeparator()
           + "Total Regained Bookings : "
           + totalRegainedBookings
+          + System.lineSeparator()
+          + "Total Paused Bookings : "
+          + totalPausedBookings
           + System.lineSeparator();
     }
   }
@@ -325,7 +350,7 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
     // successful and errored runs so far on this service instance
     private final CounterWithOutcome runsSoFarCounter;
     // distribution of task run time
-    private final SimpleDistributionSummary taskRuntimeMillis;
+    private final DistributionSummary taskRuntimeMillis;
     // number of times a run was made without booking (this should be 0 always)
     private final SimpleCounter totalContractBreaks;
     // task run time watch, reset after every run
@@ -337,7 +362,14 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
       runsSoFarCounter =
           CounterWithOutcome.of(runName("so_far"), "Tracks task's actual runs", taskNameTag);
       taskRuntimeMillis =
-          SimpleDistributionSummary.of(runName("runtime_ms"), "Record task's runtime", taskNameTag);
+          DistributionSummary.builder(runName("runtime_ms"))
+              .description("Record task's runtime")
+              .maximumExpectedValue(
+                  6 /*hours*/ * 60 /*minutes*/ * 60 /* seconds */ * 1000.0 /* milliseconds */)
+              .minimumExpectedValue(1 /* second */ * 1000.0 /* milliseconds */)
+              .withRegistry(Metrics.globalRegistry)
+              .withTags(taskNameTag);
+
       totalContractBreaks =
           SimpleCounter.of(
               runName("contract_breaks"),
@@ -373,7 +405,7 @@ final class PerTaskStatsCollector implements SchedulerEvents.PerTaskEvents {
       } else {
         runsSoFarCounter.errored();
       }
-      taskRuntimeMillis.recordAmount(runTimeWatch.elapsed(TimeUnit.MILLISECONDS));
+      taskRuntimeMillis.record(runTimeWatch.elapsed(TimeUnit.MILLISECONDS));
       runTimeWatch.reset();
     }
 

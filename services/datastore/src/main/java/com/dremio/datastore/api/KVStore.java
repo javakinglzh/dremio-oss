@@ -216,4 +216,13 @@ public interface KVStore<K, V> {
    */
   @Deprecated
   KVAdmin getAdmin();
+
+  /**
+   * Get the KVFormatter for this KVStore.
+   *
+   * @return the KVFormatter for this KVStore.
+   */
+  default KVFormatter<K, V> getKVFormatter() {
+    throw new UnsupportedOperationException("KVFormatter is not supported for this KVStore");
+  }
 }

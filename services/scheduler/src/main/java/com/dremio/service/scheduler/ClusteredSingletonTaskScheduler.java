@@ -59,7 +59,12 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
   // by default weight based balancing is disabled
   private static final int DEFAULT_WEIGHT_BASED_BALANCING_PERIOD_SECS = 0;
   private static final int DEFAULT_WEIGHT_TOLERANCE = 0;
+  // keep a reasonably high value for expiry check interval post re-connection as default, in case
+  // we cannot get it from underlying store
+  private static final int DEFAULT_EXPIRY_CHECK_INTERVAL_MILLIS = 3 * 60 * 1000;
+  private static final int EXPIRY_CHECK_DEFER_TIME = 10 * 1000;
   private static final String MAIN_POOL_NAME = "clustered_singleton";
+  private static final String EXPIRY_POOL_NAME = "clustered_singleton_expiry";
   private static final String STICKY_POOL_NAME = "clustered_singleton_sticky";
   private static final int MAX_TIME_TO_WAIT_POST_CANCEL_SECONDS = 10;
   // main pool can be very small as the wrapper task is lightweight and short-lived.
@@ -92,6 +97,7 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
   private final ConcurrentMap<String, PerTaskScheduleTracker> allTasks;
   // Pool used for internal processing of the clustered singleton (e.g wrapped run)
   private final CloseableSchedulerThreadPool scheduleCommonPool;
+  private final CloseableSchedulerThreadPool serviceExpiryCheckerPool;
   // Pool used to handle overflow of sticky schedules
   private final CloseableThreadPool stickyPool;
   // Tasks that has been cancelled locally. They are cached for sometime before the booking is
@@ -116,12 +122,14 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
   private final AtomicBoolean zombie;
   private final AtomicBoolean ignoreReconnects;
   private final int weightBasedBalancingPeriodSecs;
+  private final AtomicInteger sessionExpiryCheckIncarnation;
   // Reference to the distributed task store (e.g. zk)
   private volatile LinearizableHierarchicalStore taskStore;
   // version of this service on the latest restart
   private volatile String serviceVersion;
   private volatile String versionedDoneFqPath;
   private volatile boolean rollingUpgradeInProgress;
+  private volatile int expiryCheckIntervalMillis;
 
   public ClusteredSingletonTaskScheduler(
       ScheduleTaskGroup defaultGroup,
@@ -183,6 +191,7 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
     this.currentEndPoint = currentNode;
     this.taskPools = new ConcurrentHashMap<>();
     this.scheduleCommonPool = new CloseableSchedulerThreadPool(MAIN_POOL_NAME, MAIN_POOL_SIZE);
+    this.serviceExpiryCheckerPool = new CloseableSchedulerThreadPool(EXPIRY_POOL_NAME, 1);
     this.stickyPool = new CloseableThreadPool(STICKY_POOL_NAME);
     this.allTasks = new ConcurrentHashMap<>();
     this.cancelledTasks = new HashSet<>();
@@ -214,11 +223,18 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
       this.weightFqPath = null;
       this.weightBalancer = new TaskWeightTracker.DummyWeightTracker();
     }
+    this.sessionExpiryCheckIncarnation = new AtomicInteger(0);
+    // keep a very high value for session timeout
+    this.expiryCheckIntervalMillis = DEFAULT_EXPIRY_CHECK_INTERVAL_MILLIS;
   }
 
   @Override
   public void start() throws Exception {
     this.taskStore = clusterCoordinatorProvider.get().getHierarchicalStore();
+    var sessionTimeout = clusterCoordinatorProvider.get().getSessionTimeoutMillis();
+    if (sessionTimeout > 0) {
+      this.expiryCheckIntervalMillis = sessionTimeout + EXPIRY_CHECK_DEFER_TIME;
+    }
     createBasePathIgnoreIfExists(rootPath);
     createBasePathIgnoreIfExists(doneFqPath);
     createBasePathIgnoreIfExists(stealFqPath);
@@ -335,7 +351,7 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
                       doneHandler,
                       weightBalancer);
                 } else {
-                  v.setNewSchedule(schedule);
+                  v.setNewSchedule(schedule, true);
                 }
                 return v;
               }
@@ -362,11 +378,13 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
     return rollingUpgradeInProgress;
   }
 
-  private void handleSessionLoss() {
+  private void handlePotentialSessionLoss() {
+    sessionExpiryCheckIncarnation.incrementAndGet();
     LOGGER.warn(
-        "{}:{}:An error has occurred in the underlying task store that has probably caused session loss.",
+        "{}:{}:An error has occurred in the underlying task store that may cause session loss. Incarnation {}",
         ENDPOINT_AS_STRING.apply(getThisEndpoint()),
-        this.serviceName);
+        this.serviceName,
+        sessionExpiryCheckIncarnation);
     allTasks
         .values()
         .forEach(
@@ -380,18 +398,50 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
 
   private void recoverOrInitiateNewSession() {
     LOGGER.info(
-        "{}:{}: Regaining session after session loss",
+        "{}:{}: Scheduling expiry check task after a potential session loss. Expiry check is at {} millis from now",
         ENDPOINT_AS_STRING.apply(getThisEndpoint()),
-        this.serviceName);
-    allTasks
-        .values()
-        .forEach(
-            (tracker) -> {
-              if (!cancelledTasks.contains(tracker)) {
-                tracker.tryRecoverSession();
+        this.serviceName,
+        this.expiryCheckIntervalMillis);
+    // schedule expiry check a few minutes after reconnect as the underlying cluster coordinator
+    // reuses the
+    // same client (LHS store client) session post session expiry.
+    final int expiryNumber = sessionExpiryCheckIncarnation.get();
+    serviceExpiryCheckerPool.schedule(
+        () -> {
+          LOGGER.info(
+              "{}:{}: Session expiry check after a potential session loss",
+              ENDPOINT_AS_STRING.apply(getThisEndpoint()),
+              this.serviceName);
+          if (expiryNumber != sessionExpiryCheckIncarnation.get()) {
+            // we have another one coming soon. Ignore this
+            LOGGER.info(
+                "Ignoring this session expiry schedule as a new one is coming soon {} {}",
+                expiryNumber,
+                sessionExpiryCheckIncarnation.get());
+            return;
+          }
+          boolean sessionExpired = false;
+          boolean sessionExpiryChecked = false;
+          for (var tracker : allTasks.values()) {
+            if (!cancelledTasks.contains(tracker)) {
+              if (tracker.isBookingOwner()) {
+                sessionExpiryChecked = true;
               }
-            });
-    recoveryMonitor.refresh();
+              if (!tracker.tryRecoverSession()) {
+                sessionExpired = true;
+              }
+            }
+          }
+          if (sessionExpired || !sessionExpiryChecked) {
+            // Either we have confirmed session expiry OR there were no owned tasks by this node,
+            // which we can use to check expiry.
+            // Refresh in both cases, as when we are not sure if session is expired, better to
+            // treat it as expired and refresh.
+            recoveryMonitor.refresh();
+          }
+        },
+        expiryCheckIntervalMillis,
+        TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -674,7 +724,16 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
     }
   }
 
+  /**
+   * Handles connection lost and regained events to check and act on potential session expiry.
+   *
+   * <p>The following assumptions are made about the underlying store (which is already true for
+   * Curator/ZK): 1. Lost connection and notify regained connection are ordered (send through a
+   * single thread). 2. Currently, the same client/curator session is used even on a session expiry,
+   * which means we have to explicitly check for session expiry for clustered singleton tasks.
+   */
   final class SessionLostHandler implements LostConnectionObserver {
+
     @Override
     public void notifyLostConnection() {
       if (isActive()) {
@@ -685,7 +744,7 @@ public class ClusteredSingletonTaskScheduler extends ClusteredSingletonCommon
                   + "System is doing an abrupt halt to preserve data integrity");
           Runtime.getRuntime().halt(1);
         } else {
-          handleSessionLoss();
+          handlePotentialSessionLoss();
         }
       }
     }

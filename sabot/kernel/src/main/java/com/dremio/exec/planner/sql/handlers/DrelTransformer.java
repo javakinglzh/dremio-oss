@@ -15,12 +15,17 @@
  */
 package com.dremio.exec.planner.sql.handlers;
 
+import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
+import static com.dremio.exec.planner.physical.PlannerSettings.DECORRELATION_TYPE;
+import static com.dremio.exec.planner.physical.PlannerSettings.MAKE_CORRELATE_IDS_DISTINCT;
+import static com.dremio.exec.planner.physical.PlannerSettings.TRIMMER_TYPE;
 import static com.dremio.exec.planner.physical.PlannerSettings.USE_LEGACY_DECORRELATOR;
 
 import com.dremio.exec.calcite.logical.JdbcCrel;
 import com.dremio.exec.planner.PlannerPhase;
 import com.dremio.exec.planner.PlannerType;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
+import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.acceleration.MaterializationList;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionInfo;
@@ -29,20 +34,27 @@ import com.dremio.exec.planner.common.JdbcRelImpl;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
 import com.dremio.exec.planner.common.PlannerMetrics;
 import com.dremio.exec.planner.cost.DremioCost;
+import com.dremio.exec.planner.decorrelation.DecorrelationAssertions;
+import com.dremio.exec.planner.decorrelation.DecorrelationOptions;
+import com.dremio.exec.planner.decorrelation.DecorrelatorFactory;
+import com.dremio.exec.planner.decorrelation.DecorrelatorType;
+import com.dremio.exec.planner.decorrelation.calcite.LegacyDremioRelDecorrelator;
 import com.dremio.exec.planner.logical.AggregateRel;
-import com.dremio.exec.planner.logical.DremioRelDecorrelator;
 import com.dremio.exec.planner.logical.DremioRelFactories;
 import com.dremio.exec.planner.logical.EnhancedFilterJoinRule;
-import com.dremio.exec.planner.logical.LegacyDremioRelDecorrelator;
 import com.dremio.exec.planner.logical.ProjectRel;
 import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.logical.ScreenRel;
 import com.dremio.exec.planner.logical.rule.LogicalAggregateGroupKeyFixRule;
+import com.dremio.exec.planner.normalizer.RelNormalizerTransformerImpl;
 import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.planner.trimmer.MonadicRelNodeTrimmer;
+import com.dremio.exec.planner.trimmer.RelNodeTrimmerFactory;
+import com.dremio.exec.planner.trimmer.TrimmerType;
+import com.dremio.exec.planner.trimmer.calcite.DremioFieldTrimmerParameters;
 import com.dremio.exec.store.dfs.FilesystemScanDrel;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
-import com.dremio.exec.work.foreman.UnsupportedRelOperatorException;
-import com.dremio.sabot.op.join.JoinUtils;
+import com.dremio.options.OptionResolver;
 import com.dremio.service.Pointer;
 import com.google.common.collect.Lists;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
@@ -105,16 +117,21 @@ public final class DrelTransformer {
     Rel convertedRelNode = convertToDrel(config, relNode);
 
     // We might have to trim again after decorrelation ...
-    Rel trimmedRelNode = (Rel) trimLogical(config, convertedRelNode);
+    Rel trimmedRelNode = (Rel) trimDrel(config, convertedRelNode);
 
     // Put a non-trivial topProject to ensure the final output field name is preserved, when
     // necessary.
     trimmedRelNode = addRenamedProject(config, trimmedRelNode, validatedRowType);
 
-    trimmedRelNode =
-        SqlHandlerUtil.storeQueryResultsIfNeeded(
-            config.getConverter().getParserConfig(), config.getContext(), trimmedRelNode);
+    trimmedRelNode = storeQueryResultsIfNeeded(config, trimmedRelNode);
     return new ScreenRel(trimmedRelNode.getCluster(), trimmedRelNode.getTraitSet(), trimmedRelNode);
+  }
+
+  public static RelNode computeMaterializationPlan(SqlHandlerConfig config, final RelNode relNode)
+      throws SqlUnsupportedException {
+    final RelNode normalized =
+        config.getRelNormalizerTransformer().transformPostSerialization(relNode);
+    return normalizeForLogicalPlanning(config, normalized);
   }
 
   /**
@@ -127,16 +144,17 @@ public final class DrelTransformer {
   public static Rel convertToDrel(SqlHandlerConfig config, final RelNode relNode)
       throws SqlUnsupportedException {
     try {
-      final RelNode trimmed = trim(config, relNode);
-      final RelNode flattenCaseExprs = flattenCaseExpression(config, trimmed);
-      final RelNode rangeConditionRewrite = rewriteRangeConditions(config, flattenCaseExprs);
-
-      final RelNode projPush = pushDownProjects(config, rangeConditionRewrite);
-      final RelNode projPull = projectPullUp(config, projPush);
-      final RelNode filterConstantPushdown = pushDownFilterConstant(config, projPull);
-      final RelNode tfRel = pushDownTransitiveFilter(config, filterConstantPushdown);
-      final RelNode conditionCanonicalization = equalityConditionCastCanonicalize(tfRel);
-      final RelNode preLog = planPreLogical(config, conditionCanonicalization);
+      final RelNode expansionNodeStripped = stripExpansionNodes(config, relNode);
+      RelNode filtersPushed = normalizeForLogicalPlanning(config, expansionNodeStripped);
+      if (config
+          .getContext()
+          .getPlannerSettings()
+          .getOptions()
+          .getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
+        RelNormalizerTransformerImpl.updateOriginalRoot(filtersPushed);
+        filtersPushed = ExpansionNode.removeFromTree(filtersPushed);
+      }
+      final RelNode preLog = planPreLogical(config, filtersPushed);
       final RelNode logical = planLogical(config, preLog);
       final RelNode sampledPlan = addSampling(config, logical);
       final RelNode rowCountAdjusted = adjustRowCount(config, sampledPlan);
@@ -146,7 +164,7 @@ public final class DrelTransformer {
       final RelNode nestedProjectPushdown = nestedProjectPushdown(config, jdbcPushDownRel);
       final RelNode aggJoinPushed = pushDownAggregates(config, nestedProjectPushdown);
       final RelNode fixedGroupKeys = fixGroupKeys(aggJoinPushed);
-      final RelNode trimmedAggJoinPushed = trimLogical(config, fixedGroupKeys);
+      final RelNode trimmedAggJoinPushed = trimDrel(config, fixedGroupKeys);
       // Do Join Planning.
 
       final RelNode preConvertedRelNode = planMultiJoin(config, trimmedAggJoinPushed);
@@ -159,23 +177,28 @@ public final class DrelTransformer {
       observeMaterialization(config, drel);
       return drel;
     } catch (RelOptPlanner.CannotPlanException ex) {
-      LOGGER.error(ex.getMessage(), ex);
-
-      if (JoinUtils.checkCartesianJoin(
-          relNode, Lists.newArrayList(), Lists.newArrayList(), Lists.newArrayList())) {
-        throw new UnsupportedRelOperatorException(
-            "This query cannot be planned\u2014possibly due to use of an unsupported feature.");
-      } else {
-        throw ex;
-      }
+      throw new RuntimeException(
+          "This query cannot be planned due to an unforeseen internal error.", ex);
     }
+  }
+
+  private static RelNode normalizeForLogicalPlanning(
+      SqlHandlerConfig config, final RelNode relNode) {
+    final RelNode trimmed = trimCrel(config, relNode);
+    final RelNode flattenCaseExprs = flattenCaseExpression(config, trimmed);
+    final RelNode rangeConditionRewrite = rewriteRangeConditions(config, flattenCaseExprs);
+    final RelNode projPush = pushDownProjects(config, rangeConditionRewrite);
+    final RelNode projPull = projectPullUp(config, projPush);
+    final RelNode filterConstantPushdown = pushDownFilterConstant(config, projPull);
+    final RelNode tfRel = pushDownTransitiveFilter(config, filterConstantPushdown);
+    return equalityConditionCastCanonicalize(tfRel);
   }
 
   private static RelNode pushDownAggregates(SqlHandlerConfig config, RelNode relNode) {
     return PlannerUtil.transform(
         config,
         PlannerType.HEP_AC,
-        PlannerPhase.AGG_JOIN_PUSHDOWN,
+        PlannerPhase.AGG_PUSHDOWN,
         relNode,
         relNode.getTraitSet(),
         true);
@@ -238,6 +261,19 @@ public final class DrelTransformer {
   }
 
   private static RelNode pushDownFilterConstant(SqlHandlerConfig config, RelNode relNode) {
+    relNode =
+        relNode.accept(
+            new RelShuttleImpl() {
+              @Override
+              public RelNode visit(RelNode other) {
+                RelNode newInput = super.visitChildren(other);
+                if (!(other instanceof ExpansionNode)) {
+                  return newInput;
+                }
+                return ((ExpansionNode) newInput).considerForPullUpPredicate(true);
+              }
+            });
+
     RelNode filterPushdown =
         PlannerUtil.transform(
             config,
@@ -275,29 +311,34 @@ public final class DrelTransformer {
         });
   }
 
-  private static RelNode trim(SqlHandlerConfig config, RelNode relNode) {
+  private static RelNode trimCrel(SqlHandlerConfig config, RelNode relNode) {
     final PlannerSettings plannerSettings = config.getContext().getPlannerSettings();
-    final RelBuilder relBuilder =
-        DremioRelFactories.CALCITE_LOGICAL_BUILDER.create(relNode.getCluster(), null);
-    DremioFieldTrimmer dremioFieldTrimmer =
-        new DremioFieldTrimmer(
-            relBuilder,
+
+    String value = plannerSettings.options.getOption(TRIMMER_TYPE);
+    TrimmerType trimmerType = TrimmerType.valueOf(value);
+
+    return RelNodeTrimmerFactory.create(
+            trimmerType,
             DremioFieldTrimmerParameters.builder()
                 .shouldLog(true)
                 .isRelPlanning(true)
                 .trimProjectedColumn(true)
                 .trimJoinBranch(plannerSettings.trimJoinBranch())
-                .build());
-    return dremioFieldTrimmer.trim(relNode);
+                .build())
+        .tryTrim(relNode, DremioRelFactories.CALCITE_LOGICAL_BUILDER)
+        .unsafeGet();
   }
 
-  private static RelNode trimLogical(SqlHandlerConfig config, RelNode rel) {
+  private static RelNode trimDrel(SqlHandlerConfig config, RelNode rel) {
     PlannerSettings plannerSettings = config.getContext().getPlannerSettings();
-    RelBuilder relBuilder = DremioRelFactories.LOGICAL_BUILDER.create(rel.getCluster(), null);
+
+    String value = plannerSettings.options.getOption(TRIMMER_TYPE);
+    TrimmerType trimmerType = TrimmerType.valueOf(value);
+
     // We might have to trim again after decorrelation ...
-    DremioFieldTrimmer trimmer =
-        new DremioFieldTrimmer(
-            relBuilder,
+    MonadicRelNodeTrimmer trimmer =
+        RelNodeTrimmerFactory.create(
+            trimmerType,
             DremioFieldTrimmerParameters.builder()
                 .shouldLog(true)
                 .isRelPlanning(false)
@@ -305,8 +346,9 @@ public final class DrelTransformer {
                 .trimJoinBranch(plannerSettings.trimJoinBranch())
                 .build());
     // Trimming twice, since some columns weren't being trimmed
-    Rel trimmedRelNode = (Rel) trimmer.trim(trimmer.trim(rel));
-    return trimmedRelNode;
+    rel = trimmer.tryTrim(rel, DremioRelFactories.LOGICAL_BUILDER).unsafeGet();
+    rel = trimmer.tryTrim(rel, DremioRelFactories.LOGICAL_BUILDER).unsafeGet();
+    return rel;
   }
 
   private static RelNode flattenCaseExpression(SqlHandlerConfig config, RelNode relNode) {
@@ -366,31 +408,50 @@ public final class DrelTransformer {
   }
 
   private static RelNode decorrelate(SqlHandlerConfig config, RelNode relNode) {
+    OptionResolver options = config.getContext().getPlannerSettings().options;
+
     RelBuilder relBuilder = DremioRelFactories.LOGICAL_BUILDER.create(relNode.getCluster(), null);
     final RelNode decorrelatedQuery;
-    if (config.getContext().getPlannerSettings().options.getOption(USE_LEGACY_DECORRELATOR)) {
+    if (options.getOption(USE_LEGACY_DECORRELATOR)) {
       decorrelatedQuery = LegacyDremioRelDecorrelator.decorrelateQuery(relNode, relBuilder, true);
     } else {
-      decorrelatedQuery = DremioRelDecorrelator.decorrelateQuery(relNode, relBuilder, true);
+      String value = options.getOption(DECORRELATION_TYPE);
+      DecorrelatorType decorrelatorType = DecorrelatorType.valueOf(value);
+
+      decorrelatedQuery =
+          DecorrelatorFactory.create(
+                  relNode,
+                  DecorrelationOptions.Options.builder()
+                      .decorrelatorType(decorrelatorType)
+                      .isRelPlanning(true)
+                      .makeCorrelateIdsDistinct(options.getOption(MAKE_CORRELATE_IDS_DISTINCT))
+                      .build())
+              .tryDecorrelate(relNode)
+              .getOrThrow();
     }
+
+    DecorrelationAssertions.assertPostDecorrelation(decorrelatedQuery);
 
     return decorrelatedQuery;
   }
 
   private static RelNode pushDownJdbcQuery(SqlHandlerConfig config, RelNode relNode) {
-    RelBuilder relBuilder = DremioRelFactories.LOGICAL_BUILDER.create(relNode.getCluster(), null);
     PlannerSettings plannerSettings = config.getContext().getPlannerSettings();
 
+    String value = plannerSettings.options.getOption(TRIMMER_TYPE);
+    TrimmerType trimmerType = TrimmerType.valueOf(value);
+
     RelNode trimmedRel =
-        new DremioFieldTrimmer(
-                relBuilder,
+        RelNodeTrimmerFactory.create(
+                trimmerType,
                 DremioFieldTrimmerParameters.builder()
                     .shouldLog(false)
                     .isRelPlanning(true)
                     .trimProjectedColumn(true)
                     .trimJoinBranch(plannerSettings.trimJoinBranch())
                     .build())
-            .trim(relNode);
+            .tryTrim(relNode, DremioRelFactories.LOGICAL_BUILDER)
+            .unsafeGet();
 
     Pointer<Boolean> hasJdbcPushDown = new Pointer<>(false);
     RelNode injectJdbcCrel =
@@ -639,5 +700,14 @@ public final class DrelTransformer {
     builder.setCost(acceleratedCost);
 
     return Optional.of(info);
+  }
+
+  private static RelNode stripExpansionNodes(SqlHandlerConfig sqlHandlerConfig, RelNode relNode) {
+    OptionResolver options = sqlHandlerConfig.getConverter().getOptionResolver();
+    if (options.getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
+      return relNode;
+    } else {
+      return ExpansionNode.removeFromTree(relNode);
+    }
   }
 }

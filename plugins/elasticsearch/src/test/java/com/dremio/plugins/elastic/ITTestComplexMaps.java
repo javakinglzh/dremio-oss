@@ -464,8 +464,7 @@ public class ITTestComplexMaps extends ElasticBaseTestQuery {
               + "    \"match_all\" : { }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
-              + "    \"includes\" : [ \"messedUpList\", \"@complex map!\" ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    \"includes\" : [ \"messedUpList\", \"@complex map!\" ]\n"
               + "  }\n"
               + "}]"
         });
@@ -528,8 +527,7 @@ public class ITTestComplexMaps extends ElasticBaseTestQuery {
               + "    \"match_all\" : { }\n"
               + "  },\n"
               + "  \"_source\" : {\n"
-              + "    \"includes\" : [ \"messedUpList2\", \"@complex map!\" ],\n"
-              + "    \"excludes\" : [ ]\n"
+              + "    \"includes\" : [ \"messedUpList2\", \"@complex map!\" ]\n"
               + "  }\n"
               + "}]"
         });

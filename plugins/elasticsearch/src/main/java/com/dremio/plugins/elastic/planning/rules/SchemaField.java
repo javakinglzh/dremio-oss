@@ -28,7 +28,6 @@ import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.TypedFieldId;
 import com.dremio.plugins.elastic.ElasticsearchConf;
 import com.dremio.plugins.elastic.ElasticsearchConstants;
-import com.dremio.plugins.elastic.ElasticsearchStoragePlugin;
 import com.dremio.plugins.elastic.mapping.FieldAnnotation;
 import com.dremio.plugins.elastic.planning.rels.ElasticIntermediateScanPrel;
 import com.dremio.plugins.elastic.planning.rels.ElasticIntermediateScanPrel.IndexMode;
@@ -42,6 +41,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rel.type.RelDataTypeField;
@@ -56,8 +56,6 @@ import org.apache.calcite.sql.SqlSyntax;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.util.Pair;
 import org.apache.commons.lang3.StringEscapeUtils;
-
-// import org.apache.commons.lang.StringEscapeUtils;
 
 /**
  * A specialized version of RexInputRef that holds an entire schema path along with important
@@ -81,28 +79,23 @@ public final class SchemaField extends RexInputRef {
   private final CompleteType type;
   private final FieldAnnotation annotation;
   private final ElasticSpecialType specialType;
-  private final boolean isV5;
   private final boolean isPainless;
-  private final boolean isV7;
 
   private SchemaField(
       int index,
       SchemaPath path,
       CompleteType type,
+      boolean isNullable,
       FieldAnnotation annotation,
       RelDataTypeFactory factory,
       ElasticSpecialType specialType,
-      boolean isV5,
-      boolean isPainless,
-      boolean isV7) {
-    super(index, CalciteArrowHelper.wrap(type).toCalciteType(factory, true));
+      boolean isPainless) {
+    super(index, CalciteArrowHelper.wrap(type, isNullable).toCalciteType(factory, true));
     this.path = path;
     this.type = type;
     this.annotation = annotation;
     this.specialType = specialType;
-    this.isV5 = isV5;
     this.isPainless = isPainless;
-    this.isV7 = isV7;
   }
 
   public SchemaPath getPath() {
@@ -130,9 +123,6 @@ public final class SchemaField extends RexInputRef {
     final boolean isScalarOrScalarListReturn =
         type.isScalar() || (type.isList() && type.getOnlyChildType().isScalar());
 
-    // on es2, IP fields are integers, need to access via source.
-    final boolean isIpOnPreES5 = annotation != null && annotation.isIpType() && !isV5;
-
     // some fields don't have doc values.
     final boolean hasDocValue = annotation == null || !annotation.isDocValueMissing();
 
@@ -145,7 +135,6 @@ public final class SchemaField extends RexInputRef {
             && hasDocValue
             && hasCorrectDocValue
             && isScalarOrScalarListReturn
-            && !isIpOnPreES5
             && !hasSpecialType;
 
     final StringBuilder sb = new StringBuilder();
@@ -212,16 +201,6 @@ public final class SchemaField extends RexInputRef {
                   possibleNulls.add(new Pair(sb.toString(), fullPath.toString()));
                   if (type.isList()) {
                     sb.append(".values");
-                  } else if (!isV5 && (annotation != null && annotation.isIpType())) {
-                    // for a non v5 install, we need to convert ip to string
-                    throw new IllegalStateException(
-                        "Prior to version 5, ip type cannot be pushed down.");
-                  } else if (type.isTemporal()) {
-                    if (isV7) {
-                      sb.append(".value");
-                    } else {
-                      sb.append(".date");
-                    }
                   } else {
                     sb.append(".value");
                   }
@@ -259,12 +238,8 @@ public final class SchemaField extends RexInputRef {
 
                   case DATE:
                   case TIME:
-                  case TIMESTAMP:
-                    if (isV7) {
-                      sb.append(".value");
-                    } else {
-                      sb.append(".date");
-                    }
+                  case TIMESTAMPMILLI:
+                    sb.append(".value");
                     break;
 
                   case INT:
@@ -453,25 +428,15 @@ public final class SchemaField extends RexInputRef {
 
     private final Set<ElasticSpecialType> disallowedSpecialTypes;
     private final ElasticIntermediateScanPrel scan;
-    private final boolean isV5;
     private final boolean isPainless;
-    private final boolean isV7;
 
     public SchemaingShuttle(
         ElasticIntermediateScanPrel scan, Set<ElasticSpecialType> disallowedSpecialTypes) {
       this.scan = scan;
-      this.isV5 =
-          scan.getPluginId()
-              .getCapabilities()
-              .getCapability(ElasticsearchStoragePlugin.ENABLE_V5_FEATURES);
-      this.isV7 =
-          scan.getPluginId()
-              .getCapabilities()
-              .getCapability(ElasticsearchStoragePlugin.ENABLE_V7_FEATURES);
       this.disallowedSpecialTypes = disallowedSpecialTypes;
       ElasticsearchConf config =
           ElasticsearchConf.createElasticsearchConf(scan.getPluginId().getConnectionConf());
-      this.isPainless = isV5 && config.isUsePainless();
+      this.isPainless = config.isUsePainless();
     }
 
     @Override
@@ -501,17 +466,16 @@ public final class SchemaField extends RexInputRef {
       TypedFieldId fieldId = scan.getBatchSchema().getFieldId(path);
       Preconditions.checkArgument(fieldId != null, "Unable to resolve item path %s.", node);
       CompleteType type = fieldId.getFinalType();
-
+      Field field = scan.getBatchSchema().getColumn(fieldId.getFieldIds()[0]);
       return new SchemaField(
           fieldId.getFieldIds()[0],
           path,
           type,
+          field.isNullable(),
           annotation,
           scan.getCluster().getTypeFactory(),
           specialType,
-          isV5,
-          isPainless,
-          isV7);
+          isPainless);
     }
 
     @Override

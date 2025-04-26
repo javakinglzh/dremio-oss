@@ -28,7 +28,7 @@ import org.apache.arrow.vector.TimeStampMilliVector;
 
 public class TimeStampMilliAccessor extends AbstractSqlAccessor {
 
-  private static final MajorType TYPE = Types.optional(MinorType.TIMESTAMP);
+  private static final MajorType TYPE = Types.optional(MinorType.TIMESTAMPMILLI);
 
   private final TimeZone defaultTimeZone;
   private final TimeStampMilliVector ac;

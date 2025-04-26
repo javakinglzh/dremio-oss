@@ -18,6 +18,7 @@ package com.dremio.exec.planner.serializer.logical;
 import com.dremio.exec.calcite.logical.FlattenCrel;
 import com.dremio.exec.planner.serializer.RelNodeSerde;
 import com.dremio.plan.serialization.PFlattenCrel;
+import java.util.List;
 import java.util.stream.Collectors;
 import org.apache.calcite.rex.RexInputRef;
 
@@ -27,7 +28,7 @@ public class FlattenCrelSerde implements RelNodeSerde<FlattenCrel, PFlattenCrel>
     return PFlattenCrel.newBuilder()
         .setInput(s.toProto(node.getInput()))
         .addAllToFlatten(node.getToFlatten().stream().map(s::toProto).collect(Collectors.toList()))
-        .addAllAlias(node.getAliases())
+        .addAllAlias(node.getAliases() == null ? List.of() : node.getAliases())
         .setNumProjects(node.getNumProjectsPushed())
         .build();
   }

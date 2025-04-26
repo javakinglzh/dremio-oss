@@ -29,12 +29,13 @@ import java.util.List;
 import java.util.Map;
 import javax.annotation.Nullable;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.vector.BaseFixedWidthVector;
+import org.apache.arrow.vector.BaseVariableWidthVector;
 import org.apache.arrow.vector.ValueVector;
 
 public abstract class AbstractRecordReader implements RecordReader {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(AbstractRecordReader.class);
-
   private static final String COL_NULL_ERROR =
       "Columns cannot be null. Use star column to select all fields.";
   public static final SchemaPath STAR_COLUMN = SchemaPath.getSimplePath("*");
@@ -45,6 +46,10 @@ public abstract class AbstractRecordReader implements RecordReader {
   protected int numRowsPerBatch;
   protected long numBytesPerBatch;
   protected final OperatorContext context;
+  protected int rowSizeLimit;
+  protected boolean rowSizeLimitEnabled;
+  protected int fixedDataLenPerRow;
+  protected int variableVectorCount;
 
   public AbstractRecordReader(final OperatorContext context, final List<SchemaPath> columns) {
     this.context = context;
@@ -60,18 +65,39 @@ public abstract class AbstractRecordReader implements RecordReader {
         || context.getOptions().getOption(ExecConstants.OPERATOR_TARGET_BATCH_BYTES) == null) {
       this.numBytesPerBatch =
           ExecConstants.OPERATOR_TARGET_BATCH_BYTES_VALIDATOR.getDefault().getNumVal();
+      this.rowSizeLimit =
+          Math.toIntExact(ExecConstants.LIMIT_ROW_SIZE_BYTES.getDefault().getNumVal());
+      this.rowSizeLimitEnabled =
+          ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT.getDefault().getBoolVal();
     } else {
       this.numBytesPerBatch =
           context.getOptions().getOption(ExecConstants.OPERATOR_TARGET_BATCH_BYTES).getNumVal();
+      this.rowSizeLimit =
+          Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
+      this.rowSizeLimitEnabled =
+          this.context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
     }
 
     if (columns != null) {
       setColumns(columns);
     }
+    this.variableVectorCount = 0;
   }
 
   public long getNumRowsPerBatch() {
     return numRowsPerBatch;
+  }
+
+  protected void setUpVectorsLenAndCount(Iterable<ValueVector> vectors) {
+    if (rowSizeLimitEnabled) {
+      for (ValueVector vv : vectors) {
+        if (vv instanceof BaseFixedWidthVector) {
+          fixedDataLenPerRow += ((BaseFixedWidthVector) vv).getTypeWidth();
+        } else if (vv instanceof BaseVariableWidthVector) {
+          variableVectorCount++;
+        }
+      }
+    }
   }
 
   @Override

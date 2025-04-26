@@ -46,7 +46,7 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
-      <artifactId>dremio-services-script</artifactId>
+      <artifactId>dremio-services-scripts</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>

@@ -273,7 +273,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
     try {
       RequestContext.current()
-          .with(UserContext.CTX_KEY, new UserContext(userUUID))
+          .with(UserContext.CTX_KEY, UserContext.of(userUUID))
           .call(
               () -> {
                 feedWorkHelper(
@@ -426,7 +426,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
         case RpcType.RUN_QUERY_VALUE:
           {
             logger.debug("Received query to run.  Returning query handle.");
-            final RunQuery query = parse(pBody, RunQuery.PARSER, RunQuery.class);
+            final RunQuery query = parse(pBody, RunQuery.parser(), RunQuery.class);
             UserRequest request = new UserRequest(RpcType.RUN_QUERY, query);
             final ExternalId externalId = ExternalIdHelper.generateExternalId();
             worker.submitWork(
@@ -442,7 +442,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.CANCEL_QUERY_VALUE:
           {
-            final QueryId queryId = parse(pBody, QueryId.PARSER, QueryId.class);
+            final QueryId queryId = parse(pBody, QueryId.parser(), QueryId.class);
             final Ack ack =
                 worker.cancelQuery(
                     ExternalIdHelper.toExternal(queryId),
@@ -453,7 +453,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.RESUME_PAUSED_QUERY_VALUE:
           {
-            final QueryId queryId = parse(pBody, QueryId.PARSER, QueryId.class);
+            final QueryId queryId = parse(pBody, QueryId.parser(), QueryId.class);
             final Ack ack = worker.resumeQuery(ExternalIdHelper.toExternal(queryId));
             responseSender.send(new Response(RpcType.ACK, ack));
             break;
@@ -461,7 +461,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.GET_CATALOGS_VALUE:
           {
-            final GetCatalogsReq req = parse(pBody, GetCatalogsReq.PARSER, GetCatalogsReq.class);
+            final GetCatalogsReq req = parse(pBody, GetCatalogsReq.parser(), GetCatalogsReq.class);
             UserRequest request = new UserRequest(RpcType.GET_CATALOGS, req);
             worker.submitWork(
                 connection.getSession(),
@@ -473,7 +473,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.GET_SCHEMAS_VALUE:
           {
-            final GetSchemasReq req = parse(pBody, GetSchemasReq.PARSER, GetSchemasReq.class);
+            final GetSchemasReq req = parse(pBody, GetSchemasReq.parser(), GetSchemasReq.class);
             UserRequest request = new UserRequest(RpcType.GET_SCHEMAS, req);
             worker.submitWork(
                 connection.getSession(),
@@ -485,7 +485,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.GET_TABLES_VALUE:
           {
-            final GetTablesReq req = parse(pBody, GetTablesReq.PARSER, GetTablesReq.class);
+            final GetTablesReq req = parse(pBody, GetTablesReq.parser(), GetTablesReq.class);
             UserRequest request = new UserRequest(RpcType.GET_TABLES, req);
             worker.submitWork(
                 connection.getSession(),
@@ -497,7 +497,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
 
         case RpcType.GET_COLUMNS_VALUE:
           {
-            final GetColumnsReq req = parse(pBody, GetColumnsReq.PARSER, GetColumnsReq.class);
+            final GetColumnsReq req = parse(pBody, GetColumnsReq.parser(), GetColumnsReq.class);
             UserRequest request = new UserRequest(RpcType.GET_COLUMNS, req);
             worker.submitWork(
                 connection.getSession(),
@@ -510,7 +510,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
         case RpcType.CREATE_PREPARED_STATEMENT_VALUE:
           {
             final CreatePreparedStatementReq req =
-                parse(pBody, CreatePreparedStatementReq.PARSER, CreatePreparedStatementReq.class);
+                parse(pBody, CreatePreparedStatementReq.parser(), CreatePreparedStatementReq.class);
             UserRequest request = new UserRequest(RpcType.CREATE_PREPARED_STATEMENT, req);
             worker.submitWork(
                 connection.getSession(),
@@ -525,7 +525,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
             final CreatePreparedStatementArrowReq req =
                 parse(
                     pBody,
-                    CreatePreparedStatementArrowReq.PARSER,
+                    CreatePreparedStatementArrowReq.parser(),
                     CreatePreparedStatementArrowReq.class);
             UserRequest request = new UserRequest(RpcType.CREATE_PREPARED_STATEMENT_ARROW, req);
             worker.submitWork(
@@ -539,7 +539,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
         case RpcType.GET_SERVER_META_VALUE:
           {
             final GetServerMetaReq req =
-                parse(pBody, GetServerMetaReq.PARSER, GetServerMetaReq.class);
+                parse(pBody, GetServerMetaReq.parser(), GetServerMetaReq.class);
             UserRequest request = new UserRequest(RpcType.GET_SERVER_META, req);
             worker.submitWork(
                 connection.getSession(),
@@ -817,7 +817,7 @@ public class UserRPCServer extends BasicServer<RpcType, UserRPCServer.UserClient
       final UserClientConnectionImpl connection) {
 
     return new ServerHandshakeHandler<UserToBitHandshake>(
-        RpcType.HANDSHAKE, UserToBitHandshake.PARSER) {
+        RpcType.HANDSHAKE, UserToBitHandshake.parser()) {
 
       @Override
       protected void consumeHandshake(ChannelHandlerContext ctx, UserToBitHandshake inbound)

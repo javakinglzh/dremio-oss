@@ -28,17 +28,21 @@ import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogUser;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
+import com.dremio.exec.catalog.SupportsReadingViews;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.server.JobResultInfoProvider;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.exec.store.StoragePluginRulesFactory;
 import com.dremio.exec.store.Views;
+import com.dremio.exec.store.dfs.system.SystemIcebergTableMetadataFactory;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePlugin;
 import com.dremio.exec.store.dfs.system.SystemIcebergTablesStoragePluginConfig;
+import com.dremio.exec.store.dfs.system.SystemIcebergViewMetadataFactory;
+import com.dremio.exec.store.sys.SystemStoragePlugin;
 import com.dremio.exec.store.sys.SystemTable;
 import com.dremio.exec.util.ViewFieldsHelper;
 import com.dremio.service.namespace.NamespaceKey;
@@ -73,7 +77,8 @@ import org.apache.arrow.flight.FlightInfo;
 import org.apache.arrow.memory.BufferAllocator;
 
 /** Plugin for System tables using Flight protocol, also aware of tables in {@link SystemTable} */
-public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDatasets {
+public class SysFlightStoragePlugin
+    implements StoragePlugin, SupportsListingDatasets, SupportsReadingViews {
   private final Map<EntityPath, SystemTable> legacyTableMap =
       Stream.of(SystemTable.values())
           .collect(
@@ -81,7 +86,7 @@ public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDat
                   systemTable -> canonicalize(systemTable.getDatasetPath()), Function.identity()));
   private volatile Set<EntityPath> flightTableList = new HashSet<>();
 
-  private final SabotContext context;
+  private final PluginSabotContext context;
   private final String name;
   private final boolean useConduit;
   private final BufferAllocator allocator;
@@ -93,32 +98,35 @@ public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDat
   private Supplier<SystemIcebergTablesStoragePlugin> systemIcebergTablesStoragePlugin;
 
   public SysFlightStoragePlugin(
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       String name,
       Provider<StoragePluginId> pluginIdProvider,
       boolean useConduit,
       List<SystemTable> excludeLegacyTablesList) {
     excludeLegacyTables(legacyTableMap, excludeLegacyTablesList);
-    this.context = context;
-    this.jobResultInfoProvider = context.getJobResultInfoProvider();
+    this.context = pluginSabotContext;
+    this.jobResultInfoProvider = pluginSabotContext.getJobResultInfoProvider();
     this.name = name;
     this.useConduit = useConduit;
     allocator =
-        context
+        pluginSabotContext
             .getAllocator()
             .newChildAllocator(SysFlightStoragePlugin.class.getName(), 0, Long.MAX_VALUE);
 
-    if (context.getOptionManager().getOption(ExecConstants.ENABLE_SYSTEM_ICEBERG_TABLES_STORAGE)) {
+    if (pluginSabotContext
+        .getOptionManager()
+        .getOption(ExecConstants.ENABLE_SYSTEM_ICEBERG_TABLES_STORAGE)) {
       systemIcebergTablesStoragePlugin =
           Suppliers.memoize(
               () ->
-                  context
+                  pluginSabotContext
                       .getCatalogService()
                       .getSource(
                           SystemIcebergTablesStoragePluginConfig
                               .SYSTEM_ICEBERG_TABLES_PLUGIN_NAME));
     }
-    this.nodeHistoryViewResolver = new NodesHistoryViewResolver(context::getOptionManager);
+    this.nodeHistoryViewResolver =
+        new NodesHistoryViewResolver(pluginSabotContext::getOptionManager);
   }
 
   Map<EntityPath, SystemTable> getLegacyTableMap() {
@@ -151,7 +159,7 @@ public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDat
     return allocator;
   }
 
-  public SabotContext getSabotContext() {
+  public PluginSabotContext getSabotContext() {
     return context;
   }
 
@@ -166,44 +174,46 @@ public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDat
   }
 
   @Override
-  public ViewTable getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
+  public Optional<ViewTable> getView(List<String> tableSchemaPath, SchemaConfig schemaConfig) {
     if (tableSchemaPath.size() == 2
         && systemIcebergTablesStoragePlugin != null
         && systemIcebergTablesStoragePlugin.get().isSupportedTablePath(tableSchemaPath)) {
-      return systemIcebergTablesStoragePlugin
-          .get()
-          .getViewTable(tableSchemaPath, schemaConfig.getUserName());
+      return Optional.ofNullable(
+          systemIcebergTablesStoragePlugin
+              .get()
+              .getViewTable(tableSchemaPath, schemaConfig.getUserName()));
     }
 
     if (nodeHistoryViewResolver.isSupportedView(tableSchemaPath)) {
-      return nodeHistoryViewResolver.getViewTable();
+      return Optional.ofNullable(nodeHistoryViewResolver.getViewTable());
     }
 
     if (!JobResultInfoProvider.isJobResultsTable(tableSchemaPath)) {
-      return null;
+      return Optional.empty();
     }
 
     final String jobId = Iterables.getLast(tableSchemaPath);
     final Optional<JobResultInfoProvider.JobResultInfo> jobResultInfo =
         jobResultInfoProvider.getJobResultInfo(jobId, schemaConfig.getUserName());
 
-    return jobResultInfo
-        .map(
-            info -> {
-              final View view =
-                  Views.fieldTypesToView(
-                      jobId,
-                      getJobResultsQuery(info.getResultDatasetPath()),
-                      ViewFieldsHelper.getBatchSchemaFields(info.getBatchSchema()),
-                      null);
+    return Optional.ofNullable(
+        jobResultInfo
+            .map(
+                info -> {
+                  final View view =
+                      Views.fieldTypesToView(
+                          jobId,
+                          getJobResultsQuery(info.getResultDatasetPath()),
+                          ViewFieldsHelper.getBatchSchemaFields(info.getBatchSchema()),
+                          null);
 
-              return new ViewTable(
-                  new NamespaceKey(tableSchemaPath),
-                  view,
-                  CatalogUser.from(SystemUser.SYSTEM_USERNAME),
-                  info.getBatchSchema());
-            })
-        .orElse(null);
+                  return new ViewTable(
+                      new NamespaceKey(tableSchemaPath),
+                      view,
+                      CatalogUser.from(SystemUser.SYSTEM_USERNAME),
+                      info.getBatchSchema());
+                })
+            .orElse(null));
   }
 
   private static String getJobResultsQuery(List<String> resultDatasetPath) {
@@ -257,6 +267,28 @@ public class SysFlightStoragePlugin implements StoragePlugin, SupportsListingDat
   public PartitionChunkListing listPartitionChunks(
       DatasetHandle datasetHandle, ListPartitionChunkOption... options) {
     return datasetHandle.unwrap(SystemTableWrapper.class);
+  }
+
+  /**
+   * Retrieve system tables (such as the system iceberg tables) that cannot be listed using
+   * FlightClient and are need to be gathered from elsewhere.
+   *
+   * @return A list of {@link EntityPath} objects representing the qualified paths of system tables.
+   */
+  public List<EntityPath> getUnlistedSystemTablesOrViews() {
+    List<EntityPath> unlistedDatasets =
+        Arrays.stream(SystemIcebergTableMetadataFactory.SupportedSystemIcebergTable.values())
+            .map(
+                table ->
+                    new EntityPath(Arrays.asList(SystemStoragePlugin.NAME, table.getTableName())))
+            .collect(Collectors.toList());
+    unlistedDatasets.add(
+        new EntityPath(
+            Arrays.asList(
+                SystemStoragePlugin.NAME,
+                SystemIcebergViewMetadataFactory.SupportedSystemIcebergView.COPY_ERRORS_HISTORY
+                    .getViewName())));
+    return unlistedDatasets;
   }
 
   @Override

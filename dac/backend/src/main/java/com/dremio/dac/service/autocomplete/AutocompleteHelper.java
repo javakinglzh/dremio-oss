@@ -69,6 +69,7 @@ public final class AutocompleteHelper {
           }
       }
     }
+
     return new AutocompleteResponse(
         SuggestionsType.CONTAINER.getType(),
         suggestedContainers.size(),

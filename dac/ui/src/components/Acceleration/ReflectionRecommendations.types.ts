@@ -15,7 +15,6 @@
  */
 
 type ReflectionRecommendation = {
-  arrowCachingEnabled: boolean;
   enabled: boolean;
   entityType: "reflection";
   partitionFields: any[];

@@ -116,6 +116,8 @@ public class EqualityDeleteHashTable implements AutoCloseable {
                   false,
                   batchSize,
                   null, // we want IS DISTINCT FROM comparison semantics
+                  false,
+                  false,
                   false));
     }
 

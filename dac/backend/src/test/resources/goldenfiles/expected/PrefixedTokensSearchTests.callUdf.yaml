@@ -1138,3 +1138,4 @@
      - "SELECT myudf ( 1 , 2 ) UNION myIdentifier "
      - "SELECT myudf ( 1 , 2 ) [ myIdentifier "
      - "SELECT myudf ( 1 , 2 ) || myIdentifier "
+

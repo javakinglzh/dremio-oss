@@ -204,8 +204,8 @@ public class UserRequest {
     if (q.getType() == QueryType.PREPARED_STATEMENT) {
       try {
         final ServerPreparedStatementState preparedStatement =
-            ServerPreparedStatementState.PARSER.parseFrom(
-                q.getPreparedStatementHandle().getServerInfo());
+            ServerPreparedStatementState.parser()
+                .parseFrom(q.getPreparedStatementHandle().getServerInfo());
         return preparedStatement.getSqlQuery();
       } catch (Exception ex) {
         throw UserException.connectionError(ex)

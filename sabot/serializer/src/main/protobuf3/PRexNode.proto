@@ -19,6 +19,8 @@ package plan;
 import "PRelDataType.proto";
 import "PRelTraitSet.proto";
 import "google/protobuf/any.proto";
+import "google/protobuf/wrappers.proto";
+
 
 option java_package = "com.dremio.plan.serialization";
 option optimize_for = SPEED;
@@ -259,4 +261,21 @@ enum PSqlFunctionCategory {
     USER_DEFINED_TABLE_FUNCTION = 8;
     USER_DEFINED_TABLE_SPECIFIC_FUNCTION = 9;
     MATCH_RECOGNIZE = 10;
+}
+
+
+message PGroupSet {
+  repeated int32 group = 1;
+}
+
+message PAggregateCall {
+  bool distinct = 1;
+  bool approximate = 2;
+  PSqlOperator operator = 3;
+  PRelDataType type = 4;
+  google.protobuf.StringValue name = 5;
+  repeated int32 arg = 6;
+  int32 filter_arg = 7;
+  PRelCollationImpl rel_collation_legacy = 8;
+  PRelCollation rel_collation = 9;
 }

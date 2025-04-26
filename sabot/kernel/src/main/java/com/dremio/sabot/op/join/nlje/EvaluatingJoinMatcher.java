@@ -161,6 +161,9 @@ class EvaluatingJoinMatcher implements AutoCloseable, JoinMatcher {
       }
 
       copyWatch.start();
+      for (FieldBufferCopier fb : buildCopiers) {
+        fb.allocate(0);
+      }
       for (FieldBufferCopier fb : probeCopiers) {
         fb.allocate(output);
         fb.copy(offsetCopier.memoryAddress(), output);

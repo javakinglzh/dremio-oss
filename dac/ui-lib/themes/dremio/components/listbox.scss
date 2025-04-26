@@ -65,6 +65,9 @@
   &--active,
   &[aria-selected="true"] {
     background: var(--fill--primary--selected);
+    &:hover {
+      background: var(--fill--primary--selected--hover);
+    }
   }
 
   &[aria-disabled="true"],

@@ -15,7 +15,7 @@
  */
 package com.dremio.exec.planner.physical;
 
-import static com.dremio.sabot.op.common.ht2.LBlockHashTable.MIN_RESERVATION_BATCH_SIZE;
+import static com.dremio.sabot.op.common.ht2.HashTable.MIN_RESERVATION_BATCH_SIZE;
 
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.LogicalExpression;
@@ -339,10 +339,10 @@ public class HashAggMemoryEstimator {
           totalSize += Numbers.nextPowerOfTwo(validitySize + dataSize);
           break;
 
-          /* 8 byte output accumulator */
+        /* 8 byte output accumulator */
         case BIGINT:
         case DATE:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case FLOAT8:
         case INTERVALDAY:
           validitySize = getValidityBufferSizeFromCount(hashTableBatchSize);
@@ -350,7 +350,7 @@ public class HashAggMemoryEstimator {
           totalSize += Numbers.nextPowerOfTwo(validitySize + dataSize);
           break;
 
-          /* 4 byte output accumulator */
+        /* 4 byte output accumulator */
         case FLOAT4:
         case INTERVALYEAR:
         case TIME:
@@ -360,7 +360,7 @@ public class HashAggMemoryEstimator {
           totalSize += Numbers.nextPowerOfTwo(validitySize + dataSize);
           break;
 
-          /* 16 byte output accumulator */
+        /* 16 byte output accumulator */
         case DECIMAL:
           validitySize = getValidityBufferSizeFromCount(hashTableBatchSize);
           dataSize = (int) roundUpTo8Multiple(16L * hashTableBatchSize);

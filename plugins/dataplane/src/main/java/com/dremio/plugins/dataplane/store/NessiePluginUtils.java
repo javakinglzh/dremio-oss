@@ -29,6 +29,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SecretRef;
+import com.dremio.exec.catalog.conf.StorageProviderType;
 import com.dremio.exec.store.ConnectionRefusedException;
 import com.dremio.exec.store.HttpClientRequestException;
 import com.dremio.exec.store.InvalidNessieApiVersionException;
@@ -54,6 +55,7 @@ import org.projectnessie.client.auth.oauth2.OAuth2Exception;
 import org.projectnessie.client.http.HttpClientException;
 import org.projectnessie.client.http.NessieApiCompatibilityException;
 import org.projectnessie.client.rest.NessieServiceException;
+import org.projectnessie.error.NessieForbiddenException;
 import org.projectnessie.model.NessieConfiguration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -63,7 +65,7 @@ public class NessiePluginUtils {
 
   public static List<Property> getCredentialProperties(
       boolean secure,
-      AbstractDataplanePluginConfig.StorageProviderType storageProviderType,
+      StorageProviderType storageProviderType,
       AWSAuthenticationType credentialType,
       String awsAccessKey,
       SecretRef awsAccessSecret,
@@ -251,6 +253,10 @@ public class NessiePluginUtils {
             "Make sure that the Oauth2 ClientID, Client Secret and OAuth2 token endpoint URI are valid.",
             String.format("Could not connect to [%s].", name));
       }
+    } catch (NessieForbiddenException e) {
+      logExceptionDetail(name, nessieEndpoint, "NessieForbiddenException", e);
+      return SourceState.badState(
+          e.getMessage(), String.format("Not permitted to connect to [%s].", name));
     } catch (Exception e) {
       // For any unknowns
       logExceptionDetail(name, nessieEndpoint, "Unexpected exception", e);

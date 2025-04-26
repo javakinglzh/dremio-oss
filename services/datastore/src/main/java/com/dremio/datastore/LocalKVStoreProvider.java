@@ -366,13 +366,16 @@ public class LocalKVStoreProvider implements KVStoreProvider, Iterable<StoreWith
 
     @Override
     public KVStore<K, V> doBuild() {
-      return new LocalKVStore<>(coreStoreBuilder.build(getStoreBuilderHelper()));
+      StoreBuilderHelper<K, V> storeBuilderHelper = getStoreBuilderHelper();
+      return new LocalKVStore<>(coreStoreBuilder.build(storeBuilderHelper), storeBuilderHelper);
     }
 
     @Override
     public IndexedStore<K, V> doBuildIndexed(DocumentConverter<K, V> documentConverter) {
-      getStoreBuilderHelper().documentConverter(documentConverter);
-      return new LocalIndexedStore<>(coreStoreBuilder.buildIndexed(getStoreBuilderHelper()));
+      StoreBuilderHelper<K, V> storeBuilderHelper = getStoreBuilderHelper();
+      storeBuilderHelper.documentConverter(documentConverter);
+      return new LocalIndexedStore<>(
+          coreStoreBuilder.buildIndexed(storeBuilderHelper), storeBuilderHelper);
     }
   }
 }

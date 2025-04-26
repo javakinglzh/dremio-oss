@@ -26,9 +26,13 @@
   position: relative;
   &.checked {
     background: var(--fill--toggle--checked);
+    &:hover {
+      background-color: var(--fill--toggle--checked--hover);
+      border: 1px solid var(--fill--toggle--checked--hover);
+    }
   }
   &:hover {
-    border: 1px solid var(--fill--toggle--checked--hover);
+    border: 1px solid var(--border--hover);
   }
 }
 

@@ -13,6 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { useState } from "react";
+import { useTabsKeyboardListener } from "dremio-ui-lib/components";
+
 import "./SubHeaderTabs.less";
 
 type SubHeaderTabsProps = {
@@ -27,8 +31,11 @@ const SubHeaderTabs = ({
   selectedTab,
 }: SubHeaderTabsProps) => {
   const selectedTabArray = selectedTab.split(" ");
+
+  const { setTabsEl } = useTabsKeyboardListener();
+
   return (
-    <div className="subHeader">
+    <div ref={(r) => setTabsEl(r)} className="subHeader">
       {tabArray.map((tab: string, i: number) => {
         const tabNameForTesting = tab.split(" ");
         return (
@@ -41,12 +48,18 @@ const SubHeaderTabs = ({
             onClick={() => {
               onClickFunc(tab);
             }}
+            onKeyDown={(e) => {
+              if (e.code === "Space" || e.code === "Enter") {
+                onClickFunc(tab);
+              }
+            }}
             key={`${tab}-${i}`}
             data-qa={
               tab.startsWith(selectedTab)
                 ? tabNameForTesting[0] + "subHeaderTab--selected"
                 : tabNameForTesting[0] + "subHeaderTab"
             }
+            tabIndex={tab.startsWith(selectedTab) ? 0 : -1}
           >
             {tab}
           </div>

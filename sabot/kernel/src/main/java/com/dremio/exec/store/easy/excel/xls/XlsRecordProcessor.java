@@ -24,6 +24,7 @@ import com.dremio.exec.store.easy.excel.ColumnNameHandler;
 import com.dremio.exec.store.easy.excel.ExcelFormatPluginConfig;
 import com.dremio.exec.store.easy.excel.ExcelParser;
 import com.dremio.exec.store.easy.excel.SheetNotFoundException;
+import com.dremio.exec.util.RowSizeUtil;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -101,6 +102,8 @@ public class XlsRecordProcessor implements ExcelParser {
 
   /* lookup table to find if a particular column is to be projected or not */
   private final Set<String> columnsToProject;
+
+  private int currentRowSize;
 
   /**
    * Extracts the workbook stream for the byte array and instantiates a {@link
@@ -393,6 +396,7 @@ public class XlsRecordProcessor implements ExcelParser {
    */
   @Override
   public State parseNextRecord() throws Exception {
+    currentRowSize = 0;
     if (missingRowBlock) {
       return State.END_OF_STREAM;
     }
@@ -411,6 +415,7 @@ public class XlsRecordProcessor implements ExcelParser {
       while (nextCell != null && nextCell.getRow() == curRow) {
 
         final Object value = resolveCellValue(nextCell);
+        incrementCurrentRowSize(value);
         final int column = nextCell.getColumn();
         final int colId = computeCellId(curRow, column);
         final MergedCell mergedCell = mergeCells == null ? null : mergeCells.get(colId);
@@ -601,6 +606,20 @@ public class XlsRecordProcessor implements ExcelParser {
         }
       }
     }
+  }
+
+  private void incrementCurrentRowSize(Object value) {
+    if (value instanceof String) {
+      currentRowSize +=
+          RowSizeUtil.getFieldSizeForVariableWidthType(((String) value).getBytes(UTF_8));
+    }
+  }
+
+  @Override
+  public int getAndResetRowSize() {
+    int temp = currentRowSize;
+    currentRowSize = 0;
+    return temp;
   }
 
   @Override

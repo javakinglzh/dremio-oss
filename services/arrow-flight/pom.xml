@@ -65,12 +65,25 @@
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
+      <artifactId>dremio-services-arrow-flight-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-tokens</artifactId>
       <version>${project.version}</version>
     </dependency>
     <dependency>
       <groupId>com.dremio.services</groupId>
       <artifactId>dremio-services-usersessions</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-jdk18on</artifactId>
     </dependency>
 
     <!-- Test dependencies -->

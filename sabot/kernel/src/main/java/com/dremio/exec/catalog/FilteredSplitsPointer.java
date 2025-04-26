@@ -19,8 +19,8 @@ import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.SearchTypes.SearchQuery;
 import com.dremio.datastore.api.FindByCondition;
 import com.dremio.datastore.api.ImmutableFindByCondition;
-import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.PartitionChunkMetadata;
+import com.dremio.service.namespace.split.SplitNamespaceService;
 import java.util.Objects;
 
 /**
@@ -31,7 +31,7 @@ final class FilteredSplitsPointer extends LazySplitsPointer {
   private final FindByCondition splitFilter;
 
   FilteredSplitsPointer(
-      NamespaceService namespaceService,
+      SplitNamespaceService namespaceService,
       long splitVersion,
       SearchQuery partitionFilterQuery,
       int totalSplitCount) {

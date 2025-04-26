@@ -27,6 +27,7 @@ import com.dremio.common.memory.MemoryDebugInfo;
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.config.DremioConfig;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
+import com.dremio.exec.catalog.CatalogSabotContext;
 import com.dremio.exec.catalog.ViewCreatorFactory;
 import com.dremio.exec.compile.CodeCompiler;
 import com.dremio.exec.expr.ExpressionSplitCache;
@@ -69,14 +70,12 @@ import com.dremio.service.spill.SpillService;
 import com.dremio.service.users.UserService;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.SecretsCreator;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import java.lang.reflect.InvocationTargetException;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.arrow.memory.OutOfMemoryException;
@@ -87,7 +86,7 @@ import org.slf4j.LoggerFactory;
 /* SabotContext
  * TODO - Add description for SabotContext's responsibility.
  */
-public class SabotContext implements AutoCloseable, SabotQueryContext {
+public class SabotContext implements AutoCloseable, SabotQueryContext, CatalogSabotContext {
   private static final Logger logger = LoggerFactory.getLogger(SabotContext.class);
 
   private final SabotConfig config;
@@ -127,7 +126,6 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
   private final JobResultInfoProvider jobResultInfoProvider;
   private final List<RulesFactory> rules;
   private final OptionValidatorListing optionValidatorListing;
-  private final ExecutorService executorService;
   private final SchemaFetcherFactoryContext schemaFetcherFactoryContext;
   private final Provider<CoordinatorModeInfo> coordinatorModeInfoProvider;
   private final Provider<NessieApiV2> nessieApiProvider;
@@ -196,7 +194,6 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
       GroupResourceInformation clusterInfo,
       FileSystemWrapper fileSystemWrapper,
       OptionValidatorListing optionValidatorListing,
-      ExecutorService executorService,
       Provider<CoordinatorModeInfo> coordinatorModeInfoProvider,
       Provider<NessieApiV2> nessieApiProvider,
       Provider<StatisticsService> statisticsService,
@@ -250,7 +247,6 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     this.jobResultInfoProvider = jobResultInfoProvider;
     this.rules = getRulesFactories(scan);
     this.optionValidatorListing = optionValidatorListing;
-    this.executorService = executorService;
     this.schemaFetcherFactoryContext =
         new SchemaFetcherFactoryContext(optionManager, credentialsServiceProvider.get());
     this.coordinatorModeInfoProvider = coordinatorModeInfoProvider;
@@ -275,15 +271,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
             : NodeDebugContextProvider.NOOP;
   }
 
-  private void checkIfCoordinator() {
-    Preconditions.checkState(roles.contains(Role.COORDINATOR), "this is a coordinator notion");
-  }
-
-  // TODO: rationalize which methods are executor only or coordinator only
-  public NamespaceService.Factory getNamespaceServiceFactory() {
-    return namespaceServiceFactory;
-  }
-
+  @Override
   public Orphanage.Factory getOrphanageFactory() {
     return orphanageFactory;
   }
@@ -300,10 +288,12 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return accelerationListManager;
   }
 
+  @Override
   public Provider<StatisticsListManager> getStatisticsListManagerProvider() {
     return statisticsListManagerProvider;
   }
 
+  @Override
   public Provider<UserDefinedFunctionService> getUserDefinedFunctionListManagerProvider() {
     return userDefinedFunctionListManagerProvider;
   }
@@ -312,10 +302,12 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return foremenWorkManagerProvider;
   }
 
+  @Override
   public Provider<MetadataIOPool> getMetadataIOPoolProvider() {
     return metadataIOPoolProvider;
   }
 
+  @Override
   public MetadataIOPool getMetadataIOPool() {
     return metadataIOPoolProvider.get();
   }
@@ -340,6 +332,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return relMetadataQuerySupplier;
   }
 
+  @Override
   public Provider<ViewCreatorFactory> getViewCreatorFactoryProvider() {
     return viewCreatorFactory;
   }
@@ -354,6 +347,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return decimalFunctionImplementationRegistry;
   }
 
+  @Override
   public Set<Role> getRoles() {
     return roles;
   }
@@ -387,6 +381,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return clusterInfo;
   }
 
+  @Override
   public BufferAllocator getAllocator() {
     return allocator;
   }
@@ -396,6 +391,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return queryPlanningAllocator;
   }
 
+  @Override
   public PhysicalPlanReader getPlanReader() {
     return planReader;
   }
@@ -426,6 +422,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return namespaceServiceFactory.get(userName);
   }
 
+  @Override
   public DatasetListingService getDatasetListing() {
     return datasetListing;
   }
@@ -435,6 +432,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return catalogService.get();
   }
 
+  @Override
   public ConduitProvider getConduitProvider() {
     return conduitProvider;
   }
@@ -448,6 +446,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return conduitInProcessChannelProviderProvider;
   }
 
+  @Override
   public InformationSchemaServiceBlockingStub getInformationSchemaServiceBlockingStub() {
     return informationSchemaStub.get();
   }
@@ -460,6 +459,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return spillService;
   }
 
+  @Override
   public LegacyKVStoreProvider getKVStoreProvider() {
     return kvStoreProvider;
   }
@@ -473,6 +473,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return queryObserverFactory;
   }
 
+  @Override
   public UserService getUserService() {
     checkNotNull(userService, "UserService instance is not set yet.");
     return userService;
@@ -498,18 +499,22 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return accelerationManager.get();
   }
 
+  @Override
   public AccelerationListManager getAccelerationListManager() {
     return accelerationListManager.get();
   }
 
+  @Override
   public boolean isCoordinator() {
     return roles.contains(Role.COORDINATOR);
   }
 
+  @Override
   public boolean isExecutor() {
     return roles.contains(Role.EXECUTOR);
   }
 
+  @Override
   public boolean isMaster() {
     return roles.contains(Role.MASTER);
   }
@@ -519,10 +524,12 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return rules;
   }
 
+  @Override
   public FileSystemWrapper getFileSystemWrapper() {
     return fileSystemWrapper;
   }
 
+  @Override
   public JobResultInfoProvider getJobResultInfoProvider() {
     return jobResultInfoProvider;
   }
@@ -532,12 +539,8 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return optionValidatorListing;
   }
 
-  @Override
-  public ExecutorService getExecutorService() {
-    return executorService;
-  }
-
   // TODO(DX-26296): Return JdbcSchemaFetcherFactory
+  @Override
   public SchemaFetcherFactoryContext getSchemaFetcherFactoryContext() {
     return schemaFetcherFactoryContext;
   }
@@ -547,10 +550,12 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return this.coordinatorModeInfoProvider;
   }
 
+  @Override
   public AccessControlListingManager getAccessControlListingManager() {
     return null;
   }
 
+  @Override
   public Provider<NessieApiV2> getNessieApiProvider() {
     return nessieApiProvider;
   }
@@ -560,18 +565,22 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return jobsRunnerProvider;
   }
 
+  @Override
   public Provider<DatasetCatalogServiceBlockingStub> getDatasetCatalogBlockingStub() {
     return datasetCatalogStub;
   }
 
+  @Override
   public Provider<GlobalKeysService> getGlobalCredentialsServiceProvider() {
     return globalCredentailsServiceProvider;
   }
 
+  @Override
   public Provider<CredentialsService> getCredentialsServiceProvider() {
     return credentialsServiceProvider;
   }
 
+  @Override
   public Provider<SecretsCreator> getSecretsCreator() {
     return secretsCreator;
   }
@@ -582,6 +591,7 @@ public class SabotContext implements AutoCloseable, SabotQueryContext {
     return null;
   }
 
+  @Override
   public Provider<SysFlightChannelProvider> getSysFlightChannelProviderProvider() {
     return sysFlightChannelProviderProvider;
   }

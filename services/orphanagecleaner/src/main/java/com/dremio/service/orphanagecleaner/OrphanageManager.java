@@ -20,7 +20,7 @@ import static com.dremio.service.orphanage.proto.OrphanEntry.OrphanType.ICEBERG_
 import com.dremio.common.concurrent.CloseableSchedulerThreadPool;
 import com.dremio.datastore.api.Document;
 import com.dremio.exec.ExecConstants;
-import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.server.SimpleJobRunner;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.orphanage.Orphanage;
@@ -58,12 +58,12 @@ public class OrphanageManager implements AutoCloseable {
   public OrphanageManager(
       Orphanage orphanage,
       NamespaceService namespaceService,
-      SabotContext sabotContext,
+      SimpleJobRunner jobRunner,
       OptionManager optionManager) {
     this.orphanage = orphanage;
     this.optionManager = optionManager;
     orphanTypeToHandlerMap.put(
-        ICEBERG_METADATA, new IcebergMetadataHandler(namespaceService, sabotContext));
+        ICEBERG_METADATA, new IcebergMetadataHandler(namespaceService, jobRunner));
     this.blockingQueue = new LinkedBlockingDeque<>(MAX_ALLOWED_BLOCKING_QUEUE_SIZE);
     this.orphanageThreads = (int) getOrphanProcessingThreadCount();
     this.executorService =

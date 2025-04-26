@@ -16,7 +16,6 @@
 package com.dremio.exec.planner.sql.parser;
 
 import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.sql.SqlBasicTypeNameSpec;
 import org.apache.calcite.sql.SqlDataTypeSpec;
 import org.apache.calcite.sql.validate.SqlValidator;
@@ -28,32 +27,28 @@ import org.apache.calcite.sql.validate.SqlValidator;
 public class SqlComplexDataTypeSpec extends SqlDataTypeSpec {
 
   public SqlComplexDataTypeSpec(SqlDataTypeSpec spec) {
-    super(
-        spec.getTypeNameSpec(),
-        spec.getTypeNameSpec(),
-        spec.getTimeZone(),
-        spec.getNullable(),
-        spec.getParserPosition());
+    super(spec.getTypeNameSpec(), spec.getTimeZone(), spec.getNullable(), spec.getParserPosition());
   }
 
   @Override
   public RelDataType deriveType(SqlValidator validator) {
     if (this.getTypeName() instanceof SqlTypeNameSpec) {
       // Create type directly if this typeName is a SqlTypeNameSpec.
-      return getDataTypeForComplex(validator.getTypeFactory());
+      return getDataTypeForComplex(validator);
     }
     return super.deriveType(validator); // DEFAULT
   }
 
-  public RelDataType getDataTypeForComplex(RelDataTypeFactory typeFactory) {
-    RelDataType type =
-        createTypeFromTypeNameSpec(typeFactory, (SqlTypeNameSpec) this.getTypeName());
+  private RelDataType getDataTypeForComplex(SqlValidator validator) {
+    RelDataType type = createTypeFromTypeNameSpec(validator, (SqlTypeNameSpec) this.getTypeName());
     if (type == null) {
       return null;
     }
     type =
-        typeFactory.createTypeWithNullability(
-            type, this.getNullable() == null ? true : this.getNullable());
+        validator
+            .getTypeFactory()
+            .createTypeWithNullability(
+                type, this.getNullable() == null ? true : this.getNullable());
 
     return type;
   }
@@ -61,12 +56,12 @@ public class SqlComplexDataTypeSpec extends SqlDataTypeSpec {
   /**
    * Create type from the type name specification directly.
    *
-   * @param typeFactory type factory.
+   * @param validator SQL validator.
    * @return the type.
    */
   private RelDataType createTypeFromTypeNameSpec(
-      RelDataTypeFactory typeFactory, SqlTypeNameSpec typeNameSpec) {
-    return typeNameSpec.deriveType(new DremioSqlValidator(typeFactory));
+      SqlValidator validator, SqlTypeNameSpec typeNameSpec) {
+    return typeNameSpec.deriveType(validator);
   }
 
   private int tryGetPrecision(SqlDataTypeSpec spec) {

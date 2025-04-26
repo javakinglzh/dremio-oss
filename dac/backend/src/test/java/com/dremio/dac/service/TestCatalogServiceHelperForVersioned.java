@@ -41,6 +41,7 @@ import com.dremio.dac.api.Folder;
 import com.dremio.dac.api.Function;
 import com.dremio.dac.api.Source;
 import com.dremio.dac.homefiles.HomeFileTool;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.namespace.NamespaceTree;
 import com.dremio.dac.model.sources.PhysicalDataset;
@@ -53,10 +54,13 @@ import com.dremio.dac.service.search.SearchService;
 import com.dremio.dac.service.source.SourceService;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.catalog.FunctionManagingPlugin;
 import com.dremio.exec.catalog.MutablePlugin;
+import com.dremio.exec.catalog.SupportsMutatingFolders;
 import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.physical.base.ViewOptions;
+import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.SimpleJobRunner;
 import com.dremio.exec.store.CatalogService;
@@ -124,19 +128,18 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
   private static final FunctionDefinition functionDefinition =
       new FunctionDefinition()
           .setFunctionBody(new FunctionBody().setRawBody("SELECT 1").setSerializedPlan(null))
-          .setFunctionArgList(Collections.EMPTY_LIST);
+          .setFunctionArgList(Collections.emptyList());
   private static final ReturnType rawReturnType =
       new ReturnType().setRawDataType(ByteString.copyFrom(CompleteType.INT.serialize()));
   private static final CompleteType returnType =
       CompleteType.deserialize(rawReturnType.getRawDataType().toByteArray());
   private SourceConfig sourceConfig;
-  private NameSpaceContainer sourceContainer;
   private CatalogServiceHelper catalogServiceHelper;
 
   @Before
   public void setup() throws NamespaceNotFoundException {
     sourceConfig = new SourceConfig().setName("versionedSource").setId(new EntityId(sourceId));
-    sourceContainer =
+    NameSpaceContainer sourceContainer =
         new NameSpaceContainer()
             .setSource(sourceConfig)
             .setType(NameSpaceContainer.Type.SOURCE)
@@ -149,6 +152,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
         .thenReturn(Collections.singletonList(sourceContainer));
     when(catalog.getSource(anyString())).thenReturn(dataplanePlugin);
     when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
+    when(dataplanePlugin.isWrapperFor(SupportsMutatingFolders.class)).thenReturn(true);
     when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
     when(reflectionServiceHelper.getReflectionSettings()).thenReturn(reflectionSettings);
     when(reflectionSettings.getStoredReflectionSettings(any(CatalogEntityKey.class)))
@@ -180,7 +184,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
   public void getCatalogSourceEntityById() throws NamespaceException {
     final NamespaceTree contents = new NamespaceTree();
     contents.addFolder(
-        new com.dremio.dac.model.folder.Folder(
+        new FolderModel(
             VersionedDatasetId.newBuilder()
                 .setTableKey(Arrays.asList("versionedSource", "myfolder"))
                 .setContentId("85f4da7b-ff38-4a2e-a040-600d73e7eb9a")
@@ -197,7 +201,9 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
             null,
             new NamespaceTree(),
             null,
-            0));
+            0,
+            null,
+            "tag"));
     contents.addDataset(
         com.dremio.dac.explore.model.Dataset.newInstance(
             new SourceName("versionedSource"),
@@ -267,7 +273,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final NamespaceTree contents = new NamespaceTree();
     contents.addFolder(
-        new com.dremio.dac.model.folder.Folder(
+        new FolderModel(
             VersionedDatasetId.newBuilder()
                 .setTableKey(Arrays.asList("versionedSource", "myfolder", "nested"))
                 .setContentId("85f4da7b-ff38-4a2e-a040-600d73e7eb9a")
@@ -284,7 +290,9 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
             null,
             new NamespaceTree(),
             null,
-            0));
+            0,
+            null,
+            "tag"));
     contents.addDataset(
         com.dremio.dac.explore.model.Dataset.newInstance(
             new SourceName("versionedSource"),
@@ -377,7 +385,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final Optional<CatalogEntity> catalogEntity =
         catalogServiceHelper.getCatalogEntityById(
-            tableId, ImmutableList.of(), ImmutableList.of(), null, 0);
+            tableId, ImmutableList.of(), ImmutableList.of(), null, 0, false);
 
     assertThat(catalogEntity.isPresent()).isTrue();
     assertThat(catalogEntity.get()).isInstanceOf(Dataset.class);
@@ -415,7 +423,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final Optional<CatalogEntity> catalogEntity =
         catalogServiceHelper.getCatalogEntityById(
-            viewId, ImmutableList.of(), ImmutableList.of(), null, 0);
+            viewId, ImmutableList.of(), ImmutableList.of(), null, 0, false);
 
     assertThat(catalogEntity.isPresent()).isTrue();
     assertThat(catalogEntity.get()).isInstanceOf(Dataset.class);
@@ -456,7 +464,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final Optional<CatalogEntity> catalogEntity =
         catalogServiceHelper.getCatalogEntityById(
-            functionId, ImmutableList.of(), ImmutableList.of(), null, 0);
+            functionId, ImmutableList.of(), ImmutableList.of(), null, 0, false);
 
     assertThat(catalogEntity.isPresent()).isTrue();
     assertThat(catalogEntity.get()).isInstanceOf(Function.class);
@@ -501,7 +509,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final Optional<CatalogEntity> catalogEntity =
         catalogServiceHelper.getCatalogEntityById(
-            bsFunctionId, ImmutableList.of(), ImmutableList.of(), null, 0);
+            bsFunctionId, ImmutableList.of(), ImmutableList.of(), null, 0, false);
 
     assertThat(catalogEntity.isEmpty()).isTrue();
   }
@@ -748,7 +756,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
         ResolvedVersionContext.ofBranch("main", "abc123");
     final NamespaceTree contents = new NamespaceTree();
     contents.addFolder(
-        new com.dremio.dac.model.folder.Folder(
+        new FolderModel(
             VersionedDatasetId.newBuilder()
                 .setTableKey(Arrays.asList("versionedSource", "myfolder", "nested"))
                 .setContentId("85f4da7b-ff38-4a2e-a040-600d73e7eb9a")
@@ -765,7 +773,9 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
             null,
             new NamespaceTree(),
             null,
-            0));
+            0,
+            null,
+            "tag"));
     contents.addDataset(
         com.dremio.dac.explore.model.Dataset.newInstance(
             new SourceName("versionedSource"),
@@ -981,7 +991,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
     when(optionManager.getOption(SUPPORT_UDF_API)).thenReturn(true);
 
     Function function =
-        new Function(null, Collections.EMPTY_LIST, "", null, null, true, null, null, null);
+        new Function(null, Collections.emptyList(), "", null, null, true, null, null, null);
 
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(function))
         .isInstanceOf(IllegalArgumentException.class);
@@ -1120,6 +1130,41 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
   }
 
   @Test
+  public void testCreateVersionedFunctionWithExistingEntityHavingTheSameNameShouldFail()
+      throws Exception {
+    when(optionManager.getOption(SUPPORT_UDF_API)).thenReturn(true);
+
+    final List<String> functionFullPath = ImmutableList.of("versionedSource", "udf");
+    Function function =
+        new Function(null, functionFullPath, null, null, null, true, null, "SELECT 1", "INT");
+
+    final String functionId =
+        VersionedDatasetId.newBuilder()
+            .setTableVersionContext(TableVersionContext.of(VersionContext.ofBranch("main")))
+            .setContentId(UUID.randomUUID().toString())
+            .setTableKey(functionFullPath)
+            .build()
+            .asString();
+
+    final FunctionConfig functionConfig =
+        new FunctionConfig()
+            .setId(new EntityId(functionId))
+            .setFullPathList(functionFullPath)
+            .setFunctionDefinitionsList(Arrays.asList(functionDefinition))
+            .setReturnType(rawReturnType);
+    when(dataplanePlugin.getFunction(any(CatalogEntityKey.class)))
+        .thenReturn(Optional.of(functionConfig));
+
+    assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(function))
+        .isInstanceOfSatisfying(
+            UserException.class,
+            ue ->
+                assertThat(ue.getErrorType())
+                    .isEqualTo(UserBitShared.DremioPBError.ErrorType.CONCURRENT_MODIFICATION))
+        .hasMessageContaining("already exists");
+  }
+
+  @Test
   public void testCreateVersionedFunctionWithSyntaxErrorShouldFail() throws Exception {
     when(optionManager.getOption(SUPPORT_UDF_API)).thenReturn(true);
 
@@ -1179,32 +1224,38 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
   @Test
   public void testUpdateFunctionWithEntityBeingFolderShouldFail() throws Exception {
-    Folder folder = new Folder(null, ImmutableList.of("versionedSource", "udf"), null, null);
+    Folder folder =
+        new Folder(null, ImmutableList.of("versionedSource", "udf"), null, null, null, null);
     when(sourceService.createFolder(
             new SourceName(folder.getPath().get(0)),
             new SourceFolderPath(folder.getPath()),
             userName,
-            "BRANCH",
-            "main"))
+            null,
+            null,
+            null))
         .thenReturn(
-            new com.dremio.dac.model.folder.Folder(
-                VersionedDatasetId.newBuilder()
-                    .setTableKey(Arrays.asList("versionedSource", "udf"))
-                    .setContentId("059d108e-8b97-4ffb-bdaa-4157272d7827")
-                    .setTableVersionContext(TableVersionContext.of(VersionContext.ofBranch("main")))
-                    .build()
-                    .asString(),
-                "udf",
-                "/source/versionedSource/folder/udf",
-                false,
-                false,
-                false,
-                null,
-                "0",
-                null,
-                null,
-                null,
-                0));
+            Optional.of(
+                new FolderModel(
+                    VersionedDatasetId.newBuilder()
+                        .setTableKey(Arrays.asList("versionedSource", "udf"))
+                        .setContentId("059d108e-8b97-4ffb-bdaa-4157272d7827")
+                        .setTableVersionContext(
+                            TableVersionContext.of(VersionContext.ofBranch("main")))
+                        .build()
+                        .asString(),
+                    "udf",
+                    "/source/versionedSource/folder/udf",
+                    false,
+                    false,
+                    false,
+                    null,
+                    "0",
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "tag")));
     CatalogEntity folderItem = catalogServiceHelper.createCatalogItem(folder);
     assertThat(folderItem instanceof Folder).isTrue();
 
@@ -1312,6 +1363,54 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
   }
 
   @Test
+  public void testUpdateFunctionWithTagReferenceShouldFail() throws Exception {
+    when(optionManager.getOption(SUPPORT_UDF_API)).thenReturn(true);
+    final List<String> functionFullPath = Arrays.asList("versionedSource", "udf");
+    final VersionedDatasetId id =
+        VersionedDatasetId.newBuilder()
+            .setTableVersionContext(TableVersionContext.of(VersionContext.ofTag("test")))
+            .setContentId(UUID.randomUUID().toString())
+            .setTableKey(functionFullPath)
+            .build();
+    final String functionId = id.asString();
+    final ResolvedVersionContext resolvedVersionContext =
+        ResolvedVersionContext.ofTag("test", "abc123");
+
+    when(dataplanePlugin.resolveVersionContext(any(VersionContext.class)))
+        .thenReturn(resolvedVersionContext);
+    when(dataplanePlugin.getType(eq(Arrays.asList("udf")), eq(resolvedVersionContext)))
+        .thenReturn(VersionedPlugin.EntityType.UDF);
+    final FunctionConfig functionConfig =
+        new FunctionConfig()
+            .setId(new EntityId(functionId))
+            .setFullPathList(functionFullPath)
+            .setFunctionDefinitionsList(Arrays.asList(functionDefinition))
+            .setReturnType(rawReturnType);
+    when(dataplanePlugin.getFunction(any(CatalogEntityKey.class)))
+        .thenReturn(Optional.of(functionConfig));
+    when(dataplanePlugin.isWrapperFor(MutablePlugin.class)).thenReturn(true);
+    when(dataplanePlugin.isWrapperFor(FunctionManagingPlugin.class)).thenReturn(true);
+    when(dataplanePlugin.unwrap(MutablePlugin.class)).thenReturn(dataplanePlugin);
+    when(dataplanePlugin.unwrap(FunctionManagingPlugin.class)).thenReturn(dataplanePlugin);
+
+    Function function =
+        new Function(
+            functionId,
+            ImmutableList.of("versionedSource", "udf"),
+            null,
+            null,
+            null,
+            true,
+            null,
+            "SELECT 1",
+            "INT");
+
+    assertThatThrownBy(() -> catalogServiceHelper.updateCatalogItem(function, functionId))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessageContaining("Function id should specify the BRANCH value in version context");
+  }
+
+  @Test
   public void testUpdateFunctionWithSyntaxErrorShouldFailButKeepFunctionUnchanged()
       throws Exception {
     String functionId = setupExistingFunction();
@@ -1336,7 +1435,7 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
 
     final Optional<CatalogEntity> catalogEntity =
         catalogServiceHelper.getCatalogEntityById(
-            functionId, ImmutableList.of(), ImmutableList.of(), null, 0);
+            functionId, ImmutableList.of(), ImmutableList.of(), null, 0, false);
 
     assertThat(catalogEntity.isPresent()).isTrue();
     assertThat(catalogEntity.get()).isInstanceOf(Function.class);
@@ -1379,6 +1478,8 @@ public class TestCatalogServiceHelperForVersioned extends DremioTest {
         .thenReturn(Optional.of(functionConfig));
     when(dataplanePlugin.isWrapperFor(MutablePlugin.class)).thenReturn(true);
     when(dataplanePlugin.unwrap(MutablePlugin.class)).thenReturn(dataplanePlugin);
+    when(dataplanePlugin.isWrapperFor(FunctionManagingPlugin.class)).thenReturn(true);
+    when(dataplanePlugin.unwrap(FunctionManagingPlugin.class)).thenReturn(dataplanePlugin);
     return functionId;
   }
 }

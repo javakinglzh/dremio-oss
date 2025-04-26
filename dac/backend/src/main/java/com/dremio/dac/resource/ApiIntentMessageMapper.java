@@ -27,6 +27,7 @@ import com.dremio.service.accelerator.proto.LayoutDimensionFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutId;
 import com.dremio.service.accelerator.proto.LayoutMeasureFieldDescriptor;
+import com.dremio.service.accelerator.proto.LayoutPartitionFieldDescriptor;
 import com.dremio.service.accelerator.proto.LayoutType;
 import com.google.common.base.Function;
 import com.google.common.collect.FluentIterable;
@@ -52,7 +53,7 @@ public class ApiIntentMessageMapper {
                 .setDisplayFieldList(toApiFields(details.getDisplayFieldList()))
                 .setDimensionFieldList(toApiDimensionFields(details.getDimensionFieldList()))
                 .setMeasureFieldList(toApiMeasureFields(details.getMeasureFieldList()))
-                .setPartitionFieldList(toApiFields(details.getPartitionFieldList()))
+                .setPartitionFieldList(toApiPartitionFields(details.getPartitionFieldList()))
                 .setSortFieldList(toApiFields(details.getSortFieldList()))
                 .setDistributionFieldList(toApiFields(details.getDistributionFieldList()))
                 .setPartitionDistributionStrategy(details.getPartitionDistributionStrategy()));
@@ -100,6 +101,21 @@ public class ApiIntentMessageMapper {
               @Nullable
               @Override
               public LayoutFieldApiDescriptor apply(@Nullable final LayoutFieldDescriptor input) {
+                return new LayoutFieldApiDescriptor().setName(input.getName());
+              }
+            })
+        .toList();
+  }
+
+  private static List<LayoutFieldApiDescriptor> toApiPartitionFields(
+      final List<LayoutPartitionFieldDescriptor> fields) {
+    return FluentIterable.from(AccelerationUtils.selfOrEmpty(fields))
+        .transform(
+            new Function<LayoutPartitionFieldDescriptor, LayoutFieldApiDescriptor>() {
+              @Nullable
+              @Override
+              public LayoutFieldApiDescriptor apply(
+                  @Nullable final LayoutPartitionFieldDescriptor input) {
                 return new LayoutFieldApiDescriptor().setName(input.getName());
               }
             })

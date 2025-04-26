@@ -19,12 +19,12 @@ import static com.dremio.plugins.s3.store.S3StoragePlugin.AWS_PROFILE_PROVIDER;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.EC2_METADATA_PROVIDER;
 import static com.dremio.plugins.s3.store.S3StoragePlugin.NONE_PROVIDER;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
 import com.dremio.exec.catalog.conf.DisplayMetadata;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.plugins.util.awsauth.AWSCredentialsConfigurator;
 import io.protostuff.Tag;
 import javax.inject.Provider;
@@ -41,10 +41,12 @@ public class S3PluginConfig extends AbstractS3PluginConfig {
 
   @Override
   public S3StoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     return new S3StoragePlugin(
         this,
-        context,
+        pluginSabotContext,
         name,
         pluginIdProvider,
         getS3CredentialsProvider(),

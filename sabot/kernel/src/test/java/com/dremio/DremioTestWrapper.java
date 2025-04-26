@@ -25,6 +25,7 @@ import static org.junit.Assert.fail;
 
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.types.TypeProtos.MajorType;
+import com.dremio.common.util.DateTimes;
 import com.dremio.common.util.DremioGetObject;
 import com.dremio.exec.HyperVectorValueIterator;
 import com.dremio.exec.exception.SchemaChangeException;
@@ -952,6 +953,10 @@ public class DremioTestWrapper {
           return (Byte) actual == ((Number) expected).byteValue();
         }
       }
+    }
+
+    if (expected instanceof org.joda.time.LocalDateTime) {
+      return DateTimes.compareDateTimeLikeObjects((org.joda.time.LocalDateTime) expected, actual);
     }
 
     if (!expected.equals(actual)) {

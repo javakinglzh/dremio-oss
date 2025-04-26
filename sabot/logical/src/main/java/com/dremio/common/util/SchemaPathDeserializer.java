@@ -41,7 +41,12 @@ public class SchemaPathDeserializer extends StdDeserializer<SchemaPath> {
     if (node == null) {
       return null;
     }
-    return deserializeSchemaPath(node.asText());
+    String pathStr = node.asText();
+    if (pathStr.contains("[")) {
+      return SchemaPath.De.deserializeImpl(pathStr);
+    } else {
+      return deserializeSchemaPath(pathStr);
+    }
   }
 
   public static SchemaPath deserializeSchemaPath(String serializedStr) {

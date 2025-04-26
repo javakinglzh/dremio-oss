@@ -15,10 +15,10 @@
  */
 package com.dremio.exec.store;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
-import com.dremio.exec.server.SabotContext;
 import com.google.common.annotations.VisibleForTesting;
 import io.protostuff.Tag;
 import javax.inject.Provider;
@@ -39,7 +39,9 @@ public class MissingPluginConf extends ConnectionConf<MissingPluginConf, Missing
 
   @Override
   public MissingStoragePlugin newPlugin(
-      SabotContext context, String name, Provider<StoragePluginId> pluginIdProvider) {
+      PluginSabotContext pluginSabotContext,
+      String name,
+      Provider<StoragePluginId> pluginIdProvider) {
     return new MissingStoragePlugin(errorMessage, throwOnInvocation);
   }
 }

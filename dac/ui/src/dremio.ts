@@ -13,18 +13,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { Dremio } from "@dremio/dremio-js/community";
+import { Dremio } from "@dremio/dremio-js/oss";
 import { getLoggingContext } from "dremio-ui-common/contexts/LoggingContext.js";
 
 export const config = {
-  origin: window.location.origin as any,
-  token: () => {
-    try {
-      return JSON.parse(window.localStorage.getItem("user")!).token;
-    } catch (e) {
-      return null;
-    }
+  credentials: {
+    get: async () => {
+      try {
+        return JSON.parse(globalThis.localStorage.getItem("user")!).token;
+      } catch (e) {
+        return null;
+      }
+    },
   },
+  origin: globalThis.location?.origin as any,
   logger: getLoggingContext().createLogger("SDK"),
 };
 

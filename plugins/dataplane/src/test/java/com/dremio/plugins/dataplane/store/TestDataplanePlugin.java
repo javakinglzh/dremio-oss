@@ -16,14 +16,17 @@
 package com.dremio.plugins.dataplane.store;
 
 import static com.dremio.catalog.model.VersionContext.NOT_SPECIFIED;
+import static com.dremio.exec.ExecConstants.FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AWS_STORAGE_ENABLED;
 import static com.dremio.nessiemetadata.cache.NessieMetadataCacheOptions.BYPASS_DATAPLANE_CACHE;
 import static com.dremio.nessiemetadata.cache.NessieMetadataCacheOptions.DATAPLANE_ICEBERG_METADATA_CACHE_EXPIRE_AFTER_ACCESS_MINUTES;
 import static com.dremio.nessiemetadata.cache.NessieMetadataCacheOptions.DATAPLANE_ICEBERG_METADATA_CACHE_SIZE_ITEMS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -31,21 +34,32 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.dremio.catalog.model.CatalogEntityKey;
+import com.dremio.catalog.model.CatalogFolder;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.connector.metadata.EntityPath;
+import com.dremio.exec.catalog.ImmutablePluginFolder;
 import com.dremio.exec.catalog.ImmutableVersionedListOptions;
 import com.dremio.exec.catalog.ImmutableVersionedListResponsePage;
+import com.dremio.exec.catalog.PluginFolder;
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.VersionedListOptions;
+import com.dremio.exec.catalog.VersionedPlugin;
+import com.dremio.exec.catalog.conf.StorageProviderType;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.InvalidNessieApiVersionException;
 import com.dremio.exec.store.InvalidSpecificationVersionException;
 import com.dremio.exec.store.InvalidURLException;
+import com.dremio.exec.store.NoDefaultBranchException;
 import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.SemanticVersionParserException;
 import com.dremio.exec.store.VersionedDatasetAccessOptions;
+import com.dremio.io.file.FileSystem;
+import com.dremio.io.file.Path;
 import com.dremio.nessiemetadata.cache.NessieDataplaneCacheProvider;
 import com.dremio.nessiemetadata.cache.NessieDataplaneCaffeineCacheProvider;
 import com.dremio.nessiemetadata.storeprovider.NessieDataplaneCacheStoreProvider;
@@ -54,8 +68,7 @@ import com.dremio.plugins.ExternalNamespaceEntry;
 import com.dremio.plugins.ImmutableNessieListOptions;
 import com.dremio.plugins.ImmutableNessieListResponsePage;
 import com.dremio.plugins.NessieClient;
-import com.dremio.plugins.dataplane.store.AbstractDataplanePluginConfig.StorageProviderType;
-import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.plugins.NessieContent;
 import com.dremio.service.namespace.SourceState;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Streams;
@@ -64,6 +77,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.inject.Provider;
@@ -92,6 +106,7 @@ public class TestDataplanePlugin {
   @Mock private OptionManager optionManager;
   @Mock private Provider<StoragePluginId> idProvider;
   @Mock private static NessieClient nessieClient;
+  @Mock private static FileSystem systemUserFS;
 
   // Can't @InjectMocks a String, so initialization is done in @BeforeEach
   private DataplanePlugin dataplanePlugin;
@@ -115,18 +130,24 @@ public class TestDataplanePlugin {
     }
 
     @Override
-    public SourceState getState(NessieClient nessieClient, String name, SabotContext context) {
+    public FileSystem getSystemUserFS() {
+      return systemUserFS;
+    }
+
+    @Override
+    public SourceState getState(
+        NessieClient nessieClient, String name, PluginSabotContext pluginSabotContext) {
       return SourceState.GOOD;
     }
 
     @Override
-    public void validatePluginEnabled(SabotContext context) {
+    public void validatePluginEnabled(PluginSabotContext pluginSabotContext) {
       // no-op
     }
 
     @Override
     public void validateConnectionToNessieRepository(
-        NessieClient nessieClient, String name, SabotContext context) {
+        NessieClient nessieClient, String name, PluginSabotContext context) {
       // no-op
     }
 
@@ -134,6 +155,9 @@ public class TestDataplanePlugin {
     public void validateNessieSpecificationVersion(NessieClient nessieClient) {
       // no-op
     }
+
+    @Override
+    protected void validateStorageUri(String storageUriString) {}
 
     @Override
     public NessieClient getNessieClient() {
@@ -153,6 +177,9 @@ public class TestDataplanePlugin {
     doReturn(BYPASS_DATAPLANE_CACHE.getDefault().getBoolVal())
         .when(optionManager)
         .getOption(BYPASS_DATAPLANE_CACHE);
+    doReturn(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS.getDefault().getBoolVal())
+        .when(optionManager)
+        .getOption(FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS);
 
     dataplanePlugin =
         new DataplanePluginMockImpl(
@@ -173,22 +200,131 @@ public class TestDataplanePlugin {
   }
 
   @Test
-  public void createNamespace() {
+  public void createFolder() {
     final String folderNameWithSpace = "folder with space";
     final String branchName = "branchName";
     // Arrange
-    NamespaceKey pathWithSourceName =
-        new NamespaceKey(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderNameWithSpace));
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderNameWithSpace))
+            .tableVersionContext(TableVersionContext.of(VersionContext.ofBranch(branchName)))
+            .build();
     VersionContext sourceVersion = VersionContext.ofBranch(branchName);
 
+    when(pluginConfig.getRootPath()).thenReturn("/bucket/path");
+    when(pluginConfig.getStorageProvider()).thenReturn(StorageProviderType.AWS);
     // Act
-    dataplanePlugin.createNamespace(pathWithSourceName, sourceVersion);
+    dataplanePlugin.createFolder(folderKey, null);
 
     // Assert
     verify(nessieClient)
         .createNamespace(
-            pathWithSourceName.getPathComponents().stream().skip(1).collect(Collectors.toList()),
-            sourceVersion);
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
+            sourceVersion,
+            null);
+  }
+
+  @Test
+  public void testCreateFolderCheckReturnedPath() {
+    final String folderName = "valid-folder";
+    final String branchName = "branchName";
+    final String commitHash = "123456";
+    VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+    ResolvedVersionContext resolvedVersionContext =
+        ResolvedVersionContext.ofBranch(branchName, commitHash);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderName))
+            .tableVersionContext(TableVersionContext.of(sourceVersion))
+            .build();
+    PluginFolder returnedPluginFolder =
+        new ImmutablePluginFolder.Builder()
+            .setFolderPath(
+                folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()))
+            .setContentId("contentId")
+            .setResolvedVersionContext(resolvedVersionContext)
+            .build();
+    when(nessieClient.createNamespace(
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
+            sourceVersion,
+            null))
+        .thenReturn(Optional.of(returnedPluginFolder));
+    when(pluginConfig.getRootPath()).thenReturn("/bucket/path");
+    when(pluginConfig.getStorageProvider()).thenReturn(StorageProviderType.AWS);
+    Optional<CatalogFolder> result = dataplanePlugin.createFolder(folderKey, null);
+
+    assertThat(result).isPresent();
+    assertThat(result.get().fullPath()).isEqualTo(folderKey.getKeyComponents());
+  }
+
+  @Test
+  public void testCreateFolderWithNestedFolders() {
+    final String rootFolder = "root";
+    final String nestedFolder = "nested";
+    final String branchName = "branchName";
+    final String commitHash = "123456";
+    ResolvedVersionContext resolvedVersionContext =
+        ResolvedVersionContext.ofBranch(branchName, commitHash);
+    VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(DATAPLANE_PLUGIN_NAME, rootFolder, nestedFolder))
+            .tableVersionContext(TableVersionContext.of(sourceVersion))
+            .build();
+    PluginFolder returnedPluginFolder =
+        new ImmutablePluginFolder.Builder()
+            .setFolderPath(
+                folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()))
+            .setContentId("contentId")
+            .setResolvedVersionContext(resolvedVersionContext)
+            .build();
+    when(nessieClient.createNamespace(
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
+            sourceVersion,
+            null))
+        .thenReturn(Optional.of(returnedPluginFolder));
+    when(pluginConfig.getRootPath()).thenReturn("/bucket/path");
+    when(pluginConfig.getStorageProvider()).thenReturn(StorageProviderType.AWS);
+
+    Optional<CatalogFolder> result = dataplanePlugin.createFolder(folderKey, null);
+
+    assertThat(result).isPresent();
+    assertThat(result.get().fullPath()).isEqualTo(folderKey.getKeyComponents());
+  }
+
+  @Test
+  public void testUpdateFolderCheckReturnedPath() {
+    final String folderName = "valid-folder";
+    final String branchName = "branchName";
+    final String commitHash = "123456";
+    VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+    ResolvedVersionContext resolvedVersionContext =
+        ResolvedVersionContext.ofBranch(branchName, commitHash);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderName))
+            .tableVersionContext(TableVersionContext.of(sourceVersion))
+            .build();
+    PluginFolder returnedPluginFolder =
+        new ImmutablePluginFolder.Builder()
+            .setFolderPath(
+                folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()))
+            .setContentId("contentId")
+            .setStorageUri("newStorageUri")
+            .setResolvedVersionContext(resolvedVersionContext)
+            .build();
+    when(nessieClient.updateNamespace(
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
+            sourceVersion,
+            "newStorageUri"))
+        .thenReturn(Optional.of(returnedPluginFolder));
+    when(pluginConfig.getRootPath()).thenReturn("/bucket/path");
+    when(pluginConfig.getStorageProvider()).thenReturn(StorageProviderType.AWS);
+    Optional<CatalogFolder> result = dataplanePlugin.updateFolder(folderKey, "newStorageUri");
+
+    assertThat(result).isPresent();
+    assertThat(result.get().fullPath()).isEqualTo(folderKey.getKeyComponents());
+    assertThat(result.get().storageUri()).isEqualTo("newStorageUri");
   }
 
   @Test
@@ -196,17 +332,21 @@ public class TestDataplanePlugin {
     final String folderName = "folder";
     final String branchName = "branchName";
     // Arrange
-    NamespaceKey pathWithSourceName =
-        new NamespaceKey(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderName));
+
     VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(Arrays.asList(DATAPLANE_PLUGIN_NAME, folderName))
+            .tableVersionContext(TableVersionContext.of(sourceVersion))
+            .build();
 
     // Act
-    dataplanePlugin.deleteFolder(pathWithSourceName, sourceVersion);
+    dataplanePlugin.deleteFolder(folderKey);
 
     // Assert
     verify(nessieClient)
         .deleteNamespace(
-            pathWithSourceName.getPathComponents().stream().skip(1).collect(Collectors.toList()),
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
             sourceVersion);
   }
 
@@ -296,19 +436,26 @@ public class TestDataplanePlugin {
     final String leafFolderNameWithSpace = "folder with another space";
     final String branchName = "branchName";
     // Arrange
-    NamespaceKey pathWithSourceName =
-        new NamespaceKey(
-            Arrays.asList(DATAPLANE_PLUGIN_NAME, rootFolderNameWithSpace, leafFolderNameWithSpace));
     VersionContext sourceVersion = VersionContext.ofBranch(branchName);
+    CatalogEntityKey folderKey =
+        CatalogEntityKey.newBuilder()
+            .keyComponents(
+                Arrays.asList(
+                    DATAPLANE_PLUGIN_NAME, rootFolderNameWithSpace, leafFolderNameWithSpace))
+            .tableVersionContext(TableVersionContext.of(sourceVersion))
+            .build();
 
     // Act
-    dataplanePlugin.createNamespace(pathWithSourceName, sourceVersion);
+    when(pluginConfig.getRootPath()).thenReturn("/bucket/path");
+    when(pluginConfig.getStorageProvider()).thenReturn(StorageProviderType.AWS);
+    dataplanePlugin.createFolder(folderKey, null);
 
     // Assert
     verify(nessieClient)
         .createNamespace(
-            pathWithSourceName.getPathComponents().stream().skip(1).collect(Collectors.toList()),
-            sourceVersion);
+            folderKey.getKeyComponents().stream().skip(1).collect(Collectors.toList()),
+            sourceVersion,
+            null);
   }
 
   @Test
@@ -409,6 +556,18 @@ public class TestDataplanePlugin {
   }
 
   @Test
+  public void testGetAllTableInfoDefaultBranchErrorReturnsEmptyStream() {
+    when(nessieClient.getDefaultBranch()).thenThrow(new NoDefaultBranchException());
+    assertThat(dataplanePlugin.getAllTableInfo()).isEmpty();
+  }
+
+  @Test
+  public void testGetAllViewInfoDefaultBranchErrorReturnsEmptyStream() {
+    when(nessieClient.getDefaultBranch()).thenThrow(new NoDefaultBranchException());
+    assertThat(dataplanePlugin.getAllViewInfo()).isEmpty();
+  }
+
+  @Test
   public void testGetAllTableInfoEmptyStreamReturnsEmptyStream() {
     ResolvedVersionContext resolvedVersionContext = mock(ResolvedVersionContext.class);
     when(nessieClient.getDefaultBranch()).thenReturn(resolvedVersionContext);
@@ -456,8 +615,6 @@ public class TestDataplanePlugin {
   @Test
   public void testListEntries_convert() {
     ResolvedVersionContext resolvedVersionContext = mock(ResolvedVersionContext.class);
-    VersionContext versionContext = mock(VersionContext.class);
-    when(nessieClient.resolveVersionContext(eq(versionContext))).thenReturn(resolvedVersionContext);
 
     ExternalNamespaceEntry entry =
         ExternalNamespaceEntry.of(
@@ -488,7 +645,13 @@ public class TestDataplanePlugin {
             .setPageToken(previousPageToken)
             .setMaxResultsPerPage(maxResultsPerPage)
             .build();
-    assertThat(dataplanePlugin.listEntriesPage(null, versionContext, options))
+    assertThat(
+            dataplanePlugin.listEntriesPage(
+                null,
+                resolvedVersionContext,
+                VersionedPlugin.NestingMode.IMMEDIATE_CHILDREN_ONLY,
+                VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY,
+                options))
         .isEqualTo(
             new ImmutableVersionedListResponsePage.Builder()
                 .addEntries(entry)
@@ -510,6 +673,147 @@ public class TestDataplanePlugin {
         .resolveVersionContext(any());
 
     assertThat(dataplanePlugin.getFunctions(NOT_SPECIFIED)).isEmpty();
+  }
+
+  @Test
+  public void testFindBasePathWithNamespaceStorageUri() {
+    List<String> tablePath = List.of("namespace", "folder", "table");
+    List<String> folderPath = List.of("namespace", "folder");
+    ResolvedVersionContext versionContext = mock(ResolvedVersionContext.class);
+    String testContentId = "test-content-id";
+    String metadataLocation = "";
+    String storageUri = "s3://bucket/path";
+    String expectedStorageUri = "/bucket/path";
+
+    when(nessieClient.getContent(eq(folderPath), eq(versionContext), isNull()))
+        .thenReturn(
+            Optional.of(
+                new NessieContent(
+                    tablePath,
+                    testContentId,
+                    VersionedPlugin.EntityType.FOLDER,
+                    null,
+                    null,
+                    storageUri)));
+
+    Path result = dataplanePlugin.findBasePath(tablePath, versionContext);
+
+    assertEquals(Path.of(expectedStorageUri), result);
+  }
+
+  @Test
+  public void testFindBasePathWithManyNamespacesStorageUri1() {
+    List<String> tablePath =
+        List.of("namespace", "folder1", "folder2", "folder3", "folder4", "table");
+    List<String> folderPath3 = List.of("namespace", "folder1", "folder2", "folder3");
+    List<String> folderPath4 = List.of("namespace", "folder1", "folder2", "folder3", "folder4");
+
+    ResolvedVersionContext versionContext = mock(ResolvedVersionContext.class);
+    String testContentId = "test-content-id";
+    String folder3StorageUri = "s3://bucket/path";
+    String expectedStorageUri = "/bucket/path";
+    NessieContent folderContent3 =
+        new NessieContent(
+            folderPath3,
+            testContentId,
+            VersionedPlugin.EntityType.FOLDER,
+            null,
+            null,
+            folder3StorageUri);
+    NessieContent folderContent4 =
+        new NessieContent(
+            folderPath3, testContentId, VersionedPlugin.EntityType.FOLDER, null, null, null);
+
+    when(nessieClient.getContent(eq(folderPath3), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent3));
+
+    when(nessieClient.getContent(eq(folderPath4), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent4));
+
+    Path result = dataplanePlugin.findBasePath(tablePath, versionContext);
+
+    assertEquals(Path.of(expectedStorageUri), result);
+  }
+
+  @Test
+  public void testFindBasePathWithMultipleNamespacesStorageUri2() {
+    List<String> tablePath =
+        List.of("namespace", "folder1", "folder2", "folder3", "folder4", "table");
+    List<String> folderPath1 = List.of("namespace", "folder1");
+    List<String> folderPath2 = List.of("namespace", "folder1", "folder2");
+    List<String> folderPath3 = List.of("namespace", "folder1", "folder2", "folder3");
+    List<String> folderPath4 = List.of("namespace", "folder1", "folder2", "folder3", "folder4");
+
+    ResolvedVersionContext versionContext = mock(ResolvedVersionContext.class);
+    String testContentId = "test-content-id";
+    String folder1StorageUri = "s3://bucket/path";
+    String expectedFolder1StorageUri = "/bucket/path";
+
+    NessieContent folderContent1 =
+        new NessieContent(
+            folderPath3,
+            testContentId,
+            VersionedPlugin.EntityType.FOLDER,
+            null,
+            null,
+            folder1StorageUri);
+    NessieContent folderContent2 =
+        new NessieContent(
+            folderPath3, testContentId, VersionedPlugin.EntityType.FOLDER, null, null, null);
+
+    NessieContent folderContent3 =
+        new NessieContent(
+            folderPath3, testContentId, VersionedPlugin.EntityType.FOLDER, null, null, null);
+    NessieContent folderContent4 =
+        new NessieContent(
+            folderPath3, testContentId, VersionedPlugin.EntityType.FOLDER, null, null, null);
+
+    when(nessieClient.getContent(eq(folderPath3), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent3));
+    when(nessieClient.getContent(eq(folderPath2), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent2));
+    when(nessieClient.getContent(eq(folderPath1), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent1));
+    when(nessieClient.getContent(eq(folderPath4), eq(versionContext), isNull()))
+        .thenReturn(Optional.of(folderContent4));
+
+    Path result = dataplanePlugin.findBasePath(tablePath, versionContext);
+
+    assertEquals(Path.of(expectedFolder1StorageUri), result);
+  }
+
+  @Test
+  public void testFindBasePathWithNoStorageUri() {
+    List<String> tablePath = List.of("namespace", "folder", "table");
+    List<String> folderPath = List.of("namespace", "folder");
+    ResolvedVersionContext versionContext = mock(ResolvedVersionContext.class);
+    String testContentId = "test-content-id";
+    String namespaceStorageUri = null;
+    String pluginStorageLocation = "pluginStorageLocation";
+
+    when(nessieClient.getContent(eq(folderPath), eq(versionContext), isNull()))
+        .thenReturn(
+            Optional.of(
+                new NessieContent(
+                    tablePath,
+                    testContentId,
+                    VersionedPlugin.EntityType.FOLDER,
+                    null,
+                    null,
+                    namespaceStorageUri)));
+    when(pluginConfig.getPath()).thenReturn(Path.of(pluginStorageLocation));
+
+    Path result = dataplanePlugin.findBasePath(tablePath, versionContext);
+
+    assertEquals(Path.of(pluginStorageLocation), result);
+  }
+
+  @Test
+  public void testFindBasePathWithEmptyEntityPath() {
+    List<String> tablePath = List.of();
+    ResolvedVersionContext versionContext = mock(ResolvedVersionContext.class);
+    assertThatThrownBy(() -> dataplanePlugin.findBasePath(tablePath, versionContext))
+        .isInstanceOf(IllegalArgumentException.class);
   }
 
   private void setupAWSStorageAndProvider() {

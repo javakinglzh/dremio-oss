@@ -42,7 +42,6 @@ export default class AccelerationRaw extends Component {
       "rawReflections[].type",
       "rawReflections[].name",
       "rawReflections[].enabled",
-      "rawReflections[].arrowCachingEnabled",
       "rawReflections[].partitionDistributionStrategy",
       "rawReflections[].partitionFields[].name",
       "rawReflections[].sortFields[].name",

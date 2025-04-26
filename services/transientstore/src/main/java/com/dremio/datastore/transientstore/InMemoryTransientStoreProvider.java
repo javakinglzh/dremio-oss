@@ -24,13 +24,13 @@ public class InMemoryTransientStoreProvider implements TransientStoreProvider {
 
   @Override
   public <K, V, T extends TransientStore<K, V>> T getStore(
-      Format<K> keyFormat, Format<V> valueFormat) {
+      Format<K> keyFormat, Format<V> valueFormat, String... tags) {
     throw new UnsupportedOperationException();
   }
 
   @Override
   public <K, V, T extends TransientStore<K, V>> T getStore(
-      Format<K> keyFormat, Format<V> valueFormat, int ttl) {
+      Format<K> keyFormat, Format<V> valueFormat, int ttl, String... tags) {
     return (T) new InMemoryTransientStore(ttl);
   }
 

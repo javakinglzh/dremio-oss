@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.planner.serializer.logical;
 
-import com.dremio.exec.planner.serializer.RelFieldCollationSerde;
 import com.dremio.exec.planner.serializer.RelNodeSerde;
+import com.dremio.exec.planner.serializer.core.RelFieldCollationSerde;
 import com.dremio.plan.serialization.PLogicalSort;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -33,10 +33,7 @@ public final class LogicalSortSerde implements RelNodeSerde<LogicalSort, PLogica
     PLogicalSort.Builder builder =
         PLogicalSort.newBuilder()
             .setInput(s.toProto(sort.getInput()))
-            .addAllCollation(
-                sort.collation.getFieldCollations().stream()
-                    .map(RelFieldCollationSerde::toProto)
-                    .collect(Collectors.toList()));
+            .addAllCollation(s.toProtoRelFieldCollation(sort.collation.getFieldCollations()));
 
     if (sort.fetch != null) {
       builder.setFetch(s.toProto(sort.fetch));

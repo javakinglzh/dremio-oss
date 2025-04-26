@@ -69,6 +69,9 @@ type TooltipProps = {
   onOpen?: () => void;
 };
 
+/**
+ * @deprecated import from `@dremio/design-system/components` instead
+ */
 export const Tooltip = (props: TooltipProps): JSX.Element => {
   const arrowElRef = React.useRef(null);
   const [open, setOpen] = React.useState(false);
@@ -211,7 +214,12 @@ export const Tooltip = (props: TooltipProps): JSX.Element => {
           getReferenceProps({ ref, ...children.props }),
         )
       )}
-      {portal ? createPortal(tooltipContent, document.body!) : tooltipContent}
+      {portal
+        ? createPortal(
+            tooltipContent,
+            refs["domReference"].current?.closest("dialog") || document.body!,
+          )
+        : tooltipContent}
     </>
   );
 };

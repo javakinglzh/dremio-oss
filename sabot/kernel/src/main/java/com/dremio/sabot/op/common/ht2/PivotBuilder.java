@@ -60,10 +60,10 @@ public class PivotBuilder {
           bitOffset += 2;
           break;
 
-          // 8 byte
+        // 8 byte
         case BIGINT:
         case DATE:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case FLOAT8:
         case INTERVALDAY:
           defs.add(
@@ -77,7 +77,7 @@ public class PivotBuilder {
           fixedOffset += 8;
           break;
 
-          // 4 byte
+        // 4 byte
         case FLOAT4:
         case INTERVALYEAR:
         case TIME:
@@ -93,7 +93,7 @@ public class PivotBuilder {
           fixedOffset += 4;
           break;
 
-          // 16 byte
+        // 16 byte
         case DECIMAL:
           defs.add(
               new VectorPivotDef(
@@ -106,7 +106,7 @@ public class PivotBuilder {
           fixedOffset += 16;
           break;
 
-          // variable
+        // variable
         case VARBINARY:
         case VARCHAR:
           defs.add(
@@ -181,17 +181,17 @@ public class PivotBuilder {
           bitOffset += 2;
           break;
 
-          /* 8 byte */
+        /* 8 byte */
         case BIGINT:
         case DATE:
-        case TIMESTAMP:
+        case TIMESTAMPMILLI:
         case FLOAT8:
         case INTERVALDAY:
           bitOffset++;
           fixedOffset += 8;
           break;
 
-          /* 4 byte */
+        /* 4 byte */
         case FLOAT4:
         case INTERVALYEAR:
         case TIME:
@@ -200,13 +200,13 @@ public class PivotBuilder {
           fixedOffset += 4;
           break;
 
-          /* 16 byte */
+        /* 16 byte */
         case DECIMAL:
           bitOffset++;
           fixedOffset += 16;
           break;
 
-          /* variable */
+        /* variable */
         case VARBINARY:
         case VARCHAR:
           bitOffset++;

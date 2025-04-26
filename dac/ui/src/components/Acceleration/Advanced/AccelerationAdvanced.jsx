@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { Component } from "react";
+import { Component, createRef } from "react";
 import { connect } from "react-redux";
 import Immutable from "immutable";
 import PropTypes from "prop-types";
@@ -28,6 +28,7 @@ import {
 import AccelerationAggregation from "./AccelerationAggregation";
 import AccelerationRaw from "./AccelerationRaw";
 import "#oss/uiTheme/less/Acceleration/Acceleration.less";
+import { tabsListener } from "dremio-ui-lib/components";
 
 export class AccelerationAdvanced extends Component {
   static propTypes = {
@@ -73,6 +74,20 @@ export class AccelerationAdvanced extends Component {
       aggregationReflections: this.props.values.aggregationReflections,
       rawReflections: this.props.values.rawReflections,
     });
+
+    this.tabsRef = createRef();
+  }
+
+  componentDidMount() {
+    this.tabsRef.current?.addEventListener("keydown", (e) =>
+      tabsListener(e, "horizontal"),
+    );
+  }
+
+  componentWillUnmount() {
+    this.tabsRef.current?.removeEventListener("keydown", (e) =>
+      tabsListener(e, "horizontal"),
+    );
   }
 
   componentDidUpdate(newProps) {
@@ -217,7 +232,7 @@ export class AccelerationAdvanced extends Component {
     const activeTab = this.getActiveTab();
     return (
       <div className={"AccelerationAdvanced"} data-qa="acceleration-advanced">
-        <div className={"AccelerationAdvanced__tabs"}>
+        <div className={"AccelerationAdvanced__tabs"} ref={this.tabsRef}>
           <div
             className={`AccelerationAdvanced__tab ${
               activeTab === "RAW" ? "--bgColor-header" : "--bgColor-white"
@@ -225,6 +240,12 @@ export class AccelerationAdvanced extends Component {
             data-qa="raw-queries-tab"
             key="raw"
             onClick={() => this.setState({ activeTab: "RAW" })}
+            tabIndex={activeTab === "RAW" ? 0 : -1}
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                this.setState({ activeTab: "RAW" });
+              }
+            }}
           >
             {laDeprecated("Raw Reflections")}
           </div>
@@ -237,6 +258,12 @@ export class AccelerationAdvanced extends Component {
             data-qa="aggregation-queries-tab"
             key="aggregation"
             onClick={() => this.setState({ activeTab: "AGGREGATION" })}
+            onKeyDown={(e) => {
+              if (e.code === "Enter" || e.code === "Space") {
+                this.setState({ activeTab: "AGGREGATION" });
+              }
+            }}
+            tabIndex={activeTab === "AGGREGATION" ? 0 : -1}
           >
             {laDeprecated("Aggregation Reflections")}
           </div>

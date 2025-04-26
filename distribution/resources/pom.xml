@@ -28,19 +28,11 @@
   <packaging>jar</packaging>
   <name>Distribution - Scripts and Resources</name>
 
-  <properties>
-    <profile.tag>default</profile.tag>
-  </properties>
-
   <build>
     <resources>
       <resource>
         <filtering>true</filtering>
         <directory>${project.basedir}/src/main/resources</directory>
-      </resource>
-      <resource>
-        <filtering>true</filtering>
-        <directory>${project.basedir}/src/main/resources-${profile.tag}</directory>
       </resource>
     </resources>
     <plugins>
@@ -80,17 +72,4 @@
       </plugin>
     </plugins>
   </build>
-  <profiles>
-    <profile>
-      <id>mapr</id>
-      <activation>
-        <property>
-          <name>mapr</name>
-        </property>
-      </activation>
-      <properties>
-        <profile.tag>mapr</profile.tag>
-      </properties>
-    </profile>
-  </profiles>
 </project>

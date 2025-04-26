@@ -18,6 +18,7 @@ package com.dremio.sabot.exec;
 
 import static com.dremio.telemetry.api.metrics.CommonTags.TAGS_OUTCOME_SUCCESS;
 
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.proto.UserBitShared.QueryId;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Meter;
@@ -28,6 +29,8 @@ import java.util.List;
 
 /** Abstract strategy for reducing heap usage. */
 public abstract class AbstractHeapClawBackStrategy implements HeapClawBackStrategy {
+  private static final org.slf4j.Logger logger =
+      org.slf4j.LoggerFactory.getLogger(AbstractHeapClawBackStrategy.class);
 
   protected FragmentExecutors fragmentExecutors;
   protected QueriesClerk queriesClerk;
@@ -87,6 +90,10 @@ public abstract class AbstractHeapClawBackStrategy implements HeapClawBackStrate
         .increment(queries.size());
 
     for (QueryId queryId : queries) {
+      logger.error(
+          "{} initiated canceling of query {} ",
+          clawBackContext.getTrigger().name(),
+          QueryIdHelper.getQueryId(queryId));
       fragmentExecutors.failFragments(
           queryId,
           queriesClerk,

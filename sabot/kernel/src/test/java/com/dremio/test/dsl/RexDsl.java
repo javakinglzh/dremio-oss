@@ -132,8 +132,8 @@ public class RexDsl {
     return REX_BUILDER.makeCall(IS_NOT_DISTINCT_FROM, rexNode1, rexNode2);
   }
 
-  public static RexNode literal(int value) {
-    return REX_BUILDER.makeLiteral(value, INT_TYPE, false);
+  public static RexLiteral literal(int value) {
+    return (RexLiteral) REX_BUILDER.makeLiteral(value, INT_TYPE, false);
   }
 
   public static RexNode literal(float value) {
@@ -182,6 +182,10 @@ public class RexDsl {
 
   public static RexInputRef intInput(int i) {
     return REX_BUILDER.makeInputRef(INT_TYPE, i);
+  }
+
+  public static RexInputRef structInput(RelDataType dataType, int i) {
+    return REX_BUILDER.makeInputRef(dataType, i);
   }
 
   public static RexInputRef floatNullInput(int i) {
@@ -246,5 +250,9 @@ public class RexDsl {
 
   public static RexNode caseExpr(RexNode... exp) {
     return REX_BUILDER.makeCall(SqlStdOperatorTable.CASE, exp);
+  }
+
+  public static RexNode fieldInput(RexNode field, int i) {
+    return REX_BUILDER.makeFieldAccess(field, i);
   }
 }

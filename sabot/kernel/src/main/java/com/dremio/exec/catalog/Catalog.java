@@ -15,6 +15,9 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
+import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.exec.catalog.namespace.NamespacePassthrough;
 import com.dremio.exec.dotfile.View;
@@ -37,7 +40,8 @@ public interface Catalog
         InformationSchemaCatalog,
         VersionContextResolver,
         NamespacePassthrough,
-        BulkEntityExplorer {
+        BulkEntityExplorer,
+        FolderCatalog {
   /**
    * Resolve an ambiguous reference using the following rules: if the reference is a single value
    * and a default schema is defined, resolve using the default schema. Otherwise, resolve using the
@@ -71,12 +75,18 @@ public interface Catalog
   // TODO(DX-21034): Rework View Creator
   void createView(
       final NamespaceKey key, View view, ViewOptions viewOptions, NamespaceAttribute... attributes)
-      throws IOException;
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException;
 
   // TODO(DX-21034): Rework View Creator
   void updateView(
       final NamespaceKey key, View view, ViewOptions viewOptions, NamespaceAttribute... attributes)
-      throws IOException;
+      throws IOException,
+          CatalogUnsupportedOperationException,
+          CatalogEntityAlreadyExistsException,
+          CatalogEntityNotFoundException;
 
   // TODO(DX-21034): Rework View Creator
   void dropView(final NamespaceKey key, ViewOptions viewOptions) throws IOException;
@@ -84,12 +94,6 @@ public interface Catalog
   Iterable<String> getSubPartitions(
       NamespaceKey key, List<String> partitionColumns, List<String> partitionValues)
       throws PartitionNotFoundException;
-
-  default CatalogAccessStats getCatalogAccessStats() {
-    return new CatalogAccessStats();
-  }
-
-  default void invalidateNamespaceCache(final NamespaceKey key) {}
 
   MetadataRequestOptions getMetadataRequestOptions();
 

@@ -101,8 +101,8 @@ public class HiveIncrementalRefreshDatasetPlanBuilder extends HiveFullRefreshDat
   private void validateMetadata() {
     boolean isValid = validatePartitionSpecEvolution(tableSchema, new ArrayList<>(partitionCols), metadataProvider.getTableSchema(), new ArrayList<>(metadataProvider.getPartitionColumns()));
     if (!isValid) {
-      throw UserException.validationError().message("Change in Hive partition definition detected for table '%s', " +
-        "re-promote the table to update the partition definition.", tableNSKey.toString()).build(logger);
+      throw UserException.validationError().message("Change in Hive partition definition detected for table '%s'. " +
+        "Run ALTER TABLE %s FORGET METADATA.", tableNSKey.toString(), tableNSKey.toString()).build(logger);
     }
   }
 

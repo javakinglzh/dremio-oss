@@ -22,7 +22,7 @@ import com.dremio.exec.planner.sql.handlers.query.CopyIntoTableContext;
 import com.dremio.exec.store.dfs.FileLoadInfo;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
+import java.util.HashMap;
 import java.util.Map;
 import org.junit.Test;
 
@@ -167,16 +167,21 @@ public class TestCopyIntoFileLoadInfo {
   }
 
   private static Map<CopyIntoTableContext.FormatOption, Object> getFormatOptions() {
-    return ImmutableMap.of(
-        CopyIntoTableContext.FormatOption.TRIM_SPACE, false,
-        CopyIntoTableContext.FormatOption.DATE_FORMAT, "yyyy-MM-dd",
-        CopyIntoTableContext.FormatOption.TIME_FORMAT, "HH:mm:ss",
-        CopyIntoTableContext.FormatOption.EMPTY_AS_NULL, true,
-        CopyIntoTableContext.FormatOption.TIMESTAMP_FORMAT, "YYYY-MM-DD HH24:MI:SS.FFF",
-        CopyIntoTableContext.FormatOption.NULL_IF, ImmutableList.of("one", "two", "3", "IV"),
-        CopyIntoTableContext.FormatOption.RECORD_DELIMITER, "\n",
-        CopyIntoTableContext.FormatOption.FIELD_DELIMITER, ",",
-        CopyIntoTableContext.FormatOption.QUOTE_CHAR, "\"",
-        CopyIntoTableContext.FormatOption.ESCAPE_CHAR, "\\");
+    return new HashMap<>() {
+      {
+        put(CopyIntoTableContext.FormatOption.TRIM_SPACE, false);
+        put(CopyIntoTableContext.FormatOption.DATE_FORMAT, "yyyy-MM-dd");
+        put(CopyIntoTableContext.FormatOption.TIME_FORMAT, "HH:mm:ss");
+        put(CopyIntoTableContext.FormatOption.EMPTY_AS_NULL, true);
+        put(CopyIntoTableContext.FormatOption.TIMESTAMP_FORMAT, "YYYY-MM-DD HH24:MI:SS.FFF");
+        put(CopyIntoTableContext.FormatOption.NULL_IF, ImmutableList.of("one", "two", "3", "IV"));
+        put(CopyIntoTableContext.FormatOption.RECORD_DELIMITER, "\n");
+        put(CopyIntoTableContext.FormatOption.FIELD_DELIMITER, ",");
+        put(CopyIntoTableContext.FormatOption.QUOTE_CHAR, "\"");
+        put(CopyIntoTableContext.FormatOption.ESCAPE_CHAR, "\\");
+        put(CopyIntoTableContext.FormatOption.EXTRACT_HEADER, false);
+        put(CopyIntoTableContext.FormatOption.SKIP_LINES, 0);
+      }
+    };
   }
 }

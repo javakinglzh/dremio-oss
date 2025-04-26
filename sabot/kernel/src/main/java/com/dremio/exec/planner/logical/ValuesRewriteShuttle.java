@@ -19,12 +19,14 @@ import static org.apache.calcite.sql.fun.SqlStdOperatorTable.CASE;
 import static org.apache.calcite.sql.fun.SqlStdOperatorTable.IS_NULL;
 
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
+import com.dremio.exec.planner.sql.DremioSqlOperatorTable;
+import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.core.Collect;
+import org.apache.calcite.rel.logical.LogicalAggregate;
 import org.apache.calcite.rel.logical.LogicalValues;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
@@ -56,22 +58,25 @@ public class ValuesRewriteShuttle extends StatelessRelShuttleImpl {
   }
 
   @Override
-  public RelNode visit(RelNode other) {
-    if (!(other instanceof Collect)) {
-      return super.visit(other);
-    }
-
+  public RelNode visit(LogicalAggregate aggregate) {
     // We want to minimize the number of tests we break, so we are only handling all numerics for
     // the array subquery tests.
-    Collect collect = (Collect) other;
-    if (!(collect.getInput() instanceof LogicalValues)) {
-      return super.visit(other);
+    if (aggregate.getAggCallList().size() != 1) {
+      return super.visit(aggregate);
     }
 
-    LogicalValues logicalValues = (LogicalValues) collect.getInput();
+    if (aggregate.getAggCallList().get(0).getAggregation() != DremioSqlOperatorTable.ARRAY_AGG) {
+      return super.visit(aggregate);
+    }
+
+    if (!(aggregate.getInput() instanceof LogicalValues)) {
+      return super.visit(aggregate);
+    }
+
+    LogicalValues logicalValues = (LogicalValues) aggregate.getInput();
     RelNode rewrittenValues = rewrite(logicalValues, true);
 
-    return collect.copy(collect.getTraitSet(), rewrittenValues);
+    return aggregate.copy(aggregate.getTraitSet(), ImmutableList.of(rewrittenValues));
   }
 
   @Override

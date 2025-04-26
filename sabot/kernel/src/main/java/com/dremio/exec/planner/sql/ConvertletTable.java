@@ -19,6 +19,7 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.planner.sql.HiveMaskConvertlets.HiveMaskConvertlet;
 import com.dremio.exec.planner.sql.HiveMaskConvertlets.HiveMaskFirstLastConvertlet;
 import com.dremio.exec.planner.sql.HiveMaskConvertlets.HiveMaskHashConvertlet;
+import com.dremio.exec.planner.sql.convertlet.TryConvertFromConvertlet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import java.util.LinkedList;
@@ -131,7 +132,7 @@ public class ConvertletTable extends ReflectiveConvertletTable {
             final SqlLiteral unitLiteral = call.operand(0);
             final TimeUnit unit = unitLiteral.symbolValue(TimeUnit.class);
             switch (unit) {
-                // TODO(DX-11268): Support sub-second intervals with TIMESTAMPADD.
+              // TODO(DX-11268): Support sub-second intervals with TIMESTAMPADD.
               case MILLISECOND:
               case MICROSECOND:
               case NANOSECOND:
@@ -170,6 +171,8 @@ public class ConvertletTable extends ReflectiveConvertletTable {
     registerOp(DremioSqlOperatorTable.DAY, DatePartFunctionsConvertlet.DAY_INSTANCE);
     registerOp(DremioSqlOperatorTable.MONTH, DatePartFunctionsConvertlet.MONTH_INSTANCE);
     registerOp(DremioSqlOperatorTable.YEAR, DatePartFunctionsConvertlet.YEAR_INSTANCE);
+    registerOp(DremioSqlOperatorTable.TRY_CONVERT_FROM, TryConvertFromConvertlet.INSTANCE);
+    registerOp(DremioSqlOperatorTable.CAST, CastSqlRexConvertlet.INSTANCE);
   }
 
   /*
@@ -251,7 +254,7 @@ public class ConvertletTable extends ReflectiveConvertletTable {
             }
           }
         }
-        // fall through
+      // fall through
       case LEAST_RESTRICTIVE:
         return cx.getTypeFactory().leastRestrictive(types);
       default:

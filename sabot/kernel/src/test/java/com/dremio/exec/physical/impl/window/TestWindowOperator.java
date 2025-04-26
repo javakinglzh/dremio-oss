@@ -27,13 +27,17 @@ import static com.dremio.sabot.Fixtures.t;
 import static java.util.Collections.singletonList;
 import static org.apache.calcite.rel.RelFieldCollation.Direction.DESCENDING;
 import static org.apache.calcite.rel.RelFieldCollation.NullDirection.FIRST;
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 
 import com.dremio.common.logical.data.NamedExpression;
 import com.dremio.common.logical.data.Order;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.physical.config.WindowPOP;
 import com.dremio.exec.physical.config.WindowPOP.Bound;
 import com.dremio.exec.physical.config.WindowPOP.BoundType;
 import com.dremio.sabot.BaseTestOperator;
+import com.dremio.sabot.CustomHashAggDataGenerator;
 import com.dremio.sabot.Fixtures;
 import com.dremio.sabot.Fixtures.Table;
 import com.dremio.sabot.op.windowframe.WindowFrameOperator;
@@ -141,5 +145,53 @@ public class TestWindowOperator extends BaseTestOperator {
     final Table output =
         Fixtures.t(WindowGenerator.header4657, WindowGenerator.generateOutput4657(partitions));
     validateSingle(window, WindowFrameOperator.class, input, output, 20);
+  }
+
+  @Test
+  public void testRowSizeNoCheck() throws Exception {
+    final WindowPOP window =
+        new WindowPOP(
+            PROPS,
+            null,
+            Collections.<NamedExpression>emptyList(), // withins
+            Arrays.asList(n("count(VARCHAR_KEY)", "rn"), n("rank()", "rnk")), // aggregations
+            singletonList(ordering("VARCHAR_KEY", DESCENDING, FIRST)), // ordering
+            false,
+            new Bound(true, Integer.MAX_VALUE, BoundType.FOLLOWING),
+            new Bound(false, 0, BoundType.FOLLOWING));
+
+    final int shortLen = (120 * 1024);
+    try (CustomHashAggDataGenerator generator =
+            new CustomHashAggDataGenerator(1000, getTestAllocator(), shortLen);
+        AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 96); ) {
+      Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
+      validateSingle(window, WindowFrameOperator.class, generator, null, 1000);
+    }
+  }
+
+  @Test
+  public void testRowSizeCheck() throws Exception {
+    final WindowPOP window =
+        new WindowPOP(
+            PROPS,
+            null,
+            Collections.<NamedExpression>emptyList(), // withins
+            Arrays.asList(n("first_value(VARCHAR_KEY)", "rn"), n("rank()", "rnk")), // aggregations
+            singletonList(ordering("INT_KEY", DESCENDING, FIRST)), // ordering
+            false,
+            new Bound(true, Integer.MAX_VALUE, BoundType.FOLLOWING),
+            new Bound(false, 0, BoundType.FOLLOWING));
+
+    final int shortLen = (120 * 1024);
+    try (CustomHashAggDataGenerator generator =
+            new CustomHashAggDataGenerator(1000, getTestAllocator(), shortLen);
+        AutoCloseable ac = with(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT, true);
+        AutoCloseable ac1 = with(ExecConstants.LIMIT_ROW_SIZE_BYTES, 88); ) {
+      validateSingle(window, WindowFrameOperator.class, generator, null, 1000);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size of 88 bytes"));
+    }
   }
 }

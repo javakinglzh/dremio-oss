@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 import { PureComponent } from "react";
+import { marked } from "marked";
+import DOMPurify from "dompurify";
 import PropTypes from "prop-types";
 import { v4 as uuidv4 } from "uuid";
 import classNames from "clsx";
 import { debounce } from "lodash";
-import SimpleMDE from "simplemde";
-import "simplemde/dist/simplemde.min.css";
-import "#oss/components/markedjsOverrides.js";
+import EasyMDE from "easymde";
+import "easymde/dist/easymde.min.css";
 import { withErrorBoundary } from "#oss/components/OldErrorBoundary";
 import additionalWikiControls from "@inject/shared/AdditionalWikiControls";
 import { Spinner } from "dremio-ui-lib";
@@ -34,43 +35,24 @@ import {
 } from "./MarkdownEditor.less";
 import "./MarkdownEditorIcons.less";
 
-// simple mde overrides ---------------------------
-
-const refreshEditorPreview = (mdeEditor) => {
-  const cm = mdeEditor.codemirror;
-  const wrapper = cm.getWrapperElement();
-  const preview = wrapper.lastChild;
-  if (preview) {
-    preview.innerHTML = mdeEditor.options.previewRender(
-      mdeEditor.value(),
-      preview,
-    );
-  }
-};
-
-(() => {
-  const originalValue = SimpleMDE.prototype.value;
-
-  const newValue = function (value) {
-    const result = originalValue.call(this, value);
-
-    if (value !== undefined && this.isPreviewActive()) {
-      // make sure that preview is updated on value change
-      refreshEditorPreview(this);
-    }
-
-    return result;
-  };
-
-  SimpleMDE.prototype.value = newValue;
-})();
-
-// End of "simple mde overrides" ------------------
-
 const customMenus = {
   save: "Save",
   cancel: "Cancel",
   fullScreenMode: "dremio-full-screen",
+};
+
+const preserveNewLines = (token) => {
+  const numMatches = token.raw.match(/\n/g).length;
+  return new Array(numMatches).join("<br>");
+};
+const renderer = new marked.Renderer();
+const renderSpace = renderer.space;
+const renderHeading = renderer.heading;
+renderer.space = function (token) {
+  return renderSpace.call(this, token) + preserveNewLines(token);
+};
+renderer.heading = function (token) {
+  return renderHeading.call(this, token) + preserveNewLines(token);
 };
 
 export class MarkdownEditorView extends PureComponent {
@@ -123,6 +105,7 @@ export class MarkdownEditorView extends PureComponent {
 
     this.handlePropsChange(undefined, undefined, this.props, this.state); // we should set initial editor state. Reuse componentDidUpdate for that purposes.
     this.updateHasScroll();
+    this.updateToolbarButtons();
   }
 
   componentWillUnmount() {
@@ -137,7 +120,7 @@ export class MarkdownEditorView extends PureComponent {
   createEditor = (additionalToolbarButton) => {
     const { value } = this.props;
 
-    this.editor = new SimpleMDE({
+    this.editor = new EasyMDE({
       autoDownloadFontAwesome: false,
       toolbar: this.getToolbar(additionalToolbarButton), // should be rendered in any mode. Toolbar would be hidden via styles in read mode
       initialValue: value,
@@ -150,6 +133,23 @@ export class MarkdownEditorView extends PureComponent {
         togglePreview: null,
       },
       element: document.getElementById(this._id),
+      renderingConfig: {
+        sanitizerFunction: (input) => {
+          return DOMPurify.sanitize(input, { USE_PROFILES: { html: true } });
+        },
+        markedOptions: {
+          renderer: renderer,
+        },
+      },
+    });
+
+    this.editor.codemirror.on("keydown", (_, e) => {
+      if (
+        e.code === "Escape" &&
+        document.activeElement.nodeName === "TEXTAREA"
+      ) {
+        document.activeElement.blur();
+      }
     });
 
     this.editor.codemirror.on("change", () => {
@@ -208,11 +208,6 @@ export class MarkdownEditorView extends PureComponent {
       }
     }
 
-    if (readMode) {
-      // we should make sure, that in readMode UI displays a value from properties
-      refreshEditorPreview(this.editor);
-    }
-
     if (
       readMode &&
       (readModeChanged || fullScreenModeChanged || valueChanged)
@@ -263,6 +258,22 @@ export class MarkdownEditorView extends PureComponent {
         editor.toggleFullScreen();
       }
     }
+  };
+
+  updateToolbarButtons = () => {
+    const toolbars = document.body.querySelectorAll(".editor-toolbar");
+    toolbars.forEach((bar) => {
+      if (bar?.childNodes?.length)
+        bar.childNodes.forEach((btn) => {
+          if (btn.nodeName === "BUTTON") {
+            btn.setAttribute("tabindex", 0);
+            btn.setAttribute(
+              "class",
+              `${btn.getAttribute("class")} force-focus-visible-outline`,
+            );
+          }
+        });
+    });
   };
 
   toggleClass(el, className, addClass /*: true|false */) {
@@ -406,7 +417,7 @@ export class MarkdownEditorView extends PureComponent {
   };
 
   render() {
-    const { readMode, className, fitToContainer, isModal, entityId, fullPath } =
+    const { readMode, className, fitToContainer, entityId, fullPath } =
       this.props;
     return (
       <>

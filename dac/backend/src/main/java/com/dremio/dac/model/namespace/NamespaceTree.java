@@ -15,6 +15,7 @@
  */
 package com.dremio.dac.model.namespace;
 
+import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
 import static com.dremio.service.namespace.proto.NameSpaceContainer.Type.SOURCE;
 
 import com.dremio.dac.explore.model.Dataset;
@@ -25,7 +26,7 @@ import com.dremio.dac.explore.model.DatasetVersionResourcePath;
 import com.dremio.dac.model.common.DACRuntimeException;
 import com.dremio.dac.model.common.Function;
 import com.dremio.dac.model.common.NamespacePath;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.folder.SourceFolderPath;
 import com.dremio.dac.model.sources.PhysicalDataset;
@@ -54,22 +55,17 @@ import com.dremio.service.namespace.physicaldataset.proto.PhysicalDatasetConfig;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.dremio.service.namespace.space.proto.FolderConfig;
-import com.google.common.base.Preconditions;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.jetbrains.annotations.NotNull;
 
 /** Full/Partial representation of a namespace. */
 public class NamespaceTree {
-
-  private static DatasetVersionMutator datasetService;
-  private static List<NameSpaceContainer> children;
-  private static Type rootEntityType;
-  private static CollaborationHelper collaborationService;
   // TODO For now we only implement list (single level lookups)
-  private final List<Folder> folders;
+  private final List<FolderModel> folders;
   private final List<Dataset> datasets;
   private final List<File> files;
   private final List<PhysicalDataset> physicalDatasets;
@@ -167,7 +163,27 @@ public class NamespaceTree {
             final DatasetConfig datasetConfig = container.getDataset();
             switch (datasetConfig.getType()) {
               case VIRTUAL_DATASET:
-                Preconditions.checkArgument(rootEntityType != SOURCE);
+                if (rootEntityType == SOURCE
+                    && optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)) {
+
+                  final String id = datasetConfig.getId().getId();
+                  final DatasetName datasetName = datasetPath.getDataset();
+                  final VirtualDatasetUI vds = DatasetsUtil.toVirtualDatasetUI(datasetConfig);
+
+                  tree.addDataset(
+                      new DatasetResourcePath(datasetPath),
+                      new DatasetVersionResourcePath(datasetPath, vds.getVersion()),
+                      datasetName,
+                      vds.getSql(),
+                      vds,
+                      datasetService.getJobsCount(datasetPath.toNamespaceKey()),
+                      rootEntityType,
+                      tags.get(id));
+                  break;
+                } else if (rootEntityType == SOURCE) {
+                  // Skip virtual datasets in source and process other entries
+                  break;
+                }
                 final VirtualDatasetUI vds =
                     datasetService.get(datasetPath, datasetConfig.getVirtualDataset().getVersion());
                 tree.addDataset(
@@ -259,7 +275,7 @@ public class NamespaceTree {
     }
   }
 
-  public void addFolder(final Folder f) {
+  public void addFolder(final FolderModel f) {
     folders.add(f);
   }
 
@@ -271,29 +287,47 @@ public class NamespaceTree {
       boolean isQueryable,
       boolean isPromoted)
       throws NamespaceNotFoundException {
-    Folder folder =
-        Folder.newInstance(
-            folderPath,
+    addFolder(
+        getFolderModel(
             folderConfig,
             fileFormat,
-            null,
             isQueryable,
-            isFileSystemSource != null && isFileSystemSource,
-            0);
-    addFolder(folder);
+            isPromoted,
+            rootEntityType,
+            folderPath.toUrlPath()));
   }
 
   public void addFolder(
       FolderPath folderPath, FolderConfig folderConfig, NameSpaceContainer.Type rootEntityType)
       throws NamespaceNotFoundException {
-    Folder folder =
-        Folder.newInstance(
-            folderPath,
-            folderConfig,
-            null,
-            false,
-            isFileSystemSource != null && isFileSystemSource);
-    addFolder(folder);
+    addFolder(
+        getFolderModel(folderConfig, null, false, false, rootEntityType, folderPath.toUrlPath()));
+  }
+
+  protected @NotNull FolderModel getFolderModel(
+      FolderConfig folderConfig,
+      FileFormat fileFormat,
+      boolean isQueryable,
+      boolean isPromoted,
+      NameSpaceContainer.Type rootEntityType,
+      String folderUrlPath)
+      throws NamespaceNotFoundException {
+    String id = folderConfig.getId() == null ? folderUrlPath : folderConfig.getId().getId();
+    return new FolderModel(
+        id,
+        folderConfig.getName(),
+        folderUrlPath,
+        folderConfig.getIsPhysicalDataset(),
+        isFileSystemSource != null && isFileSystemSource,
+        isQueryable,
+        folderConfig.getExtendedConfig(),
+        folderConfig.getTag(),
+        fileFormat,
+        null,
+        null,
+        0,
+        folderConfig.getStorageUri(),
+        folderConfig.getTag());
   }
 
   public void addFile(final File f) {
@@ -378,7 +412,7 @@ public class NamespaceTree {
     addPhysicalDataset(physicalDataset);
   }
 
-  public final List<Folder> getFolders() {
+  public final List<FolderModel> getFolders() {
     return folders;
   }
 

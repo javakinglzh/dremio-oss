@@ -449,14 +449,6 @@ public class IncrementalMetadataRefreshCommitter
     List<SnapshotEntry> expiredSnapshots =
         snapshotsCollector.collect(timestampExpiry, numSnapshotsRetain).first();
 
-    operatorStats.addLongStat(
-        WriterCommitterOperator.Metric.NUM_TOTAL_SNAPSHOTS, numTotalSnapshots);
-    operatorStats.addLongStat(
-        WriterCommitterOperator.Metric.NUM_EXPIRED_SNAPSHOTS, expiredSnapshots.size());
-    if (expiredSnapshots.isEmpty()) {
-      return Pair.of(Collections.emptySet(), 0L);
-    }
-
     // Perform the expiry operation.
     List<SnapshotEntry> liveSnapshots;
     try {
@@ -497,16 +489,38 @@ public class IncrementalMetadataRefreshCommitter
     Preconditions.checkState(
         numValidSnapshots >= 1L, "Should keep files at least for current snapshot");
 
+    // Make Iceberg commit, and clean old snapshots.
+    clearMetric();
+    operatorStats.setLongStat(
+        WriterCommitterOperator.Metric.NUM_TOTAL_SNAPSHOTS, numTotalSnapshots);
+    operatorStats.setLongStat(
+        WriterCommitterOperator.Metric.NUM_EXPIRED_SNAPSHOTS, expiredSnapshots.size());
+
     // Remove orphan files
     IcebergUtils.removeOrphanFiles(fs, logger, EXECUTOR_SERVICE, orphanFiles);
     long clearTime = stopwatch.elapsed(TimeUnit.MILLISECONDS);
-    operatorStats.addLongStat(
+    operatorStats.setLongStat(
         WriterCommitterOperator.Metric.NUM_ORPHAN_FILES_DELETED, orphanFiles.size());
-    operatorStats.addLongStat(
+    operatorStats.setLongStat(
         WriterCommitterOperator.Metric.CLEAR_EXPIRE_SNAPSHOTS_TIME, clearTime);
-    operatorStats.addLongStat(
+    operatorStats.setLongStat(
         WriterCommitterOperator.Metric.NUM_VALID_SNAPSHOTS, numValidSnapshots);
     return Pair.of(orphanFiles, numValidSnapshots);
+  }
+
+  private void clearMetric() {
+    // DX-96559: When MD query makes Iceberg commit, it needs to refresh metadata file
+    // (IcebergNessieTableOperations.refreshFromMetadataLocation). It involves to read old
+    // metadata file and write a new metadata file (json file). This triggers to add
+    // ScanOperator.metric values. Those values are brought back
+    // (AsyncSeekableInputStreamFactory.close) and finally are written into
+    // WriterCommitterOperator's OperatorStats.doubleMetrics,which causes the wrong numbers
+    // shown in WriterCommitterOperator.Metric.
+    operatorStats.clearDoubleStat(WriterCommitterOperator.Metric.NUM_TOTAL_SNAPSHOTS);
+    operatorStats.clearDoubleStat(WriterCommitterOperator.Metric.NUM_EXPIRED_SNAPSHOTS);
+    operatorStats.clearDoubleStat(WriterCommitterOperator.Metric.NUM_ORPHAN_FILES_DELETED);
+    operatorStats.clearDoubleStat(WriterCommitterOperator.Metric.CLEAR_EXPIRE_SNAPSHOTS_TIME);
+    operatorStats.clearDoubleStat(WriterCommitterOperator.Metric.NUM_VALID_SNAPSHOTS);
   }
 
   private Set<String> collectFilesForSnapshot(
@@ -743,8 +757,17 @@ public class IncrementalMetadataRefreshCommitter
             .setTableName(tableName)
             .setMapTypeEnabled(isMapDataTypeEnabled)
             .build();
-    Schema oldIcebergSchema = schemaConverter.toIcebergSchema(batchSchema);
-    Schema newIcebergSchema = schemaConverter.toIcebergSchema(newSchema);
+
+    // DX-97502: Remove IncrementalUpdateUtils.UPDATE_COLUMN from those two schemas.
+    // As this additional column could cause SchemaConverter.toIcebergSchema to generate
+    // mismatched column id for Complex type's children, and result in detecting complex
+    // field as an updated column, and being updated during Iceberg updates.
+    BatchSchema batchSchemaWithoutUpdateColumn =
+        batchSchema.dropField(IncrementalUpdateUtils.UPDATE_COLUMN);
+    BatchSchema newSchemaWithoutUpdateColumn =
+        newSchema.dropField(IncrementalUpdateUtils.UPDATE_COLUMN);
+    Schema oldIcebergSchema = schemaConverter.toIcebergSchema(batchSchemaWithoutUpdateColumn);
+    Schema newIcebergSchema = schemaConverter.toIcebergSchema(newSchemaWithoutUpdateColumn);
 
     List<Types.NestedField> oldFields = oldIcebergSchema.columns();
     List<Types.NestedField> newFields = newIcebergSchema.columns();
@@ -847,5 +870,10 @@ public class IncrementalMetadataRefreshCommitter
   @VisibleForTesting
   public DatasetCatalogRequestBuilder getDatasetCatalogRequestBuilder() {
     return datasetCatalogRequestBuilder;
+  }
+
+  @VisibleForTesting
+  public List<Types.NestedField> getUpdatedColumnTypes() {
+    return updatedColumnTypes;
   }
 }

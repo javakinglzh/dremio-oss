@@ -24,7 +24,7 @@ import java.util.Objects;
 /** Plugin Configuration for MongoDB */
 @JsonTypeName(MongoStoragePluginConfig.NAME)
 public class MongoStoragePluginConfig extends StoragePluginConfig {
-  static final org.slf4j.Logger logger =
+  private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(MongoStoragePluginConfig.class);
 
   public static final String NAME = "mongo";

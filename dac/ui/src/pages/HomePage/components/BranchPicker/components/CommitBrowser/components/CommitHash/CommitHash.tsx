@@ -54,7 +54,7 @@ function CommitHash({
   };
 
   return (
-    <div className="commitEntryHash">
+    <div className="commitEntryHash" aria-hidden={true}>
       <NessieLink
         disabled={disabled}
         to={`/commit/${encodeURIComponent(branch.name)}/${hash}`}
@@ -64,7 +64,7 @@ function CommitHash({
       >
         {getShortHash(hash)}
       </NessieLink>
-      {enableCopy && <CopyButton contents={hash} />}
+      {enableCopy && <CopyButton contents={hash} disabled={disabled} />}
     </div>
   );
 }

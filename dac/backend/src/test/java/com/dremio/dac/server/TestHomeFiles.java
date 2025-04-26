@@ -15,7 +15,6 @@
  */
 package com.dremio.dac.server;
 
-import static com.dremio.dac.server.FamilyExpectation.CLIENT_ERROR;
 import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
 import static com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME;
 import static java.lang.String.format;
@@ -35,7 +34,7 @@ import com.dremio.dac.explore.model.FileFormatUI;
 import com.dremio.dac.homefiles.HomeFileConf;
 import com.dremio.dac.homefiles.HomeFileSystemStoragePlugin;
 import com.dremio.dac.homefiles.HomeFileTool;
-import com.dremio.dac.model.folder.Folder;
+import com.dremio.dac.model.folder.FolderModel;
 import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.job.JobDataFragment;
 import com.dremio.dac.model.spaces.Home;
@@ -43,6 +42,7 @@ import com.dremio.dac.model.spaces.HomeName;
 import com.dremio.dac.options.UIOptions;
 import com.dremio.dac.server.test.SampleDataPopulator;
 import com.dremio.dac.util.DatasetsUtil;
+import com.dremio.exec.catalog.SourceRefreshOption;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
@@ -82,6 +82,7 @@ import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.GenericType;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.hadoop.conf.Configuration;
@@ -144,12 +145,14 @@ public class TestHomeFiles extends BaseTestServer {
 
   @Test
   public void testHome() throws Exception {
+    doc("get home");
     Home home =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("home/" + HOME_NAME)).buildGet(),
             Home.class);
     assertNotNull(home.getId());
 
+    doc("upload file to staging");
     java.io.File inputFile = temporaryFolder.newFile("input.json");
     try (FileWriter fileWriter = new FileWriter(inputFile)) {
       fileWriter.write("{\"person_id\": 1, \"salary\": 10}");
@@ -161,7 +164,7 @@ public class TestHomeFiles extends BaseTestServer {
     form.bodyPart(fileBody);
     FormDataBodyPart fileNameBody = new FormDataBodyPart("fileName", "file1");
     form.bodyPart(fileNameBody);
-    doc("upload file to staging");
+
     File file1Staged =
         expectSuccess(
             getBuilder(
@@ -180,7 +183,7 @@ public class TestHomeFiles extends BaseTestServer {
 
     checkFileData(file1StagedFormat.getLocation());
 
-    // external query
+    doc("querying file");
     String fileLocation = PathUtils.toDottedPath(Path.of(file1StagedFormat.getLocation()));
     SqlQuery query =
         new SqlQuery(
@@ -190,8 +193,6 @@ public class TestHomeFiles extends BaseTestServer {
                 fileLocation,
                 file1StagedFormat.toTableOptions()),
             SampleDataPopulator.DEFAULT_USER_NAME);
-
-    doc("querying file");
     try (final JobDataFragment truncData =
         submitJobAndGetData(
             l(JobsService.class),
@@ -215,7 +216,7 @@ public class TestHomeFiles extends BaseTestServer {
     assertEquals(1, data.getReturnedRowCount());
     assertEquals(2, data.getColumns().size());
 
-    // finish upload
+    doc("finish upload");
     File file1 =
         expectSuccess(
             getBuilder(
@@ -229,42 +230,6 @@ public class TestHomeFiles extends BaseTestServer {
 
     checkFileData(file1Format.getLocation());
     checkFileDoesNotExist(file1StagedFormat.getLocation());
-
-    // test upload cancel
-    form = new FormDataMultiPart();
-    fileBody = new FormDataBodyPart("file", inputFile, MediaType.MULTIPART_FORM_DATA_TYPE);
-    form.bodyPart(fileBody);
-    form.bodyPart(new FormDataBodyPart("fileName", "file2"));
-
-    doc("upload second file to staging");
-    File file2Staged =
-        expectSuccess(
-            getBuilder(
-                    getHttpClient()
-                        .getAPIv2()
-                        .path("home/" + HOME_NAME + "/upload_start/")
-                        .queryParam("extension", "json"))
-                .buildPost(Entity.entity(form, form.getMediaType())),
-            File.class);
-    FileFormat file2StagedFormat = file2Staged.getFileFormat().getFileFormat();
-
-    assertEquals("file2", file2StagedFormat.getName());
-    assertEquals(asList(HOME_NAME, "file2"), file2StagedFormat.getFullPath());
-    assertEquals(FileType.JSON, file2StagedFormat.getFileType());
-
-    fileBody.cleanup();
-    checkFileData(file2StagedFormat.getLocation());
-
-    // cancel upload
-    doc("cancel upload for second file");
-    expectSuccess(
-        getBuilder(getHttpClient().getAPIv2().path("home/" + HOME_NAME + "/upload_cancel/file2"))
-            .buildPost(Entity.json(file2StagedFormat)));
-    checkFileDoesNotExist(file2StagedFormat.getLocation());
-    expectError(
-        CLIENT_ERROR,
-        getBuilder(getHttpClient().getAPIv2().path("home/" + HOME_NAME + "/file/file2")).buildGet(),
-        NotFoundErrorMessage.class);
 
     doc("getting a file");
     File file2 =
@@ -298,21 +263,47 @@ public class TestHomeFiles extends BaseTestServer {
     doc("creating a folder");
     String folderPath = "home/" + HOME_NAME + "/folder/";
 
-    final Folder putFolder1 =
+    final FolderModel putFolder1 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path(folderPath))
                 .buildPost(Entity.json("{\"name\": \"f1\"}")),
-            Folder.class);
+            FolderModel.class);
     assertEquals("f1", putFolder1.getName());
 
     doc("get folder");
-    Folder f1 =
+    FolderModel f1 =
         expectSuccess(
             getBuilder(getHttpClient().getAPIv2().path("home/" + HOME_NAME + "/folder/f1"))
                 .buildGet(),
-            Folder.class);
+            FolderModel.class);
     assertEquals("f1", f1.getName());
     Assert.assertArrayEquals(new String[] {HOME_NAME, "f1"}, f1.getFullPathList().toArray());
+
+    doc("delete file");
+    Response ignored1 =
+        expectSuccess(
+            getBuilder(
+                    getHttpClient()
+                        .getAPIv2()
+                        .path("home/" + HOME_NAME + "/file/file1")
+                        .queryParam("version", file1.getFileFormat().getFileFormat().getVersion()))
+                .buildDelete());
+    checkFileDoesNotExist(file1.getFileFormat().getFileFormat().getLocation());
+
+    doc("delete folder");
+    Response ignored2 =
+        expectSuccess(
+            getBuilder(
+                    getHttpClient()
+                        .getAPIv2()
+                        .path("home/" + HOME_NAME + "/folder/f1")
+                        .queryParam("version", putFolder1.getVersion()))
+                .buildDelete());
+    Response ignored3 =
+        expectStatus(
+            Status.NOT_FOUND,
+            getBuilder(getHttpClient().getAPIv2().path("home/" + HOME_NAME + "/folder/f1"))
+                .buildGet());
   }
 
   @Test // DX-5410
@@ -608,7 +599,9 @@ public class TestHomeFiles extends BaseTestServer {
             "localhost");
     nasHomeFileStore.getFilesystemAndCreatePaths("localhost");
     config.setConnectionConf(nasHomeFileStore);
-    catalog.getSystemUserCatalog().updateSource(config);
+    catalog
+        .getSystemUserCatalog()
+        .updateSource(config, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     HomeFileTool tool = l(HomeFileTool.class);
 
     try {
@@ -622,7 +615,9 @@ public class TestHomeFiles extends BaseTestServer {
               .getId()
               .getClonedConfig();
       backConfig.setConfig(oldConfig);
-      catalog.getSystemUserCatalog().updateSource(backConfig);
+      catalog
+          .getSystemUserCatalog()
+          .updateSource(backConfig, SourceRefreshOption.WAIT_FOR_DATASETS_CREATION);
     }
   }
 

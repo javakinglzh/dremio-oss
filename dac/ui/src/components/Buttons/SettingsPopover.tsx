@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { IconButton, Popover } from "dremio-ui-lib/components";
+import { Popover } from "dremio-ui-lib/components";
+import { Tooltip } from "@dremio/design-system/components";
 import clsx from "clsx";
 
 import * as classes from "./SettingsPopover.module.less";
@@ -30,6 +31,8 @@ type SettingsPopoverProps = {
   hasDropdown?: boolean;
   onOpen?: () => void;
   onClose?: () => void;
+  placement?: Parameters<typeof Popover>[0]["placement"];
+  btnClassName?: string;
 };
 
 const SettingsPopover = (props: SettingsPopoverProps) => {
@@ -39,30 +42,39 @@ const SettingsPopover = (props: SettingsPopoverProps) => {
         mode="click"
         role="menu"
         content={props.content}
-        placement="left-start"
+        placement={props.placement || "left-start"}
         portal={false}
         className={clsx(classes["settings-popover"], "drop-shadow-lg")}
         dismissable
         onOpen={props.onOpen}
         onClose={props.onClose}
       >
-        <IconButton
-          className="settings-button"
-          data-qa={props.dataQa}
-          tooltip={props.tooltip ?? "More"}
-          tooltipPortal
-        >
-          {props.children}
-          {props.hasDropdown && !props.disabled && !props.hideArrowIcon && (
-            <dremio-icon
-              style={{
-                blockSize: 20,
-                inlineSize: 20,
-              }}
-              name="interface/caretDown"
-            ></dremio-icon>
-          )}
-        </IconButton>
+        <div>
+          <Tooltip content={props.tooltip ?? "More"}>
+            <button
+              className={clsx(
+                "dremio-icon-button settings-button",
+                props.btnClassName,
+              )}
+              data-qa={props.dataQa}
+            >
+              <div>
+                {props.children}
+                {props.hasDropdown &&
+                  !props.disabled &&
+                  !props.hideArrowIcon && (
+                    <dremio-icon
+                      style={{
+                        blockSize: 20,
+                        inlineSize: 20,
+                      }}
+                      name="interface/caretDown"
+                    ></dremio-icon>
+                  )}
+              </div>
+            </button>
+          </Tooltip>
+        </div>
       </Popover>
     </div>
   );

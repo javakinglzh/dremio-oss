@@ -48,11 +48,6 @@ const modulesStateReducer = (state = {}, action) => {
         ...rest
       } = state;
 
-      console.info(
-        `"RESET_MODULE_STATE" called for key "${moduleKey}"`,
-        removedModule,
-      );
-
       return rest;
     }
     default:

@@ -41,7 +41,7 @@ public final class PathFilters {
         }
 
         switch (name.charAt(0)) {
-            // Hidden files
+          // Hidden files
           case '.':
           case '_':
             return false;

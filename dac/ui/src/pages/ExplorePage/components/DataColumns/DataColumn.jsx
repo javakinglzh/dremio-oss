@@ -16,53 +16,63 @@
 import { Component } from "react";
 import PropTypes from "prop-types";
 import classNames from "clsx";
+import { Tooltip } from "@dremio/design-system/components";
+import { getIntlContext } from "dremio-ui-common/contexts/IntlContext.js";
 import { formatMessage } from "utils/locale";
 import {
   typeToIconType,
   typeToFormatMessageId,
 } from "#oss/constants/DataTypes";
-import {
-  name as nameCls,
-  icon as iconCls,
-  wrapper,
-  wrapperHover,
-  nameWiki,
-  iconWiki,
-} from "./DataColumn.less";
 
 import HighlightedColumnName from "./HighlightedColumnName";
 
 export const columnPropTypes = {
   type: PropTypes.string, //see constants/DataTypes for the list of available types
   name: PropTypes.string,
+  isPartitioned: PropTypes.bool,
+  isSorted: PropTypes.bool,
 };
+
+const { t } = getIntlContext();
 
 export class DataColumn extends Component {
   static propTypes = {
     ...columnPropTypes,
     className: PropTypes.string,
-    detailsView: PropTypes.bool,
     searchTerm: PropTypes.string,
   };
 
   render() {
-    const { type, name, className, detailsView, searchTerm } = this.props;
+    const { type, name, className, searchTerm, isPartitioned, isSorted } =
+      this.props;
     const label = `data-types/${typeToIconType[type]}`;
     const alt = typeToFormatMessageId?.[type] ?? typeToFormatMessageId["ANY"];
 
     return (
-      <div
-        className={classNames(detailsView ? wrapper : wrapperHover, className)}
-      >
+      <div className={classNames("flex items-center h-5 gap-05", className)}>
         <dremio-icon
           name={label}
           data-qa={label}
           alt={formatMessage(alt)}
-          class={`icon-primary ${detailsView ? iconWiki : iconCls}`}
+          class="h-205 w-205 icon-primary"
         />
-        <div className={detailsView ? nameWiki : nameCls}>
-          <HighlightedColumnName columnName={name} searchTerm={searchTerm} />
-        </div>
+        <HighlightedColumnName columnName={name} searchTerm={searchTerm} />
+        {isSorted && (
+          <Tooltip content={t("Catalog.Tree.Column.Sorted")}>
+            <dremio-icon
+              name="interface/sort"
+              class="h-205 w-205 icon-primary"
+            />
+          </Tooltip>
+        )}
+        {isPartitioned && (
+          <Tooltip content={t("Catalog.Tree.Column.Partitioned")}>
+            <dremio-icon
+              name="sql-editor/partition"
+              class="h-205 w-205 icon-primary"
+            />
+          </Tooltip>
+        )}
       </div>
     );
   }

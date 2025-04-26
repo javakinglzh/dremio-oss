@@ -50,7 +50,7 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
       new TypeValidators.PositiveLongValidator(
           "planner.op.scan.nessie.commits.limit_bytes", Long.MAX_VALUE, DEFAULT_LIMIT);
 
-  private final String user;
+  private final String userName;
   private final RelDataType relDataType;
   private final SnapshotsScanOptions snapshotsScanOptions;
   private final long estimatedRows;
@@ -59,18 +59,20 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
   private final BatchSchema batchSchema;
   private final String fsScheme;
   private final String schemeVariate;
+  private final List<String> excludedContentIDs;
 
   public NessieCommitsScanPrel(
       RelOptCluster cluster,
       RelTraitSet traitSet,
       BatchSchema batchSchema,
       SnapshotsScanOptions snapshotsScanOptions,
-      String user,
+      String userName,
       StoragePluginId storagePluginId,
       long estimatedRows,
       int maxParallelizationWidth,
       String fsScheme,
-      String schemeVariate) {
+      String schemeVariate,
+      List<String> excludedContentIDs) {
     super(cluster, traitSet);
     this.batchSchema = batchSchema;
     this.relDataType = VacuumOutputSchema.getRowType(batchSchema, cluster.getTypeFactory());
@@ -78,9 +80,10 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
     this.storagePluginId = storagePluginId;
     this.estimatedRows = estimatedRows;
     this.maxParallelizationWidth = maxParallelizationWidth;
-    this.user = user;
+    this.userName = userName;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
+    this.excludedContentIDs = excludedContentIDs;
   }
 
   public RelDataType getRelDataType() {
@@ -116,13 +119,14 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     return new NessieCommitsGroupScan(
-        creator.props(this, user, batchSchema, RESERVE, LIMIT),
+        creator.props(this, userName, batchSchema, RESERVE, LIMIT),
         storagePluginId,
         SchemaUtilities.allColPaths(batchSchema),
         snapshotsScanOptions,
         maxParallelizationWidth,
         fsScheme,
-        schemeVariate);
+        schemeVariate,
+        excludedContentIDs);
   }
 
   @Override
@@ -132,12 +136,13 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
         getTraitSet(),
         batchSchema,
         snapshotsScanOptions,
-        user,
+        userName,
         storagePluginId,
         estimatedRows,
         maxParallelizationWidth,
         fsScheme,
-        schemeVariate);
+        schemeVariate,
+        excludedContentIDs);
   }
 
   @Override

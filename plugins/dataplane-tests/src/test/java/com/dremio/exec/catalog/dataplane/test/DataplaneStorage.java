@@ -121,4 +121,6 @@ public interface DataplaneStorage extends ExtensionContext.Store.CloseableResour
   FileIO getFileIO();
 
   String getWarehousePath();
+
+  String getWarehousePath(BucketSelection bucketName);
 }

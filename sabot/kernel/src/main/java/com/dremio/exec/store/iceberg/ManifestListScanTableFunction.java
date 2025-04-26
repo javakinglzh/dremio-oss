@@ -16,11 +16,13 @@
 package com.dremio.exec.store.iceberg;
 
 import static com.dremio.exec.planner.physical.TableFunctionUtil.getDataset;
+import static com.dremio.exec.store.SystemSchemas.DATASET_FIELD;
 import static com.dremio.exec.store.SystemSchemas.MANIFEST_LIST_PATH;
 import static com.dremio.exec.store.SystemSchemas.METADATA_FILE_PATH;
 import static com.dremio.exec.store.SystemSchemas.SNAPSHOT_ID;
 import static com.dremio.exec.util.VectorUtil.getVectorFromSchemaPath;
 
+import com.dremio.common.expression.BasePath;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.CarryForwardAwareTableFunctionContext;
 import com.dremio.exec.physical.config.TableFunctionConfig;
@@ -35,7 +37,9 @@ import com.dremio.sabot.op.scan.MutatorSchemaChangeCallBack;
 import com.dremio.sabot.op.scan.ScanOperator.ScanMutator;
 import com.dremio.sabot.op.tablefunction.TableFunctionOperator;
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Streams;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import org.apache.arrow.vector.BigIntVector;
@@ -60,6 +64,7 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
   private VarCharVector inputMetadataLocation;
   private VarCharVector inputManifestListLocation;
   private BigIntVector inputSnapshotId;
+  private Optional<VarCharVector> inputDataset;
 
   private int inputIndex;
 
@@ -87,6 +92,12 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
     inputManifestListLocation =
         (VarCharVector) getVectorFromSchemaPath(incoming, MANIFEST_LIST_PATH);
     inputSnapshotId = (BigIntVector) getVectorFromSchemaPath(incoming, SNAPSHOT_ID);
+    // See if dataset column exists
+    inputDataset =
+        Streams.stream(incoming)
+            .filter(vw -> vw.getValueVector().getName().equals(DATASET_FIELD))
+            .findFirst()
+            .map(vw -> (VarCharVector) vw.getValueVector());
 
     VectorContainer outgoing = (VectorContainer) super.setup(incoming);
     this.mutator = new ScanMutator(outgoing, context, callBack);
@@ -104,6 +115,8 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
   public void startRow(int row) throws Exception {
     inputIndex = row;
     TableFunctionContext functionContext = functionConfig.getFunctionContext();
+    List<String> dataset =
+        inputDataset.map(v -> Arrays.asList(new String(v.get(row)).split("\\."))).orElse(tablePath);
 
     Preconditions.checkState(
         functionContext instanceof CarryForwardAwareTableFunctionContext,
@@ -121,7 +134,7 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
                 context,
                 manifestListLocation,
                 icebergMutablePlugin,
-                tablePath,
+                dataset,
                 functionContext.getPluginId().getName(),
                 functionContext.getFullSchema(),
                 props,
@@ -145,7 +158,7 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
               context,
               metadataLocation,
               icebergMutablePlugin,
-              tablePath,
+              dataset,
               functionContext.getPluginId().getName(),
               functionContext.getFullSchema(),
               props,
@@ -164,6 +177,16 @@ public class ManifestListScanTableFunction extends AbstractTableFunction {
   public int processRow(int startOutIndex, int maxRecords) throws Exception {
     int outputCount = manifestListRecordReader.nextBatch(startOutIndex, startOutIndex + maxRecords);
     int totalRecordCount = startOutIndex + outputCount;
+
+    if (inputDataset.isPresent()
+        && outgoing.getSchema().getFieldId(BasePath.getSimple(DATASET_FIELD)) != null) {
+      VarCharVector datasetOutVector =
+          (VarCharVector) getVectorFromSchemaPath(outgoing, DATASET_FIELD);
+      for (int i = startOutIndex; i < totalRecordCount; i++) {
+        datasetOutVector.setSafe(i, inputDataset.get().get(inputIndex));
+      }
+    }
+
     outgoing.forEach(vw -> vw.getValueVector().setValueCount(totalRecordCount));
     outgoing.setRecordCount(totalRecordCount);
     return outputCount;

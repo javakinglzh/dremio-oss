@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.serializer.logical;
 
 import com.dremio.exec.planner.serializer.RelNodeSerde;
+import com.dremio.exec.planner.serializer.core.CommonRelSerde;
 import com.dremio.plan.serialization.PCorrelationId;
 import com.dremio.plan.serialization.PLogicalCorrelate;
 import com.dremio.plan.serialization.PLogicalCorrelate.PSemiJoinType;
@@ -35,7 +36,7 @@ public final class LogicalCorrelateSerde
         .setRightInput(s.toProto(correlate.getRight()))
         .setSemiJoinType(toProto(correlate.getJoinType()))
         .setCorrelationId(toProto(correlate.getCorrelationId()))
-        .setRequiredColumns(LogicalAggregateSerde.toProto(correlate.getRequiredColumns()))
+        .setRequiredColumns(s.toProtoGroupSet(correlate.getRequiredColumns()))
         .build();
   }
 
@@ -85,7 +86,7 @@ public final class LogicalCorrelateSerde
 
   private static PCorrelationId toProto(CorrelationId correlationId) {
     return PCorrelationId.newBuilder()
-        .setColumnIndex(LogicalAggregateSerde.toProto(correlationId.getColumnIndex()))
+        .setColumnIndex(CommonRelSerde.toProtoGroupSet(correlationId.getColumnIndex()))
         .setId(correlationId.getId())
         .build();
   }

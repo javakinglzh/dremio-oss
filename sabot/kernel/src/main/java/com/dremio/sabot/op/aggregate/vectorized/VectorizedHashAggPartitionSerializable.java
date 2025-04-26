@@ -19,7 +19,7 @@ import com.dremio.exec.cache.AbstractStreamSerializable;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.aggregate.vectorized.HashAggPartitionWritableBatch.HashAggPartitionBatchDefinition;
-import com.dremio.sabot.op.common.ht2.LBlockHashTable;
+import com.dremio.sabot.op.common.ht2.HashTable;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
@@ -203,11 +203,13 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
           fixedBlockBuffer.readableBytes() == fixedBufferLength,
           "ERROR: read incorrect length of fixed width data from spilled chunk");
 
-      /* STEP 7: read variable width pivoted data from spilled chunk */
-      readIntoArrowBuf(variableBlockBuffer, variableBufferLength, input);
-      Preconditions.checkArgument(
-          variableBlockBuffer.readableBytes() == variableBufferLength,
-          "ERROR: read incorrect length of variable width data from spilled chunk");
+      if (variableBufferLength != 0) {
+        /* STEP 7: read variable width pivoted data from spilled chunk */
+        readIntoArrowBuf(variableBlockBuffer, variableBufferLength, input);
+        Preconditions.checkArgument(
+            variableBlockBuffer.readableBytes() == variableBufferLength,
+            "ERROR: read incorrect length of variable width data from spilled chunk");
+      }
 
       /* STEP 8: read data for accumulator vectors from spilled chunk */
       final long length = readAccumulators(accumulatorBatchDef, accumulatorTypes, input);
@@ -377,18 +379,26 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
    */
   @Override
   public void writeToStream(final OutputStream output) throws IOException {
-    final LBlockHashTable hashTable = hashAggPartition.hashTable;
+    final HashTable hashTable = hashAggPartition.hashTable;
     if (isPartitionEmpty(hashTable)) {
       return;
     }
-    final List<ArrowBuf> fixedBlockBuffers = hashTable.getFixedBlockBuffers();
-    final List<ArrowBuf> variableBlockBuffers = hashTable.getVariableBlockBuffers();
-    Preconditions.checkArgument(
-        (fixedBlockBuffers.size() == variableBlockBuffers.size()),
-        "ERROR: inconsistent number of buffers in hash table");
+    List<ArrowBuf> fixedBlockBuffers;
+    List<ArrowBuf> variableBlockBuffers;
+    if (hashAggPartition.useNewFixedAccumulatorAllocation()) {
+      fixedBlockBuffers = null;
+      variableBlockBuffers = null;
+    } else {
+      fixedBlockBuffers = hashTable.getFixedBlockBuffers();
+      variableBlockBuffers = hashTable.getVariableBlockBuffers();
+      Preconditions.checkArgument(
+          (fixedBlockBuffers.size() == variableBlockBuffers.size()),
+          "ERROR: inconsistent number of buffers in hash table");
+    }
     final HashAggPartitionWritableBatch hashTableWritableBatch =
         new HashAggPartitionWritableBatch(
             hashTable,
+            hashAggPartition.useNewFixedAccumulatorAllocation(),
             fixedBlockBuffers,
             variableBlockBuffers,
             hashAggPartition.blockWidth,
@@ -424,7 +434,9 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
       spilledDataSize += buffer.readableBytes();
       writeArrowBuf(buffer, output);
     }
-
+    if (spilledDataSize == 0) {
+      logger.debug("Query might loop going forward");
+    }
     final long elapsed = watch.elapsed(TimeUnit.MILLISECONDS);
     if (elapsed >= this.warnMaxSpillTime) {
       logger.warn("DHL: Spill write of {} bytes took too long: {} ms", spilledDataSize, elapsed);
@@ -445,15 +457,20 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
    */
   boolean writeBatchToStream(final OutputStream output) throws Exception {
     if (inProgressWritableBatch == null) {
-      final LBlockHashTable hashTable = hashAggPartition.hashTable;
-      final List<ArrowBuf> fixedBlockBuffers = hashTable.getFixedBlockBuffers();
-      final List<ArrowBuf> variableBlockBuffers = hashTable.getVariableBlockBuffers();
-      Preconditions.checkArgument(
-          (fixedBlockBuffers.size() == variableBlockBuffers.size()),
-          "ERROR: inconsistent number of buffers in hash table");
+      final HashTable hashTable = hashAggPartition.hashTable;
+      final List<ArrowBuf> fixedBlockBuffers;
+      final List<ArrowBuf> variableBlockBuffers;
+      if (hashAggPartition.useNewFixedAccumulatorAllocation()) {
+        fixedBlockBuffers = null;
+        variableBlockBuffers = null;
+      } else {
+        fixedBlockBuffers = hashTable.getFixedBlockBuffers();
+        variableBlockBuffers = hashTable.getVariableBlockBuffers();
+      }
       inProgressWritableBatch =
           new HashAggPartitionWritableBatch(
               hashTable,
+              hashAggPartition.useNewFixedAccumulatorAllocation(),
               fixedBlockBuffers,
               variableBlockBuffers,
               hashAggPartition.blockWidth,
@@ -484,7 +501,7 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
    * @param partitionHashTable partition's hashtable
    * @return true if partition is empty (0 entries in hashtable), false otherwise
    */
-  private boolean isPartitionEmpty(final LBlockHashTable partitionHashTable) {
+  private boolean isPartitionEmpty(final HashTable partitionHashTable) {
     if (partitionHashTable.size() == 0) {
       Preconditions.checkArgument(
           partitionHashTable.blocks() == 0, "Error: detected inconsistent hashtable state");
@@ -573,6 +590,14 @@ public class VectorizedHashAggPartitionSerializable extends AbstractStreamSerial
   @VisibleForTesting
   public VectorizedHashAggPartition getPartition() {
     return hashAggPartition;
+  }
+
+  public int getCurrentBatchIndex() {
+    if (inProgressWritableBatch != null) {
+      return inProgressWritableBatch.getCurrentBatchIndex();
+    } else {
+      return spillStartIndex;
+    }
   }
 
   private int getLEIntFromByteArray(byte[] array, int index) {

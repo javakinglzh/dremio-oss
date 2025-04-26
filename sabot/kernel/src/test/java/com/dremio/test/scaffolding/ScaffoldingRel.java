@@ -28,6 +28,7 @@ import static org.apache.calcite.sql.type.SqlTypeName.VARCHAR;
 import static org.apache.calcite.sql.type.SqlTypeUtil.createArrayType;
 
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
+import java.util.List;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
@@ -55,6 +56,8 @@ public final class ScaffoldingRel {
       TYPE_FACTORY.createTypeWithNullability(TYPE_FACTORY.createArrayType(INT_NULL_TYPE, -1), true);
   public static final RelDataType INT_ARRAY_COLUMN_TYPE =
       createArrayType(TYPE_FACTORY, INT_TYPE, false);
+  public static final RelDataType STRUCT_TYPE =
+      TYPE_FACTORY.createStructType(List.of(INT_TYPE), List.of("intA"));
   public static final RelDataType VARCHAR_ARRAY_COLUMN_TYPE =
       createArrayType(TYPE_FACTORY, VARCHAR_TYPE, false);
   public static final RelDataType SMALL_INT_NULL_TYPE =

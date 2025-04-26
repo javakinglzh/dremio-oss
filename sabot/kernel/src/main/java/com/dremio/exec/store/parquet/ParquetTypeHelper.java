@@ -21,7 +21,6 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.types.TypeProtos.DataMode;
-import com.dremio.common.types.TypeProtos.MajorType;
 import com.dremio.common.types.TypeProtos.MinorType;
 import com.dremio.exec.store.parquet2.LogicalListL1Converter;
 import com.google.common.base.Preconditions;
@@ -43,10 +42,18 @@ import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
-import org.apache.parquet.schema.DecimalMetadata;
 import org.apache.parquet.schema.GroupType;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DateLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.ListLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.MapKeyValueTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.MapLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.StringLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeUnit;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.apache.parquet.schema.MessageType;
-import org.apache.parquet.schema.OriginalType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
 import org.apache.parquet.schema.Type;
@@ -57,7 +64,6 @@ public class ParquetTypeHelper {
       org.slf4j.LoggerFactory.getLogger(ParquetTypeHelper.class);
   private static Map<MinorType, PrimitiveTypeName> typeMap;
   private static Map<DataMode, Repetition> modeMap;
-  private static Map<MinorType, OriginalType> originalTypeMap;
 
   static {
     typeMap = new HashMap<>();
@@ -74,22 +80,12 @@ public class ParquetTypeHelper {
     typeMap.put(MinorType.UINT8, PrimitiveTypeName.INT64);
     typeMap.put(MinorType.FLOAT8, PrimitiveTypeName.DOUBLE);
     typeMap.put(MinorType.DATE, PrimitiveTypeName.INT32);
-    typeMap.put(MinorType.TIMESTAMP, PrimitiveTypeName.INT64);
+    typeMap.put(MinorType.TIMESTAMPMILLI, PrimitiveTypeName.INT64);
     typeMap.put(MinorType.INTERVALDAY, PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY);
     typeMap.put(MinorType.DECIMAL, PrimitiveTypeName.FIXED_LEN_BYTE_ARRAY);
     typeMap.put(MinorType.VARBINARY, PrimitiveTypeName.BINARY);
     typeMap.put(MinorType.VARCHAR, PrimitiveTypeName.BINARY);
     typeMap.put(MinorType.BIT, PrimitiveTypeName.BOOLEAN);
-
-    originalTypeMap = new HashMap<>();
-    originalTypeMap.put(MinorType.DECIMAL, OriginalType.DECIMAL);
-    originalTypeMap.put(MinorType.VARCHAR, OriginalType.UTF8);
-    originalTypeMap.put(MinorType.DATE, OriginalType.DATE);
-    originalTypeMap.put(MinorType.TIME, OriginalType.TIME_MILLIS);
-    originalTypeMap.put(MinorType.TIMESTAMP, OriginalType.TIMESTAMP_MILLIS);
-    originalTypeMap.put(MinorType.INTERVALDAY, OriginalType.INTERVAL);
-    originalTypeMap.put(MinorType.INTERVALYEAR, OriginalType.INTERVAL);
-    originalTypeMap.put(MinorType.INTERVAL, OriginalType.INTERVAL);
   }
 
   public static PrimitiveTypeName getPrimitiveTypeNameForMinorType(MinorType minorType) {
@@ -97,20 +93,23 @@ public class ParquetTypeHelper {
     return primitiveTypeName;
   }
 
-  public static OriginalType getOriginalTypeForMinorType(MinorType minorType) {
-    return originalTypeMap.get(minorType);
-  }
-
-  public static DecimalMetadata getDecimalMetadataForField(MajorType type) {
-    switch (type.getMinorType()) {
+  public static LogicalTypeAnnotation getLogicalTypeForMinorType(
+      MinorType minorType, Integer scale, Integer precision) {
+    switch (minorType) {
       case DECIMAL:
-      case DECIMAL9:
-      case DECIMAL18:
-      case DECIMAL28SPARSE:
-      case DECIMAL28DENSE:
-      case DECIMAL38SPARSE:
-      case DECIMAL38DENSE:
-        return new DecimalMetadata(type.getPrecision(), type.getScale());
+        return LogicalTypeAnnotation.decimalType(scale, precision);
+      case VARCHAR:
+        return LogicalTypeAnnotation.stringType();
+      case DATE:
+        return LogicalTypeAnnotation.dateType();
+      case TIME:
+        return LogicalTypeAnnotation.timeType(false, TimeUnit.MILLIS);
+      case TIMESTAMPMILLI:
+        return LogicalTypeAnnotation.timestampType(false, TimeUnit.MILLIS);
+      case INTERVALDAY:
+      case INTERVALYEAR:
+      case INTERVAL:
+        return LogicalTypeAnnotation.intervalType();
       default:
         return null;
     }
@@ -137,42 +136,38 @@ public class ParquetTypeHelper {
    *
    * @param colPath schema path of the column
    * @param primitiveType parquet primitive type
-   * @param originalType parquet original type
+   * @param logicalType parquet logic type annotation
    * @param schemaHelper schema helper used for type conversions
    * @return arrow vector field
    */
   public static Field createField(
       SchemaPath colPath,
       PrimitiveType primitiveType,
-      OriginalType originalType,
+      LogicalTypeAnnotation logicalType,
       SchemaDerivationHelper schemaHelper) {
     return createField(
-        colPath,
-        colPath.getAsNamePart().getName(),
-        primitiveType,
-        originalType,
-        schemaHelper,
-        true);
+        colPath, colPath.getAsNamePart().getName(), primitiveType, logicalType, schemaHelper, true);
   }
 
   private static Field createField(
       SchemaPath colPath,
       String columnName,
       PrimitiveType primitiveType,
-      OriginalType originalType,
+      LogicalTypeAnnotation logicalType,
       SchemaDerivationHelper schemaHelper,
       boolean isNullable) {
     switch (primitiveType.getPrimitiveTypeName()) {
       case BINARY:
       case FIXED_LEN_BYTE_ARRAY:
-        if (originalType == OriginalType.UTF8) {
+        if (logicalType instanceof StringLogicalTypeAnnotation) {
           return CompleteType.VARCHAR.toField(columnName, isNullable);
         }
-        if (originalType == OriginalType.DECIMAL) {
-
+        if (logicalType instanceof DecimalLogicalTypeAnnotation) {
+          DecimalLogicalTypeAnnotation decimalLogicalTypeAnnotation =
+              (DecimalLogicalTypeAnnotation) logicalType;
           return CompleteType.fromDecimalPrecisionScale(
-                  primitiveType.getDecimalMetadata().getPrecision(),
-                  primitiveType.getDecimalMetadata().getScale())
+                  decimalLogicalTypeAnnotation.getPrecision(),
+                  decimalLogicalTypeAnnotation.getScale())
               .toField(columnName, isNullable);
         }
         if (schemaHelper.isVarChar(colPath)) {
@@ -186,27 +181,30 @@ public class ParquetTypeHelper {
       case FLOAT:
         return CompleteType.FLOAT.toField(columnName, isNullable);
       case INT32:
-        if (originalType == OriginalType.DATE) {
+        if (logicalType instanceof DateLogicalTypeAnnotation) {
           return CompleteType.DATE.toField(columnName, isNullable);
-        } else if (originalType == OriginalType.TIME_MILLIS) {
+        } else if (logicalType instanceof TimeLogicalTypeAnnotation) {
           return CompleteType.TIME.toField(columnName, isNullable);
-        } else if (originalType == OriginalType.DECIMAL) {
+        } else if (logicalType instanceof DecimalLogicalTypeAnnotation) {
+          DecimalLogicalTypeAnnotation decimalLogicalTypeAnnotation =
+              (DecimalLogicalTypeAnnotation) logicalType;
           return CompleteType.fromDecimalPrecisionScale(
-                  primitiveType.getDecimalMetadata().getPrecision(),
-                  primitiveType.getDecimalMetadata().getScale())
+                  decimalLogicalTypeAnnotation.getPrecision(),
+                  decimalLogicalTypeAnnotation.getScale())
               .toField(columnName, isNullable);
         }
         return CompleteType.INT.toField(columnName, isNullable);
       case INT64:
-        if (originalType == OriginalType.TIMESTAMP_MILLIS
-            || originalType == OriginalType.TIMESTAMP_MICROS) {
+        if (logicalType instanceof TimestampLogicalTypeAnnotation) {
           return CompleteType.TIMESTAMP.toField(columnName, isNullable);
-        } else if (originalType == OriginalType.TIME_MICROS) {
+        } else if (logicalType instanceof TimeLogicalTypeAnnotation) {
           return CompleteType.TIME.toField(columnName, isNullable);
-        } else if (originalType == OriginalType.DECIMAL) {
+        } else if (logicalType instanceof DecimalLogicalTypeAnnotation) {
+          DecimalLogicalTypeAnnotation decimalLogicalTypeAnnotation =
+              (DecimalLogicalTypeAnnotation) logicalType;
           return CompleteType.fromDecimalPrecisionScale(
-                  primitiveType.getDecimalMetadata().getPrecision(),
-                  primitiveType.getDecimalMetadata().getScale())
+                  decimalLogicalTypeAnnotation.getPrecision(),
+                  decimalLogicalTypeAnnotation.getScale())
               .toField(columnName, isNullable);
         }
         return CompleteType.BIGINT.toField(columnName, isNullable);
@@ -220,7 +218,7 @@ public class ParquetTypeHelper {
             .message(
                 "Parquet Primitive Type '%s', Original Type '%s' combination not supported. Column '%s'",
                 primitiveType.toString(),
-                originalType != null ? originalType : "Not Available",
+                logicalType != null ? logicalType : "Not Available",
                 columnName)
             .build();
     }
@@ -268,7 +266,7 @@ public class ParquetTypeHelper {
               columnSchemaPath,
               columnName,
               parquetField.asPrimitiveType(),
-              parquetField.getOriginalType(),
+              parquetField.getLogicalTypeAnnotation(),
               schemaHelper,
               isNullable);
       if (parquetField.isRepetition(REPEATED)) {
@@ -288,7 +286,7 @@ public class ParquetTypeHelper {
 
     // Handle non-primitive cases
     final GroupType complexField = (GroupType) parquetField;
-    if (OriginalType.LIST == complexField.getOriginalType()
+    if (complexField.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation
         && LogicalListL1Converter.isSupportedSchema(complexField)) {
       GroupType repeatedField = (GroupType) complexField.getFields().get(0);
       Optional<Field> subField =
@@ -317,7 +315,7 @@ public class ParquetTypeHelper {
                   columnName,
                   new FieldType(isNullable, new ArrowType.List(), null),
                   Arrays.asList(new Field[] {sf})));
-    } else if (OriginalType.LIST == complexField.getOriginalType()) {
+    } else if (complexField.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation) {
       if (complexField.getFieldCount() == 1) {
         Type type = complexField.getType(0);
         Optional<Field> subField = toField(type, schemaHelper);
@@ -352,7 +350,8 @@ public class ParquetTypeHelper {
           .build();
     }
 
-    if (OriginalType.MAP == complexField.getOriginalType() && !convertToStruct) {
+    if (complexField.getLogicalTypeAnnotation() instanceof MapLogicalTypeAnnotation
+        && !convertToStruct) {
       GroupType repeatedField = (GroupType) complexField.getFields().get(0);
 
       // should have only one child field type
@@ -457,7 +456,7 @@ public class ParquetTypeHelper {
       }
     }
 
-    final boolean isStructType = complexField.getOriginalType() == null || convertToStruct;
+    final boolean isStructType = complexField.getLogicalTypeAnnotation() == null || convertToStruct;
     if (isStructType) { // it is struct
       return toComplexField(
           complexField,
@@ -545,9 +544,9 @@ public class ParquetTypeHelper {
     Field field = new Field(columnName, new FieldType(isNullable, arrowType, null), subFields);
     if (complexField.isRepetition(REPEATED)
         && !convertToStruct
-        && OriginalType.MAP_KEY_VALUE != complexField.getOriginalType()
-        && OriginalType.MAP != complexField.getOriginalType()
-        && OriginalType.LIST != complexField.getOriginalType()) {
+        && !(complexField.getLogicalTypeAnnotation() instanceof MapKeyValueTypeAnnotation)
+        && !(complexField.getLogicalTypeAnnotation() instanceof MapLogicalTypeAnnotation)
+        && !(complexField.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation)) {
       Field listChild =
           new Field(
               "$data$",
@@ -594,7 +593,7 @@ public class ParquetTypeHelper {
         stringBuilder.append(columnPath.get(index));
         chunkIncluded =
             chunkIncluded || includeChunk(stringBuilder.toString(), allProjectedPaths, false);
-        if (type.getOriginalType() == OriginalType.LIST) {
+        if (type.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation) {
           if (!LogicalListL1Converter.isSupportedSchema(type.asGroupType())) {
             throw UserException.dataReadError()
                 .message("Unsupported LOGICAL LIST parquet schema")
@@ -607,7 +606,7 @@ public class ParquetTypeHelper {
 
           type = type.asGroupType().getType(columnPath.get(index + 1));
 
-          while (type.getOriginalType() == OriginalType.LIST) {
+          while (type.getLogicalTypeAnnotation() instanceof ListLogicalTypeAnnotation) {
             if (!LogicalListL1Converter.isSupportedSchema(type.asGroupType())) {
               throw UserException.dataReadError()
                   .message("Unsupported LOGICAL LIST parquet schema")
@@ -631,7 +630,7 @@ public class ParquetTypeHelper {
               chunkIncluded || includeChunk(stringBuilder.toString(), allProjectedPaths, false);
           columnPath.remove(index + 1);
         }
-        if (type.getOriginalType() == OriginalType.MAP) {
+        if (type.getLogicalTypeAnnotation() instanceof MapLogicalTypeAnnotation) {
           index++;
           Preconditions.checkState(
               type.asGroupType().getFieldCount() == 1, "Map column has more than one field");

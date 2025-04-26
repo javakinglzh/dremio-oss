@@ -60,8 +60,12 @@ export const useToggleTreeItemExpansion = (id: string) => {
   }, [id]);
 };
 
-export const ExpandedContextProvider: FC<PropsWithChildren> = (props) => (
-  <ExpandedContext.Provider value={useSignal(new Set<string>())}>
+export const ExpandedContextProvider: FC<
+  PropsWithChildren<{ initialExpansionState?: string[] }>
+> = (props) => (
+  <ExpandedContext.Provider
+    value={useSignal(new Set<string>(props.initialExpansionState))}
+  >
     {props.children}
   </ExpandedContext.Provider>
 );

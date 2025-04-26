@@ -35,7 +35,6 @@ import com.dremio.exec.planner.fragment.PlanFragmentFull;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.exec.proto.ExecProtos;
 import com.dremio.exec.proto.UserBitShared;
-import com.dremio.exec.server.BootStrapContext;
 import com.dremio.exec.server.NodeDebugContextProvider;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
@@ -58,6 +57,7 @@ import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import javax.inject.Provider;
 import org.apache.arrow.memory.OutOfMemoryException;
+import org.apache.arrow.memory.RootAllocatorFactory;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -81,10 +81,8 @@ public class TestFragmentExecutorBuilder extends DremioTest {
     when(planFragmentFull.getMemInitial()).thenReturn(0L);
     when(planFragmentFull.getMemInitial()).thenReturn(0L);
 
-    BootStrapContext bootStrapContext =
-        new BootStrapContext(
-            DremioConfig.create(null, DEFAULT_SABOT_CONFIG), CLASSPATH_SCAN_RESULT);
-    DremioRootAllocator rootAllocator = (DremioRootAllocator) bootStrapContext.getAllocator();
+    DremioRootAllocator rootAllocator =
+        (DremioRootAllocator) RootAllocatorFactory.newRoot(DEFAULT_SABOT_CONFIG);
     FragmentExecutorBuilder fragmentExecutorBuilder =
         new FragmentExecutorBuilder(
             queriesClerk,
@@ -132,7 +130,7 @@ public class TestFragmentExecutorBuilder extends DremioTest {
       //      Assert.assertTrue(additionalInfo.contains("Allocator dominators:\nAllocator(ROOT)"));
       throw ex;
     } finally {
-      bootStrapContext.close();
+      rootAllocator.close();
     }
   }
 

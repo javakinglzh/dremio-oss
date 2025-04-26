@@ -26,7 +26,7 @@ public interface Rel extends RelNode {
    * Calling convention for relational expressions that are "implemented" by generating Dremio
    * logical plans.
    */
-  public static final Convention LOGICAL =
+  Convention LOGICAL =
       new Convention.Impl("LOGICAL", Rel.class) {
         @Override
         public boolean canConvertConvention(Convention toConvention) {

@@ -23,6 +23,7 @@ import com.dremio.common.concurrent.CloseableSchedulerThreadPool;
 import com.dremio.common.concurrent.ExtendedLatch;
 import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.utils.protos.QueryIdHelper;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.planner.PhysicalPlanReader;
@@ -56,6 +57,9 @@ import com.dremio.telemetry.api.metrics.SimpleTimer;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Maps;
+import com.google.protobuf.Empty;
+import io.grpc.Context;
+import io.grpc.stub.StreamObserver;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
@@ -98,6 +102,7 @@ public class MaestroServiceImpl implements MaestroService {
   private final Provider<ResourceAllocator> resourceAllocator;
   private final Provider<ExecutorSelectionService> executorSelectionService;
   private final Provider<JobTelemetryClient> jobTelemetryClient;
+  private final Provider<OptionManager> optionManagerProvider;
   // single map of currently running queries
   private final ConcurrentMap<QueryId, QueryTracker> activeQueryMap = Maps.newConcurrentMap();
   private final CloseableSchedulerThreadPool closeableSchedulerThreadPool;
@@ -109,6 +114,7 @@ public class MaestroServiceImpl implements MaestroService {
   private final Provider<ExecutorServiceClientFactory> executorServiceClientFactory;
   private ExtendedLatch exitLatch =
       null; // This is used to wait to exit when things are still running
+  private final Context grpcContext;
 
   @Inject
   public MaestroServiceImpl(
@@ -119,7 +125,8 @@ public class MaestroServiceImpl implements MaestroService {
       final Provider<ExecutorSelectionService> executorSelectionService,
       final Provider<ExecutorServiceClientFactory> executorServiceClientFactory,
       final Provider<JobTelemetryClient> jobTelemetryClient,
-      final Provider<MaestroForwarder> forwarder) {
+      final Provider<MaestroForwarder> forwarder,
+      Provider<OptionManager> optionManagerProvider) {
 
     this.executorSetService = executorSetService;
     this.sabotContext = sabotContext;
@@ -129,10 +136,13 @@ public class MaestroServiceImpl implements MaestroService {
     this.executorServiceClientFactory = executorServiceClientFactory;
     this.jobTelemetryClient = jobTelemetryClient;
     this.forwarder = forwarder;
+    this.optionManagerProvider = optionManagerProvider;
 
     this.closeableSchedulerThreadPool =
         new CloseableSchedulerThreadPool(
             "cancel-fragment-retry-", Runtime.getRuntime().availableProcessors() * 2);
+    // separate out grpc context for jts
+    this.grpcContext = Context.current().fork();
   }
 
   @Override
@@ -301,7 +311,8 @@ public class MaestroServiceImpl implements MaestroService {
     @Override
     public void screenCompleted(NodeQueryScreenCompletion completion) throws RpcException {
       logger.info(
-          "Screen complete message came in for id {}",
+          "Screen complete message came in for node {} and queryId {}",
+          completion.getEndpoint().getAddress(),
           QueryIdHelper.getQueryId(completion.getId()));
       QueryTracker queryTracker = activeQueryMap.get(completion.getId());
 
@@ -325,7 +336,10 @@ public class MaestroServiceImpl implements MaestroService {
     public void nodeQueryCompleted(NodeQueryCompletion completion) throws RpcException {
       Span currentSpan = Span.current();
       String queryId = QueryIdHelper.getQueryId(completion.getId());
-      logger.info("Node query complete message came in for id {}", queryId);
+      logger.info(
+          "Node query complete message came in for node {} and queryId {}",
+          completion.getEndpoint().getAddress(),
+          queryId);
       QueryTracker queryTracker = activeQueryMap.get(completion.getId());
 
       if (queryTracker != null) {
@@ -344,7 +358,13 @@ public class MaestroServiceImpl implements MaestroService {
               ExecutionSetupException.class);
           timedOperation(
               UPDATE_FINAL_EXECUTOR_PROFILE_TIMER.start(),
-              () -> updateFinalExecutorProfile(completion));
+              () -> {
+                if (optionManagerProvider.get().getOption(ExecConstants.JOB_PROFILE_ASYNC_UPDATE)) {
+                  updateFinalExecutorProfileAsync(completion, queryTracker);
+                } else {
+                  updateFinalExecutorProfileSync(completion);
+                }
+              });
         } catch (Throwable e) {
           currentSpan.setAttribute("jts.put_executor_profile_rpc_failed", true);
           logger.warn("Exception sending final Executor profile {}. ", queryId, e);
@@ -367,20 +387,23 @@ public class MaestroServiceImpl implements MaestroService {
       }
     }
 
+    private void logUninitialisedStub(String endpoint) {
+      // telemetry client/service has not been fully started. a message can still arrive
+      // if coordinator has been restarted while active queries are running in executor.
+      logger.info(
+          "Dropping a profile message from end point : {}. "
+              + "This is harmless since the query will be terminated shortly due to coordinator restarting",
+          endpoint);
+    }
+
     @WithSpan
-    private void updateFinalExecutorProfile(NodeQueryCompletion completion) {
+    private void updateFinalExecutorProfileSync(NodeQueryCompletion completion) {
       // propagate to job-telemetry service (in-process server).
       JobTelemetryServiceGrpc.JobTelemetryServiceBlockingStub stub =
           jobTelemetryClient.get().getBlockingStub();
       CoordExecRPC.ExecutorQueryProfile profile = completion.getFinalNodeQueryProfile();
       if (stub == null) {
-        // telemetry client/service has not been fully started. a message can still arrive
-        // if coordinator has been restarted while active queries are running in executor.
-        logger.info(
-            "Dropping a profile message from end point : "
-                + profile.getEndpoint()
-                + ". This is harmless since the query will be terminated shortly due to coordinator "
-                + "restarting");
+        logUninitialisedStub(profile.getEndpoint().toString());
       } else {
         jobTelemetryClient
             .get()
@@ -395,10 +418,54 @@ public class MaestroServiceImpl implements MaestroService {
       }
     }
 
+    @WithSpan
+    private void updateFinalExecutorProfileAsync(
+        NodeQueryCompletion completion, QueryTracker queryTracker) {
+      // propagate to job-telemetry service (in-process server).
+      JobTelemetryServiceGrpc.JobTelemetryServiceStub stub =
+          jobTelemetryClient.get().getAsyncStub();
+      CoordExecRPC.ExecutorQueryProfile profile = completion.getFinalNodeQueryProfile();
+      if (stub == null) {
+        logUninitialisedStub(profile.getEndpoint().toString());
+      } else {
+        queryTracker.putExecutorProfile(profile.getEndpoint().getAddress());
+        grpcContext.run(
+            () -> {
+              stub.putExecutorProfile(
+                  PutExecutorProfileRequest.newBuilder()
+                      .setProfile(profile)
+                      .setIsFinal(true)
+                      .build(),
+                  new StreamObserver<Empty>() {
+                    @Override
+                    public void onNext(Empty value) {
+                      // No-op
+                    }
+
+                    @Override
+                    public void onError(Throwable t) {
+                      logger.warn(
+                          "{} : Failed to update Final Execution Profile for {}:{}",
+                          QueryIdHelper.getQueryId(profile.getQueryId()),
+                          profile.getEndpoint().getAddress(),
+                          profile.getEndpoint().getFabricPort(),
+                          t);
+                    }
+
+                    @Override
+                    public void onCompleted() {
+                      queryTracker.removeExecutorProfile(profile.getEndpoint().getAddress());
+                    }
+                  });
+            });
+      }
+    }
+
     @Override
     public void nodeQueryMarkFirstError(NodeQueryFirstError error) throws RpcException {
       logger.info(
-          "Node Query error came in for id {} ",
+          "Node Query error came in for node {} and queryId {}",
+          error.getEndpoint().getAddress(),
           QueryIdHelper.getQueryId(error.getHandle().getQueryId()));
       QueryTracker queryTracker = activeQueryMap.get(error.getHandle().getQueryId());
 

@@ -17,7 +17,6 @@ package com.dremio.service.namespace;
 
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertThrows;
@@ -215,20 +214,13 @@ public class TestNamespaceServiceImpl extends DremioTest {
         sourceKey, ProtostuffUtil.copy(sourceConfig).setDescription("Test description"));
     ns.addOrUpdateDataset(dataset2Key, ProtostuffUtil.copy(dataset2Config).setTotalNumSplits(2));
 
-    // Delete everything
-    ns.deleteSource(sourceKey, null);
-    ns.deleteHome(homeKey, null);
-    ns.deleteSpace(spaceKey, null);
-
     List<NamespaceKey> expectedCreate =
         List.of(
             spaceKey, folder1Key, dataset1Key, udfKey, homeKey, sourceKey, folder2Key, dataset2Key);
     List<NamespaceKey> expectedUpdate = List.of(dataset1Key, udfKey, sourceKey, dataset2Key);
-    List<NamespaceKey> expectedDelete =
-        List.of(
-            dataset2Key, folder2Key, sourceKey, homeKey, dataset1Key, folder1Key, udfKey, spaceKey);
 
     for (NamespaceKey key : expectedCreate) {
+      String entityId = ns.getEntityIdByPath(key);
       verify(messagePublisher)
           .publish(
               CatalogEventProto.CatalogEventMessage.newBuilder()
@@ -237,10 +229,12 @@ public class TestNamespaceServiceImpl extends DremioTest {
                           .setEventType(
                               CatalogEventProto.CatalogEventMessage.CatalogEventType
                                   .CATALOG_EVENT_TYPE_CREATED)
-                          .addAllPath(key.getPathComponents()))
+                          .addAllPath(key.getPathComponents())
+                          .setEntityId(entityId))
                   .build());
     }
     for (NamespaceKey key : expectedUpdate) {
+      String entityId = ns.getEntityIdByPath(key);
       verify(messagePublisher)
           .publish(
               CatalogEventProto.CatalogEventMessage.newBuilder()
@@ -249,9 +243,20 @@ public class TestNamespaceServiceImpl extends DremioTest {
                           .setEventType(
                               CatalogEventProto.CatalogEventMessage.CatalogEventType
                                   .CATALOG_EVENT_TYPE_UPDATED)
-                          .addAllPath(key.getPathComponents()))
+                          .addAllPath(key.getPathComponents())
+                          .setEntityId(entityId))
                   .build());
     }
+
+    // Delete everything
+    ns.deleteSource(sourceKey, null);
+    ns.deleteHome(homeKey, null);
+    ns.deleteSpace(spaceKey, null);
+
+    List<NamespaceKey> expectedDelete =
+        List.of(
+            dataset2Key, folder2Key, sourceKey, homeKey, dataset1Key, folder1Key, udfKey, spaceKey);
+
     for (NamespaceKey key : expectedDelete) {
       verify(messagePublisher)
           .publish(
@@ -287,13 +292,13 @@ public class TestNamespaceServiceImpl extends DremioTest {
     ns.addOrUpdateDataset(new NamespaceKey(ds1.getFullPathList()), ds1);
 
     DatasetConfig ds2 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view2")));
-    assertEquals(true, ds2.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds2.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds3 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view3")));
-    assertEquals(true, ds3.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds3.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds4 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view4")));
-    assertNotEquals(true, ds4.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds4.getVirtualDataset().getSchemaOutdated());
   }
 
   @Test
@@ -324,13 +329,13 @@ public class TestNamespaceServiceImpl extends DremioTest {
     ns.addOrUpdateDataset(new NamespaceKey(ds1.getFullPathList()), ds1);
 
     DatasetConfig ds2 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view2")));
-    assertEquals(true, ds2.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds2.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds3 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view3")));
-    assertEquals(true, ds3.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds3.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds4 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view4")));
-    assertNotEquals(true, ds4.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds4.getVirtualDataset().getSchemaOutdated());
   }
 
   @Test
@@ -341,13 +346,13 @@ public class TestNamespaceServiceImpl extends DremioTest {
     ns.addOrUpdateDataset(new NamespaceKey(ds1.getFullPathList()), ds1);
 
     DatasetConfig ds2 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view2")));
-    assertNotEquals(true, ds2.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds2.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds3 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view3")));
-    assertNotEquals(true, ds3.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds3.getVirtualDataset().getSchemaOutdated());
 
     DatasetConfig ds4 = ns.getDataset(new NamespaceKey(Lists.newArrayList("sp1", "view4")));
-    assertNotEquals(true, ds4.getVirtualDataset().getSchemaOutdated());
+    assertEquals(null, ds4.getVirtualDataset().getSchemaOutdated());
   }
 
   @Test
@@ -462,7 +467,7 @@ public class TestNamespaceServiceImpl extends DremioTest {
   }
 
   private SourceConfig newTestSource(String sourceName) {
-    return new SourceConfig().setName(sourceName).setType("NAS").setCtime(1000L);
+    return new SourceConfig().setName(sourceName).setType("NAS");
   }
 
   private SpaceConfig newTestSpace(String spaceName) {
@@ -470,7 +475,7 @@ public class TestNamespaceServiceImpl extends DremioTest {
   }
 
   private HomeConfig newTestHome(String owner) {
-    return new HomeConfig().setOwner(owner).setCtime(1000L);
+    return new HomeConfig().setOwner(owner);
   }
 
   private DatasetConfig newTestVirtualDataset(

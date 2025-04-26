@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.elastic.planning.rules;
 
+import co.elastic.clients.elasticsearch._types.Script;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.plugins.elastic.ElasticsearchConstants;
@@ -26,7 +27,6 @@ import com.dremio.plugins.elastic.planning.functions.FunctionRenderer.RenderMode
 import com.dremio.plugins.elastic.planning.rules.SchemaField.ElasticFieldReference;
 import com.dremio.plugins.elastic.planning.rules.SchemaField.NullReference;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
 import java.util.Calendar;
 import org.apache.calcite.rex.RexCall;
 import org.apache.calcite.rex.RexCorrelVariable;
@@ -40,8 +40,6 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexOver;
 import org.apache.calcite.rex.RexRangeRef;
 import org.apache.calcite.rex.RexVisitorImpl;
-import org.elasticsearch.script.Script;
-import org.elasticsearch.script.ScriptType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,16 +57,14 @@ public final class ProjectAnalyzer extends RexVisitorImpl<FunctionRender> {
   public static Script getScript(
       RexNode node,
       boolean painlessAllowed,
-      boolean supportsV5Features,
       boolean scriptsEnabled,
       boolean isAggregationContext,
       boolean allowPushdownAnalyzedNormalizedFields,
       boolean variationDetected) {
     ProjectAnalyzer analyzer =
         new ProjectAnalyzer(isAggregationContext, allowPushdownAnalyzedNormalizedFields);
-    RenderMode mode =
-        painlessAllowed && supportsV5Features ? RenderMode.PAINLESS : RenderMode.GROOVY;
-    FunctionRenderer r = new FunctionRenderer(supportsV5Features, scriptsEnabled, mode, analyzer);
+    RenderMode mode = painlessAllowed ? RenderMode.PAINLESS : RenderMode.GROOVY;
+    FunctionRenderer r = new FunctionRenderer(scriptsEnabled, mode, analyzer);
     analyzer.renderer = r;
     FunctionRender render = node.accept(analyzer);
     if (analyzer.isNotAllowed()) {
@@ -84,14 +80,14 @@ public final class ProjectAnalyzer extends RexVisitorImpl<FunctionRender> {
 
     if (mode == RenderMode.PAINLESS) {
       // when returning a painless script, let's make sure we cast to a valid output type.
-      return new Script(
-          ScriptType.INLINE,
-          "painless",
-          String.format("(def) (%s)", nullGuardedScript),
-          ImmutableMap.of());
+      return Script.of(
+          s ->
+              s.inline(
+                  i -> i.lang("painless").source(String.format("(def) (%s)", nullGuardedScript))));
+
     } else {
       // keeping this so plan matching tests will pass
-      return new Script(ScriptType.INLINE, "groovy", nullGuardedScript, ImmutableMap.of());
+      return Script.of(s -> s.inline(i -> i.lang("groovy").source(nullGuardedScript)));
     }
   }
 
@@ -220,7 +216,7 @@ public final class ProjectAnalyzer extends RexVisitorImpl<FunctionRender> {
     return visitUnknown(correlVariable);
   }
 
-  protected FunctionRender visitUnknown(RexNode o) {
+  private FunctionRender visitUnknown(RexNode o) {
     // raise an error
     throw UserException.planError()
         .message(

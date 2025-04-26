@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.catalog.dataplane.test;
 
+import static com.dremio.test.AnnotatedFields.populateAnnotatedFields;
 import static org.projectnessie.tools.compatibility.internal.NessieTestApiBridge.nessieServer;
-import static org.projectnessie.tools.compatibility.internal.NessieTestApiBridge.populateAnnotatedFields;
 import static org.projectnessie.tools.compatibility.internal.NessieTestApiBridge.versionsFromResource;
 
 import com.google.common.base.Preconditions;

@@ -21,6 +21,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -283,9 +284,10 @@ public class TestAzureAsyncReader {
           getReader(
               String.valueOf(versionDate.atZone(ZoneId.of("GMT")).toInstant().toEpochMilli()),
               isSecure,
-              client);
+              client,
+              null);
     } else {
-      azureAsyncReader = getReader("0", isSecure, client);
+      azureAsyncReader = getReader("0", isSecure, client, null);
     }
 
     ByteBuf buf = Unpooled.buffer(20);
@@ -296,7 +298,11 @@ public class TestAzureAsyncReader {
         .read(eq(0L), eq(20L), any(ChecksumVerifyingCompletionHandler.class), eq(0));
   }
 
-  AzureAsyncReader getReader(String version, boolean isSecure, AsyncHttpClient client) {
+  AzureAsyncReader getReader(
+      String version,
+      boolean isSecure,
+      AsyncHttpClient client,
+      AzureAuthTokenProvider authTokenProvider) {
     AsyncReadWithRetry asyncReadWithRetry =
         spy(
             new AsyncReadWithRetry(
@@ -314,7 +320,7 @@ public class TestAzureAsyncReader {
             AZURE_ENDPOINT,
             "account",
             new Path("container/directory/file_00.parquet"),
-            getMockAuthTokenProvider(),
+            authTokenProvider != null ? authTokenProvider : getMockAuthTokenProvider(),
             version,
             isSecure,
             client,
@@ -364,6 +370,20 @@ public class TestAzureAsyncReader {
     }
   }
 
+  @Test
+  public void testSasTokenAddedToURL() {
+    AsyncHttpClient client = mock(AsyncHttpClient.class);
+    AzureAuthTokenProvider authTokenProvider = getMockAuthTokenProvider();
+    when(authTokenProvider.getSasSignature(anyBoolean())).thenReturn("?sas-token");
+    AzureAsyncReader azureAsyncReader = getReader("0", true, client, authTokenProvider);
+    when(getMockAuthTokenProvider().getSasSignature(false)).thenReturn("sas-token");
+    Request resultRequest =
+        azureAsyncReader.getRequestBuilderFunction(0, 20, mock(MetricsLogger.class)).apply(null);
+    assertEquals(
+        "https://account.dfs.core.windows.net/container/directory%2Ffile_00.parquet?sas-token",
+        resultRequest.getUrl());
+  }
+
   private AzureAsyncReader prepareAsyncReader(
       final String responseBody, final int responseCode, boolean checkVersion) {
     // Prepare response
@@ -400,9 +420,10 @@ public class TestAzureAsyncReader {
           getReader(
               String.valueOf(versionDate.atZone(ZoneId.of("GMT")).toInstant().toEpochMilli()),
               true,
-              client);
+              client,
+              null);
     } else {
-      azureAsyncReader = getReader("0", true, client);
+      azureAsyncReader = getReader("0", true, client, null);
     }
     MetricsLogger metricsLogger = mock(MetricsLogger.class);
     when(azureAsyncReader.getMetricLogger()).thenReturn(metricsLogger);
@@ -422,7 +443,9 @@ public class TestAzureAsyncReader {
   private AzureAuthTokenProvider getMockAuthTokenProvider() {
     AzureAuthTokenProvider authTokenProvider = mock(AzureAuthTokenProvider.class);
     when(authTokenProvider.checkAndUpdateToken()).thenReturn(false);
-    when(authTokenProvider.getAuthzHeaderValue(any(Request.class))).thenReturn("Bearer testtoken");
+    when(authTokenProvider.getAuthorizationHeader(any(Request.class)))
+        .thenReturn("Bearer testtoken");
+    when(authTokenProvider.getSasSignature(anyBoolean())).thenReturn("");
     return authTokenProvider;
   }
 

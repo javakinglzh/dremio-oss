@@ -35,11 +35,11 @@ public class TestRestServerV2ClassRegister {
     // Setup
     final ScanResult scanResult =
         new ScanResult(
-            Collections.EMPTY_LIST,
-            Collections.EMPTY_LIST,
+            Collections.emptyList(),
+            Collections.emptyList(),
             ImmutableList.of(RestResource.class.getName()),
-            Collections.EMPTY_LIST,
-            Collections.EMPTY_LIST);
+            Collections.emptyList(),
+            Collections.emptyList());
 
     // Test
     final RestServerV2 server = new RestServerV2(new DACConfig(DremioConfig.create()), scanResult);

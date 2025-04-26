@@ -15,14 +15,30 @@
  */
 package com.dremio.exec.planner.plancache;
 
-public class PlanCacheKey {
-  private final String hash;
+import com.google.common.base.Suppliers;
+import com.google.common.hash.HashCode;
+import java.util.function.Supplier;
 
-  public PlanCacheKey(String hash) {
-    this.hash = hash;
+public class PlanCacheKey {
+  private final Supplier<String> stringHash;
+  private final Supplier<byte[]> bytesHash;
+  private final Supplier<String> materializationStringHash;
+
+  public PlanCacheKey(HashCode hashCode, HashCode materializationHashCode) {
+    this.bytesHash = Suppliers.memoize(hashCode::asBytes);
+    this.stringHash = Suppliers.memoize(hashCode::toString);
+    this.materializationStringHash = Suppliers.memoize(materializationHashCode::toString);
   }
 
-  public String getHash() {
-    return hash;
+  public String getStringHash() {
+    return stringHash.get();
+  }
+
+  public byte[] getBytesHash() {
+    return bytesHash.get();
+  }
+
+  public String getMaterializationHashString() {
+    return materializationStringHash.get();
   }
 }

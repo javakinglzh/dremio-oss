@@ -2226,7 +2226,6 @@ public class StringFunctions {
 
     @Override
     public void eval() {
-      out.buffer = buffer;
       if (in.isSet == 0 || partToExtract.isSet == 0) {
         out.isSet = 0;
         return;
@@ -2243,13 +2242,14 @@ public class StringFunctions {
       if (extractedPart != null) {
         out.isSet = 1;
         byte[] buf = extractedPart.getBytes();
+        buffer = buffer.reallocIfNeeded(buf.length);
         buffer.setBytes(0, buf);
-
         out.start = 0;
         out.end = buf.length;
       } else {
         out.isSet = 0;
       }
+      out.buffer = buffer;
     }
   }
 
@@ -2271,7 +2271,6 @@ public class StringFunctions {
 
     @Override
     public void eval() {
-      out.buffer = buffer;
       if (in.isSet == 0 || partToExtract.isSet == 0 || queryKey.isSet == 0) {
         out.isSet = 0;
         return;
@@ -2300,6 +2299,7 @@ public class StringFunctions {
       if (extractValue != null) {
         out.isSet = 1;
         byte[] buf = extractValue.getBytes();
+        buffer = buffer.reallocIfNeeded(buf.length);
         buffer.setBytes(0, buf);
 
         out.start = 0;
@@ -2308,6 +2308,7 @@ public class StringFunctions {
       } else {
         out.isSet = 0;
       }
+      out.buffer = buffer;
     }
   }
 

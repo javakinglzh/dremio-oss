@@ -76,7 +76,7 @@ public class ITBackPressure extends BaseFlightQueryTest {
       waitCountingResponseHandlerFactory = new DelegatingWaitCountingResponseHandlerFactory();
 
   @BeforeClass
-  public static void setup() throws Exception {
+  public static void setupDefaultTestCluster() throws Exception {
     setupBaseFlightQueryTest(
         false, true, "backpressure.flight.endpoint.port", waitCountingResponseHandlerFactory);
   }

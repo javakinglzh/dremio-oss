@@ -16,11 +16,13 @@
 package com.dremio.exec.planner.physical;
 
 import com.dremio.exec.catalog.DremioPrepareTable;
+import com.dremio.exec.catalog.SupportsFsMutablePlugin;
 import com.dremio.exec.ops.OptimizerRulesContext;
 import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.logical.RelOptHelper;
 import com.dremio.exec.planner.logical.TableModifyRel;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
+import com.dremio.exec.store.iceberg.SupportsIcebergRestApi;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rel.RelNode;
 
@@ -36,8 +38,10 @@ public class FileSystemTableModifyPrule extends TableModifyPruleBase {
 
   @Override
   public boolean matches(RelOptRuleCall call) {
-    return call.<TableModifyRel>rel(0).getCreateTableEntry().getPlugin()
-        instanceof FileSystemPlugin;
+    // TODO: DX-99788 - Investigate Alternative
+    final SupportsFsMutablePlugin plugin =
+        call.<TableModifyRel>rel(0).getCreateTableEntry().getPlugin();
+    return plugin instanceof FileSystemPlugin || plugin instanceof SupportsIcebergRestApi;
   }
 
   @Override

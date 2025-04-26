@@ -15,7 +15,6 @@
  */
 package com.dremio.provision.yarn.service;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_DEFAULT_NAME_KEY;
 import static org.apache.hadoop.yarn.conf.YarnConfiguration.RM_HOSTNAME;
 import static org.apache.twill.api.Configs.Keys.HEAP_RESERVED_MIN_RATIO;
@@ -96,8 +95,6 @@ public class TestYarnService {
 
   @Test
   public void testStartCluster() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
     YarnService yarnService =
         new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
@@ -139,176 +136,17 @@ public class TestYarnService {
     when(twillController.getResourceReport()).thenReturn(resourceReport);
 
     ClusterEnriched clusterEnriched = yarnService.startCluster(cluster);
-    assertNull(null, clusterEnriched.getRunTimeInfo());
+    assertNotNull(clusterEnriched.getRunTimeInfo());
 
     assertEquals(ClusterState.STARTING, cluster.getState());
     assertNotNull(cluster.getRunId());
     assertEquals(runId.getId(), cluster.getRunId().getId());
   }
 
-  @Test
-  public void testDistroDefaults() throws Exception {
-    assumeNonMaprProfile();
-
-    YarnController controller = Mockito.mock(YarnController.class);
-    YarnService yarnService =
-        new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
-    Cluster cluster = new Cluster();
-    cluster.setState(ClusterState.CREATED);
-    cluster.setStateChangeTime(System.currentTimeMillis());
-    cluster.setId(new ClusterId(UUID.randomUUID().toString()));
-    ClusterConfig clusterConfig = new ClusterConfig();
-    clusterConfig.setClusterSpec(
-        new ClusterSpec()
-            .setContainerCount(2)
-            .setMemoryMBOffHeap(4096)
-            .setMemoryMBOnHeap(4096)
-            .setVirtualCoreCount(2));
-    clusterConfig.setIsSecure(false);
-    clusterConfig.setDistroType(DistroType.MAPR);
-    List<Property> propertyList = new ArrayList<>();
-    propertyList.add(new Property(FS_DEFAULT_NAME_KEY, "hdfs://name-node:8020"));
-    propertyList.add(new Property(RM_HOSTNAME, "resource-manager"));
-    propertyList.add(new Property(DremioConfig.DIST_WRITE_PATH_STRING, "pdfs:///data/mydata/pdfs"));
-    clusterConfig.setSubPropertyList(propertyList);
-    cluster.setClusterConfig(clusterConfig);
-    YarnConfiguration yarnConfig = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(cluster, yarnConfig);
-
-    assertNotNull(yarnConfig.get(FS_DEFAULT_NAME_KEY));
-    assertNotNull(yarnConfig.get(RM_HOSTNAME));
-    assertNotNull(yarnConfig.get(DremioConfig.DIST_WRITE_PATH_STRING));
-
-    assertEquals("hdfs://name-node:8020", yarnConfig.get(FS_DEFAULT_NAME_KEY));
-    assertEquals("resource-manager", yarnConfig.get(RM_HOSTNAME));
-    assertEquals("pdfs:///data/mydata/pdfs", yarnConfig.get(DremioConfig.DIST_WRITE_PATH_STRING));
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", yarnConfig.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", yarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals("Client_simple", yarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.simplesasl.SimpleSaslProvider",
-        yarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        yarnConfig.get(YarnDefaultsConfigurator.SPILL_PATH));
-
-    // MapR security ON
-    Cluster myCluster = createCluster();
-    myCluster.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(true);
-    YarnConfiguration myYarnConfig = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(myCluster, myYarnConfig);
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", myYarnConfig.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals("Client", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.maprsasl.MaprSaslProvider",
-        myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        myYarnConfig.get(YarnDefaultsConfigurator.SPILL_PATH));
-
-    // HDP security OFF
-
-  }
-
   private static final String NETTY_MAX_DIRECT_MEMORY = "io.netty.maxDirectMemory";
 
   @Test
-  public void testDistroMapRDefaults() throws Exception {
-    assumeNonMaprProfile();
-
-    YarnController controller = Mockito.mock(YarnController.class);
-    YarnService yarnService =
-        new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
-
-    Cluster myCluster = createCluster();
-    myCluster.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(true);
-    YarnConfiguration myYarnConfig = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(myCluster, myYarnConfig);
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", myYarnConfig.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals("Client", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.maprsasl.MaprSaslProvider",
-        myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        myYarnConfig.get(YarnDefaultsConfigurator.SPILL_PATH));
-    assertEquals("0", myYarnConfig.get(NETTY_MAX_DIRECT_MEMORY));
-
-    Cluster myClusterOff = createCluster();
-    myClusterOff.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(false);
-    YarnConfiguration myYarnConfigOff = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(myClusterOff, myYarnConfigOff);
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", myYarnConfigOff.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals(
-        "Client_simple", myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.simplesasl.SimpleSaslProvider",
-        myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        myYarnConfigOff.get(YarnDefaultsConfigurator.SPILL_PATH));
-    assertEquals("0", myYarnConfigOff.get(NETTY_MAX_DIRECT_MEMORY));
-  }
-
-  @Test
-  public void testDistroMapRDefaultsWithMaprRAStreams() throws Exception {
-    assumeNonMaprProfile();
-
-    YarnController controller = Mockito.mock(YarnController.class);
-    YarnService yarnService =
-        new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
-
-    Cluster myCluster = createCluster();
-    myCluster.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(true);
-    YarnConfiguration myYarnConfig = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(myCluster, myYarnConfig);
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", myYarnConfig.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals("Client", myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.maprsasl.MaprSaslProvider",
-        myYarnConfig.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        myYarnConfig.get(YarnDefaultsConfigurator.SPILL_PATH));
-    assertEquals("0", myYarnConfig.get(NETTY_MAX_DIRECT_MEMORY));
-
-    Cluster myClusterOff = createCluster();
-    myClusterOff.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(false);
-    YarnConfiguration myYarnConfigOff = new YarnConfiguration();
-    yarnService.updateYarnConfiguration(myClusterOff, myYarnConfigOff);
-
-    assertEquals(
-        "/opt/mapr/conf/mapr.login.conf", myYarnConfigOff.get(YarnDefaultsConfigurator.JAVA_LOGIN));
-    assertEquals("false", myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT));
-    assertEquals(
-        "Client_simple", myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_CLIENT_CONFIG));
-    assertEquals(
-        "com.mapr.security.simplesasl.SimpleSaslProvider",
-        myYarnConfigOff.get(YarnDefaultsConfigurator.ZK_SASL_PROVIDER));
-    assertEquals(
-        "[\"maprfs:///var/mapr/local/${NM_HOST}/mapred/spill\"]",
-        myYarnConfigOff.get(YarnDefaultsConfigurator.SPILL_PATH));
-    assertEquals("0", myYarnConfigOff.get(NETTY_MAX_DIRECT_MEMORY));
-  }
-
-  @Test
   public void testDistroHDPDefaults() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
     YarnService yarnService =
         new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
@@ -327,7 +165,7 @@ public class TestYarnService {
     assertEquals("0", myYarnConfig.get(NETTY_MAX_DIRECT_MEMORY));
 
     Cluster myClusterOff = createCluster();
-    myClusterOff.getClusterConfig().setDistroType(DistroType.MAPR).setIsSecure(false);
+    myClusterOff.getClusterConfig().setDistroType(DistroType.HDP).setIsSecure(false);
     YarnConfiguration myYarnConfigOff = new YarnConfiguration();
     yarnService.updateYarnConfiguration(myClusterOff, myYarnConfigOff);
 
@@ -342,8 +180,6 @@ public class TestYarnService {
 
   @Test
   public void testDistroDefaultsOverwrite() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
     YarnService yarnService =
         new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
@@ -391,7 +227,6 @@ public class TestYarnService {
 
   @Test
   public void testStartServiceFailure() throws Exception {
-    assumeNonMaprProfile();
     try (final LegacyKVStoreProvider kvstore =
         LegacyKVStoreProviderAdapter.inMemory(DremioTest.CLASSPATH_SCAN_RESULT)) {
       SingletonRegistry registry = new SingletonRegistry();
@@ -434,7 +269,6 @@ public class TestYarnService {
 
   @Test
   public void testMemorySplit() throws Exception {
-    assumeNonMaprProfile();
     try (final LegacyKVStoreProvider kvstore =
         LegacyKVStoreProviderAdapter.inMemory(DremioTest.CLASSPATH_SCAN_RESULT)) {
       SingletonRegistry registry = new SingletonRegistry();
@@ -497,8 +331,6 @@ public class TestYarnService {
 
   @Test
   public void testUpdater() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
 
     final TestListener listener = new TestListener();
@@ -583,8 +415,6 @@ public class TestYarnService {
 
   @Test
   public void testFailedUpdater() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
 
     final TestListener listener = new TestListener();
@@ -669,8 +499,6 @@ public class TestYarnService {
 
   @Test
   public void testProcessRestart() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
 
     final TestListener listener = new TestListener();
@@ -778,8 +606,6 @@ public class TestYarnService {
 
   @Test
   public void testStopCluster() throws Exception {
-    assumeNonMaprProfile();
-
     Cluster myCluster = createCluster();
     myCluster.setState(ClusterState.RUNNING);
     myCluster.setStateChangeTime(System.currentTimeMillis());
@@ -804,8 +630,6 @@ public class TestYarnService {
 
   @Test
   public void testMemoryOnOffHeapRatio() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
     YarnService yarnService =
         new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));
@@ -876,8 +700,6 @@ public class TestYarnService {
 
   @Test
   public void testGetClusterInfo() throws Exception {
-    assumeNonMaprProfile();
-
     YarnController controller = Mockito.mock(YarnController.class);
     YarnService yarnService =
         new YarnService(new TestListener(), controller, Mockito.mock(NodeProvider.class));

@@ -414,4 +414,8 @@ public abstract class JoinRelBase extends Join {
     }
     return JoinCategory.EQUALITY;
   }
+
+  public List<Boolean> filterNulls() {
+    return filterNulls;
+  }
 }

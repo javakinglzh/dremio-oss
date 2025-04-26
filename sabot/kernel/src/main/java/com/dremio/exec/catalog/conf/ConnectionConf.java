@@ -17,8 +17,9 @@ package com.dremio.exec.catalog.conf;
 
 import com.dremio.common.SuppressForbidden;
 import com.dremio.exec.catalog.ConnectionReader;
+import com.dremio.exec.catalog.PluginSabotContext;
+import com.dremio.exec.catalog.SourceNameRefreshAction;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.StoragePlugin;
 import com.dremio.service.namespace.AbstractConnectionConf;
 import com.dremio.service.namespace.SupportsDecoratingSecrets;
@@ -36,6 +37,7 @@ import com.google.common.base.Defaults;
 import com.google.common.base.Predicate;
 import com.google.common.base.Strings;
 import com.google.common.base.Throwables;
+import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import io.protostuff.ByteString;
 import io.protostuff.LinkedBuffer;
@@ -356,7 +358,7 @@ public abstract class ConnectionConf<T extends ConnectionConf<T, P>, P extends S
    * <p>
    *
    * @param credentialsService to resolve secrets with
-   * @param schemes a whitelist set of schemas to resolve, if null resolve all secrets.
+   * @param filter
    * @return ConnectionConf with resolved secrets
    */
   @SuppressForbidden // We are resolving secrets so the resultant Secrets will be unsafe
@@ -506,6 +508,11 @@ public abstract class ConnectionConf<T extends ConnectionConf<T, P>, P extends S
     return existingConf.equals(newConf);
   }
 
+  public List<SourceNameRefreshAction> getNameRefreshActionsForNewConf(
+      String name, ConnectionConf<?, ?> other) {
+    return Lists.newArrayList();
+  }
+
   @Override
   public final String getType() {
     return this.getClass().getAnnotation(SourceType.class).value();
@@ -517,16 +524,18 @@ public abstract class ConnectionConf<T extends ConnectionConf<T, P>, P extends S
   }
 
   public abstract P newPlugin(
-      final SabotContext context, final String name, Provider<StoragePluginId> pluginIdProvider);
+      final PluginSabotContext pluginSabotContext,
+      final String name,
+      Provider<StoragePluginId> pluginIdProvider);
 
   // Use this if newPlugin logic need to know that if source is created or modified, which is
-  // identified using influxSourcePred.
+  // identified using isInFluxSource.
   public P newPlugin(
-      final SabotContext context,
+      final PluginSabotContext pluginSabotContext,
       final String name,
       Provider<StoragePluginId> pluginIdProvider,
-      java.util.function.Predicate<String> influxSourcePred) {
-    return newPlugin(context, name, pluginIdProvider);
+      java.util.function.Predicate<String> isInFluxSource) {
+    return newPlugin(pluginSabotContext, name, pluginIdProvider);
   }
 
   public boolean isInternal() {

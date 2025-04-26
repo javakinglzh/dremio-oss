@@ -37,6 +37,7 @@ import javax.inject.Provider;
 import org.slf4j.Logger;
 
 public class CacheRefresherServiceImpl implements Service, CacheRefresherService {
+
   public static final Logger LOGGER = getLogger(CacheRefresherServiceImpl.class);
 
   private final Provider<SabotContext> sabotContextProvider;
@@ -108,13 +109,15 @@ public class CacheRefresherServiceImpl implements Service, CacheRefresherService
             new Runnable() {
               @Override
               public void run() {
-                cacheRefresherWakeupHandler.handle(
-                    "Periodic plan cache and materialization cache refresh");
-                if (isClosed) {
-                  return;
-                }
-                long cacheUpdateDelay;
+                long cacheUpdateDelay =
+                    MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS.getDefault().getNumVal();
+
                 try {
+                  cacheRefresherWakeupHandler.handle(
+                      "Periodic plan cache and materialization cache refresh");
+                  if (isClosed) {
+                    return;
+                  }
                   cacheUpdateDelay =
                       sabotContextProvider
                           .get()
@@ -122,16 +125,15 @@ public class CacheRefresherServiceImpl implements Service, CacheRefresherService
                           .getOption(MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS);
                 } catch (Exception e) {
                   LOGGER.warn("Failed to retrieve materialization cache refresh delay", e);
-                  cacheUpdateDelay =
-                      MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS.getDefault().getNumVal();
+                } finally {
+                  schedulerService
+                      .get()
+                      .schedule(
+                          Schedule.SingleShotBuilder.at(
+                                  ofEpochMilli(System.currentTimeMillis() + cacheUpdateDelay))
+                              .build(),
+                          this);
                 }
-                schedulerService
-                    .get()
-                    .schedule(
-                        Schedule.SingleShotBuilder.at(
-                                ofEpochMilli(System.currentTimeMillis() + cacheUpdateDelay))
-                            .build(),
-                        this);
               }
             });
   }

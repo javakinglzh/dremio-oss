@@ -20,6 +20,7 @@ import {
   useDismiss,
 } from "@floating-ui/react";
 import mergeRefs from "react-merge-refs";
+import { useTrapFocus } from "./utilities/useTrapFocus";
 
 type PopoverProps = {
   /**
@@ -59,6 +60,8 @@ type PopoverProps = {
 
 export const Popover = (props: PopoverProps) => {
   const arrowElRef = React.useRef(null);
+  const anchorEl = React.useRef(null);
+  const popoverRef = React.useRef(null);
   const [open, setOpen] = React.useState(false);
   const {
     children,
@@ -79,13 +82,21 @@ export const Popover = (props: PopoverProps) => {
     setOpen(isOpen);
 
     if (!isOpen) {
+      if (portal) {
+        anchorEl.current.focus();
+      }
       onClose?.();
     }
 
     if (isOpen) {
+      if (portal) {
+        anchorEl.current = document.activeElement;
+      }
       onOpen?.();
     }
   };
+
+  useTrapFocus(popoverRef, portal);
 
   const { x, y, context, refs, strategy, middlewareData } = useFloating({
     middleware: [
@@ -148,7 +159,10 @@ export const Popover = (props: PopoverProps) => {
       <div
         className={clsx("popover", `popover--${staticSide}`, className)}
         {...getFloatingProps({
-          ref: refs.setFloating,
+          ref: (r) => {
+            popoverRef.current = r;
+            refs.setFloating(r);
+          },
           style: {
             position: strategy,
             top: y ?? 0,

@@ -42,13 +42,15 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.io.IOException;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
 import java.util.List;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.complex.UnionVector;
 import org.apache.arrow.vector.types.Types.MinorType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.util.Pair;
-import org.joda.time.LocalDateTime;
 
 /** A JSON serializable wrapper around {@code JobDataFragment} */
 @JsonSerialize(using = JobDataFragmentSerializer.class)
@@ -132,16 +134,16 @@ public class JobDataFragmentWrapper implements JobDataFragment {
 
       switch (cellType) {
         case DATE:
-          return DataJsonOutput.FORMAT_DATE.print(DateTimes.toMillis((LocalDateTime) obj));
+          return DataJsonOutput.FORMAT_DATE.print(DateTimes.toMillis((LocalDate) obj));
         case TIME:
-          return DataJsonOutput.FORMAT_TIME.print(DateTimes.toMillis((LocalDateTime) obj));
+          return DataJsonOutput.FORMAT_TIME.print(DateTimes.toMillis((LocalTime) obj));
         case DATETIME:
           return DataJsonOutput.FORMAT_TIMESTAMP.print(DateTimes.toMillis((LocalDateTime) obj));
-          /**
-           * Everything else is converted based on the toString method of the object case TEXT: case
-           * BINARY: case BOOLEAN: case FLOAT: case INTEGER: case DECIMAL: case MIXED: case LIST:
-           * case MAP: case GEO: case OTHER:
-           */
+        /**
+         * Everything else is converted based on the toString method of the object case TEXT: case
+         * BINARY: case BOOLEAN: case FLOAT: case INTEGER: case DECIMAL: case MIXED: case LIST: case
+         * MAP: case GEO: case OTHER:
+         */
         default:
           return obj.toString();
       }

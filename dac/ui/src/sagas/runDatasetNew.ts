@@ -187,8 +187,9 @@ export function* handlePendingMetadataFetch(
       const attempts = updatedJob?.attemptDetails || [];
       if (
         updatedJob.state === "FAILED" &&
-        attempts.length &&
-        attempts[attempts.length - 1].result === "FAILED"
+        ((attempts.length &&
+          attempts[attempts.length - 1].result === "FAILED") ||
+          callback)
       ) {
         const failureInfo = jobDone.payload.update.failureInfo;
         throw new JobFailedError(

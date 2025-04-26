@@ -32,7 +32,7 @@ public interface MFunctionMetadata {
 
   Optional<DatasetHandle> getHandle();
 
-  StoragePlugin getPlugin();
+  Optional<StoragePlugin> getPlugin();
 
   StoragePluginId getPluginId();
 

@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.catalog;
 
+import static com.dremio.exec.catalog.CatalogOptions.SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS;
 import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -22,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.when;
 
 import com.dremio.catalog.model.ResolvedVersionContext;
@@ -106,6 +108,9 @@ public class TestDatasetMetadataState {
   @Test
   public void testDatasetMetadataStateForNonIcebergDatasets() {
     when(datasetConfig.getLastModified()).thenReturn(1000L);
+    doReturn(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS.getDefault().getNumVal())
+        .when(optionManager)
+        .getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS);
 
     final SourceMetadataManager sourceMetadataManager =
         new SourceMetadataManager(
@@ -140,6 +145,10 @@ public class TestDatasetMetadataState {
             new PhysicalDataset()
                 .setIcebergMetadata(new IcebergMetadata().setFileType(FileType.ICEBERG)));
 
+    doReturn(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS.getDefault().getNumVal())
+        .when(optionManager)
+        .getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS);
+
     final SourceMetadataManager sourceMetadataManager =
         new SourceMetadataManager(
             new NamespaceKey("SOURCE"),
@@ -166,6 +175,7 @@ public class TestDatasetMetadataState {
    */
   @Test
   public void testDatasetMetadataStateWhenValidityCheckIsPresent() {
+
     when(datasetConfig.getFullPathList()).thenReturn(TABLE);
     when(datasetConfig.getPhysicalDataset())
         .thenReturn(
@@ -173,6 +183,10 @@ public class TestDatasetMetadataState {
                 .setIcebergMetadata(new IcebergMetadata().setFileType(FileType.ICEBERG)));
 
     when(metadataRequestOptions.checkValidity()).thenReturn(true);
+
+    doReturn(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS.getDefault().getNumVal())
+        .when(optionManager)
+        .getOption(SOURCE_METADATA_MANAGER_WAKEUP_FREQUENCY_MS);
 
     MetadataPolicy metadataPolicy = new MetadataPolicy();
     metadataPolicy.setDatasetDefinitionExpireAfterMs(Long.MAX_VALUE);

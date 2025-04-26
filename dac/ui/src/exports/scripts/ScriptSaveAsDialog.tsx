@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { isProblem, isValidationProblem } from "@dremio/dremio-js/interfaces";
+import { isProblem, isValidationProblem } from "@dremio/dremio-js/oss";
 import { Button, DialogContent } from "dremio-ui-lib/components";
 import type { FC } from "react";
 import { useForm } from "react-hook-form";

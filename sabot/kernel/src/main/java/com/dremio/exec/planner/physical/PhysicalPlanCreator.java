@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.physical;
 
+import static com.dremio.exec.planner.ResultWriterUtils.buildCreateTableEntryForResults;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 
@@ -29,28 +30,46 @@ import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.PhysicalOperator;
+import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.planner.physical.explain.PrelSequencer.OpId;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.options.OptionManager;
 import com.dremio.options.TypeValidators.LongValidator;
+import com.google.common.base.Suppliers;
 import com.google.common.collect.Lists;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /** Carries common state and utility methods for generating a physical plan. */
 public class PhysicalPlanCreator {
 
+  private final SqlHandlerConfig sqlHandlerConfig;
+  private final QueryContext context;
   private final Map<Prel, OpId> opIdMap;
 
+  private final Supplier<CreateTableEntry> resultCreateTableEntry;
+
   private List<PhysicalOperator> popList;
-  private final QueryContext context;
+
   PhysicalPlan plan = null;
 
-  public PhysicalPlanCreator(QueryContext context, Map<Prel, OpId> opIdMap) {
-    this.context = context;
+  public PhysicalPlanCreator(SqlHandlerConfig config, Map<Prel, OpId> opIdMap) {
+    this.sqlHandlerConfig = config;
+    this.context = config.getContext();
     this.opIdMap = opIdMap;
     popList = Lists.newArrayList();
+    this.resultCreateTableEntry = Suppliers.memoize(() -> buildCreateTableEntryForResults(config));
+  }
+
+  public SqlHandlerConfig getSqlHandlerConfig() {
+    return sqlHandlerConfig;
+  }
+
+  public CreateTableEntry getCreateTableEntryForResults() {
+    return resultCreateTableEntry.get();
   }
 
   public QueryContext getContext() {

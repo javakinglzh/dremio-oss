@@ -99,7 +99,9 @@ public class LogicalListL1Converter extends GroupConverter implements ParquetLis
     if (schema.getFieldCount() == 1) {
       Type type = schema.getType(0);
       // check: repeated group
-      if (type.isPrimitive() || !type.isRepetition(REPEATED) || type.getOriginalType() != null) {
+      if (type.isPrimitive()
+          || !type.isRepetition(REPEATED)
+          || type.getLogicalTypeAnnotation() != null) {
         return false;
       }
       return type.asGroupType().getFieldCount() == 1;

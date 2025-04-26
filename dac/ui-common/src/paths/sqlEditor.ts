@@ -27,6 +27,8 @@ type NewQueryParam = {
   version?: string;
   tipVersion?: string;
   jobId?: string;
+  scriptId?: string;
+  scriptSearchResultId?: string;
 };
 type SqlEditorParam = {
   pageType?: string;

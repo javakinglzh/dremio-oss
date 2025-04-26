@@ -15,9 +15,13 @@
  */
 package com.dremio.exec.store.easy.arrow;
 
+import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.ExecTest;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.record.VectorContainer;
@@ -27,6 +31,7 @@ import com.dremio.io.FSInputStream;
 import com.dremio.io.FSOutputStream;
 import com.dremio.io.file.FileSystem;
 import com.dremio.io.file.Path;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.op.scan.VectorContainerMutator;
 import com.google.common.collect.Lists;
@@ -83,6 +88,12 @@ public class TestArrowFlatBufRecordReaderWriter extends ExecTest {
 
         OperatorContext context = mock(OperatorContext.class);
         when(context.getAllocator()).thenReturn(allocator);
+        when(context.getAllocator()).thenReturn(allocator);
+        OptionManager manager = mock(OptionManager.class);
+        when(context.getOptions()).thenReturn(manager);
+
+        when(manager.getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT)).thenReturn(false);
+        when(manager.getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES)).thenReturn(9L);
 
         // Create recordwriter
         FSOutputStream outputStream =
@@ -148,13 +159,19 @@ public class TestArrowFlatBufRecordReaderWriter extends ExecTest {
     }
   }
 
-  private void writeAndVerifyArrowFile(int batchCount) throws Exception {
+  private void writeAndVerifyArrowFile(int batchCount, boolean withRowSizeCheck) throws Exception {
     // common state
     Configuration conf = new Configuration();
     conf.set(org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY, "file:///");
     final File tempDir = Files.createTempDir();
     OperatorContext context = mock(OperatorContext.class);
     when(context.getAllocator()).thenReturn(allocator);
+    OptionManager manager = mock(OptionManager.class);
+    when(context.getOptions()).thenReturn(manager);
+
+    when(manager.getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT))
+        .thenReturn(withRowSizeCheck);
+    when(manager.getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES)).thenReturn(9L);
     tempDir.deleteOnExit();
 
     // write arrow file having multiple batches with varying batch counts
@@ -244,16 +261,26 @@ public class TestArrowFlatBufRecordReaderWriter extends ExecTest {
 
   @Test
   public void testBatchCounts() throws Exception {
-    writeAndVerifyArrowFile(5);
+    writeAndVerifyArrowFile(5, false);
   }
 
   @Test
   public void testLargeFileLargeFooter() throws Exception {
-    writeAndVerifyArrowFile(1500);
+    writeAndVerifyArrowFile(1500, false);
   }
 
   @Test
   public void testLargeFileMediumFooter() throws Exception {
-    writeAndVerifyArrowFile(1000);
+    writeAndVerifyArrowFile(1000, false);
+  }
+
+  @Test
+  public void testRowSizeCheck() throws Exception {
+    try {
+      writeAndVerifyArrowFile(5, true);
+      fail("Query should have throw RowSizeLimitException");
+    } catch (UserException e) {
+      assertTrue(e.getMessage().contains("Exceeded maximum allowed row size "));
+    }
   }
 }

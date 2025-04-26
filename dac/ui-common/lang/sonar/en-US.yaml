@@ -70,6 +70,8 @@ Sonar.Description: Sonar is a lakehouse query engine that lets analysts explore 
 Sonar.Project.AddFirst: Add your first project
 Sonar.Project.UpdateRequired: Update required
 Sonar.Tagline: Explore data with sub-second query response times
+Sonar.Job.Action.Cancel: Cancel job
+Sonar.Job.Action.Open: Open job details in another tab
 Sonar.Job.Column.JobId.Label: "Job ID"
 Sonar.Job.Column.User.Label: "User"
 Sonar.Job.Column.Dataset.Label: "Dataset"
@@ -100,6 +102,12 @@ Sonar.Job.Status.METADATA_RETRIEVAL: "Metadata Retrieval"
 Sonar.Job.Status.QUEUED: "Queued"
 Sonar.Job.Status.ENGINE_START: "Engine Start"
 Sonar.Job.Status.EXECUTION_PLANNING: "Execution Planning"
+Sonar.Query.Table.Empty: No queries found
+Sonar.Query.Table.Pending: ({pending}/{total}) jobs processing...
+Sonar.Query.Table.Remove: Remove query
+Sonar.Settings.Table.CPU: CPU
+Sonar.Settings.Table.Memory: Memory
+Sonar.Settings.Table.Type: Type
 Sonar.Source.Settings.Arctic.Info.Message: "For optimization configuration, table cleanup settings and catalog privileges, please visit Arctic > Arctic catalog > "
 Sonar.SqlRunner.Tab.Actions.CloseOthers: "Close others"
 Sonar.SqlRunner.Download.Menu.Label: "Download"
@@ -114,20 +122,38 @@ Reflection.CurrentFootprint.Hint: "Size of the current reflection."
 Reflection.TotalFootprint.Label: "<b>Total Footprint</b>"
 Reflection.TotalFootprint.Hint: "Total size of this reflection across all refreshes."
 Catalog.Search.Modal.Trigger.Placeholder: Search
-Catalog.Search.Modal.SearchTextInput.Placeholder: Start typing to find items in the catalog…
+Catalog.Search.Modal.SearchTextInput.Placeholder: Search data, scripts, recent jobs, and more…
 Catalog.Search.Modal.TypeFilters.Title: I want to search…
 Catalog.Search.NoResultsFound.Title: No results found for “{searchText}”
 Catalog.Search.NoResultsFound.EmptyDescription: We couldn’t find any results based on your filter criteria.
 Catalog.Search.UnexpectedError: An unexpected error occurred when we tried to search the catalog.
 Catalog.Search.RecentSearches.Title: Recent searches
 Catalog.Reference.Type.DATASET_DIRECT.Label: Table
+Catalog.Reference.Type.DATASET_DIRECT.Label.Plural: Tables
 Catalog.Reference.Type.DATASET_PROMOTED.Label: Promoted
 Catalog.Reference.Type.DATASET_VIRTUAL.Label: View
+Catalog.Reference.Type.DATASET_VIRTUAL.Label.Plural: Views
 Catalog.Reference.Type.FILE.Label: File
+Catalog.Reference.Type.FILE.Label.Plural: Files
 Catalog.Reference.Type.FOLDER.Label: Folder
+Catalog.Reference.Type.FOLDER.Label.Plural: Folders
 Catalog.Reference.Type.FUNCTION.Label: Function
+Catalog.Reference.Type.FUNCTION.Label.Plural: Functions
 Catalog.Reference.Type.HOME.Label: Home
+Catalog.Reference.Type.JOB.Label: Job
+Catalog.Reference.Type.JOB.Label.Plural: Jobs
+Catalog.Reference.Type.REFLECTION.Label: Reflection
+Catalog.Reference.Type.REFLECTION.Label.Plural: Reflections
+Catalog.Reference.Type.SCRIPT.Label: Script
+Catalog.Reference.Type.SCRIPT.Label.Plural: Scripts
 Catalog.Reference.Type.SOURCE.Label: Source
+Catalog.Reference.Type.SOURCE.Label.Plural: Sources
 Catalog.Reference.Type.SPACE.Label: Space
+Catalog.Reference.Type.SPACE.Label.Plural: Spaces
+Catalog.Tree.Column.Partitioned: Partitioned
+Catalog.Tree.Column.Sorted: Sorted
 Script.SaveAsDialog.Title: Save Script
 Script.SaveAsDialog.Field.Name.Label: Script name
+Folder.Create.Modal.Title: New folder
+Folder.Create.Name: Folder name
+Folder.Create.Name.Error: Folder name cannot be empty

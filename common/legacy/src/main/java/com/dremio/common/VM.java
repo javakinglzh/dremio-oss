@@ -58,8 +58,13 @@ public final class VM {
     return IS_ASSERT;
   }
 
-  public static String getProcessId() {
-    return ManagementFactory.getRuntimeMXBean().getName().split("@")[0];
+  /**
+   * Returns the current process id
+   *
+   * @return the process pid
+   */
+  public static long getProcessId() {
+    return ProcessHandle.current().pid();
   }
 
   /**
@@ -163,19 +168,19 @@ public final class VM {
           case "t":
           case "T":
             multiplier *= 1024;
-            // fall through
+          // fall through
           case "g":
           case "G":
             multiplier *= 1024;
-            // fall through
+          // fall through
           case "m":
           case "M":
             multiplier *= 1024;
-            // fall through
+          // fall through
           case "k":
           case "K":
             multiplier *= 1024;
-            // fall through
+          // fall through
           default:
             break;
         }

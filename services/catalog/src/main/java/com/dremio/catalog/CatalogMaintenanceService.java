@@ -15,11 +15,10 @@
  */
 package com.dremio.catalog;
 
-import com.dremio.common.WakeupHandler;
+import com.dremio.options.OptionManager;
 import com.dremio.service.Service;
-import com.dremio.service.scheduler.SchedulerService;
 import com.google.common.collect.ImmutableList;
-import java.util.concurrent.ExecutorService;
+import java.util.List;
 import javax.inject.Provider;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,42 +27,55 @@ import org.slf4j.LoggerFactory;
 public class CatalogMaintenanceService implements Service {
   private static final Logger logger = LoggerFactory.getLogger(CatalogMaintenanceService.class);
 
-  private final Provider<SchedulerService> schedulerServiceProvider;
-  private final Provider<ExecutorService> executorServiceProvider;
-  private final ImmutableList<CatalogMaintenanceRunnable> maintenanceRunnables;
+  private static final String LOCAL_TASK_LEADER_NAME_FORMAT = "catalog_maintenance_%s";
+
+  private final Provider<OptionManager> optionManagerProvider;
+  private final Provider<ImmutableList<CatalogMaintenanceTask>> tasksProvider;
+
+  private final Object taskLock = new Object();
+  private List<CatalogMaintenanceTask> tasks = List.of();
 
   public CatalogMaintenanceService(
-      Provider<SchedulerService> schedulerServiceProvider,
-      Provider<ExecutorService> executorServiceProvider,
-      ImmutableList<CatalogMaintenanceRunnable> maintenanceRunnables) {
-    this.schedulerServiceProvider = schedulerServiceProvider;
-    this.executorServiceProvider = executorServiceProvider;
-    this.maintenanceRunnables = maintenanceRunnables;
+      Provider<OptionManager> optionManagerProvider,
+      Provider<ImmutableList<CatalogMaintenanceTask>> tasksProvider) {
+    this.optionManagerProvider = optionManagerProvider;
+    this.tasksProvider = tasksProvider;
   }
 
   /** Schedules periodic maintenance tasks to run on an executor service. */
   @Override
   public void start() throws Exception {
-    SchedulerService schedulerService = schedulerServiceProvider.get();
-    ExecutorService executorService = executorServiceProvider.get();
-    for (CatalogMaintenanceRunnable runnable : maintenanceRunnables) {
-      logger.info(
-          "Scheduling catalog maintenance {} with schedule {}",
-          runnable.name(),
-          runnable.schedule());
-      WakeupHandler wakeupHandler = new WakeupHandler(executorService, runnable.runnable());
-      schedulerService.schedule(
-          runnable.schedule(),
-          () -> {
-            logger.info(
-                "Scheduling run of catalog maintenance {} with schedule {}",
-                runnable.name(),
-                runnable.schedule());
-            wakeupHandler.handle(String.format("Scheduled %s", runnable.name()));
-          });
+    startInternal();
+  }
+
+  protected void startInternal() {
+    close();
+
+    synchronized (taskLock) {
+      tasks = tasksProvider.get();
+      for (CatalogMaintenanceTask task : tasks) {
+        task.start();
+      }
+    }
+
+    optionManagerProvider.get().addOptionChangeListener(this::onOptionsChanged);
+  }
+
+  private void onOptionsChanged() {
+    synchronized (taskLock) {
+      for (CatalogMaintenanceTask task : tasks) {
+        task.onOptionChanged();
+      }
     }
   }
 
   @Override
-  public void close() throws Exception {}
+  public void close() {
+    synchronized (taskLock) {
+      for (CatalogMaintenanceTask task : tasks) {
+        task.stop();
+      }
+      tasks = List.of();
+    }
+  }
 }

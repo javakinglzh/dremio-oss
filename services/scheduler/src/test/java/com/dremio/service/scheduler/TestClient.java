@@ -16,6 +16,7 @@
 package com.dremio.service.scheduler;
 
 import com.dremio.common.AutoCloseables;
+import com.dremio.common.config.SabotConfig;
 import com.dremio.exec.proto.CoordinationProtos;
 import com.dremio.io.file.Path;
 import com.dremio.service.DirectProvider;
@@ -24,6 +25,7 @@ import com.dremio.service.coordinator.zk.KillZkSession;
 import com.dremio.service.coordinator.zk.ZKClusterCoordinator;
 import com.dremio.test.DremioTest;
 import com.google.common.collect.Sets;
+import java.util.Properties;
 import java.util.UUID;
 import org.junit.Assert;
 
@@ -36,20 +38,35 @@ final class TestClient implements AutoCloseable {
   private static final String SERVICE_NAME = "TestCoordinator";
   private static final String SERVICE_ROOT_PATH =
       Path.SEPARATOR + SERVICE_NAME + Path.SEPARATOR + SERVICE_UUID;
+
+  private static final Properties TEST_CONFIGURATIONS =
+      new Properties() {
+        {
+          put("dremio.exec.zk.timeout", "5000");
+          put("dremio.exec.zk.session.timeout", "10000");
+        }
+      };
+
+  private static final SabotConfig CS_SABOT_CONFIG = SabotConfig.create(TEST_CONFIGURATIONS);
+
   private final ClusterCoordinator clusterCoordinator;
   private final CoordinationProtos.NodeEndpoint endpoint;
   private final ClusteredSingletonTaskScheduler singletonScheduler;
 
   TestClient(int clientNum, String connectString) {
-    this(clientNum, connectString, "test-version", 0, 0);
+    this(clientNum, connectString, "test-version", 0, 0, false);
+  }
+
+  TestClient(int clientNum, String connectString, boolean adjustSessionTimeout) {
+    this(clientNum, connectString, "test-version", 0, 0, adjustSessionTimeout);
   }
 
   TestClient(int clientNum, String connectString, int weightTolerance, int balancingPeriod) {
-    this(clientNum, connectString, "test-version", weightTolerance, balancingPeriod);
+    this(clientNum, connectString, "test-version", weightTolerance, balancingPeriod, false);
   }
 
   TestClient(int clientNum, String connectString, String dremioVersion) {
-    this(clientNum, connectString, dremioVersion, 0, 0);
+    this(clientNum, connectString, dremioVersion, 0, 0, false);
   }
 
   TestClient(
@@ -57,11 +74,12 @@ final class TestClient implements AutoCloseable {
       String connectString,
       String dremioVersion,
       int weightTolerance,
-      int balancingPeriod) {
+      int balancingPeriod,
+      boolean adjustSessionTimeout) {
     try {
+      var sabotConfig = (adjustSessionTimeout) ? CS_SABOT_CONFIG : DremioTest.DEFAULT_SABOT_CONFIG;
       clusterCoordinator =
-          new ZKClusterCoordinator(
-              DremioTest.DEFAULT_SABOT_CONFIG, String.format(ROOT_PATH_FORMAT, connectString));
+          new ZKClusterCoordinator(sabotConfig, String.format(ROOT_PATH_FORMAT, connectString));
       clusterCoordinator.start();
       endpoint =
           CoordinationProtos.NodeEndpoint.newBuilder()

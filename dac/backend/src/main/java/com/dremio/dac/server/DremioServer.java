@@ -19,6 +19,7 @@ import com.dremio.service.SingletonRegistry;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.telemetry.api.tracing.http.ServerTracingFilter;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import java.net.InetAddress;
 import java.net.URISyntaxException;
 import java.security.KeyStore;
@@ -27,6 +28,7 @@ import java.util.function.Consumer;
 import javax.inject.Provider;
 import javax.servlet.DispatcherType;
 import org.apache.commons.lang3.tuple.Pair;
+import org.eclipse.jetty.http.MimeTypes;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
@@ -82,6 +84,16 @@ public class DremioServer {
         servletContextHandler.addFilter(
             new FilterHolder(accessLogFilter), "/*", EnumSet.of(DispatcherType.REQUEST));
       }
+
+      // add the font mime type.
+      final MimeTypes mimeTypes = servletContextHandler.getMimeTypes();
+      mimeTypes.addMimeMapping("woff2", "application/font-woff2; charset=utf-8");
+      servletContextHandler.setMimeTypes(mimeTypes);
+
+      servletContextHandler.addFilter(
+          new FilterHolder(new DisableHttpMethodsFilter(ImmutableSet.of("TRACE"))),
+          "/*",
+          EnumSet.of(DispatcherType.REQUEST));
 
       if (config.serveUI) {
         final String basePath = "rest/dremio_static/";

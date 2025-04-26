@@ -16,8 +16,8 @@
 package com.dremio.exec.store.sys.udf;
 
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
-import com.dremio.exec.planner.sql.SqlOperand;
 import com.dremio.exec.planner.sql.SqlOperatorBuilder;
+import com.dremio.exec.planner.sql.SqlTypeRangeOperand;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.google.common.collect.ImmutableSet;
 import java.util.stream.Collectors;
@@ -39,7 +39,7 @@ public final class UserDefinedFunctionSqlOperator {
                           CalciteArrowHelper.wrap(arg.getDataType())
                               .toCalciteType(JavaTypeFactoryImpl.INSTANCE, true)
                               .getSqlTypeName();
-                      return SqlOperand.regular(ImmutableSet.of(sqlTypeName));
+                      return SqlTypeRangeOperand.regular(ImmutableSet.of(sqlTypeName));
                     })
                 .collect(Collectors.toList()))
         .build();

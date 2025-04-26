@@ -15,16 +15,19 @@
  */
 package com.dremio.services.pubsub.nats;
 
+import static com.dremio.services.pubsub.nats.NatsConnectionOptionsProvider.getOptions;
+
 import com.dremio.services.pubsub.MessagePublisher;
 import com.dremio.services.pubsub.nats.exceptions.NatsPublisherException;
+import com.dremio.services.pubsub.nats.utils.AsyncRetryer;
 import com.google.protobuf.Message;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
-import io.nats.client.JetStreamManagement;
 import io.nats.client.Nats;
 import java.util.concurrent.CompletableFuture;
 
 public class NatsPublisher<M extends Message> implements MessagePublisher<M> {
+  private static final int PUBLISHER_MAX_RETRIES = 2;
 
   // a dedicated connection for this publisher
   private Connection natsConnection;
@@ -39,10 +42,10 @@ public class NatsPublisher<M extends Message> implements MessagePublisher<M> {
 
   public void connect() {
     try {
+
       // TODO(DX-94549): add metrics and tracing
-      this.natsConnection = Nats.connect(natsServerUrl);
-      JetStreamManagement jsm = natsConnection.jetStreamManagement();
-      this.jetStream = jsm.jetStream();
+      this.natsConnection = Nats.connect(getOptions(natsServerUrl));
+      this.jetStream = natsConnection.jetStream();
     } catch (Exception e) {
       throw new NatsPublisherException("Problem when connecting to NATS", e);
     }
@@ -50,10 +53,13 @@ public class NatsPublisher<M extends Message> implements MessagePublisher<M> {
 
   @Override
   public CompletableFuture<String> publish(M message) {
-    return jetStream
-        .publishAsync(subjectName, message.toByteArray())
-        // TODO(DX-94554): Make the ID returned by the publisher unique
-        .thenApply(v -> Long.toString(v.getSeqno()));
+    return AsyncRetryer.retryAsync(
+        () ->
+            jetStream
+                .publishAsync(subjectName, message.toByteArray())
+                // TODO(DX-94554): Make the ID returned by the publisher unique
+                .thenApply(v -> Long.toString(v.getSeqno())),
+        PUBLISHER_MAX_RETRIES);
   }
 
   @Override

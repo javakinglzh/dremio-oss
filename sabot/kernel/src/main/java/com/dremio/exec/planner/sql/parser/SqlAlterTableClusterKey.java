@@ -82,7 +82,7 @@ public class SqlAlterTableClusterKey extends SqlAlterTable {
 
   public List<String> getClusterKeyList() {
     if (clusterKeyList == null || clusterKeyList == SqlNodeList.EMPTY) {
-      return Collections.EMPTY_LIST;
+      return Collections.emptyList();
     } else {
       return clusterKeyList.getList().stream().map(SqlNode::toString).collect(Collectors.toList());
     }

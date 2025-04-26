@@ -49,8 +49,8 @@ public class BaseTestQueryJunit5 extends BaseTestQuery {
 
     // the class setup/teardown methods of BaseTestQuery use junit4 annotations and are
     // thus not called automatically when running with junit5.
-    // since closeClient is idempotent we call it universally here to prevent resource leaks.
-    BaseTestQuery.closeClient();
+    // since closeCluster is idempotent we call it universally here to prevent resource leaks.
+    BaseTestQuery.closeCluster();
   }
 
   @BeforeEach

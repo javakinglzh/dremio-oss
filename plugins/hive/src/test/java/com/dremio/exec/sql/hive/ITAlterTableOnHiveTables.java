@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.sql.hive;
 
-import static com.dremio.common.TestProfileHelper.assumeNonMaprProfile;
 import static com.dremio.exec.store.hive.HiveTestDataGenerator.HIVE_TEST_PLUGIN_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -52,8 +51,6 @@ public class ITAlterTableOnHiveTables extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testAlterTableAddColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
     final String tableName = "addCol";
     try {
       setupTable(tableName);
@@ -67,8 +64,6 @@ public class ITAlterTableOnHiveTables extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testAlterTableDropColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
     final String tableName = "dropCol";
     try {
       setupTable(tableName);
@@ -83,9 +78,6 @@ public class ITAlterTableOnHiveTables extends LazyDataGeneratingHiveTestBase {
 
   @Test
   public void testAlterTableChangeColumn() throws Exception {
-    // TODO: DX-46976 - Enable these for MapR
-    assumeNonMaprProfile();
-
     final String tableName = "changeCol";
     try {
       setupTable(tableName);

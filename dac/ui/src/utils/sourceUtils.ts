@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { useSelector } from "react-redux";
 import { intl } from "#oss/utils/intl";
 import {
   NESSIE,
@@ -25,7 +26,7 @@ import {
   AZURE_STORAGE,
   S3,
   AWSGLUE,
-  POLARIS,
+  SNOWFLAKEOPENCATALOG,
   UNITY,
 } from "#oss/constants/sourceTypes";
 
@@ -41,6 +42,10 @@ export function sourceTypesIncludeSampleSource(
     !!sourceTypes.find((type) => type.sourceType === "SAMPLE_SOURCE")
   );
 }
+
+export const isLimitedVersionSource = (type: string) => {
+  return false;
+};
 
 export function isVersionedSource(type: string) {
   switch (type) {
@@ -69,7 +74,7 @@ export const isIcebergSource = (sourceType: string) => {
     RESTCATALOG === sourceType ||
     GCS === sourceType ||
     UNITY === sourceType ||
-    POLARIS === sourceType ||
+    SNOWFLAKEOPENCATALOG === sourceType ||
     AZURE_STORAGE === sourceType ||
     S3 === sourceType ||
     AWSGLUE === sourceType
@@ -94,4 +99,31 @@ export const getAddSourceModalTitle = (sourceType: string) => {
 
 export const getEditSourceModalTitle = (sourceType: string, name: string) => {
   return intl.formatMessage({ id: "Source.EditSource" });
+};
+
+export const isURISupportedSource = (sourceType: string) => false;
+
+export const useSourceTypeFromState = (sourceName: string) => {
+  const source = useSelector((state: Record<string, any>) => {
+    return getSourceFromState(
+      state.resources.entities.get("source"),
+      sourceName,
+    );
+  });
+  if (source && source.get("type")) {
+    return source.get("type");
+  }
+  return null;
+};
+
+export const getSourceFromState = (
+  sources: Record<string, any>,
+  sourceName: string,
+) =>
+  sources.find(
+    (source: Record<string, any>) => source.get("name") === sourceName,
+  );
+
+export const allowDatasetDelete = (sourceType: string) => {
+  return true;
 };

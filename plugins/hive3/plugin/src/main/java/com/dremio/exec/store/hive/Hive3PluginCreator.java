@@ -15,8 +15,8 @@
  */
 package com.dremio.exec.store.hive;
 
+import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
-import com.dremio.exec.server.SabotContext;
 import javax.inject.Provider;
 import org.pf4j.Extension;
 import org.pf4j.PluginManager;
@@ -29,11 +29,15 @@ public class Hive3PluginCreator implements StoragePluginCreator {
   public Hive3StoragePlugin createStoragePlugin(
       PluginManager pf4jManager,
       HiveStoragePluginConfig config,
-      SabotContext context,
+      PluginSabotContext pluginSabotContext,
       String name,
       Provider<StoragePluginId> pluginIdProvider) {
     final HiveConfFactory confFactory = new HiveConfFactory();
     return new Hive3StoragePlugin(
-        confFactory.createHiveConf(config), pf4jManager, context, name, pluginIdProvider);
+        confFactory.createHiveConf(config),
+        pf4jManager,
+        pluginSabotContext,
+        name,
+        pluginIdProvider);
   }
 }

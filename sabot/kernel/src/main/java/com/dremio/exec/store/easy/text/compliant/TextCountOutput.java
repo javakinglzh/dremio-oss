@@ -24,7 +24,7 @@ import org.apache.arrow.flatbuf.RecordBatch;
  */
 public class TextCountOutput extends TextOutput {
 
-  private int recordCount = 0;
+  private long recordCount;
 
   /** int should be enough a batch can have {@link RecordBatch#MAX_BATCH_SIZE} */
   private boolean fieldOpen = false;
@@ -74,7 +74,7 @@ public class TextCountOutput extends TextOutput {
 
   @Override
   public void startBatch() {
-    recordCount = 0;
+    // no-op
   }
 
   @Override
@@ -83,5 +83,25 @@ public class TextCountOutput extends TextOutput {
   @Override
   public boolean rowHasData() {
     return true;
+  }
+
+  @Override
+  int currentFieldIndex() {
+    return -1;
+  }
+
+  @Override
+  int currentBatchIndex() {
+    return -1;
+  }
+
+  @Override
+  boolean hasSelectedColumns() {
+    return false;
+  }
+
+  @Override
+  public int getFieldCurrentDataPointer() {
+    return 0;
   }
 }

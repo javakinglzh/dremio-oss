@@ -131,15 +131,23 @@
   }
 }
 
-.dremio-high-contrast-light {
-  .dremio-button {
-    &--primary {
-      background-color: var(--color--brand--300);
-      color: black;
-    }
-    &:disabled,
-    &[aria-disabled="true"] {
-      color: var(--color--neutral--500);
+.dremio-light {
+  @media (prefers-contrast: more) {
+    .dremio-button {
+      &--primary {
+        background-color: var(--color--brand--500);
+        &:hover,
+        &:focus-visible {
+          &:not([aria-busy="true"]) {
+            background-color: var(--color--brand--600);
+          }
+        }
+      }
+
+      &:disabled,
+      &[aria-disabled="true"] {
+        color: var(--color--neutral--500);
+      }
     }
   }
 }

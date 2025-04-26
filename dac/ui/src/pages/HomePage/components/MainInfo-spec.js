@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { browserHistory } from "react-router";
 import { shallow } from "enzyme";
 import Immutable from "immutable";
 import DatasetMenu from "components/Menus/HomePage/DatasetMenu";
@@ -22,13 +23,8 @@ import { MainInfoView as MainInfo } from "./MainInfo";
 describe("MainInfoView", () => {
   let minimalProps;
   let commonProps;
-  let context;
+  let location;
   beforeEach(() => {
-    context = {
-      location: {
-        pathname: "",
-      },
-    };
     minimalProps = Immutable.fromJS({});
     commonProps = Immutable.fromJS([
       {
@@ -42,23 +38,22 @@ describe("MainInfoView", () => {
         isInProgress: false,
       },
     ]);
+    location = browserHistory.getCurrentLocation();
   });
 
   it("should render with minimal props without exploding", () => {
-    const wrapper = shallow(<MainInfo {...minimalProps} />, { context });
+    const wrapper = shallow(<MainInfo {...minimalProps} />);
     expect(wrapper).to.have.length(1);
   });
 
   it("should render commpn props", () => {
-    const wrapper = shallow(<MainInfo {...commonProps} />, { context });
+    const wrapper = shallow(<MainInfo {...commonProps} />);
     expect(wrapper).to.have.length(1);
   });
 
   describe("#getFolderActions", () => {
     xit("should show setting button for folder-as-dataset", () => {
-      const instance = shallow(<MainInfo {...commonProps} />, {
-        context,
-      }).instance();
+      const instance = shallow(<MainInfo {...commonProps} />).instance();
       sinon.stub(instance, "getSettingsBtnByType");
       const folder = Immutable.fromJS({
         fileSystemFolder: true,
@@ -72,9 +67,7 @@ describe("MainInfoView", () => {
     });
 
     xit("should show query button for folder-as-dataset", () => {
-      const instance = shallow(<MainInfo {...commonProps} />, {
-        context,
-      }).instance();
+      const instance = shallow(<MainInfo {...commonProps} />).instance();
       sinon.stub(instance, "getSettingsBtnByType");
       const folder = Immutable.fromJS({
         fileSystemFolder: true,
@@ -88,9 +81,7 @@ describe("MainInfoView", () => {
     });
 
     xit("should show settings button for folder", () => {
-      const instance = shallow(<MainInfo {...commonProps} />, {
-        context,
-      }).instance();
+      const instance = shallow(<MainInfo {...commonProps} />).instance();
       sinon.stub(instance, "getSettingsBtnByType");
       const folder = Immutable.fromJS({
         fileSystemFolder: false,

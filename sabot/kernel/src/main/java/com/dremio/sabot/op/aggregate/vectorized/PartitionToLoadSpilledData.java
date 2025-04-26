@@ -154,7 +154,9 @@ public class PartitionToLoadSpilledData implements AutoCloseable {
           || type == Types.MinorType.VARBINARY
           || type == Types.MinorType.LIST) {
         if (accumulatorTypes[count] == AccumulatorBuilder.AccumulatorType.MAX.ordinal()
-            || accumulatorTypes[count] == AccumulatorBuilder.AccumulatorType.MIN.ordinal()) {
+            || accumulatorTypes[count] == AccumulatorBuilder.AccumulatorType.MIN.ordinal()
+            || accumulatorTypes[count]
+                == AccumulatorBuilder.AccumulatorType.SINGLE_VALUE.ordinal()) {
           ((BaseVariableWidthVector) vector).allocateNew(varLenAccumulatorCapacity, batchSize);
         } else if (accumulatorTypes[count] == AccumulatorBuilder.AccumulatorType.LISTAGG.ordinal()
             || accumulatorTypes[count] == AccumulatorBuilder.AccumulatorType.LOCAL_LISTAGG.ordinal()

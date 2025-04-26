@@ -15,7 +15,7 @@
  */
 package com.dremio.plugins.sysflight;
 
-import com.dremio.exec.catalog.CatalogServiceImpl;
+import com.dremio.exec.catalog.CatalogConstants;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.ops.OptimizerRulesContext;
 import com.dremio.exec.planner.PlannerPhase;
@@ -40,7 +40,7 @@ public class SysFlightRulesFactory extends StoragePluginTypeRulesFactory {
             new SysFlightScanPrule(
                 optimizerContext
                     .getCatalogService()
-                    .getSource(CatalogServiceImpl.SYSTEM_TABLE_SOURCE_NAME)),
+                    .getSource(CatalogConstants.SYSTEM_TABLE_SOURCE_NAME)),
             SysFlightPushFilterIntoScan.IS_FILTER_ON_PROJECT,
             SysFlightPushFilterIntoScan.IS_FILTER_ON_SCAN,
             SysTableFunctionQueryScanPrule.INSTANCE);

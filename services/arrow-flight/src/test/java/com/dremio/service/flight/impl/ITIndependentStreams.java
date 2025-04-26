@@ -68,7 +68,7 @@ public class ITIndependentStreams extends BaseFlightQueryTest {
   }
 
   @BeforeClass
-  public static void setup() throws Exception {
+  public static void setupDefaultTestCluster() throws Exception {
     setupBaseFlightQueryTest(
         false, true, "independent.streams.flight.endpoint.port", runQueryResponseHandlerFactory);
   }

@@ -30,11 +30,10 @@ public class IcebergCatalogCommand extends IcebergBaseCommand {
 
   public IcebergCatalogCommand(
       Configuration configuration,
-      String fsPath,
       String icebergPath,
       TableOperations tableOperations,
       UserBitShared.QueryId queryId) {
-    super(configuration, fsPath, tableOperations, queryId);
+    super(configuration, icebergPath, tableOperations, queryId);
 
     this.icebergPath = icebergPath;
   }
@@ -43,6 +42,9 @@ public class IcebergCatalogCommand extends IcebergBaseCommand {
   /*
    * This method should return the iceberg table location.
    * E.g. abfss://<container>@<account-name>.dfs.core.windows.net/path/to/table
+   *
+   * This method is overridden as calling IcebergUtils.getValidIcebergPath() is unnecessary and
+   * risky given incomplete hadoop configuration values for azure.
    */
   public String getTableLocation() {
     return icebergPath;

@@ -333,6 +333,11 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
   }
 
   @Override
+  public boolean hasFilter() {
+    return filter != null || rowGroupFilter != null || pruneCondition != null;
+  }
+
+  @Override
   public FilterableScan applyRowGroupFilter(ParquetScanRowGroupFilter rowGroupFilter) {
     return new IcebergScanPrel(
         getCluster(),
@@ -552,8 +557,7 @@ public class IcebergScanPrel extends FilterableScan implements Prel, PrelFinaliz
   public Prel finalizeRel() {
     if (partitionValuesEnabled) {
       // If partitionValuesEnabled flag is set, we can optimize plan by skipping data file scan.
-      return new IcebergPartitionAggregationPlanBuilder(this)
-          .buildManifestScanPlanForPartitionAggregation();
+      return new IcebergManifestColumnMetadataPlanBuilder(this).buildPartitionValuesReaderPlan();
     }
     ManifestScanOptions manifestScanOptions =
         new ImmutableManifestScanOptions.Builder().setIncludesSplitGen(true).build();

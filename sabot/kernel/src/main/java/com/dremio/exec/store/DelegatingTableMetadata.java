@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store;
 
+import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.datastore.SearchTypes;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.record.BatchSchema;
@@ -74,6 +75,11 @@ public class DelegatingTableMetadata implements TableMetadata {
   @Override
   public String getUser() {
     return tableMetadata.getUser();
+  }
+
+  @Override
+  public String getUserId() {
+    return tableMetadata.getUserId();
   }
 
   @Override
@@ -143,5 +149,10 @@ public class DelegatingTableMetadata implements TableMetadata {
   @Override
   public List<String> getPrimaryKey() {
     return tableMetadata.getPrimaryKey();
+  }
+
+  @Override
+  public TableVersionContext getVersionContext() {
+    return tableMetadata.getVersionContext();
   }
 }

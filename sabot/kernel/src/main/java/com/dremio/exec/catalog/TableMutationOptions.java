@@ -47,4 +47,9 @@ public abstract class TableMutationOptions {
   public boolean shouldDeleteCatalogEntry() {
     return false;
   }
+
+  @Value.Default
+  public boolean throwExceptionWhenTableNotFoundInPlugin() {
+    return true;
+  }
 }

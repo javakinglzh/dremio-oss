@@ -43,7 +43,6 @@ import com.dremio.service.job.proto.JobId;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.reflection.DependencyEntry;
-import com.dremio.service.reflection.ReflectionMonitor;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MeasureType;
 import com.dremio.service.reflection.proto.ReflectionDetails;
@@ -92,7 +91,6 @@ public class TestReflectionJob extends BaseTestReflection {
   private static final AtomicInteger DATA_ID = new AtomicInteger();
   private static final long REFRESH_DELAY_IN_SECONDS = 2;
 
-  private ReflectionMonitor monitor = newReflectionMonitor();
   private WebSocketClient client = new WebSocketClient();
   private TestWebSocket.TestSocket socket;
 
@@ -228,9 +226,7 @@ public class TestReflectionJob extends BaseTestReflection {
   @After
   public void clearAll() throws Exception {
     setDeletionGracePeriod();
-    getReflectionService().clearAll();
-    Thread.sleep(1);
-    monitor.waitUntilNoMaterializationsAvailable();
+    clearReflections();
     client.stop();
   }
 

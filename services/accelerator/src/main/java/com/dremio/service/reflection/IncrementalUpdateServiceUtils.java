@@ -15,6 +15,7 @@
  */
 package com.dremio.service.reflection;
 
+import static com.dremio.exec.store.iceberg.IcebergUtils.getSnapshotFromDatasetConfig;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.PHYSICAL_DATASET_SOURCE_FILE;
 import static com.dremio.service.reflection.ReflectionOptions.REFLECTION_ICEBERG_SNAPSHOT_BASED_INCREMENTAL_ENABLED;
 import static com.dremio.service.reflection.ReflectionOptions.REFLECTION_UNLIMITED_SPLITS_SNAPSHOT_BASED_INCREMENTAL;
@@ -30,8 +31,6 @@ import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
-import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.RefreshMethod;
 import com.dremio.service.reflection.proto.ReflectionEntry;
 import com.dremio.service.reflection.proto.ReflectionId;
@@ -44,10 +43,12 @@ import org.apache.calcite.sql.SqlOperator;
 
 /** Contains various utilities for acceleration incremental updates */
 public class IncrementalUpdateServiceUtils {
+
   private static final String INCREMENTAL_CHECKER =
       "dremio.reflection.refresh.incremental-checker.class";
 
   public static final class RefreshDetails {
+
     private RefreshMethod refreshMethod;
     private String refreshField;
     private boolean snapshotBased;
@@ -193,17 +194,12 @@ public class IncrementalUpdateServiceUtils {
               final AccelerationSettings settings =
                   reflectionSettings.getReflectionSettings(catalogEntityKey);
 
-              Optional.ofNullable(table.getDatasetConfig())
-                  .filter(c -> isIncrementalRefreshBySnapshotEnabled(c, optionManager))
-                  .map(DatasetConfig::getPhysicalDataset)
-                  .map(PhysicalDataset::getIcebergMetadata)
-                  .map(IcebergMetadata::getSnapshotId)
-                  .ifPresent(
-                      snapshotId -> {
-                        snapshotBased.value = true;
-                        baseTableMetadata.value = table.getDataset();
-                        baseTableSnapshotId.value = snapshotId.toString();
-                      });
+              if (isIncrementalRefreshBySnapshotEnabled(table.getDatasetConfig(), optionManager)) {
+                snapshotBased.value = true;
+                baseTableMetadata.value = table.getDataset();
+                baseTableSnapshotId.value =
+                    getSnapshotFromDatasetConfig(table.getDatasetConfig()).get();
+              }
 
               refreshField.value = settings.getRefreshField();
             }

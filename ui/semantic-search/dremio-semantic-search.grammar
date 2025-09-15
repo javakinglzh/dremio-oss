@@ -13,31 +13,31 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-@top DremioSemanticSearch { SearchText Filter* }
+@top DremioSemanticSearch { (Filter | SearchText)+ }
 @skip { space }
 
-SearchText { QuotedString | UnquotedString }
+SearchText { QuotedString | Word }
 
-FilterValue { QuotedString | UnquotedString }
+FilterKeyword { Word }
 
-Filter { FilterKeyword FilterValue }
+FilterValue { QuotedString | Word }
 
-UnquotedString { word+ }
+Filter { FilterKeyword ":" FilterValue }
 
 QuotedString { quotedString }
 
-@tokens { 
-  FilterKeyword { word ":"}
+Word { word }
 
+@tokens {
   word { unquotedChar+ }
   quotedString { '"' char* '"' }
 
-  unquotedChar { @asciiLetter | @digit | $[\u{21}\u{23}-\u{26}\u{3f}-\u{40}] | $[_$\u{a1}-\u{10ffff}] }
+  unquotedChar { @asciiLetter | @digit | $[\u{21}\u{23}-\u{26}\u{2A}-\u{2F}\u{3B}\u{3f}-\u{40}\u{5E}] | $[_$\u{a1}-\u{10ffff}] }
   char { $[\u{20}\u{21}\u{23}-\u{5b}\u{5d}-\u{10ffff}] | "\\" esc }
   esc  { $["\\\/bfnrt] | "u" hex hex hex hex }
   hex  { $[0-9a-fA-F] }
 
   space { @whitespace+ }
 
-  @precedence { space, FilterKeyword, word }
+  @precedence { space, word }
 }

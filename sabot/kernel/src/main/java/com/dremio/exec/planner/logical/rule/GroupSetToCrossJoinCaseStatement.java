@@ -18,7 +18,7 @@ package com.dremio.exec.planner.logical.rule;
 import static org.apache.calcite.sql.SqlKind.AVG_AGG_FUNCTIONS;
 
 import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.planner.logical.RollupWithBridgeExchangeRule;
+import com.dremio.exec.planner.logical.RollupWithBridgeExchangeVisitor;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
 import java.math.BigDecimal;
@@ -35,7 +35,6 @@ import org.apache.calcite.linq4j.Ord;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.plan.RelRule;
-import org.apache.calcite.plan.RelRule.Config;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.core.Aggregate;
 import org.apache.calcite.rel.core.AggregateCall;
@@ -364,7 +363,7 @@ public class GroupSetToCrossJoinCaseStatement {
       }
 
       if (!config.isRollup()
-          && RollupWithBridgeExchangeRule.isRollup(agg.getGroupSets())
+          && RollupWithBridgeExchangeVisitor.isRollup(agg.getGroupSets())
           && !agg.containsDistinctCall()) {
         return;
       }

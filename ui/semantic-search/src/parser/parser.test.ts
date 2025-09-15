@@ -23,18 +23,18 @@ const strictParser = parser.configure({ strict: true });
 const passExamples = [
   "sample", // unquoted searchText
   `"sample"`, // quoted searchText
-  "sample in: catalog", // searchText with filter
-  `"sample" in: catalog`, // quoted searchText with filter
-  "sample in: catalog type: view", // multiple filters,
-  "sample unknownFilter: test", // allow anything which matches the filterkeyword:filtervalue syntax,
+  "sample in:catalog", // searchText with filter
+  `"sample" in:catalog`, // quoted searchText with filter
+  "sample in:catalog type:view", // multiple filters,
+  "sample unknownFilter:test", // allow anything which matches the filterkeyword:filtervalue syntax,
   " sample", // leading unquoted whitespace should pass
+  `"sample" abc`, // quoted and unquoted searchText should be joined as "sample abc",
+  "in:catalog sample", // filters can precede searchText
 ];
 
 const failExamples = [
   "", // No empty string
-  "sample:", // searchText is required first before a filter condition
   "sample in:", // filter value is required
-  `"sample" abc`, // don't mix quoted and unquoted searchText
   "sample: in: catalog", // unquoted searchText with a `:`
 ];
 
@@ -55,24 +55,31 @@ describe("grammar tests", () => {
 
   test("unquoted search text with multiple filters", () => {
     const tree = strictParser.parse(
-      `sample data in: NYC Taxi Trips type: view`
+      `sample data in:"NYC Taxi Trips" type:view`
     );
     testTree(
       tree,
       `DremioSemanticSearch(
         SearchText (
-          UnquotedString
+          Word
+        )
+        SearchText (
+          Word
         )
         Filter(
-          FilterKeyword
+          FilterKeyword (
+            Word
+          )
           FilterValue (
-            UnquotedString
+            QuotedString
           )
         )
         Filter(
-          FilterKeyword
+          FilterKeyword (
+            Word
+          )
           FilterValue (
-            UnquotedString
+            Word
           )
         )
       )`
@@ -81,7 +88,7 @@ describe("grammar tests", () => {
 
   test("quoted search text with multiple filters", () => {
     const tree = strictParser.parse(
-      `"sample data" in: NYC Taxi Trips type: view`
+      `"sample data" in:"NYC Taxi Trips" type: view`
     );
     testTree(
       tree,
@@ -90,15 +97,19 @@ describe("grammar tests", () => {
           QuotedString
         )
         Filter(
-          FilterKeyword
+          FilterKeyword (
+            Word
+          )
           FilterValue (
-            UnquotedString
+            QuotedString
           )
         )
         Filter(
-          FilterKeyword
+          FilterKeyword (
+            Word
+          )
           FilterValue (
-            UnquotedString
+            Word
           )
         )
       )`
@@ -111,7 +122,7 @@ describe("grammar tests", () => {
       tree,
       `DremioSemanticSearch(
         SearchText (
-          UnquotedString
+          Word
         )
       )`
     );
@@ -130,18 +141,58 @@ describe("grammar tests", () => {
   });
 
   test("keywords in unquoted search text", () => {
-    const tree = strictParser.parse(`in in: in`);
+    const tree = strictParser.parse(`in in:in`);
     testTree(
       tree,
       `DremioSemanticSearch(
         SearchText (
-          UnquotedString
+          Word
         )
         Filter(
-          FilterKeyword
-          FilterValue (
-            UnquotedString
+          FilterKeyword (
+            Word
           )
+          FilterValue (
+            Word
+          )
+        )
+      )`
+    );
+  });
+
+  test("unquoted search text with spaces", () => {
+    const tree = strictParser.parse(`sample test`);
+    testTree(
+      tree,
+      `DremioSemanticSearch (
+        SearchText (
+          Word
+        )
+        SearchText (
+          Word
+        )
+      )`
+    );
+  });
+
+  test("filters can precede searchText", () => {
+    const tree = strictParser.parse(`in:"NYC Taxi Trips" sample test`);
+    testTree(
+      tree,
+      `DremioSemanticSearch (
+        Filter(
+          FilterKeyword (
+            Word
+          )
+          FilterValue (
+            QuotedString
+          )
+        )
+        SearchText (
+          Word
+        )
+        SearchText (
+          Word
         )
       )`
     );

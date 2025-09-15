@@ -76,7 +76,7 @@ public class SingleTableIcebergExpirySnapshotsReader extends IcebergExpirySnapsh
       commitExpiry = false;
     }
     VacuumOptions options =
-        new VacuumOptions(
+        VacuumOptions.createInstance(
             isExpireSnapshots,
             isRemoveOrphanFiles,
             snapshotsScanOptions.getOlderThanInMillis(),
@@ -130,6 +130,7 @@ public class SingleTableIcebergExpirySnapshotsReader extends IcebergExpirySnapsh
         SupportsFsCreation.builder()
             .filePath(filePath)
             .userName(props.getUserName())
+            .userId(userId)
             .operatorContext(context)
             .dataset(dataset));
   }

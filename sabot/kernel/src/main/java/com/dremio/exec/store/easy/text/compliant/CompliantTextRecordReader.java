@@ -439,10 +439,12 @@ public class CompliantTextRecordReader extends AbstractRecordReader {
     if ((reader != null) && (reader.getInput() != null) && (vectorMap.size() > 0)) {
       final OptionManager options = context.getOptions();
       final int listSizeEstimate = (int) options.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE);
+      final int mapSizeEstimate = (int) options.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE);
       final int varFieldSizeEstimate =
           (int) options.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
       final int estimatedRecordSize =
-          BatchSchema.estimateRecordSize(vectorMap, listSizeEstimate, varFieldSizeEstimate);
+          BatchSchema.estimateRecordSize(
+              vectorMap, listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
       if (estimatedRecordSize > 0) {
         estimatedRecordCount =
             Math.min(reader.getInput().length / estimatedRecordSize, numRowsPerBatch);

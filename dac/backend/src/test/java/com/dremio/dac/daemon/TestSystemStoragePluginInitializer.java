@@ -75,6 +75,7 @@ import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.orphanage.OrphanageImpl;
 import com.dremio.service.scheduler.LocalSchedulerService;
 import com.dremio.service.scheduler.ModifiableLocalSchedulerService;
+import com.dremio.service.users.UserService;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.services.fabric.FabricServiceImpl;
@@ -266,7 +267,8 @@ public class TestSystemStoragePluginInitializer {
             () -> new VersionedDatasetAdapterFactory(),
             () -> new CatalogStatusEventsImpl(),
             () -> executor,
-            () -> namespaceServiceFactory);
+            () -> namespaceServiceFactory,
+            () -> mock(UserService.class));
     catalogService.start();
   }
 

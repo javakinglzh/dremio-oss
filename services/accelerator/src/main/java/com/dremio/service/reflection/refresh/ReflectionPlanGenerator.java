@@ -285,7 +285,7 @@ public class ReflectionPlanGenerator {
   // Simple class to hold everything related to how a reflection will be refreshed
   public static class RefreshDecisionWrapper {
     // Serializable proto bean that is sent back to reflection manager including whether the refresh
-    // was full or incremental, scanPaths and the matching plan.
+    // was full or incremental and scanPaths.  Does not include the matching plan.
     private RefreshDecision refreshDecision;
 
     // For incremental refresh, information to diff between Iceberg snapshots

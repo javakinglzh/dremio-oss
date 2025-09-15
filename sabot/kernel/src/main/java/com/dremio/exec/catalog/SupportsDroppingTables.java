@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.service.namespace.NamespaceKey;
 
@@ -22,5 +23,6 @@ public interface SupportsDroppingTables {
   void dropTable(
       NamespaceKey tableSchemaPath,
       SchemaConfig schemaConfig,
-      TableMutationOptions tableMutationOptions);
+      TableMutationOptions tableMutationOptions)
+      throws CatalogEntityNotFoundException;
 }

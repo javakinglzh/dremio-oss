@@ -141,6 +141,7 @@ import org.apache.parquet.io.MessageColumnIO;
 import org.apache.parquet.io.api.RecordConsumer;
 import org.apache.parquet.schema.GroupType;
 import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeUnit;
 import org.apache.parquet.schema.MessageType;
 import org.apache.parquet.schema.PrimitiveType;
 import org.apache.parquet.schema.PrimitiveType.PrimitiveTypeName;
@@ -243,6 +244,7 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
   private PartitionSpec partitionSpec;
   private final ExecutionControls executionControls;
   private final String queryUser;
+  private final String queryUserId;
 
   // Collection of distinct valueVectors (compressed as bytes) to optionally send to manifest writer
   private final Set<ByteArrayWrapper> valueVectorCollection = new HashSet<>();
@@ -280,6 +282,7 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
 
     this.plugin = writer.getPlugin();
     this.queryUser = writer.getProps().getUserName();
+    this.queryUserId = writer.getProps().getUserId();
 
     FragmentHandle handle = context.getFragmentHandle();
     String fragmentId =
@@ -485,12 +488,12 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
 
   @Override
   public void setup() throws IOException {
-    // TODO(DX-96947): specify dataset for createFS
     this.fs =
         plugin.createFS(
             SupportsFsCreation.builder()
                 .filePath(location)
                 .userName(queryUser)
+                .userId(queryUserId)
                 .dataset(dataset)
                 .operatorContext(context));
 
@@ -981,11 +984,23 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
     LogicalTypeAnnotation logicalTypeAnnotation;
     int length = 0;
     if (convertMillisToMicros
-        && (MinorType.TIME.equals(minorType) || MinorType.TIMESTAMPMILLI.equals(minorType))) {
-      logicalTypeAnnotation =
-          MinorType.TIME.equals(minorType)
-              ? LogicalTypeAnnotation.timeType(false, LogicalTypeAnnotation.TimeUnit.MICROS)
-              : LogicalTypeAnnotation.timestampType(false, LogicalTypeAnnotation.TimeUnit.MICROS);
+        && (MinorType.TIME.equals(minorType)
+            || MinorType.TIMESTAMPMILLI.equals(minorType)
+            || MinorType.TIMETZ.equals(minorType)
+            || MinorType.TIMESTAMPTZ.equals(minorType))) {
+      if (minorType == MinorType.TIME) {
+        logicalTypeAnnotation = LogicalTypeAnnotation.timeType(false, TimeUnit.MICROS);
+      } else if (minorType == MinorType.TIMESTAMPMILLI) {
+        // in case of iceberg tables the TIMESTAMPMILLI minor type is mapped to TIMESTAMPTZ
+        // iceberg type (SchemaConverter#visit(Timestamp timestamp))
+        // therefore we need to set isAdjustedToUTC to true
+        logicalTypeAnnotation =
+            LogicalTypeAnnotation.timestampType(isIcebergWriter, TimeUnit.MICROS);
+      } else if (minorType == MinorType.TIMETZ) {
+        logicalTypeAnnotation = LogicalTypeAnnotation.timeType(true, TimeUnit.MICROS);
+      } else {
+        logicalTypeAnnotation = LogicalTypeAnnotation.timestampType(true, TimeUnit.MICROS);
+      }
       primitiveTypeName = PrimitiveTypeName.INT64;
     } else {
       length = ParquetTypeHelper.getLengthForMinorType(minorType);
@@ -1008,7 +1023,8 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
           break;
       }
       logicalTypeAnnotation =
-          ParquetTypeHelper.getLogicalTypeForMinorType(minorType, scale, precision);
+          ParquetTypeHelper.getLogicalTypeForMinorType(
+              minorType, scale, precision, isIcebergWriter);
     }
     org.apache.parquet.schema.Types.PrimitiveBuilder<PrimitiveType> fieldBuilder;
     fieldBuilder =
@@ -2064,6 +2080,10 @@ public class ParquetRecordWriter extends ParquetOutputRecordWriter {
 
   @Override
   public void abort() throws IOException {
+    if (path == null) {
+      return;
+    }
+
     fs.delete(path, true);
   }
 

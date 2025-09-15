@@ -15,29 +15,20 @@
  */
 package com.dremio.dac.explore.model;
 
-import static com.dremio.common.utils.PathUtils.encodeURIComponent;
-import static com.dremio.service.namespace.NamespaceUtils.isHomeSpace;
-
 import com.dremio.catalog.model.VersionedDatasetId;
-import com.dremio.common.utils.PathUtils;
-import com.dremio.dac.model.folder.FolderPath;
-import com.dremio.dac.model.folder.SourceFolderPath;
-import com.dremio.dac.model.job.JobFilters;
-import com.dremio.dac.model.sources.PhysicalDatasetPath;
-import com.dremio.dac.model.sources.VirtualDatasetPath;
+import com.dremio.dac.model.common.NamespacePathUtils;
+import com.dremio.dac.model.spaces.TempSpace;
 import com.dremio.dac.proto.model.dataset.Derivation;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.util.DatasetUIUtils;
 import com.dremio.dac.util.DatasetsUtil;
 import com.dremio.exec.catalog.Catalog;
-import com.dremio.file.FilePath;
-import com.dremio.file.SourceFilePath;
-import com.dremio.service.jobs.JobIndexKeys;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.ParentDataset;
+import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -47,6 +38,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import javax.annotation.Nullable;
 
 /** Minimal info of Dataset needed by UI. */
 public class DatasetUI {
@@ -63,6 +55,7 @@ public class DatasetUI {
   // to displayed even though the query that was created is actually internally
   // considered an untitled new virtual dataset
   private final List<String> displayFullPath;
+  private final NameSpaceContainer.Type rootContainerType;
   private final String version;
   private final DatasetVersion datasetVersion;
   private final Integer jobCount;
@@ -121,6 +114,15 @@ public class DatasetUI {
     String entityId =
         catalog != null ? catalog.getEntityIdByPath(new NamespaceKey(displayFullPath)) : null;
 
+    @Nullable NameSpaceContainer.Type rootContainerType = null;
+    if (catalog != null && !displayFullPath.isEmpty()) {
+      String rootName = displayFullPath.get(0);
+      // Tmp is not a valid NameSpaceContainerType so it won't be found in the catalog.
+      if (!TempSpace.isTempSpace(rootName)) {
+        rootContainerType = catalog.getEntityByPath(new NamespaceKey(rootName)).getType();
+      }
+    }
+
     final String datasetId = vds.getId();
     Map<String, VersionContextReq> versionContextReqMap =
         DatasetUIUtils.createVersionContextMap(vds.getReferencesList());
@@ -136,21 +138,30 @@ public class DatasetUI {
         context,
         fullPath,
         displayFullPath,
+        rootContainerType,
         vds.getSavedTag(),
         vds.getVersion(),
         null,
         null,
         canReapply,
         datasetType,
-        createLinks(
+        NamespacePathUtils.createLinks(
             fullPath,
             displayFullPath,
             vds.getVersion(),
+            false,
             isUnsavedDirectPhysicalDataset,
             entityId,
-            datasetType),
+            datasetType,
+            rootContainerType),
         createApiLinks(
-            fullPath, displayFullPath, datasetType, vds.getVersion(), isUnsaved, isDerivedDirectly),
+            fullPath,
+            displayFullPath,
+            datasetType,
+            rootContainerType,
+            vds.getVersion(),
+            isUnsaved,
+            isDerivedDirectly),
         entityId,
         versionContextReqMap);
   }
@@ -162,6 +173,7 @@ public class DatasetUI {
       @JsonProperty("context") List<String> context,
       @JsonProperty("fullPath") List<String> fullPath,
       @JsonProperty("displayFullPath") List<String> displayFullPath,
+      @JsonProperty("rootContainerType") NameSpaceContainer.Type rootContainerType,
       @JsonProperty("version") String version,
       @JsonProperty("datasetVersion") DatasetVersion datasetVersion,
       @JsonProperty("jobCount") Integer jobCount,
@@ -177,6 +189,7 @@ public class DatasetUI {
     this.context = context;
     this.fullPath = fullPath;
     this.displayFullPath = displayFullPath;
+    this.rootContainerType = rootContainerType;
     this.version = version;
     this.datasetVersion = datasetVersion;
     this.jobCount = jobCount;
@@ -232,6 +245,10 @@ public class DatasetUI {
 
   public List<String> getDisplayFullPath() {
     return displayFullPath;
+  }
+
+  public NameSpaceContainer.Type getRootContainerType() {
+    return rootContainerType;
   }
 
   /**
@@ -295,62 +312,11 @@ public class DatasetUI {
     return entityId;
   }
 
-  // TODO make this consistent with DatasetSummary.getLinks. In ideal case, both methods should use
-  // the same util method
-  public static Map<String, String> createLinks(
-      List<String> fullPath,
-      List<String> displayFullPath,
-      DatasetVersion datasetVersion,
-      boolean isUnsavedDirectPhysicalDataset,
-      String entityId,
-      DatasetType datasetType) {
-    String dottedFullPath = PathUtils.constructFullPath(fullPath);
-    String queryUrlPath;
-
-    final boolean isVersionedDataset = VersionedDatasetId.tryParse(entityId) != null;
-    if (isUnsavedDirectPhysicalDataset) {
-      if (isHomeSpace(displayFullPath.get(0))) {
-        queryUrlPath = new DatasetPath(displayFullPath).getQueryUrlPath();
-      } else {
-        queryUrlPath = new PhysicalDatasetPath(displayFullPath).getQueryUrlPath();
-      }
-    } else if (isVersionedDataset) {
-      queryUrlPath =
-          ((datasetType == DatasetType.VIRTUAL_DATASET)
-                  ? new VirtualDatasetPath(displayFullPath)
-                  : new PhysicalDatasetPath(displayFullPath))
-              .getQueryUrlPath();
-    } else {
-      queryUrlPath = new DatasetPath(displayFullPath).getQueryUrlPath();
-    }
-    Map<String, String> links = new HashMap<>();
-    links.put(
-        "self",
-        queryUrlPath
-            + "?version="
-            + (datasetVersion == null
-                ? datasetVersion
-                : encodeURIComponent(datasetVersion.toString())));
-    links.put(
-        "edit",
-        queryUrlPath
-            + "?mode=edit&version="
-            + (datasetVersion == null
-                ? datasetVersion
-                : encodeURIComponent(datasetVersion.toString())));
-    final JobFilters jobFilters =
-        new JobFilters()
-            .addFilter(JobIndexKeys.ALL_DATASETS, dottedFullPath)
-            .addFilter(JobIndexKeys.QUERY_TYPE, JobIndexKeys.UI, JobIndexKeys.EXTERNAL);
-    links.put("jobs", jobFilters.toUrl());
-
-    return links;
-  }
-
   public static Map<String, String> createApiLinks(
       List<String> fullPath,
       List<String> displayFullPath,
       DatasetType datasetType,
+      NameSpaceContainer.Type rootContainerType,
       DatasetVersion datasetVersion,
       boolean isUnsaved,
       boolean isDerivedDirectly) {
@@ -359,31 +325,22 @@ public class DatasetUI {
     Map<String, String> links = new HashMap<>();
     links.put("self", "/dataset/" + dottedFullPath + "/version/" + datasetVersion);
     if ((!isUnsaved || isDerivedDirectly) && datasetType != null) {
-      links.put("namespaceEntity", getNamespaceEntityUrlPath(displayFullPath, datasetType));
+      // Workaround: For VDS, override rootContainerType to SPACE.
+      // This is necessary because SourceResource currently does not support VDS,
+      // leading to 500 errors when the source APIs are called for a VDS.
+      // TODO: Once DX-104228 is resolved, this overwrite should be removed.
+      NameSpaceContainer.Type rootContainerTypeOverride =
+          datasetType == DatasetType.VIRTUAL_DATASET
+              ? NameSpaceContainer.Type.SPACE
+              : rootContainerType;
+      links.put(
+          "namespaceEntity",
+          NamespacePathUtils.getNamespacePathForDataType(
+                  datasetType, displayFullPath, rootContainerTypeOverride)
+              .toUrlPath());
     }
 
     return links;
-  }
-
-  private static String getNamespaceEntityUrlPath(
-      List<String> displayFullPath, DatasetType datasetType) {
-    switch (datasetType) {
-      case VIRTUAL_DATASET:
-        return new DatasetPath(displayFullPath).toUrlPath();
-      case PHYSICAL_DATASET:
-        return new PhysicalDatasetPath(displayFullPath).toUrlPath();
-      case PHYSICAL_DATASET_SOURCE_FILE:
-        return new SourceFilePath(displayFullPath).toUrlPath();
-      case PHYSICAL_DATASET_SOURCE_FOLDER:
-        return new SourceFolderPath(displayFullPath).toUrlPath();
-      case PHYSICAL_DATASET_HOME_FILE:
-        return new FilePath(displayFullPath).toUrlPath();
-      case PHYSICAL_DATASET_HOME_FOLDER:
-        return new FolderPath(displayFullPath)
-            .toUrlPath(); // this should not happen. can't query folder in home
-      default:
-        return null;
-    }
   }
 
   @JsonIgnore

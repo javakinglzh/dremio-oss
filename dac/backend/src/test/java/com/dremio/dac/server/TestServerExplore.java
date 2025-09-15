@@ -1518,9 +1518,6 @@ public class TestServerExplore extends BaseTestServer {
     doc("delete dataset");
     // Issue get again.
     final DatasetUI dsDeleted = getHttpClient().getDatasetApi().delete(dsGet1);
-    assertEquals(dsGet1.getSql(), dsDeleted.getSql());
-    assertEquals(dsGet1.getContext(), dsDeleted.getContext());
-    assertEquals(dsGet1.getFullPath(), dsDeleted.getFullPath());
 
     expectStatus(
         Status.NOT_FOUND,

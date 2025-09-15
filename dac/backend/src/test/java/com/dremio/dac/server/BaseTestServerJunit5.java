@@ -16,10 +16,6 @@
 package com.dremio.dac.server;
 
 import static com.dremio.common.util.TestToolUtils.readTestResourceAsString;
-import static com.dremio.dac.server.JobsServiceTestUtils.submitJobAndGetData;
-import static com.dremio.dac.server.test.SampleDataPopulator.DEFAULT_USER_NAME;
-import static java.lang.String.format;
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import com.dremio.common.AutoCloseables;
@@ -33,7 +29,6 @@ import com.dremio.dac.daemon.DACDaemon.ClusterMode;
 import com.dremio.dac.daemon.DACDaemonModule;
 import com.dremio.dac.daemon.DACModule;
 import com.dremio.dac.daemon.ZkServer;
-import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.DatasetUI;
 import com.dremio.dac.model.folder.FolderPath;
 import com.dremio.dac.model.job.JobDataFragment;
@@ -67,8 +62,6 @@ import com.dremio.options.TypeValidators.StringValidator;
 import com.dremio.sabot.rpc.user.UserServer;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobSubmission;
-import com.dremio.service.job.proto.QueryType;
-import com.dremio.service.jobs.JobNotFoundException;
 import com.dremio.service.jobs.JobRequest;
 import com.dremio.service.jobs.JobStatusListener;
 import com.dremio.service.jobs.JobsService;
@@ -76,7 +69,6 @@ import com.dremio.service.jobs.SqlQuery;
 import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
-import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.source.proto.SourceChangeState;
 import com.dremio.service.reflection.ReflectionService;
 import com.dremio.service.users.SimpleUserService;
@@ -93,7 +85,6 @@ import java.io.IOException;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -465,6 +456,13 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
     return l(JobsService.class);
   }
 
+  /**
+   * @see JobsServiceTestWrapper
+   */
+  protected static JobsServiceTestWrapper jobs() {
+    return new JobsServiceTestWrapper(getJobsService(), DEFAULT_USERNAME);
+  }
+
   protected static OptionManager getOptionManager() {
     return l(OptionManager.class);
   }
@@ -597,31 +595,28 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
   }
 
   protected JobId submitAndWaitUntilSubmitted(JobRequest request, JobStatusListener listener) {
-    return JobsServiceTestUtils.submitAndWaitUntilSubmitted(getJobsService(), request, listener);
+    return jobs().submit(request, listener);
   }
 
   protected JobId submitAndWaitUntilSubmitted(JobRequest request) {
-    return JobsServiceTestUtils.submitAndWaitUntilSubmitted(getJobsService(), request);
+    return jobs().submit(request);
   }
 
   protected JobId submitJobAndWaitUntilCompletion(JobRequest request, JobStatusListener listener) {
-    return JobsServiceTestUtils.submitJobAndWaitUntilCompletion(getJobsService(), request, listener)
-        .getJobId();
+    return jobs().run(request, listener).getJobId();
   }
 
   protected boolean submitJobAndCancelOnTimeOut(JobRequest request, long timeOutInMillis)
       throws Exception {
-    return JobsServiceTestUtils.submitJobAndCancelOnTimeout(
-        getJobsService(), request, timeOutInMillis);
+    return jobs().submitJobAndCancelOnTimeout(request, timeOutInMillis);
   }
 
   protected static JobId submitJobAndWaitUntilCompletion(JobRequest request) {
-    return JobsServiceTestUtils.submitJobAndWaitUntilCompletion(getJobsService(), request);
+    return jobs().run(request).getJobId();
   }
 
   protected static JobSubmission getJobSubmissionAfterJobCompletion(JobRequest request) {
-    return JobsServiceTestUtils.submitJobAndWaitUntilCompletion(
-        getJobsService(), request, JobStatusListener.NO_OP);
+    return jobs().run(request).getJobSubmission();
   }
 
   protected void runQuery(
@@ -630,36 +625,26 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
       int rows,
       int columns,
       FolderPath parent,
-      BufferAllocator allocator)
-      throws JobNotFoundException {
+      BufferAllocator allocator) {
     FilePath filePath;
     if (parent == null) {
       filePath =
           new FilePath(
-              ImmutableList.of(HomeName.getUserHomePath(DEFAULT_USER_NAME).getName(), name));
+              ImmutableList.of(HomeName.getUserHomePath(DEFAULT_USERNAME).getName(), name));
     } else {
       List<String> path = Lists.newArrayList(parent.toPathList());
       path.add(name);
       filePath = new FilePath(path);
     }
     try (final JobDataFragment truncData =
-        submitJobAndGetData(
-            jobsService,
-            JobRequest.newBuilder()
-                .setSqlQuery(
-                    new SqlQuery(
-                        format("select * from %s", filePath.toPathString()), DEFAULT_USER_NAME))
-                .build(),
-            0,
-            rows + 1,
-            allocator)) {
+        jobs().run("select * from %s", filePath.toPathString()).getData(rows + 1, allocator)) {
       assertEquals(rows, truncData.getReturnedRowCount());
       assertEquals(columns, truncData.getColumns().size());
     }
   }
 
   protected static UserBitShared.QueryProfile getQueryProfile(JobRequest request) throws Exception {
-    return JobsServiceTestUtils.getQueryProfile(getJobsService(), request);
+    return jobs().run(request).getProfile();
   }
 
   /**
@@ -707,11 +692,11 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
       logger.warn(
           "Test called setSystemOptionInternal with default value: {}", option.getOptionName());
     }
-    JobsServiceTestUtils.setSystemOption(getJobsService(), option.getOptionName(), value);
+    jobs().setSystemOption(option.getOptionName(), value);
   }
 
   protected static void resetSystemOption(OptionValidator option) {
-    JobsServiceTestUtils.resetSystemOption(getJobsService(), option.getOptionName());
+    jobs().resetSystemOption(option.getOptionName());
   }
 
   protected static AutoCloseable withSystemOption(BooleanValidator option, boolean value) {
@@ -744,20 +729,11 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
     return () -> resetSystemOption(option);
   }
 
-  protected static UserBitShared.QueryProfile getTestProfile() throws Exception {
+  protected static UserBitShared.QueryProfile getTestProfile() {
     String query =
         "select sin(val_int_64) + 10 from cp"
             + ".\"parquet/decimals/mixedDecimalsInt32Int64FixedLengthWithStats.parquet\"";
-
-    UserBitShared.QueryProfile queryProfile =
-        getQueryProfile(
-            JobRequest.newBuilder()
-                .setSqlQuery(new SqlQuery(query, DEFAULT_USERNAME))
-                .setQueryType(QueryType.UI_INTERNAL_RUN)
-                .setDatasetPath(DatasetPath.NONE.toNamespaceKey())
-                .setDatasetVersion(DatasetVersion.NONE)
-                .build());
-    return queryProfile;
+    return jobs().run(query).getProfile();
   }
 
   protected static String readResourceAsString(String fileName) {
@@ -775,17 +751,11 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
   }
 
   protected static void runQueryInSession(String sql, String sessionId) {
-    String executedSesssionId =
-        getJobSubmissionAfterJobCompletion(createJobRequestFromSqlAndSessionId(sql, sessionId))
-            .getSessionId()
-            .getId();
-    assertThat(executedSesssionId).isEqualTo(sessionId);
+    jobs().runInSession(sql, sessionId);
   }
 
   protected static String runQueryAndGetSessionId(String sql) {
-    return getJobSubmissionAfterJobCompletion(createNewJobRequestFromSql(sql))
-        .getSessionId()
-        .getId();
+    return jobs().run(sql).getSessionId();
   }
 
   protected void runQueryCheckResults(
@@ -795,70 +765,34 @@ public abstract class BaseTestServerJunit5 extends BaseClientUtils {
       int rows,
       int columns,
       BufferAllocator allocator,
-      String sessionId)
-      throws JobNotFoundException {
+      String sessionId) {
 
     try (final JobDataFragment truncData =
-        submitJobAndGetData(
-            jobsService,
-            JobRequest.newBuilder()
-                .setSqlQuery(
-                    new SqlQuery(
-                        format(
-                            "select * from %s",
-                            String.format("%s.%s", sourcePluginName, String.join(".", tablePath))),
-                        ImmutableList.of(),
-                        DEFAULT_USERNAME,
-                        null,
-                        sessionId))
-                .build(),
-            0,
-            rows + 1,
-            allocator)) {
+        jobs()
+            .runInSession(
+                String.format("select * from %s.%s", sourcePluginName, String.join(".", tablePath)),
+                sessionId)
+            .getData(rows + 1, allocator)) {
       assertEquals(rows, truncData.getReturnedRowCount());
       assertEquals(columns, truncData.getColumns().size());
     }
   }
 
-  protected JobDataFragment runQueryAndGetResults(String sql, BufferAllocator allocator)
-      throws JobNotFoundException {
-    return submitJobAndGetData(
-        l(JobsService.class),
-        JobRequest.newBuilder()
-            .setSqlQuery(new SqlQuery(sql, Collections.emptyList(), DEFAULT_USERNAME))
-            .build(),
-        0,
-        500,
-        allocator);
+  @SuppressWarnings("MustBeClosedChecker") // legacy helper method
+  protected static JobDataFragment runQueryAndGetResults(String sql, BufferAllocator allocator) {
+    return jobs().run(sql).getData(500, allocator);
   }
 
   protected static JobId runQuery(String query) {
-    return submitJobAndWaitUntilCompletion(
-        JobRequest.newBuilder()
-            .setSqlQuery(new SqlQuery(query, SampleDataPopulator.DEFAULT_USER_NAME))
-            .setQueryType(QueryType.UI_INTERNAL_RUN)
-            .build());
+    return jobs().run(query).getJobId();
   }
 
   protected static JobId runQuery(String query, String sessionId) {
-    final SqlQuery sqlQuery =
-        (sessionId != null)
-            ? new SqlQuery(query, Collections.emptyList(), DEFAULT_USERNAME, null, sessionId)
-            : new SqlQuery(query, DEFAULT_USERNAME);
-    return submitJobAndWaitUntilCompletion(
-        JobRequest.newBuilder()
-            .setSqlQuery(sqlQuery)
-            .setQueryType(QueryType.UI_RUN)
-            .setDatasetPath(DatasetPath.NONE.toNamespaceKey())
-            .build());
+    return jobs().runInSession(query, sessionId).getJobId();
   }
 
   protected static JobId runQuery(SqlQuery sqlQuery) {
-    return submitJobAndWaitUntilCompletion(
-        JobRequest.newBuilder()
-            .setSqlQuery(sqlQuery)
-            .setQueryType(QueryType.UI_INTERNAL_RUN)
-            .build());
+    return jobs().run(sqlQuery).getJobId();
   }
 
   /**

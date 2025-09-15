@@ -88,11 +88,9 @@ public interface SubstitutionProvider {
   }
 
   /**
-   * Wraps the given RelNode within an ExpansionNode. If any default raw reflection is available for
-   * the given RelNode, replace the view with the reflection before wrapping.
+   * Wraps the materialization with a DefaultExpansionNode
    *
    * @param path Path of the view
-   * @param query RelNode to wrap
    * @param materialization Default raw materialization
    * @param rowType Row data type
    * @param viewExpansionContext SqlConverter
@@ -100,7 +98,6 @@ public interface SubstitutionProvider {
    */
   default Optional<RelNode> wrapDefaultExpansionNode(
       final NamespaceKey path,
-      final RelNode query,
       final DremioMaterialization materialization,
       final RelDataType rowType,
       final TableVersionContext versionContext,
@@ -127,7 +124,7 @@ public interface SubstitutionProvider {
     return ImmutableSet.of();
   }
 
-  default Optional<RelNode> generateHashReplacement(RelNode query) {
+  default Optional<RelNode> generateHashReplacement(RelNode query, RelDataType validatedRowType) {
     return Optional.empty();
   }
 

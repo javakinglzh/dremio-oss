@@ -147,8 +147,7 @@ public class ParquetRowLevelDeleteFileReaderFactory implements RowLevelDeleteFil
     // TODO: make this work with nested fields.. does icebergColumnIds even have the nested field
     // info?
     List<SchemaPath> columns =
-        ParquetReaderUtility.getColumnsFromEqualityIds(equalityIds, icebergColumnIds);
-
+        ParquetReaderUtility.getColumnsFromEqualityIds(equalityIds, icebergColumnIds, tableSchema);
     if (columns.size() != equalityIds.size()) {
       throw new IllegalStateException(
           String.format(

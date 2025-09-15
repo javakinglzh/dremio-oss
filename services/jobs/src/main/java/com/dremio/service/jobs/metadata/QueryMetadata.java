@@ -15,6 +15,8 @@
  */
 package com.dremio.service.jobs.metadata;
 
+import static com.dremio.exec.store.iceberg.IcebergUtils.normalizeSnapshotId;
+
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.utils.PathUtils;
@@ -51,7 +53,6 @@ import com.dremio.service.namespace.proto.NameSpaceContainer.Type;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableList.Builder;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
@@ -660,7 +661,7 @@ public class QueryMetadata {
                     .getPhysicalDataset()
                     .getIcebergMetadata();
             if (icebergMetadata != null) {
-              path.setSnapshotId(icebergMetadata.getSnapshotId());
+              path.setSnapshotId(normalizeSnapshotId(icebergMetadata));
             }
             builder.add(path);
             return super.visit(scan);

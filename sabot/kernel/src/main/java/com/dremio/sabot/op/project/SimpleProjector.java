@@ -89,7 +89,7 @@ public class SimpleProjector implements AutoCloseable {
 
     try {
       splitter =
-          ProjectOperator.createSplitterWithExpressions(
+          ProjectOperator.createSplitterWithExpressionsStatic(
               inputVectors,
               this.exprs,
               transfers,

@@ -248,7 +248,8 @@ public class MaterializationDescriptorProviderImpl implements MaterializationDes
               // First try to get the descriptor from the materialization cache
               if (isCacheEnabled()) {
                 descriptor =
-                    (ExpandedMaterializationDescriptor) materializationCache.get(m.getId());
+                    (ExpandedMaterializationDescriptor)
+                        materializationCache.getOne(m, viewTable.getPath());
                 // Check that materialization has not expired and all partitions are online
                 // (deprecated)
                 if (descriptor != null && descriptor.getExpirationTimestamp() < currentTime) {

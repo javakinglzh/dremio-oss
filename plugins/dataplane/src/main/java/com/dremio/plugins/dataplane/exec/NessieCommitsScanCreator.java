@@ -52,7 +52,9 @@ public class NessieCommitsScanCreator implements ProducerOperator.Creator<Nessie
               config.getSnapshotsScanOptions(),
               config.getSchemeVariate(),
               config.getFsScheme(),
-              config.getExcludedContentIDs()));
+              config.isExcludeMode(),
+              config.getListedContentIDs(),
+              config.isDryRun()));
     }
 
     // Scan remaining commits for applicable snapshots

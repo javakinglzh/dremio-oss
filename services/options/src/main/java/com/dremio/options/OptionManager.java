@@ -33,6 +33,52 @@ public interface OptionManager extends Iterable<OptionValue>, OptionResolver {
    */
   boolean setOption(OptionValue value);
 
+  default boolean setSystemOption(TypeValidators.LongValidator validator, long value) {
+    return setOption(OptionType.SYSTEM, validator, value);
+  }
+
+  default boolean setSystemOption(TypeValidators.BooleanValidator validator, boolean value) {
+    return setOption(OptionType.SYSTEM, validator, value);
+  }
+
+  default boolean setSystemOption(TypeValidators.StringValidator validator, String value) {
+    return setOption(OptionType.SYSTEM, validator, value);
+  }
+
+  default boolean setSystemOption(TypeValidators.DoubleValidator validator, double value) {
+    return setOption(OptionType.SYSTEM, validator, value);
+  }
+
+  default <T extends Enum<T>> boolean setSystemOption(
+      TypeValidators.EnumValidator<T> validator, T value) {
+    return setOption(OptionType.SYSTEM, validator, value);
+  }
+
+  default boolean setOption(OptionType type, TypeValidators.LongValidator validator, long value) {
+    return setOption(OptionValue.createLong(type, validator.getOptionName(), value));
+  }
+
+  default boolean setOption(
+      OptionType type, TypeValidators.BooleanValidator validator, boolean value) {
+    return setOption(OptionValue.createBoolean(type, validator.getOptionName(), value));
+  }
+
+  default boolean setOption(
+      OptionType type, TypeValidators.StringValidator validator, String value) {
+    return setOption(OptionValue.createString(type, validator.getOptionName(), value));
+  }
+
+  default boolean setOption(
+      OptionType type, TypeValidators.DoubleValidator validator, double value) {
+    return setOption(OptionValue.createDouble(type, validator.getOptionName(), value));
+  }
+
+  default <T extends Enum<T>> boolean setOption(
+      OptionType type, TypeValidators.EnumValidator<T> validator, T value) {
+    // enum values are simply stored as String
+    return setOption(type, validator, value.name());
+  }
+
   /**
    * Deletes the option if the option name is valid. Does nothing if the option is not set.
    *

@@ -350,6 +350,7 @@ public class TestNessieCommitsRecordReader extends BaseTestOperator {
     when(subScan.getPluginId()).thenReturn(storagePluginId);
     when(subScan.getFsScheme()).thenReturn(fs.getScheme());
     when(subScan.getSchemeVariate()).thenReturn("file");
+    when(subScan.isExcludeMode()).thenReturn(true);
     return subScan;
   }
 

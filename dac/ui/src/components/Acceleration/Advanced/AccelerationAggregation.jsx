@@ -52,6 +52,7 @@ export default class AccelerationAggregation extends Component {
       "aggregationReflections[].measureFields[].measureTypeList",
       "aggregationReflections[].distributionFields[].name",
       "aggregationReflections[].shouldDelete",
+      "aggregationReflections[].reflectionMode",
     ];
   }
 

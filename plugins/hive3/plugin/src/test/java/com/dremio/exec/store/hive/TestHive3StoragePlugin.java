@@ -39,6 +39,9 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CatalogOptions;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.server.SabotContext;
+import com.dremio.exec.store.hive.metadata.HivePartitionChunkListing;
+import com.dremio.exec.store.hive.metadata.MetadataAccumulator;
+import com.dremio.exec.store.hive.metadata.TableMetadata;
 import com.dremio.hive.proto.HiveReaderProto;
 import com.dremio.options.OptionManager;
 import com.dremio.service.users.SystemUser;
@@ -51,8 +54,10 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -62,9 +67,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
+import org.apache.arrow.vector.types.pojo.FieldType;
 import org.apache.arrow.vector.types.pojo.Schema;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.metastore.api.FieldSchema;
+import org.apache.hadoop.hive.metastore.api.SerDeInfo;
+import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
+import org.apache.hadoop.hive.metastore.api.Table;
 import org.apache.hive.common.util.Ref;
 import org.junit.Assert;
 import org.junit.Test;
@@ -224,6 +234,94 @@ public class TestHive3StoragePlugin {
         assertThrows(
             UserException.class, () -> plugin.validateDatabaseExists(hiveClient, "not_existing"));
     assertEquals("Database does not exist: [not_existing]", ex.getOriginalMessage());
+  }
+
+  @Test
+  public void testAccumulateTableMetadataWithNullSerDeInfo() throws Exception {
+    final HiveConf hiveConf = new HiveConf();
+    final SabotContext context = mock(SabotContext.class);
+    final Hive3StoragePlugin plugin = createHiveStoragePlugin(hiveConf, context);
+    DatasetHandle datasetHandle = mock(DatasetHandle.class);
+    HivePartitionChunkListing chunkListing = mock(HivePartitionChunkListing.class);
+
+    MetadataAccumulator metadataAccumulator =
+        setupSerDeInfoTests(chunkListing, null); // SerDeInfo is null
+
+    assertDoesNotThrow(() -> plugin.getDatasetMetadata(datasetHandle, chunkListing));
+    verify(metadataAccumulator)
+        .getTableSerializationLibSubscript("org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe");
+  }
+
+  @Test
+  public void testAccumulateTableMetadataWithNullSerializationLib() throws Exception {
+    final HiveConf hiveConf = new HiveConf();
+    final SabotContext context = mock(SabotContext.class);
+    final Hive3StoragePlugin plugin = createHiveStoragePlugin(hiveConf, context);
+    DatasetHandle datasetHandle = mock(DatasetHandle.class);
+    HivePartitionChunkListing chunkListing = mock(HivePartitionChunkListing.class);
+
+    MetadataAccumulator metadataAccumulator =
+        setupSerDeInfoTests(
+            chunkListing, new SerDeInfo(null, null, new HashMap<>())); // serialization lib is null
+
+    assertDoesNotThrow(() -> plugin.getDatasetMetadata(datasetHandle, chunkListing));
+    verify(metadataAccumulator)
+        .getTableSerializationLibSubscript("org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe");
+  }
+
+  /**
+   * Sets up mock objects necessary to test the {@code accumulateTableMetadata} method behavior with
+   * different SerDeInfo configurations. The method is specifically designed to test edge cases
+   * where SerDeInfo information might be null or incomplete, ensuring the plugin handles these
+   * scenarios gracefully by falling back to default SerDeInfo implementations.
+   *
+   * @param chunkListing the mock {@link HivePartitionChunkListing} to be configured with the test
+   *     table metadata and accumulator
+   * @param serdeInfo the {@link SerDeInfo} object to test with; can be {@code null} to test null
+   *     SerDeInfo handling, or have null serialization library to test incomplete SerDeInfo
+   *     configurations
+   * @return the mock {@link MetadataAccumulator} used in the test
+   */
+  private MetadataAccumulator setupSerDeInfoTests(
+      HivePartitionChunkListing chunkListing, SerDeInfo serdeInfo) {
+    Table table =
+        new Table(
+            "emptyserdetest",
+            "hufftesting",
+            null,
+            1752853081,
+            0,
+            0,
+            new StorageDescriptor(
+                List.of(new FieldSchema("id", "bigint", null)),
+                "s3://some-location",
+                null,
+                null,
+                false,
+                0,
+                serdeInfo, // serdeInfo is null or lib is null
+                List.of(),
+                List.of(),
+                new HashMap<>()),
+            List.of(),
+            new HashMap<>(),
+            null,
+            null,
+            "EXTERNAL_TABLE");
+
+    TableMetadata tableMetadata = mock(TableMetadata.class);
+    when(tableMetadata.getTableProperties()).thenReturn(new Properties());
+    when(tableMetadata.getTable()).thenReturn(table);
+    when(tableMetadata.getBatchSchema())
+        .thenReturn(
+            new BatchSchema(
+                List.of(new Field("id", FieldType.nullable(new ArrowType.Int(64, true)), null))));
+
+    MetadataAccumulator metadataAccumulator = spy(MetadataAccumulator.class);
+    when(chunkListing.getMetadataAccumulator()).thenReturn(metadataAccumulator);
+    when(chunkListing.unwrap(HivePartitionChunkListing.class)).thenReturn(chunkListing);
+    when(chunkListing.getTableMetadata()).thenReturn(tableMetadata);
+    return metadataAccumulator;
   }
 
   private void testValidateMetadataTimeout(Long timePerCheck, Long parallelism) throws Exception {

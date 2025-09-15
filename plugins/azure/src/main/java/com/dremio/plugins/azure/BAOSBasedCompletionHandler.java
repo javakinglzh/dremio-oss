@@ -17,15 +17,20 @@
 package com.dremio.plugins.azure;
 
 import java.io.ByteArrayOutputStream;
+import java.nio.file.AccessDeniedException;
 import org.asynchttpclient.AsyncCompletionHandlerBase;
 import org.asynchttpclient.HttpResponseBodyPart;
 import org.asynchttpclient.HttpResponseStatus;
 import org.asynchttpclient.Response;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import software.amazon.awssdk.http.HttpStatusCode;
 
 /** Process response via {@link ByteArrayOutputStream} */
 class BAOSBasedCompletionHandler extends AsyncCompletionHandlerBase {
   private boolean requestFailed = false;
   private final ByteArrayOutputStream baos;
+  private static final Logger logger = LoggerFactory.getLogger(BAOSBasedCompletionHandler.class);
 
   public BAOSBasedCompletionHandler(final ByteArrayOutputStream baos) {
     this.baos = baos;
@@ -38,8 +43,14 @@ class BAOSBasedCompletionHandler extends AsyncCompletionHandlerBase {
   }
 
   @Override
-  public Response onCompleted(final Response response) {
+  public Response onCompleted(final Response response) throws AccessDeniedException {
     if (requestFailed) {
+      logger.error(
+          "Error response received {} {}", response.getStatusCode(), response.getResponseBody());
+
+      if (response.getStatusCode() == HttpStatusCode.FORBIDDEN) {
+        throw new AccessDeniedException(response.getResponseBody());
+      }
       throw new RuntimeException(response.getResponseBody());
     }
     return response;

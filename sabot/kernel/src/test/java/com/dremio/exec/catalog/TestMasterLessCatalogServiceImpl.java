@@ -63,6 +63,7 @@ import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.orphanage.OrphanageImpl;
 import com.dremio.service.scheduler.LocalSchedulerService;
 import com.dremio.service.scheduler.ModifiableWrappedSchedulerService;
+import com.dremio.service.users.UserService;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.services.fabric.FabricServiceImpl;
@@ -289,7 +290,8 @@ public class TestMasterLessCatalogServiceImpl {
             () -> new VersionedDatasetAdapterFactory(),
             () -> new CatalogStatusEventsImpl(),
             () -> executor,
-            DirectProvider.wrap(namespaceServiceFactory));
+            DirectProvider.wrap(namespaceServiceFactory),
+            () -> mock(UserService.class));
     catalogService.start();
     mockUpPlugin = new TestCatalogServiceImpl.MockUpPlugin();
   }

@@ -24,6 +24,7 @@ import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.iceberg.Schema;
@@ -31,6 +32,7 @@ import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.Transaction;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.BadRequestException;
+import org.apache.iceberg.view.View;
 import org.apache.iceberg.view.ViewMetadata;
 
 /** Provides interface between @IcebergCatalogPlugin and concrete @Catalog implementation */
@@ -49,14 +51,14 @@ public interface CatalogAccessor
   DatasetHandleListing listDatasetHandles(String rootName, SupportsIcebergRootPointer plugin);
 
   /**
-   * Given a dataset , return a handle that represents the dataset.
+   * Given a dataset, return a handle that represents the dataset.
    *
    * @param dataset table path
    * @param plugin an Iceberg capable plugin instance where this request originates from
    * @param options options
    * @return an optional dataset handle, not null
    */
-  DatasetHandle getDatasetHandle(
+  Optional<DatasetHandle> getDatasetHandle(
       List<String> dataset, SupportsIcebergRootPointer plugin, GetDatasetOption... options);
 
   /**
@@ -133,4 +135,6 @@ public interface CatalogAccessor
   String getDefaultBaseLocation();
 
   Transaction createTableTransactionForNewTable(TableIdentifier tableIdentifier, Schema schema);
+
+  View loadView(TableIdentifier tableIdentifier, GetDatasetOption... options);
 }

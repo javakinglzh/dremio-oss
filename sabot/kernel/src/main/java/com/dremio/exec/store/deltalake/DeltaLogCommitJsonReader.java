@@ -110,6 +110,7 @@ public class DeltaLogCommitJsonReader implements DeltaLogReader {
       boolean commitInfoHasRowCount = false;
       boolean foundMetadata = false;
       boolean foundCommitInfo = false;
+      boolean foundProtocol = false;
 
       /*
        * Apart from commitInfo, other sections are optional.
@@ -129,6 +130,7 @@ public class DeltaLogCommitJsonReader implements DeltaLogReader {
                 String.format(
                     FORMAT_NOT_SUPPORTED_VERSION, minReaderVersion, minReaderVersionSupported));
           }
+          foundProtocol = true;
         } else if (json.has(DELTA_FIELD_COMMIT_INFO)) {
           snapshot = OBJECT_MAPPER.readValue(nextLine, DeltaLogSnapshot.class);
           if (snapshot.getDataFileEntryCount() > 0 || snapshot.getNetOutputRows() != 0) {
@@ -151,7 +153,10 @@ public class DeltaLogCommitJsonReader implements DeltaLogReader {
         }
 
         // Condition for early exit
-        if (foundCommitInfo && foundMetadata && (!fullRowCountEnabled || commitInfoHasRowCount)) {
+        if (foundCommitInfo
+            && foundMetadata
+            && foundProtocol
+            && (!fullRowCountEnabled || commitInfoHasRowCount)) {
           break;
         }
       }

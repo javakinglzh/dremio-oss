@@ -145,6 +145,7 @@ public class TestViewSchemaLearning extends BaseTestServer {
             Arrays.asList("mySpace", "myVDS"),
             null,
             null,
+            null,
             vds.getTag(),
             null,
             vds.getSql() + " -- SALT", // A little salt to make the SQL different
@@ -212,6 +213,7 @@ public class TestViewSchemaLearning extends BaseTestServer {
             vds.getId(),
             vds.getType(),
             Arrays.asList("mySpace", "myVDS"),
+            null,
             null,
             null,
             vds.getTag(),
@@ -330,7 +332,7 @@ public class TestViewSchemaLearning extends BaseTestServer {
   @Test
   public void testAmbiguousCols() throws Exception {
     verifyNoSchemaLearning(
-        "select *, 3 as a from ((select 1 as a) x cross join (select 2 as a) y)",
+        "select *, 3 as b from ((select 1 as a) x cross join (select 2 as a) y)",
         ImmutableList.of(
             ArrowType.ArrowTypeID.Int, ArrowType.ArrowTypeID.Int, ArrowType.ArrowTypeID.Int));
   }

@@ -109,6 +109,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import javax.inject.Provider;
+import javax.ws.rs.NotFoundException;
 import javax.ws.rs.WebApplicationException;
 import javax.ws.rs.core.SecurityContext;
 import org.apache.commons.codec.digest.DigestUtils;
@@ -119,6 +120,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+@SuppressWarnings("OptionalGetWithoutIsPresent")
 @ExtendWith(MockitoExtension.class)
 public class TestSourceService {
   private static final String SOURCE_NAME = "sourceName";
@@ -153,9 +155,9 @@ public class TestSourceService {
                   .setDatasetUpdateMode(UpdateMode.INLINE)
                   .setNamesRefreshMs(300_000L))
           .setCtime(System.currentTimeMillis());
-  private static final List<ConnectionConf<?, ?>> validConnectionConfs =
+  private static final List<ConnectionConf<?, ?>> VALID_CONNECTION_CONFS =
       ImmutableList.of(new NonInternalConf());
-  private static final List<ConnectionConf<?, ?>> invalidConnectionConfs =
+  private static final List<ConnectionConf<?, ?>> INVALID_CONNECTION_CONFS =
       ImmutableList.of(
           new SystemPluginConf(), new HomeFileConf(), new PDFSConf(), new InternalFileConf());
 
@@ -206,7 +208,6 @@ public class TestSourceService {
     when(principal.getName()).thenReturn("username");
     when(securityContext.getUserPrincipal()).thenReturn(principal);
 
-    final Catalog catalog = mock(Catalog.class);
     when(catalogService.getCatalog(any())).thenReturn(catalog);
 
     final ReflectionSettings reflectionSettings = mock(ReflectionSettings.class);
@@ -214,6 +215,7 @@ public class TestSourceService {
 
     SourceConfig sourceConfig =
         ProtostuffUtil.copy(SOURCE_CONFIG).setCtime(null).setId(null).setTag(null);
+    //noinspection unchecked
     when(connectionReader.getConnectionConf(sourceConfig)).thenReturn(mock(ConnectionConf.class));
 
     assertThat(sourceConfig.getCtime()).isNull();
@@ -239,6 +241,7 @@ public class TestSourceService {
             .setAccelerationNeverRefresh(true)
             .setCtime(System.currentTimeMillis() + 1000);
 
+    //noinspection unchecked
     when(connectionReader.getConnectionConf(updatedSourceConfig))
         .thenReturn(mock(ConnectionConf.class));
 
@@ -266,7 +269,9 @@ public class TestSourceService {
             eq(VersionedPlugin.ContentMode.ENTRY_METADATA_ONLY)))
         .thenReturn(DEFAULT_ENTRIES.stream());
     SourceResource sourceResource = makeSourceResource();
-    when(dataplanePlugin.getState()).thenReturn(SourceState.GOOD);
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.refreshSourceStatus(eq(new NamespaceKey(SOURCE_NAME))))
+        .thenReturn(SourceState.GOOD);
     when(catalogService.getSource(anyString())).thenReturn(dataplanePlugin);
     when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
@@ -300,7 +305,9 @@ public class TestSourceService {
         .thenReturn(DEFAULT_ENTRIES.stream());
 
     SourceResource sourceResource = makeSourceResource();
-    when(dataplanePlugin.getState()).thenReturn(SourceState.GOOD);
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.refreshSourceStatus(eq(new NamespaceKey(SOURCE_NAME))))
+        .thenReturn(SourceState.GOOD);
     when(dataplanePlugin.getFolder(any(CatalogEntityKey.class)))
         .thenReturn(Optional.of(mock(FolderConfig.class)));
 
@@ -651,7 +658,6 @@ public class TestSourceService {
     final String rootFolder = "rootFolder";
     SourceFolderPath sourceFolderPath =
         new SourceFolderPath(Arrays.asList(SOURCE_NAME, rootFolder));
-    SourceResource sourceResource = makeSourceResource();
     final Principal principal = mock(Principal.class);
     CatalogFolder catalogFolder = mock(CatalogFolder.class);
 
@@ -682,6 +688,25 @@ public class TestSourceService {
   }
 
   @Test
+  public void testGetFolderThrowsNotFoundException() throws Exception {
+    final Principal principal = mock(Principal.class);
+    final StoragePlugin storagePlugin = mock(StoragePlugin.class);
+
+    // Arrange
+    when(catalogService.getSource(anyString())).thenReturn(storagePlugin);
+    when(storagePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(false);
+    when(securityContext.getUserPrincipal()).thenReturn(principal);
+    doThrow(new NamespaceNotFoundException("not found"))
+        .when(namespaceService)
+        .list(new NamespaceKey(Arrays.asList("sourceName", "folder")), null, 2147483647);
+    SourceResource sourceResource = makeSourceResource();
+
+    // Act + Assert
+    assertThatThrownBy(() -> sourceResource.getFolder("folder", true, false, null, null))
+        .isInstanceOf(NotFoundException.class);
+  }
+
+  @Test
   public void testDeletePhysicalDatasetForVersionedSource() {
     when(catalogService.getSource("nessie")).thenReturn(dataplanePlugin);
     when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
@@ -696,11 +721,13 @@ public class TestSourceService {
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
   public void testListSource_versioned(boolean folderOrSource) throws Exception {
-    when(catalogService.getSource("source")).thenReturn(dataplanePlugin);
+    when(catalogService.getSource(SOURCE_NAME)).thenReturn(dataplanePlugin);
     when(dataplanePlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(dataplanePlugin.unwrap(VersionedPlugin.class)).thenReturn(dataplanePlugin);
     if (!folderOrSource) {
-      when(dataplanePlugin.getState()).thenReturn(SourceState.GOOD);
+      when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+      when(catalog.refreshSourceStatus(eq(new NamespaceKey(SOURCE_NAME))))
+          .thenReturn(SourceState.GOOD);
     }
 
     // Verify that page token is passed to versioned plugin and the result is passed back.
@@ -725,8 +752,8 @@ public class TestSourceService {
         folderOrSource
             ? getSourceService()
                 .listFolder(
-                    new SourceName("source"),
-                    new SourceFolderPath(ImmutableList.of("source", "folder")),
+                    new SourceName(SOURCE_NAME),
+                    new SourceFolderPath(ImmutableList.of(SOURCE_NAME, "folder")),
                     null,
                     null,
                     null,
@@ -735,7 +762,14 @@ public class TestSourceService {
                     false)
             : getSourceService()
                 .listSource(
-                    new SourceName("source"), null, null, null, null, pageToken, maxResults, false);
+                    new SourceName(SOURCE_NAME),
+                    null,
+                    null,
+                    null,
+                    null,
+                    pageToken,
+                    maxResults,
+                    false);
     assertThat(tree.getNextPageToken()).isEqualTo(nextPageToken);
 
     verify(dataplanePlugin, times(1))
@@ -745,12 +779,12 @@ public class TestSourceService {
 
   @Test
   public void testValidConnectionConfs() {
-    testConnectionConfs(validConnectionConfs, true);
+    testConnectionConfs(VALID_CONNECTION_CONFS, true);
   }
 
   @Test
   public void testInvalidConnectionConfs() {
-    testConnectionConfs(invalidConnectionConfs, false);
+    testConnectionConfs(INVALID_CONNECTION_CONFS, false);
   }
 
   @Test
@@ -759,7 +793,8 @@ public class TestSourceService {
     String userName = "testUser";
     SourceName versionedSource = new SourceName(name);
     when(catalogService.getSource(name)).thenReturn(dataplanePlugin);
-    when(dataplanePlugin.getState()).thenReturn(SourceState.DELETED);
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.refreshSourceStatus(eq(new NamespaceKey(name)))).thenReturn(SourceState.DELETED);
     assertThatThrownBy(
             () ->
                 getSourceService()
@@ -816,6 +851,7 @@ public class TestSourceService {
             .setMetadataPolicy(CatalogService.NEVER_REFRESH_POLICY)
             .setCtime(100L)
             .setId(new EntityId().setId("1"));
+    //noinspection unchecked
     when(connectionReader.getConnectionConf(sourceConfig)).thenReturn(mock(ConnectionConf.class));
     when(namespaceService.getSource(any())).thenReturn(sourceConfig);
     when(namespaceService.getDatasetCount(any(), anyLong(), anyInt()))
@@ -834,6 +870,8 @@ public class TestSourceService {
 
   private static final class NonInternalConf
       extends ConnectionConf<NonInternalConf, StoragePlugin> {
+
+    public NonInternalConf() {}
 
     @Override
     public StoragePlugin newPlugin(

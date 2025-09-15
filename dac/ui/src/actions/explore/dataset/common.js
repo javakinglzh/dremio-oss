@@ -236,6 +236,9 @@ export function navigateToNextDataset(
       ...(isTransform ? { isTransform } : {}),
       ...(goToSqlRunner && renderScriptTab ? { renderScriptTab } : {}),
       ...(location.state?.isFromDataGraph ? { isFromDataGraph: true } : {}), // used when opening a table from the lineage graph
+      ...(location.state?.layoutId
+        ? { layoutId: location.state?.layoutId }
+        : {}),
     };
 
     const state = isSaveAs ? { afterDatasetSave: true } : nextState;

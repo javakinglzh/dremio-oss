@@ -36,6 +36,7 @@ import com.dremio.exec.planner.physical.PhysicalPlanCreator;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.Prel;
 import com.dremio.exec.planner.physical.PrelUtil;
+import com.dremio.exec.planner.physical.PrelUtil.CntStrOptimization;
 import com.dremio.exec.planner.physical.explain.PrelSequencer;
 import com.dremio.exec.planner.physical.visitor.BridgeReaderSchemaFinder;
 import com.dremio.exec.planner.physical.visitor.CSEIdentifier;
@@ -552,6 +553,14 @@ public final class PrelTransformer {
 
   public static PhysicalOperator convertToPop(SqlHandlerConfig config, Prel prel)
       throws IOException {
+
+    /* This visitor will look for count star in the plan and will replace the count star with
+    record count from table metadata.
+    p.s.: this logic is here only bcz count star optimization is not executable without this step.
+    so this is kind of making the plan executable similar to prelToPop.
+    */
+    prel = prel.accept(new CntStrOptimization(config.getConverter().getCluster()), null);
+
     PhysicalPlanCreator creator = new PhysicalPlanCreator(config, PrelSequencer.getIdMap(prel));
     PhysicalOperator op = prel.getPhysicalOperator(creator);
 

@@ -286,4 +286,82 @@ public class TestVHashJoinSpill extends TestHashJoin {
       }
     }
   }
+
+  @Test
+  public void testToProducePageSizeError() throws Exception {
+    List<FieldInfo> buildFieldInfos = new ArrayList<>();
+    List<FieldInfo> probeFieldInfos = new ArrayList<>();
+    List<FieldInfo> buildKeyFieldInfos = new ArrayList<>();
+    List<FieldInfo> probeKeyFieldInfos = new ArrayList<>();
+
+    int batchSize = 4096;
+
+    buildKeyFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Int(32, true), batchSize, FieldInfo.SortOrder.RANDOM, 7));
+    buildFieldInfos.addAll(buildKeyFieldInfos);
+    buildFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Utf8(), batchSize, FieldInfo.SortOrder.RANDOM, 2));
+    probeKeyFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Int(32, true), batchSize, FieldInfo.SortOrder.RANDOM, 7));
+    probeFieldInfos.addAll(probeKeyFieldInfos);
+    probeFieldInfos.addAll(
+        getFieldInfos(new ArrowType.Utf8(), batchSize, FieldInfo.SortOrder.RANDOM, 2));
+
+    List<String> buildKeyNames = getFieldNames(buildKeyFieldInfos);
+    List<String> probeKeyNames = getFieldNames(probeKeyFieldInfos);
+
+    int dataSize = 6_000_000;
+    int numOfBatches = (dataSize / batchSize / (2 * 18));
+
+    try (BatchDataGenerator buildGenerator =
+            new BatchDataGenerator(
+                buildFieldInfos,
+                getTestAllocator(),
+                numOfBatches * batchSize,
+                batchSize,
+                65_000,
+                10_000 * batchSize);
+        BatchDataGenerator probeGenerator =
+            new BatchDataGenerator(
+                probeFieldInfos,
+                getTestAllocator(),
+                numOfBatches * batchSize,
+                batchSize,
+                250,
+                10_000 * batchSize)) {
+      JoinInfo info = null;
+
+      List<JoinCondition> joinConditions = new ArrayList<>();
+      int numOfFixedJoinKeysPerSide = 5;
+      for (int index = 0; index < numOfFixedJoinKeysPerSide; index++) {
+        joinConditions.add(
+            new JoinCondition("EQUALS", f(probeKeyNames.get(index)), f(buildKeyNames.get(index))));
+      }
+      int memoryLimit = 100_000_000;
+      info = getSpillingJoinInfo(joinConditions, null, JoinRelType.INNER, 0, memoryLimit);
+
+      OperatorStats stats;
+
+      // Page size can't be less than 64K based on the following criteria when spilling is involved
+      // PAGE_SIZE / HEAD_SIZE (4) needs to be ensured to be power of 2
+      // Able to allocate ordinals and BuildMemoryReleaser.MiscBuffers to be allocated in one page
+      // Required memory size for MiscBuffers is 34KB
+
+      try (AutoCloseable ac1 = with(HashJoinOperator.PAGE_SIZE, 64 * 1024);
+          AutoCloseable ac2 = with(TARGET_BATCH_RECORDS_MAX, 4096); ) {
+        try {
+          stats =
+              validateDual(
+                  info.operator, info.clazz, probeGenerator, buildGenerator, batchSize, null, true);
+          assertTrue(stats != null);
+        } catch (UserException ue) {
+          if (ue.getMessage().contains("too large to fit into page size")) {
+            assertTrue(true);
+          } else {
+            throw ue;
+          }
+        }
+      }
+    }
+  }
 }

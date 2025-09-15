@@ -2,15 +2,15 @@
 import {LRParser} from "@lezer/lr"
 export const parser = LRParser.deserialize({
   version: 14,
-  states: "!pOVQPOOOOQO'#C_'#C_OOQO'#Cd'#CdO_QPO'#C`OOQO'#C^'#C^QjQPOOOOQO-E6b-E6bOVQPO'#CaOOQO'#Ce'#CeQjQPOOOOQO'#Cc'#CcOOQO,58{,58{OOQO-E6c-E6c",
-  stateData: "t~O[OS~O]PO^QO~O^QOUSXYSX~OUVO~O[U^U~",
-  goto: "xYPPZ^^dPhkrRTOQSORYVTWTXRZVSROVRURQXTR[X",
-  nodeNames: "⚠ DremioSemanticSearch SearchText QuotedString UnquotedString Filter FilterKeyword FilterValue",
+  states: "!jOVQPOOOOQO'#C`'#C`O_QPO'#C_OOQO'#Cb'#CbOmQPO'#C^OOQO'#Cc'#CcOOQO'#Cd'#CdQVQPOOOVQPO,58xOOQO-E6b-E6bOOQO'#Ca'#CaOOQO1G.d1G.d",
+  stateData: "u~OZOS~O[PO^RO~OXVX[VX]RX^VX~O]WO~OZ[~",
+  goto: "yXPPY^bilYsTUOVTSOVSQOVRYWRZWSTOVRYWQVORXV",
+  nodeNames: "⚠ DremioSemanticSearch Filter FilterKeyword Word FilterValue QuotedString SearchText",
   maxTerm: 14,
   skippedNodes: [0],
-  repeatNodeCount: 2,
-  tokenData: ")f~RmX^!|pq!|qr#qrs$zst#qtu#quw#q!Q![#q!a!c#q!c!}#q#R#S#q#T#o#q#y#z!|$f$g!|$g#BY#q#BY#BZ'd#BZ$IS#q$IS$I_'d$I_$I|#q$I|$JO'd$JO$JT#q$JT$JU'd$JU$KV#q$KV$KW'd$KW&FU#q&FU&FV'd&FV;'S#q;'S;=`$t<%lO#q~#RY[~X^!|pq!|#y#z!|$f$g!|#BY#BZ!|$IS$I_!|$I|$JO!|$JT$JU!|$KV$KW!|&FU&FV!|~#v]^~qr#qst#qtu#quw#q!Q![#q![!]$o!a!c#q!c!}#q#R#S#q#T#o#q$g;'S#q;'S;=`$t<%lO#q~$tOU~~$wP;=`<%l#q~$}Wpq$zqr$zrs%gs#O$z#O#P%l#P;'S$z;'S;=`'^<%lO$z~%lO]~~%oXrs$z!P!Q$z#O#P$z#U#V$z#Y#Z$z#b#c$z#f#g$z#h#i$z#i#j&[~&_R!Q![&h!c!i&h#T#Z&h~&kR!Q![&t!c!i&t#T#Z&t~&wR!Q!['Q!c!i'Q#T#Z'Q~'TR!Q![$z!c!i$z#T#Z$z~'aP;=`<%l$z~'km[~^~X^!|pq!|qr#qst#qtu#quw#q!Q![#q![!]$o!a!c#q!c!}#q#R#S#q#T#o#q#y#z!|$f$g!|$g#BY#q#BY#BZ'd#BZ$IS#q$IS$I_'d$I_$I|#q$I|$JO'd$JO$JT#q$JT$JU'd$JU$KV#q$KV$KW'd$KW&FU#q&FU&FV'd&FV;'S#q;'S;=`$t<%lO#q",
+  repeatNodeCount: 1,
+  tokenData: "*O~RqX^#Ypq#Yqr#}rs%Xst#}tu#}uw#}z!Q#}!Q![#}![!]'q!]!^#}!a!c#}!c!}#}#Q#R#}#R#S#}#T#o#}#y#z#Y$f$g#Y$g#BY#}#BY#BZ'v#BZ$IS#}$IS$I_'v$I_$I|#}$I|$JO'v$JO$JT#}$JT$JU'v$JU$KV#}$KV$KW'v$KW&FU#}&FU&FV'v&FV;'S#};'S;=`%R<%lO#}~#_YZ~X^#Ypq#Y#y#z#Y$f$g#Y#BY#BZ#Y$IS$I_#Y$I|$JO#Y$JT$JU#Y$KV$KW#Y&FU&FV#Y~$S_[~qr#}st#}tu#}uw#}z!Q#}!Q![#}!]!^#}!a!c#}!c!}#}#Q#R#}#R#S#}#T#o#}$g;'S#};'S;=`%R<%lO#}~%UP;=`<%l#}~%[Wpq%Xqr%Xrs%ts#O%X#O#P%y#P;'S%X;'S;=`'k<%lO%X~%yO^~~%|Xrs%X!P!Q%X#O#P%X#U#V%X#Y#Z%X#b#c%X#f#g%X#h#i%X#i#j&i~&lR!Q![&u!c!i&u#T#Z&u~&xR!Q!['R!c!i'R#T#Z'R~'UR!Q!['_!c!i'_#T#Z'_~'bR!Q![%X!c!i%X#T#Z%X~'nP;=`<%l%X~'vO]~~'}oZ~[~X^#Ypq#Yqr#}st#}tu#}uw#}z!Q#}!Q![#}!]!^#}!a!c#}!c!}#}#Q#R#}#R#S#}#T#o#}#y#z#Y$f$g#Y$g#BY#}#BY#BZ'v#BZ$IS#}$IS$I_'v$I_$I|#}$I|$JO'v$JO$JT#}$JT$JU'v$JU$KV#}$KV$KW'v$KW&FU#}&FU&FV'v&FV;'S#};'S;=`%R<%lO#}",
   tokenizers: [0],
   topRules: {"DremioSemanticSearch":[0,1]},
-  tokenPrec: 31
+  tokenPrec: 34
 })

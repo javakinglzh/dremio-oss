@@ -725,8 +725,15 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
           CatalogEntityAlreadyExistsException,
           CatalogEntityNotFoundException,
           IOException {
+    boolean isSaveAs = true;
     if (asDatasetPath == null) {
       asDatasetPath = datasetPath;
+      isSaveAs = false;
+    } else if (asDatasetPath.equals(datasetPath)) {
+      throw UserException.validationError()
+          .message(
+              "Saving as the same view is not allowed. Please use \"Save view\" or give the view a different name and/or path.")
+          .buildSilently();
     }
     // check if source is versioned
     final Catalog catalog = datasetService.getCatalog();
@@ -750,7 +757,8 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
     }
 
     try {
-      final DatasetUI savedDataset = save(vds, asDatasetPath, savedTag, branchName, versioned);
+      final DatasetUI savedDataset =
+          save(vds, asDatasetPath, savedTag, branchName, versioned, isSaveAs);
       return new DatasetUIWithHistory(
           savedDataset, tool.getHistory(asDatasetPath, savedDataset.getDatasetVersion()));
     } catch (CatalogUnsupportedOperationException e) {
@@ -790,6 +798,7 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       String savedTag,
       String branchName,
       final boolean isVersionedSource,
+      boolean isSaveAs,
       NamespaceAttribute... attributes)
       throws DatasetNotFoundException,
           UserNotFoundException,
@@ -816,10 +825,11 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       if (isAncestor(vds, fullPathList)) {
         final String nameConflictErrorMsg =
             String.format(
-                "VDS '%s' already exists. Please enter a different name.", asDatasetPath.getLeaf());
+                "Cannot save the view '%s' because of a cyclical dependency. Please review and remove the cyclical reference and try again.",
+                asDatasetPath.getLeaf());
         throw new ConflictException(nameConflictErrorMsg);
       }
-      if (!datasetPath.equals(asDatasetPath)) {
+      if (isSaveAs) {
         // Saving as a new dataset. Reset the Id, so that a new id is created for the new dataset.
         vds.setId(null);
       }
@@ -1080,7 +1090,9 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
     Transformer.DatasetAndData datasetAndData = reapplyDataset(completionListener);
     completionListener.awaitUnchecked();
     try {
-      DatasetUI savedDataset = save(datasetAndData.getDataset(), asDatasetPath, null, null, false);
+      DatasetUI savedDataset =
+          save(
+              datasetAndData.getDataset(), asDatasetPath, null, null, false, asDatasetPath != null);
       return new DatasetUIWithHistory(
           savedDataset, tool.getHistory(asDatasetPath, datasetAndData.getDataset().getVersion()));
     } catch (CatalogUnsupportedOperationException e) {
@@ -1093,17 +1105,23 @@ public class DatasetVersionResource extends BaseResourceWithAllocator {
       throws DatasetVersionNotFoundException {
     List<VirtualDatasetUI> items = new ArrayList<>();
     NameDatasetRef previousVersion;
-    while (true) {
-      items.add(dataset);
-      previousVersion = dataset.getPreviousVersion();
-      if (previousVersion != null) {
-        dataset =
-            datasetService.getVersion(
-                new DatasetPath(previousVersion.getDatasetPath()),
-                new DatasetVersion(previousVersion.getDatasetVersion()));
-      } else {
-        break;
+    try {
+      while (true) {
+        items.add(dataset);
+        previousVersion = dataset.getPreviousVersion();
+        if (previousVersion != null) {
+          dataset =
+              datasetService.getVersion(
+                  new DatasetPath(previousVersion.getDatasetPath()),
+                  new DatasetVersion(previousVersion.getDatasetVersion()));
+        } else {
+          break;
+        }
       }
+    } catch (DatasetNotFoundException | DatasetVersionNotFoundException e) {
+      // If for some reason the history chain is broken/corrupt, we will get a
+      // DatasetNotFoundException or DatasetVersionNotFoundException. Only return the valid dataset
+      // versions.
     }
     return items;
   }

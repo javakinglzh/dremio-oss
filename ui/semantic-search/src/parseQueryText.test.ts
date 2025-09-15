@@ -33,7 +33,7 @@ describe("parseQuery tests", () => {
   });
 
   test("with multiple filters", () => {
-    assert.deepStrictEqual(parseQueryText("sample data in: NYC Taxi Trips"), {
+    assert.deepStrictEqual(parseQueryText(`sample data in:"NYC Taxi Trips"`), {
       searchText: "sample data",
       filters: [
         {
@@ -62,6 +62,13 @@ describe("parseQuery tests", () => {
     });
     assert.deepStrictEqual(parseQueryText("?"), {
       searchText: "?",
+      filters: [],
+    });
+  });
+
+  test("allows certain non alphanums as unquoted words", () => {
+    assert.deepStrictEqual(parseQueryText("! # $ % & * + , - . / ; ? @ ^ _"), {
+      searchText: "! # $ % & * + , - . / ; ? @ ^ _",
       filters: [],
     });
   });

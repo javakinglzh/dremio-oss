@@ -23,6 +23,7 @@ import com.dremio.exec.store.hive.HiveSettings;
 public class StatsEstimationParameters {
   private final boolean useMetastoreStats;
   private final int listSizeEstimate;
+  private final int mapSizeEstimate;
   private final int varFieldSizeEstimate;
   private final HiveSettings hiveSettings;
 
@@ -32,10 +33,15 @@ public class StatsEstimationParameters {
    * @param varFieldSizeEstimate Estimated size of variable width columns
    * @param hiveSettings         hiveSettings to check additional settings where needed
    */
-  public StatsEstimationParameters(final boolean useMetastoreStats, final int listSizeEstimate,
-                                   final int varFieldSizeEstimate, final HiveSettings hiveSettings) {
+  public StatsEstimationParameters(
+      final boolean useMetastoreStats,
+      final int listSizeEstimate,
+      final int mapSizeEstimate,
+      final int varFieldSizeEstimate,
+      final HiveSettings hiveSettings) {
     this.useMetastoreStats = useMetastoreStats;
     this.listSizeEstimate = listSizeEstimate;
+    this.mapSizeEstimate = mapSizeEstimate;
     this.varFieldSizeEstimate = varFieldSizeEstimate;
     this.hiveSettings = hiveSettings;
   }
@@ -46,6 +52,10 @@ public class StatsEstimationParameters {
 
   public int getListSizeEstimate() {
     return listSizeEstimate;
+  }
+
+  public int getMapSizeEstimate() {
+    return mapSizeEstimate;
   }
 
   public int getVarFieldSizeEstimate() {

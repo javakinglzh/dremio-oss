@@ -280,7 +280,9 @@ public class PlanCaptureAttemptObserver extends AbstractAttemptObserver {
             .setPlan("")
             .build());
     if (verbose) {
-      this.normalizedQueryPlans = new ArrayList<>();
+      if (this.normalizedQueryPlans == null) {
+        this.normalizedQueryPlans = new ArrayList<>();
+      }
       normalizedQueryPlans.stream()
           .forEach(
               plan -> {

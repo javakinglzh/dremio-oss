@@ -134,8 +134,6 @@ public class VacuumCatalogHandler implements SqlToPlanHandler {
         .checkCompatibility(sourcePlugin, config.getContext().getOptions());
 
     NessieApiV2 nessieApi = getNessieApi(sourcePlugin);
-    IcebergCostEstimates costEstimates =
-        VacuumCatalogCostEstimates.find(nessieApi, sqlNode.getVacuumOptions());
 
     Preconditions.checkState(sourcePlugin instanceof FileSystemPlugin);
     FileSystemPlugin fileSystemPlugin = (FileSystemPlugin) sourcePlugin;
@@ -152,7 +150,6 @@ public class VacuumCatalogHandler implements SqlToPlanHandler {
             relNode,
             managedStoragePlugin,
             nessieApi,
-            costEstimates,
             config.getContext().getQueryUserName(),
             fsScheme,
             schemeVariate);
@@ -166,7 +163,6 @@ public class VacuumCatalogHandler implements SqlToPlanHandler {
       RelNode relNode,
       ManagedStoragePlugin managedStoragePlugin,
       NessieApiV2 nessieApi,
-      IcebergCostEstimates costEstimates,
       String userName,
       String fsScheme,
       String schemeVariate)
@@ -178,7 +174,8 @@ public class VacuumCatalogHandler implements SqlToPlanHandler {
                 .getContext()
                 .getOptions()
                 .getOption(ICEBERG_VACUUM_CATALOG_RETENTION_PERIOD_MINUTES));
-    VacuumOptions vacuumOptions = new VacuumOptions(nessieGCPolicy);
+    VacuumOptions vacuumOptions = VacuumOptions.createInstance(nessieGCPolicy);
+    IcebergCostEstimates costEstimates = VacuumCatalogCostEstimates.find(nessieApi, vacuumOptions);
     Rel convertedRelNode =
         DrelTransformer.convertToDrel(
             config,

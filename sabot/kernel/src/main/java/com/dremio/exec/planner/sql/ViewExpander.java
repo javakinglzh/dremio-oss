@@ -24,14 +24,13 @@ import com.dremio.exec.catalog.CatalogIdentity;
 import com.dremio.exec.catalog.CatalogUser;
 import com.dremio.exec.ops.ViewExpansionContext;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
-import com.dremio.exec.planner.acceleration.substitution.SubstitutionProvider;
 import com.dremio.exec.planner.catalog.AutoVDSFixer;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
-import com.dremio.sabot.exec.context.ContextInformation;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.users.SystemUser;
 import com.dremio.service.users.UserNotFoundException;
+import javax.annotation.Nullable;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelRoot;
 import org.apache.calcite.sql.SqlNode;
@@ -46,20 +45,16 @@ public class ViewExpander {
   private final SqlValidatorAndToRelContext.BuilderFactory
       sqlValidatorAndToRelContextBuilderFactory;
   private final ViewExpansionContext viewExpansionContext;
-  private final SubstitutionProvider substitutionProvider;
   private final AutoVDSFixer viewVersionChecker;
 
   public ViewExpander(
       SqlValidatorAndToRelContext.BuilderFactory sqlValidatorAndToRelContextBuilderFactory,
-      ContextInformation contextInformation,
       ViewExpansionContext viewExpansionContext,
-      SubstitutionProvider substitutionProvider,
       AutoVDSFixer viewVersionChecker) {
     this.sqlValidatorAndToRelContextBuilderFactory =
         checkNotNull(
             sqlValidatorAndToRelContextBuilderFactory, "sqlValidatorAndToRelContextBuilderFactory");
     this.viewExpansionContext = checkNotNull(viewExpansionContext, "viewExpansionContext");
-    this.substitutionProvider = substitutionProvider;
     this.viewVersionChecker = checkNotNull(viewVersionChecker, "viewVersionChecker");
   }
 
@@ -76,8 +71,7 @@ public class ViewExpander {
     SqlValidatorAndToRelContext newConverter = builder.build();
     final SqlNode parsedNode = newConverter.parse(queryString);
     final SqlNode validatedNode = newConverter.validate(parsedNode);
-    final RelRoot root = newConverter.toConvertibleRelRoot(validatedNode, true);
-    return root;
+    return newConverter.toConvertibleRelRoot(validatedNode, true);
   }
 
   public RelRoot expandView(ViewTable viewTable) {
@@ -124,10 +118,8 @@ public class ViewExpander {
 
   private RelRoot expandViewInternal(final ViewTable viewTable) {
     assert viewTable != null;
-
-    final CatalogIdentity viewOwner = viewTable.getViewOwner();
+    final @Nullable CatalogIdentity viewOwner = viewTable.getViewOwner();
     final String queryString = viewTable.getView().getSql();
-
     ViewExpansionContext.ViewExpansionToken token = null;
     try {
       token = viewExpansionContext.reserveViewExpansionToken(viewOwner);
@@ -147,7 +139,9 @@ public class ViewExpander {
   }
 
   private RelRoot expandRelNode(
-      final ViewTable viewTable, final CatalogIdentity viewOwner, final String queryString) {
+      final ViewTable viewTable,
+      final @Nullable CatalogIdentity viewOwner,
+      final String queryString) {
     assert viewTable != null;
 
     final NamespaceKey viewPath = viewTable.getPath();

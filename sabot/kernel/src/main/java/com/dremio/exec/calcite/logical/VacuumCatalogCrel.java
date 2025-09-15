@@ -41,7 +41,9 @@ public class VacuumCatalogCrel extends VacuumCatalogRelBase {
       VacuumOptions vacuumOptions,
       String fsScheme,
       String schemeVariate,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(
         Convention.NONE,
         cluster,
@@ -53,7 +55,9 @@ public class VacuumCatalogCrel extends VacuumCatalogRelBase {
         vacuumOptions,
         fsScheme,
         schemeVariate,
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override
@@ -68,7 +72,9 @@ public class VacuumCatalogCrel extends VacuumCatalogRelBase {
         getVacuumOptions(),
         getFsScheme(),
         getSchemeVariate(),
-        getExcludedContentIDs());
+        isExcludeMode(),
+        getListedContentIDs(),
+        isDryRun());
   }
 
   public RelNode createWith(
@@ -90,7 +96,9 @@ public class VacuumCatalogCrel extends VacuumCatalogRelBase {
             vacuumOptions,
             fsScheme,
             schemeVariate,
-            getExcludedContentIDs());
+            isExcludeMode(),
+            getListedContentIDs(),
+            isDryRun());
     newCrel.setDefaultRetentionUsed(isDefaultRetentionUsed);
     return newCrel;
   }

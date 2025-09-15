@@ -43,7 +43,8 @@ public class TestVacuumCatalogCostEstimates {
   @Test
   public void testAllCommitsLive() {
     long cutOff = Instant.now().minusSeconds(1000).toEpochMilli();
-    VacuumOptions vacuumCatalogOptions = new VacuumOptions(true, true, cutOff, 1, null, null);
+    VacuumOptions vacuumCatalogOptions =
+        VacuumOptions.createInstance(true, true, cutOff, 1, null, null);
     long commitsPerBranch = 100L;
     long numRefs = 1L;
 
@@ -78,7 +79,7 @@ public class TestVacuumCatalogCostEstimates {
     long cutOff = Instant.now().minusSeconds(5).toEpochMilli();
     int retainLast = 2;
     VacuumOptions vacuumCatalogOptions =
-        new VacuumOptions(true, true, cutOff, retainLast, null, null);
+        VacuumOptions.createInstance(true, true, cutOff, retainLast, null, null);
     long commitsPerBranch = 100L;
     long numRefs = 1L;
 
@@ -113,7 +114,7 @@ public class TestVacuumCatalogCostEstimates {
     long cutOff = Instant.now().minusSeconds(500).toEpochMilli();
     int retainLast = 1;
     VacuumOptions vacuumCatalogOptions =
-        new VacuumOptions(true, true, cutOff, retainLast, null, null);
+        VacuumOptions.createInstance(true, true, cutOff, retainLast, null, null);
     long commitsPerBranch = 100L;
     long numRefs = 1L;
 
@@ -149,7 +150,7 @@ public class TestVacuumCatalogCostEstimates {
     long cutOff = Instant.now().minusSeconds(500).toEpochMilli();
     int retainLast = 1;
     VacuumOptions vacuumCatalogOptions =
-        new VacuumOptions(true, true, cutOff, retainLast, null, null);
+        VacuumOptions.createInstance(true, true, cutOff, retainLast, null, null);
     long commitsPerBranch = 100L;
     long numRefs = 20L;
 
@@ -182,9 +183,10 @@ public class TestVacuumCatalogCostEstimates {
 
   @Test
   public void testErrorFallback() {
-    long cutOff = Instant.now().minusSeconds(500).toEpochMilli();
+    Long cutOff = Instant.now().minusSeconds(500).toEpochMilli();
 
-    VacuumOptions vacuumCatalogOptions = new VacuumOptions(true, true, cutOff, 1, null, null);
+    VacuumOptions vacuumCatalogOptions =
+        VacuumOptions.createInstance(true, true, cutOff, 1, null, null);
     NessieApiV2 nessieApi = mock(NessieApiV2.class);
     NessieConfiguration configuration = config(Instant.now().minusSeconds(1000));
     doReturn(configuration).when(nessieApi).getConfig();

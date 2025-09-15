@@ -19,14 +19,10 @@ import com.dremio.exec.exception.SchemaChangeException;
 import com.dremio.exec.physical.config.WindowPOP;
 import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
-import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.FunctionContext;
 import com.dremio.sabot.exec.context.OperatorContext;
 import java.util.List;
 import javax.inject.Named;
-import org.apache.arrow.memory.ArrowBuf;
-import org.apache.arrow.vector.BaseValueVector;
-import org.apache.arrow.vector.ValueVector;
 
 /**
  * WindowFramer implementation that doesn't support the FRAME clause (will assume the default
@@ -38,10 +34,10 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(NoFrameSupportTemplate.class);
 
-  private FunctionContext context;
-  private VectorAccessible container;
-  private VectorContainer internal;
-  private List<VectorContainer> batches;
+  protected FunctionContext context;
+  protected VectorAccessible container;
+  private boolean partitionSpansSeveralBatches;
+  protected List<VectorContainer> batches;
   private int outputCount; // number of rows in currently/last processed batch
 
   private VectorAccessible current;
@@ -51,7 +47,7 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   private boolean requireFullPartition;
 
   private Partition partition; // current partition being processed
-  private int currentBatchIndex; // index of current batch in batches
+  protected int currentBatchIndex; // index of current batch in batches
 
   @Override
   public void setup(
@@ -66,20 +62,10 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
     this.batches = batches;
     this.context = context;
 
-    internal = new VectorContainer(oContext.getAllocator());
-    allocateInternal();
-
     outputCount = 0;
     partition = null;
 
     this.requireFullPartition = requireFullPartition;
-  }
-
-  private void allocateInternal() {
-    for (VectorWrapper<?> w : container) {
-      ValueVector vv = internal.addOrGet(w.getField());
-      vv.allocateNew();
-    }
   }
 
   /** processes all rows of the first batch. */
@@ -113,6 +99,7 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   private void newPartition(final VectorAccessible current, final int currentRow)
       throws SchemaChangeException {
     partition = new Partition();
+    partitionSpansSeveralBatches = false;
     updatePartitionSize(partition, currentRow);
     setupPartition(context, current, container);
   }
@@ -120,13 +107,7 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   private void cleanPartition() {
     partition = null;
     resetValues();
-    for (VectorWrapper<?> vw : internal) {
-      ValueVector vv = vw.getValueVector();
-      if ((vv instanceof BaseValueVector)) {
-        ArrowBuf validityBuffer = vv.getValidityBuffer();
-        validityBuffer.setZero(0, validityBuffer.capacity());
-      }
-    }
+    partitionSpansSeveralBatches = false;
   }
 
   /**
@@ -143,76 +124,32 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
         partition,
         currentRow,
         outputCount);
-
     setupCopyNext(context, current, container);
     // copy remaining from current
     setupCopyPrev(context, current, container);
     int row = currentRow;
     partition.setFirstRowInPartition(currentRow);
+    boolean hasNextBatch = hasNextBatch(currentBatchIndex);
+
     // process all rows except the last one of the batch/partition
     while (row < outputCount && !partition.isDone()) {
       partition.setCurrentRowInPartition(row);
 
-      copyFromPastBatch(row, currentBatchIndex);
       copyPrev(row, row, partition);
       processRow(row);
       copyNext(row, row, partition);
-      copyFromNextBatch(row, currentBatchIndex);
+
+      if (partitionSpansSeveralBatches) {
+        if (hasNextBatch) {
+          // Use consolidated copyLeadValue for LEAD functions
+          copyLeadValue(row, row, partition, batches, currentBatchIndex, row);
+        }
+        // Use consolidated copyLagValue for LAG functions
+        copyLagValue(row, row, partition, batches, currentBatchIndex, row);
+      }
       row++;
     }
     return row;
-  }
-
-  /**
-   * Copies values from the previous batch to the current batch if the rows belong to the same
-   * partition. This method is recursive and processes all previous batches until the first batch or
-   * until a row from a different partition is encountered.
-   *
-   * @param row The index of the current row in the current batch.
-   * @param batchIndex The index of the current batch in the list of batches.
-   */
-  private void copyFromPastBatch(int row, int batchIndex) {
-    // Check if there is a previous batch to process
-    if (batchIndex > 0) {
-      // Get the previous batch
-      final VectorAccessible previousBatch = batches.get(batchIndex - 1);
-      // Update the count of rows skipped in the partition
-      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch + previousBatch.getRecordCount();
-      // Recursively process the previous batch
-      copyFromPastBatch(row, batchIndex - 1);
-      // Revert the count of rows skipped in the partition after processing
-      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch - previousBatch.getRecordCount();
-      // Set up the copy operation for the previous batch
-      setupCopyFromPastBatch(context, previousBatch, container);
-      // Perform the copy operation from the previous batch to the current batch
-      copyFromPastBatch(row, row, partition, previousBatch, current);
-    }
-  }
-
-  /**
-   * Recursively copies values from the next batch to the current batch if the rows belong to the
-   * same partition. This method processes all subsequent batches until the last batch or until a
-   * row from a different partition is encountered.
-   *
-   * @param row The index of the current row in the current batch.
-   * @param batchIndex The index of the current batch in the list of batches.
-   */
-  private void copyFromNextBatch(int row, int batchIndex) {
-    // Check if there is a next batch to process
-    if (batchIndex + 1 < batches.size()) {
-      // Get the next batch
-      final VectorAccessible nextBatch = batches.get(batchIndex + 1);
-      // Update the count of rows skipped in the partition
-      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch + nextBatch.getRecordCount();
-      // Recursively process the next batch
-      copyFromNextBatch(row, batchIndex + 1);
-      // Revert the count of rows skipped in the partition after processing
-      partition.rowsInSkipedBatch = partition.rowsInSkipedBatch - nextBatch.getRecordCount();
-      // Set up the copy operation for the next batch
-      setupCopyFromNextBatch(context, nextBatch, container);
-      // Perform the copy operation from the next batch to the current batch
-      copyFromNextBatch(row, row, partition, nextBatch, current);
-    }
   }
 
   private void processRow(final int row) throws Exception {
@@ -241,7 +178,7 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
     // count all rows that are in the same partition of start
     // keep increasing length until we find first row of next partition or we reach the very last
     // batch
-    int batchIndex = 0;
+    partitionSpansSeveralBatches = false;
     outer:
     for (int i = currentBatchIndex; i < batches.size(); i++) {
       final VectorAccessible batch = batches.get(i);
@@ -254,7 +191,20 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
         }
       }
 
+      // For the lag/lead case, it's possible that a partition spans multiple batches.
+      // In lag scenario, the current partition's values are added to the internal
+      // VectorContainer.
+      // When processing a partition segment from another batch, the internal VectorContainer is
+      // used for previous values.
+      // However, it must be verified that the partition actually spans multiple batches.
+      // In lead scenario, value for current row could be in the next batch. So it should be
+      // copied from the next batch.
+      if (hasNextBatch(i) && isSamePartition(start, current, 0, batches.get(i + 1))) {
+        partitionSpansSeveralBatches = true;
+      }
+
       if (!requireFullPartition) {
+
         // we are only interested in the first batch's records
         break;
       }
@@ -304,6 +254,10 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
     return length;
   }
 
+  private boolean hasNextBatch(int currentBatchIndex) {
+    return batches.size() - currentBatchIndex > 1;
+  }
+
   @Override
   public int getOutputCount() {
     return outputCount;
@@ -313,7 +267,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
   @Override
   public void close() {
     logger.trace("clearing internal");
-    internal.clear();
   }
 
   /**
@@ -355,17 +308,38 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
       @Named("incoming") VectorAccessible incoming,
       @Named("outgoing") VectorAccessible outgoing);
 
-  public abstract void copyFromNextBatch(
-      @Named("inIndex") int inIndex,
-      @Named("outIndex") int outIndex,
-      @Named("partition") Partition partition,
-      @Named("incoming") VectorAccessible incoming,
-      @Named("b2") VectorAccessible b2);
-
   public abstract void setupCopyFromNextBatch(
       @Named("context") FunctionContext context,
       @Named("incoming") VectorAccessible incoming,
       @Named("outgoing") VectorAccessible outgoing);
+
+  /**
+   * Consolidated method for LEAD function that combines: 1. Calculating destination lead index
+   * (evalLeadOffset) 2. Finding appropriate batch (getLeadBatchIndexForRowIndex) 3. Copying from
+   * appropriate batch to output (setupCopyFromNextBatch + copyFromNextBatch) This method is only
+   * implemented by LEAD functions to avoid return type complexity and unreachable code problems.
+   */
+  public abstract void copyLeadValue(
+      @Named("inIndex") int inIndex,
+      @Named("outIndex") int outIndex,
+      @Named("partition") Partition partition,
+      @Named("batches") List<VectorContainer> batches,
+      @Named("currentBatchIndex") int currentBatchIndex,
+      @Named("destLeadIndex") int destLeadIndex);
+
+  /**
+   * Consolidated method for LAG function that combines: 1. Calculating destination lag index
+   * (evalLagOffset) 2. Finding appropriate batch (getLagBatchIndexForRowIndex) 3. Copying from
+   * appropriate batch to output (setupCopyFromNextBatch + copyFromNextBatch) This method is only
+   * implemented by LAG functions to avoid return type complexity and unreachable code problems.
+   */
+  public abstract void copyLagValue(
+      @Named("inIndex") int inIndex,
+      @Named("outIndex") int outIndex,
+      @Named("partition") Partition partition,
+      @Named("batches") List<VectorContainer> batches,
+      @Named("currentBatchIndex") int currentBatchIndex,
+      @Named("destLagIndex") int destLagIndex);
 
   /**
    * copies value(s) from inIndex row to outIndex row. Mostly used by LAG. inIndex always points to
@@ -380,18 +354,6 @@ public abstract class NoFrameSupportTemplate implements WindowFramer {
       @Named("partition") Partition partition);
 
   public abstract void setupCopyPrev(
-      @Named("context") FunctionContext context,
-      @Named("incoming") VectorAccessible incoming,
-      @Named("outgoing") VectorAccessible outgoing);
-
-  public abstract void copyFromPastBatch(
-      @Named("inIndex") int inIndex,
-      @Named("outIndex") int outIndex,
-      @Named("partition") Partition partition,
-      @Named("incoming") VectorAccessible incoming,
-      @Named("b2") VectorAccessible b2);
-
-  public abstract void setupCopyFromPastBatch(
       @Named("context") FunctionContext context,
       @Named("incoming") VectorAccessible incoming,
       @Named("outgoing") VectorAccessible outgoing);

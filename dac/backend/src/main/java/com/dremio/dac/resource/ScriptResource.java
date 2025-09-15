@@ -91,10 +91,10 @@ public class ScriptResource {
     final String finalOrderBy = (orderBy == null) ? "" : orderBy;
 
     try {
-      Long totalScripts = scriptService.getCountOfMatchingScripts(finalSearch, "", createdBy);
+      Long totalScripts = scriptService.getCountOfMatchingScripts(finalSearch, createdBy);
       List<ScriptData> scripts =
           scriptService
-              .getScripts(finalOffset, finalMaxResults, finalSearch, finalOrderBy, "", createdBy)
+              .getScripts(finalOffset, finalMaxResults, finalSearch, finalOrderBy, createdBy)
               .parallelStream()
               .map(this::fromScript)
               .collect(Collectors.toList());

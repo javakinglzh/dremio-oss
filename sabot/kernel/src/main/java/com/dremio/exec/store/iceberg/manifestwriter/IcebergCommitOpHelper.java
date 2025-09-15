@@ -289,6 +289,7 @@ public class IcebergCommitOpHelper implements AutoCloseable {
         createReadSignProvider(icebergTableProps, true);
         icebergOpCommitter =
             icebergModel.getFullMetadataRefreshCommitter(
+                context.getOptions(),
                 icebergTableProps.getTableName(),
                 config.getDatasetPath().getPathComponents(),
                 icebergTableProps.getDataTableLocation(),
@@ -479,13 +480,17 @@ public class IcebergCommitOpHelper implements AutoCloseable {
     }
 
     if (historyEventHandler instanceof CopyIntoHistoryEventHandler) {
-      FileLoadInfo info =
+      CopyIntoFileLoadInfo.Builder builder =
           new CopyIntoFileLoadInfo.Builder(
                   FileLoadInfo.Util.getInfo(
                       new String(metadataVector.get(row)), CopyIntoFileLoadInfo.class))
-              .setRecordsRejectedCount(rejectedRecordCountVector.get(row))
-              .setSnapshotId(config.getTableFormatOptions().getSnapshotId())
-              .build();
+              .setRecordsRejectedCount(rejectedRecordCountVector.get(row));
+
+      if (config.getTableFormatOptions().getSnapshotId() != null) {
+        builder.setSnapshotId(config.getTableFormatOptions().getSnapshotId());
+      }
+
+      FileLoadInfo info = builder.build();
       historyEventHandler.process(info);
     }
   }
@@ -720,6 +725,7 @@ public class IcebergCommitOpHelper implements AutoCloseable {
                       Optional.ofNullable(config.getTempLocation())
                           .orElse(config.getFinalLocation()))
                   .userName(config.getProps().getUserName())
+                  .userId(config.getUserId())
                   .operatorContext(context)
                   .dataset(config.getDatasetPath().getPathComponents()));
     } catch (IOException ioe) {
@@ -777,8 +783,7 @@ public class IcebergCommitOpHelper implements AutoCloseable {
       if (!success) {
         // check the commit status from the icebergOpCommiter if status is not NOT_STARTED
         // we can safely delete the files as exception thrown before
-        if ((icebergOpCommitter == null
-            || (icebergOpCommitter != null && !icebergOpCommitter.isIcebergTableUpdated()))) {
+        if (icebergOpCommitter == null || !icebergOpCommitter.isIcebergTableUpdated()) {
           deleteManifestFiles(fileIO, icebergManifestFiles, false);
         }
       }

@@ -40,6 +40,7 @@ public class Dataset implements CatalogEntity {
   private final String id;
   private final DatasetType type;
   private final List<String> path;
+  private final String datasetVersion;
 
   private final DatasetFields fields;
 
@@ -70,6 +71,7 @@ public class Dataset implements CatalogEntity {
       String id,
       DatasetType type,
       List<String> path,
+      String datasetVersion,
       DatasetFields fields,
       Long createdAt,
       String tag,
@@ -82,6 +84,7 @@ public class Dataset implements CatalogEntity {
     this.id = id;
     this.type = type;
     this.path = path;
+    this.datasetVersion = datasetVersion;
     this.fields = fields;
     this.createdAt = createdAt;
     this.tag = tag;
@@ -98,6 +101,7 @@ public class Dataset implements CatalogEntity {
       @JsonProperty("id") String id,
       @JsonProperty("type") DatasetType type,
       @JsonProperty("path") List<String> path,
+      @JsonProperty("datasetVersion") String datasetVersion,
       @JsonProperty("createdAt") Long createdAt,
       @JsonProperty("tag") String tag,
       @JsonProperty("accelerationRefreshPolicy") RefreshSettings accelerationRefreshPolicy,
@@ -111,6 +115,7 @@ public class Dataset implements CatalogEntity {
         id,
         type,
         path,
+        datasetVersion,
         null,
         createdAt,
         tag,
@@ -143,6 +148,10 @@ public class Dataset implements CatalogEntity {
 
   public List<String> getPath() {
     return path;
+  }
+
+  public String getDatasetVersion() {
+    return datasetVersion;
   }
 
   public DatasetFields getFields() {

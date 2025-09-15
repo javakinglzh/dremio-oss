@@ -38,8 +38,6 @@ import org.junit.Test;
 /** Test what happens when we try to refresh a reflection while an executor is down. */
 public class TestReflectionsExecutorDown extends BaseTestReflection {
 
-  private ReflectionMonitor monitor = newReflectionMonitor();
-
   @BeforeClass
   public static void setup() throws ExecutionSetupException, IOException, NamespaceException {
     Assume.assumeTrue(isMultinode()); // only run in multinode

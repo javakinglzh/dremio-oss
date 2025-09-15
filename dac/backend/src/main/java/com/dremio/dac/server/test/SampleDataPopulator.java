@@ -77,6 +77,7 @@ import com.dremio.service.namespace.space.proto.SpaceConfig;
 import com.dremio.service.users.SystemUser;
 import com.dremio.service.users.UserService;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Function;
 import com.google.common.base.Stopwatch;
 import com.google.common.base.Throwables;
 import com.google.common.io.Resources;
@@ -217,6 +218,136 @@ public class SampleDataPopulator implements AutoCloseable {
     return ds;
   }
 
+  /**
+   * Creates a physical dataset with multiple JSON records in a file system source.
+   *
+   * @param newPhysicalDatasetPath The path of the dataset (e.g., ["LocalFS1", "my-data.json"])
+   * @param recordGenerator A function that generates a JSON record string for a given index
+   * @param count The number of records to generate
+   * @return
+   * @throws IOException If there's an error creating the file
+   * @throws NamespaceException If there's an error registering the dataset
+   */
+  private DatasetConfig createPhysicalDatasetWithRecords(
+      List<String> newPhysicalDatasetPath, Function<Integer, String> recordGenerator, int count)
+      throws IOException, NamespaceException {
+    final String fileName = newPhysicalDatasetPath.get(newPhysicalDatasetPath.size() - 1);
+    final File file = new File(path.toFile(), fileName);
+    if (!file.exists()) {
+      try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+        for (int i = 0; i < count; ++i) {
+          writer.write(recordGenerator.apply(i));
+        }
+      }
+    }
+
+    return addOrUpdatePhysicalDataset(newPhysicalDatasetPath);
+  }
+
+  /**
+   * Creates a physical dataset with a single JSON record from a classpath resource.
+   *
+   * @param newPhysicalDatasetPath The path of the dataset (e.g., ["LocalFS1", "my-data.json"])
+   * @param resourcePath The path to the resource in the classpath
+   * @throws IOException If there's an error creating the file
+   * @throws NamespaceException If there's an error registering the dataset
+   */
+  private void createPhysicalDatasetFromClasspathResource(
+      List<String> newPhysicalDatasetPath, String resourcePath)
+      throws IOException, NamespaceException {
+    final String fileName = newPhysicalDatasetPath.get(newPhysicalDatasetPath.size() - 1);
+    final File file = new File(path.toFile(), fileName);
+    if (!file.exists()) {
+      try (BufferedWriter writer = new BufferedWriter(new FileWriter(file))) {
+        writer.write(getFileContentsFromClassPath(resourcePath));
+      }
+    }
+
+    addOrUpdatePhysicalDataset(newPhysicalDatasetPath);
+  }
+
+  private DatasetConfig addOrUpdatePhysicalDataset(final List<String> path)
+      throws NamespaceException {
+    PhysicalDatasetPath datasetPath = new PhysicalDatasetPath(path);
+    DatasetConfig datasetConfig = new DatasetConfig();
+    datasetConfig.setOwner(username);
+    datasetConfig.setFullPathList(datasetPath.toPathList());
+    datasetConfig.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
+    datasetConfig.setName(path.get(path.size() - 1));
+    datasetConfig.setPhysicalDataset(
+        new PhysicalDataset().setFormatSettings(new JsonFileConfig().asFileConfig()));
+    namespaceService.addOrUpdateDataset(datasetPath.toNamespaceKey(), datasetConfig);
+    return datasetConfig;
+  }
+
+  /**
+   * Creates a physical dataset with custom field names and types.
+   *
+   * @param fieldNames The names of the fields to include in each record
+   * @param fieldTypes The types of the fields ("string", "int", "double", "boolean", "date",
+   *     "timestamp")
+   * @param count The number of records to generate
+   * @return The DatasetConfig of the created physical dataset
+   * @throws IOException If there's an error creating the file
+   * @throws NamespaceException If there's an error registering the dataset
+   * @throws IllegalArgumentException If fieldNames and fieldTypes lists have different sizes
+   */
+  private void createPhysicalDataset(
+      List<String> newPhysicalDatasetPath,
+      List<String> fieldNames,
+      List<String> fieldTypes,
+      int count)
+      throws IOException, NamespaceException {
+    if (fieldNames.size() != fieldTypes.size()) {
+      throw new IllegalArgumentException("Field names and types lists must have the same size");
+    }
+
+    createPhysicalDatasetWithRecords(
+        newPhysicalDatasetPath,
+        (i) -> {
+          StringBuilder sb = new StringBuilder("{ ");
+          for (int j = 0; j < fieldNames.size(); j++) {
+            String fieldName = fieldNames.get(j);
+            String fieldType = fieldTypes.get(j).toLowerCase();
+
+            if (j > 0) {
+              sb.append(", ");
+            }
+
+            switch (fieldType) {
+              case "int":
+              case "integer":
+                sb.append(String.format("\"%s\": %d", fieldName, i));
+                break;
+              case "double":
+              case "float":
+              case "decimal":
+                sb.append(String.format("\"%s\": %f", fieldName, i * 1.5));
+                break;
+              case "boolean":
+              case "bool":
+                sb.append(String.format("\"%s\": %s", fieldName, i % 2 == 0 ? "true" : "false"));
+                break;
+              case "date":
+                sb.append(String.format("\"%s\": \"2023-01-%02d\"", fieldName, (i % 28) + 1));
+                break;
+              case "timestamp":
+                sb.append(
+                    String.format(
+                        "\"%s\": \"2023-01-%02d T12:%02d:00\"", fieldName, (i % 28) + 1, (i % 60)));
+                break;
+              case "string":
+              default:
+                sb.append(String.format("\"%s\": \"%s_value_%d\"", fieldName, fieldName, i));
+                break;
+            }
+          }
+          sb.append(" }\n");
+          return sb.toString();
+        },
+        count);
+  }
+
   public void populateInitialData()
       throws NamespaceException,
           IOException,
@@ -342,89 +473,33 @@ public class SampleDataPopulator implements AutoCloseable {
     if (!Files.exists(folder)) {
       Files.createDirectory(folder);
     }
-    File sample1 = new File(path.toFile(), "dac-sample1.json");
-    if (!sample1.exists()) {
-      try (BufferedWriter writer = new BufferedWriter(new FileWriter(sample1))) {
-        for (int i = 0; i < 100; ++i) {
-          writer.write(
-              String.format(
-                  "{ \"user\" : \"user%d\", \"age\": %d, \"address\": \"address%d\"}",
-                  i, (i % 25), i));
-        }
-      }
-    }
-    File sample2 = new File(path.toFile(), "dac-sample2.json");
-    if (!sample2.exists()) {
-      try (BufferedWriter writer = new BufferedWriter(new FileWriter(sample2))) {
-        for (int i = 500; i < 1000; ++i) {
-          writer.write(String.format("{ \"A\" : %d , \"B\": %d }", i, i));
-        }
-      }
-    }
 
-    File sample3 = new File(path.toFile(), "dac-sample3.json");
-    if (!sample3.exists()) {
-      try (BufferedWriter writer = new BufferedWriter(new FileWriter(sample3))) {
-        for (int i = 500; i < 1000; ++i) {
-          writer.write(String.format("{ \"A\" : %d , \"B\": %d, \"C\": %d }", i, i, i));
-        }
-      }
-    }
+    final DatasetConfig dacSample1Config =
+        createPhysicalDatasetWithRecords(
+            asList("LocalFS1", "dac-sample1.json"),
+            (i) ->
+                String.format(
+                    "{ \"user\" : \"user%d\", \"age\": %d, \"address\": \"address%d\"}",
+                    i, (i % 25), i),
+            100);
+    collaborationService.setTags(
+        dacSample1Config.getId().getId(), new Tags(Arrays.asList("tag3", "tag4"), null));
+
+    final DatasetConfig dacSample2Config =
+        createPhysicalDatasetWithRecords(
+            asList("LocalFS1", "dac-sample2.json"),
+            (i) -> String.format("{ \"A\" : %d , \"B\": %d }", i + 500, i + 500),
+            500);
+    collaborationService.setTags(
+        dacSample2Config.getId().getId(), new Tags(new ArrayList<>(), null));
+
+    createPhysicalDatasetWithRecords(
+        asList("LocalFS1", "dac-sample3.json"),
+        (i) -> String.format("{ \"A\" : %d , \"B\": %d, \"C\": %d }", i + 500, i + 500, i + 500),
+        500);
 
     final String allTypesJson = "all_types_dremio.json";
-    File sample4 = new File(path.toFile(), allTypesJson);
-    if (!sample4.exists()) {
-      try (BufferedWriter writer = new BufferedWriter(new FileWriter(sample4))) {
-        writer.write(getFileContentsFromClassPath(allTypesJson));
-      }
-    }
-
-    // add physical datasets
-    {
-      PhysicalDatasetPath dacSampleAllTypes =
-          new PhysicalDatasetPath(asList("LocalFS1", allTypesJson));
-      DatasetConfig dacAllTypes = new DatasetConfig();
-      dacAllTypes.setOwner(username);
-      dacAllTypes.setFullPathList(dacSampleAllTypes.toPathList());
-      dacAllTypes.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
-      dacAllTypes.setName(allTypesJson);
-      dacAllTypes.setPhysicalDataset(
-          new PhysicalDataset().setFormatSettings(new JsonFileConfig().asFileConfig()));
-      namespaceService.addOrUpdateDataset(dacSampleAllTypes.toNamespaceKey(), dacAllTypes);
-    }
-
-    {
-      PhysicalDatasetPath dacSample1Path =
-          new PhysicalDatasetPath(asList("LocalFS1", "dac-sample1.json"));
-      DatasetConfig dacSample1 = new DatasetConfig();
-      dacSample1.setOwner(username);
-      dacSample1.setFullPathList(dacSample1Path.toPathList());
-      dacSample1.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
-      dacSample1.setName("dac-sample1.json");
-      dacSample1.setPhysicalDataset(
-          new PhysicalDataset().setFormatSettings(new JsonFileConfig().asFileConfig()));
-      namespaceService.addOrUpdateDataset(dacSample1Path.toNamespaceKey(), dacSample1);
-      // adding tags for table (physical dataset)
-      List<String> tagList = Arrays.asList("tag3", "tag4");
-      Tags newTags = new Tags(tagList, null);
-      collaborationService.setTags(dacSample1.getId().getId(), newTags);
-    }
-
-    {
-      PhysicalDatasetPath dacSample2Path =
-          new PhysicalDatasetPath(asList("LocalFS2", "dac-sample2.json"));
-      DatasetConfig dacSample2 = new DatasetConfig();
-      dacSample2.setOwner(username);
-      dacSample2.setFullPathList(dacSample2Path.toPathList());
-      dacSample2.setType(DatasetType.PHYSICAL_DATASET_SOURCE_FILE);
-      dacSample2.setName("dac-sample2.json");
-      dacSample2.setPhysicalDataset(
-          new PhysicalDataset().setFormatSettings(new JsonFileConfig().asFileConfig()));
-      namespaceService.addOrUpdateDataset(dacSample2Path.toNamespaceKey(), dacSample2);
-      // adding empty tags for table (physical dataset)
-      Tags newTags = new Tags(new ArrayList<>(), null);
-      collaborationService.setTags(dacSample2.getId().getId(), newTags);
-    }
+    createPhysicalDatasetFromClasspathResource(asList("LocalFS1", allTypesJson), allTypesJson);
 
     putDS("Prod-Sample", "ds1", new FromTable("LocalFS1.\"dac-sample1.json\"").wrap());
     putDS(

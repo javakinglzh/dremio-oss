@@ -80,17 +80,41 @@ public class ParquetColumnDefaultResolver implements ParquetColumnResolver {
     return ParquetReaderUtility.convertColumnDescriptor(schema, columnDesc);
   }
 
+  /**
+   * Convert the given SchemaPath to dotted string representation and return it.
+   *
+   * <pre>
+   * SchemaPath consists of PathSegments, e.g., the SchemaPath representing
+   * a_struct.b_struct.c_list[0] consists of the following PathSegments:
+   * 1. `a_struct` (NameSegment)
+   * 2. `b_struct` (NameSegment)
+   * 3. `c_list` (NameSegment)
+   * 4. [0] (ArraySegment).
+   * </pre>
+   *
+   * @param schemaPath SchemaPath to convert
+   * @param vector Vector corresponding to the root of the SchemaPath
+   * @return Dotted string representation of the given SchemaPath
+   */
   @Override
   public String toDotString(SchemaPath schemaPath, ValueVector vector) {
+    // The method uses ValueVector to make some sanity check(s), but otherwise
+    // it silently ignores when the ValueVector is null and continues processing
+    // the remaining PathSegments of the given SchemaPath.
+    // The usage of `(vector instanceof ListVector)` is allowed as instanceof is null-safe.
+
     StringBuilder pathBuilder = new StringBuilder();
     boolean isListChild = (vector instanceof ListVector);
     pathBuilder.append(schemaPath.getRootSegment().getPath());
     PathSegment seg = schemaPath.getRootSegment().getChild();
+
     while (seg != null) {
       pathBuilder.append(".");
       if (seg.getType().equals(PathSegmentType.ARRAY_INDEX) || isListChild) {
-        vector = ((ListVector) vector).getDataVector();
         pathBuilder.append("list.element");
+        if (vector != null) {
+          vector = ((ListVector) vector).getDataVector();
+        }
         if (!seg.getType().equals(PathSegmentType.ARRAY_INDEX)) {
           // planner doesn't always send index with list path segment
           isListChild = (vector instanceof ListVector);
@@ -108,6 +132,7 @@ public class ParquetColumnDefaultResolver implements ParquetColumnResolver {
       isListChild = (vector instanceof ListVector);
       seg = seg.getChild();
     }
+
     return pathBuilder.toString().toLowerCase();
   }
 }

@@ -79,6 +79,7 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.apache.iceberg.Table;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Translates the Iceberg format dataset metadata into internal dremio defined classes using the
@@ -165,7 +166,6 @@ public class VersionedDatasetAdapter {
     viewConfig.setId(new EntityId(versionedDatasetId.asString()));
     viewConfig.setRecordSchema(batchSchema.toByteString());
     viewConfig.setLastModified(icebergViewMetadata.getLastModifiedAt());
-
     final View view =
         Views.fieldTypesToView(
             Iterables.getLast(viewKeyPath),
@@ -180,7 +180,19 @@ public class VersionedDatasetAdapter {
             .setIsExpired(false)
             .setLastRefreshTimeMillis(System.currentTimeMillis())
             .build();
+    return new ViewTable(
+        new NamespaceKey(viewKeyPath),
+        view,
+        getCatalogIdentity(versionedDatasetId, viewConfig),
+        viewConfig,
+        batchSchema,
+        TableVersionContext.of(versionContext).asVersionContext(),
+        false,
+        metadataState);
+  }
 
+  private @Nullable CatalogIdentity getCatalogIdentity(
+      VersionedDatasetId versionedDatasetId, DatasetConfig viewConfig) {
     CatalogIdentity catalogIdentity = null;
     if (optionManager.getOption(VERSIONED_SOURCE_VIEW_DELEGATION_ENABLED)) {
       try {
@@ -198,16 +210,7 @@ public class VersionedDatasetAdapter {
         throw UserException.dataReadError(e).buildSilently();
       }
     }
-
-    return new ViewTable(
-        new NamespaceKey(viewKeyPath),
-        view,
-        catalogIdentity,
-        viewConfig,
-        batchSchema,
-        TableVersionContext.of(versionContext).asVersionContext(),
-        false,
-        metadataState);
+    return catalogIdentity;
   }
 
   private DatasetConfig createShallowVirtualDatasetConfig(

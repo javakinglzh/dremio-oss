@@ -14,5 +14,5 @@
  * limitations under the License.
  */
 export default {
-  showSearchComponent: false,
+  showSearchComponent: true,
 };

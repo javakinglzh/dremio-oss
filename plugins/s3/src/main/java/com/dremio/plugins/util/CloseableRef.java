@@ -29,27 +29,46 @@ public class CloseableRef<T extends AutoCloseable> implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(CloseableRef.class);
   private int refCnt;
   private T obj;
+  private final int identityHashCode;
+  private final String resourceClassName;
 
   public CloseableRef(T obj) {
-    logger.debug(
-        "Class {} acquired a new ref for {}:{}",
-        getCallingClass(),
-        obj.getClass().getSimpleName(),
-        System.identityHashCode(obj));
-
+    Preconditions.checkNotNull(
+        obj, "A CloseableRef object cannot be initialized with a null resource.");
     this.obj = obj;
     refCnt = 1;
+    identityHashCode = System.identityHashCode(obj);
+    resourceClassName = obj.getClass().getSimpleName();
+
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Class {} created a new CloseableRef for {}:{}. Reference count = 1",
+          getCallingClass(),
+          resourceClassName,
+          identityHashCode);
+    }
   }
 
   public synchronized T acquireRef() {
-    Preconditions.checkNotNull(obj);
-    logger.debug(
-        "Class {} acquired the ref for {}:{}",
-        getCallingClass(),
-        obj.getClass().getSimpleName(),
-        System.identityHashCode(obj));
-
+    Preconditions.checkNotNull(
+        obj,
+        "Attempting to acquire a reference for %s:%s after the resource was made null. Reference count = %s",
+        resourceClassName,
+        identityHashCode,
+        refCnt);
     ++refCnt;
+
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Class {} acquired the reference for {}:{}. Reference count = {}",
+          getCallingClass(),
+          resourceClassName,
+          identityHashCode,
+          refCnt);
+    }
+
     return obj;
   }
 
@@ -60,17 +79,18 @@ public class CloseableRef<T extends AutoCloseable> implements AutoCloseable {
     }
 
     if (--refCnt == 0 && obj != null) {
-      logger.debug("Closing ref {}", obj.getClass().getSimpleName());
+      logger.debug("Closing the reference for {}:{}", resourceClassName, identityHashCode);
       obj.close();
       obj = null;
     }
 
-    if (obj != null) {
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (obj != null && logger.isDebugEnabled()) {
       logger.debug(
-          "Class {} released the ref for {}:{}, Current ref count:{}",
+          "Class {} released the reference for {}:{}. Reference count = {}",
           getCallingClass(),
-          obj.getClass().getSimpleName(),
-          System.identityHashCode(obj),
+          resourceClassName,
+          identityHashCode,
           refCnt);
     }
   }

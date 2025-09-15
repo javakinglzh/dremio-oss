@@ -116,12 +116,11 @@ public class JobResultsStore implements Service {
     }
     try {
       if (doesQueryResultsDirExists(jobOutputDir, jobId)) {
-        deleteQueryResults(jobOutputDir, true, jobId);
-        logger.debug("Deleted job output directory : {}", jobOutputDir);
+        return deleteQueryResults(jobOutputDir, true, jobId);
       } else {
         logger.debug("Output dir doesn't exist {}", jobOutputDir);
+        return true;
       }
-      return true;
     } catch (Exception e) {
       logger.warn("Could not delete job output directory : {}", jobOutputDir, e);
       return false;
@@ -314,36 +313,48 @@ public class JobResultsStore implements Service {
         return false;
       }
 
-      /**
-       * This function borrows the implementation from
-       * PseduoDistributedFileSystem().createRemotePath(). Any change in that function should
-       * trigger an equivalent change here.
-       */
-      if (dfs instanceof com.dremio.exec.hadoop.HadoopFileSystem) {
-        final NodeEndpoint nodeEndpoint = nodeEndpoints.iterator().next();
-        final String address = nodeEndpoint.getAddress();
-        boolean hidden = false;
-        if ((address != null) && (!address.isEmpty())) {
-          String basename = jobOutputDir.getName();
+      NodeEndpoint endpoint = nodeEndpoints.iterator().next();
+      jobOutputDir = getRemotePath(jobOutputDir, endpoint);
+    }
 
-          // Check if basename is hidden.
-          if (!basename.isEmpty()) {
-            char firstChar = basename.charAt(0);
-            if (firstChar == '.' || firstChar == '_') {
-              hidden = true;
-            }
-          }
-          org.apache.hadoop.fs.Path canonicalPath =
-              new org.apache.hadoop.fs.Path(
-                  String.valueOf(jobOutputDir.getParent()),
-                  hidden
-                      ? String.format("%s%s@%s", basename.charAt(0), address, basename.substring(1))
-                      : String.format("%s@%s", address, basename));
-          jobOutputDir = Path.of(canonicalPath.toUri());
+    return dfs.exists(jobOutputDir);
+  }
+
+  /**
+   * Get remote path for a specific node endpoint. This function borrows the implementation from
+   * PseudoDistributedFileSystem().createRemotePath(). Any change in that function should trigger an
+   * equivalent change here.
+   *
+   * @param jobOutputDir the base job output directory
+   * @param nodeEndpoint the specific node endpoint to create remote path for
+   * @return the remote path for the given endpoint
+   */
+  private Path getRemotePath(Path jobOutputDir, NodeEndpoint nodeEndpoint) {
+    if (nodeEndpoint == null) {
+      return jobOutputDir;
+    }
+
+    final String address = nodeEndpoint.getAddress();
+    boolean hidden = false;
+    if ((address != null) && (!address.isEmpty())) {
+      String basename = jobOutputDir.getName();
+
+      // Check if basename is hidden.
+      if (!basename.isEmpty()) {
+        char firstChar = basename.charAt(0);
+        if (firstChar == '.' || firstChar == '_') {
+          hidden = true;
         }
       }
+      org.apache.hadoop.fs.Path canonicalPath =
+          new org.apache.hadoop.fs.Path(
+              String.valueOf(jobOutputDir.getParent()),
+              hidden
+                  ? String.format("%s%s@%s", basename.charAt(0), address, basename.substring(1))
+                  : String.format("%s@%s", address, basename));
+      jobOutputDir = Path.of(canonicalPath.toUri());
     }
-    return dfs.exists(jobOutputDir);
+    return jobOutputDir;
   }
 
   /**
@@ -352,11 +363,50 @@ public class JobResultsStore implements Service {
    * @param jobOutputDir
    * @param recursive
    * @param jobId Used in derived class.
-   * @return
+   * @return true if all deletions succeeded, false otherwise
    * @throws IOException
    */
   protected boolean deleteQueryResults(Path jobOutputDir, boolean recursive, JobId jobId)
       throws IOException {
+    if (dfs.isPdfs()) {
+      Set<NodeEndpoint> nodeEndpoints = getNodeEndpoints(jobId);
+      if (nodeEndpoints == null || nodeEndpoints.isEmpty()) {
+        logger.debug(
+            "{} There are no nodeEndpoints where query results need to be deleted."
+                + "For eg: for jdbc queries, results are not stored on executors.",
+            jobId);
+        return true;
+      }
+
+      boolean allDeleted = true;
+      int successCount = 0;
+      int totalEndpoints = nodeEndpoints.size();
+
+      // Delete from all endpoints
+      for (NodeEndpoint endpoint : nodeEndpoints) {
+        try {
+          Path remotePath = getRemotePath(jobOutputDir, endpoint);
+          boolean deleted = dfs.delete(remotePath, recursive);
+          if (deleted) {
+            successCount++;
+          } else {
+            allDeleted = false;
+          }
+        } catch (Exception e) {
+          logger.warn(
+              "{} Exception while deleting job results from endpoint: {}",
+              jobId,
+              endpoint.getAddress(),
+              e);
+          allDeleted = false;
+        }
+      }
+
+      logger.debug(
+          "{} Deleted job results from {}/{} endpoints", jobId, successCount, totalEndpoints);
+      return allDeleted;
+    }
+
     return dfs.delete(jobOutputDir, recursive);
   }
 

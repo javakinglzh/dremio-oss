@@ -56,6 +56,8 @@ public final class CatalogOptions {
       new TypeValidators.LongValidator("store.plugin.get_state_timeout_seconds", 10);
   public static final TypeValidators.BooleanValidator ENABLE_ASYNC_GET_STATE =
       new TypeValidators.BooleanValidator("store.plugin.enable_async_get_state", true);
+  public static final TypeValidators.LongValidator REFRESH_STATE_TIMEOUT_SECONDS =
+      new TypeValidators.LongValidator("store.plugin.refresh_state_timeout_seconds", 30);
 
   // How long catalog service waits when communicating to other coordinator(s). This
   // must be greater than the getState timeout as otherwise the interrupted wait on one

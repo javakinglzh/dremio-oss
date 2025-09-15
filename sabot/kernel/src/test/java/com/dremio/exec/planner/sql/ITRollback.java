@@ -50,6 +50,11 @@ public class ITRollback extends ITDmlQueryBase {
   }
 
   @Test
+  public void testRollbackToSnapshotOnUnsupportedIcebergFormat() throws Exception {
+    RollbackTests.testRollbackToSnapshotOnUnsupportedIcebergFormat(allocator, SOURCE);
+  }
+
+  @Test
   public void testRollbackWithPartialTablePath() throws Exception {
     RollbackTests.testRollbackWithPartialTablePath(allocator, SOURCE);
   }

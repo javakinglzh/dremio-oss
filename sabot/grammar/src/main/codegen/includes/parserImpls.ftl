@@ -1343,18 +1343,27 @@ tableName = CompoundIdentifier();
 SqlNode SqlVacuumCatalog(SqlParserPos pos) :
 {
     SqlIdentifier catalogSource;
-    SqlNodeList excludeTableList = new SqlNodeList(getPos());
+    SqlLiteral excludeMode = SqlLiteral.createBoolean(true, SqlParserPos.ZERO);
+    SqlNodeList tableList = new SqlNodeList(getPos());
+    SqlLiteral dryRun = SqlLiteral.createBoolean(false, SqlParserPos.ZERO);
 }
 {
     catalogSource = SimpleIdentifier()
     [
-        <EXCLUDE>
+        (
+          <EXCLUDE> {excludeMode = SqlLiteral.createBoolean(true, SqlParserPos.ZERO); }
+          |
+          <INCLUDE> {excludeMode = SqlLiteral.createBoolean(false, SqlParserPos.ZERO); }
+        )
         <LPAREN>
-            TableWithVersionContextCommaList(excludeTableList)
+            TableWithVersionContextCommaList(tableList)
         <RPAREN>
     ]
+    [
+        <DRY> <RUN> {dryRun = SqlLiteral.createBoolean(true, SqlParserPos.ZERO); }
+    ]
     {
-        return new SqlVacuumCatalog(pos, catalogSource, excludeTableList);
+        return new SqlVacuumCatalog(pos, catalogSource, excludeMode, tableList, dryRun);
     }
 }
 

@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.common;
 
 import static com.dremio.exec.ExecConstants.BATCH_LIST_SIZE_ESTIMATE;
+import static com.dremio.exec.ExecConstants.BATCH_MAP_SIZE_ESTIMATE;
 import static com.dremio.exec.ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE;
 import static com.dremio.exec.ExecConstants.PARQUET_FILES_ESTIMATE_SCALING_FACTOR_VALIDATOR;
 import static com.dremio.exec.ExecConstants.PARQUET_SPLIT_SIZE_VALIDATOR;
@@ -69,11 +70,12 @@ public abstract class WriterRelBase extends SingleRel {
     long scalingFactor = optionResolver.getOption(PARQUET_FILES_ESTIMATE_SCALING_FACTOR_VALIDATOR);
     long parquetFileSize = optionResolver.getOption(PARQUET_SPLIT_SIZE_VALIDATOR);
     int listEstimate = (int) optionResolver.getOption(BATCH_LIST_SIZE_ESTIMATE);
+    int mapEstimate = (int) optionResolver.getOption(BATCH_MAP_SIZE_ESTIMATE);
     int variableField = (int) optionResolver.getOption(BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
 
     BatchSchema schema = CalciteArrowHelper.fromCalciteRowType(relDataType);
     double estimateInputRowCount = relMetadataQuery.getRowCount(relNode.getInput());
-    int estimatedRowSize = schema.estimateRecordSize(listEstimate, variableField);
+    int estimatedRowSize = schema.estimateRecordSize(listEstimate, mapEstimate, variableField);
 
     double numRecords = ceil((double) parquetFileSize / estimatedRowSize) + 1;
     return max(10, estimateInputRowCount / numRecords) * scalingFactor;

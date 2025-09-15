@@ -28,7 +28,6 @@ import com.dremio.exec.server.SimpleJobRunner;
 import com.dremio.exec.sql.TestStoreQueryResults;
 import com.dremio.exec.work.user.LocalExecutionConfig;
 import com.dremio.exec.work.user.LocalQueryExecutor;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.google.common.base.Preconditions;
 import java.util.Arrays;
 import java.util.Collections;
@@ -85,7 +84,6 @@ public final class LocalSimpleJobRunner implements SimpleJobRunner {
               .setQueryResultsStorePath(queryResultsStorePath)
               .setAllowPartitionPruning(true)
               .setExposeInternalSources(true)
-              .setSubstitutionSettings(SubstitutionSettings.of())
               .setReflectionMode(MANUAL_REFLECTION_MODE)
               .build();
       TestStoreQueryResults.TestQueryObserver queryObserver =

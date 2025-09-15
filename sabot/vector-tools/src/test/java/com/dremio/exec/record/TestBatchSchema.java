@@ -44,6 +44,13 @@ public class TestBatchSchema {
   private static final SupportsTypeCoercionsAndUpPromotions DEFAULT_RULES =
       new SupportsTypeCoercionsAndUpPromotions() {};
 
+  private static final int BATCH_LIST_SIZE_ESTIMATE =
+      5; // aka com.dremio.exec.ExecConstants.BATCH_LIST_SIZE_ESTIMATE
+  private static final int BATCH_MAP_SIZE_ESTIMATE =
+      5; // aka com.dremio.exec.ExecConstants.BATCH_MAP_SIZE_ESTIMATE
+  private static final int BATCH_VARIABLE_FIELD_SIZE_ESTIMATE =
+      15; // aka com.dremio.exec.ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE variants
+
   @Test
   public void testBatchSchemaDropColumnSimple() throws Exception {
     BatchSchema tableSchema =
@@ -970,6 +977,144 @@ public class TestBatchSchema {
     List<Field> right = ImmutableList.of(map2);
     assertThat(BatchSchema.difference(left, right))
         .containsExactlyElementsOf(ImmutableList.of(map("m", struct("value", varchar("a")))));
+  }
+
+  @Test
+  public void testEstimateRecordSizeForPrimitiveTypes() {
+    BatchSchema schema =
+        BatchSchema.of(
+            Field.nullable("int32_field", new ArrowType.Int(32, true)),
+            Field.nullable("int64_field", new ArrowType.Int(64, true)),
+            Field.nullable(
+                "float_field", new ArrowType.FloatingPoint(FloatingPointPrecision.SINGLE)),
+            Field.nullable(
+                "double_field", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+            Field.nullable("varchar_field", new ArrowType.Utf8()));
+
+    // int32 (4) + int64 (8) + float (4) + double (8) + varchar (15)
+    int expectedSize = 4 + 8 + 4 + 8 + BATCH_VARIABLE_FIELD_SIZE_ESTIMATE;
+
+    assertEquals(
+        expectedSize,
+        schema.estimateRecordSize(
+            BATCH_LIST_SIZE_ESTIMATE, BATCH_MAP_SIZE_ESTIMATE, BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+  }
+
+  @Test
+  public void testEstimateRecordSizeForStructTypes() {
+    Field nestedStruct =
+        struct(
+            "nested_struct",
+            Field.nullable("int32_field", new ArrowType.Int(32, true)),
+            Field.nullable("varchar_field", new ArrowType.Utf8()));
+
+    Field topStruct =
+        struct(
+            "top_struct",
+            Field.nullable(
+                "double_field", new ArrowType.FloatingPoint(FloatingPointPrecision.DOUBLE)),
+            nestedStruct);
+
+    BatchSchema schema = BatchSchema.of(topStruct);
+
+    // top_struct: double (8) + nested_struct: (int32 (4) + varchar (15))
+    int expectedSize = 8 + (4 + BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
+
+    assertEquals(
+        expectedSize,
+        schema.estimateRecordSize(
+            BATCH_LIST_SIZE_ESTIMATE, BATCH_MAP_SIZE_ESTIMATE, BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+  }
+
+  @Test
+  public void testEstimateRecordSizeForListTypes() {
+    // List of int64
+    Field primitiveList =
+        list("primitive_list", Field.nullable(DATA_VECTOR_NAME, new ArrowType.Int(64, true)));
+
+    // List of struct<int32, varchar>
+    Field complexList =
+        list(
+            "complex_list",
+            struct(
+                DATA_VECTOR_NAME,
+                Field.nullable("int32_field", new ArrowType.Int(32, true)),
+                Field.nullable("varchar_field", new ArrowType.Utf8())));
+
+    BatchSchema schema = BatchSchema.of(primitiveList, complexList);
+
+    // primitive_list: list_size (5) * int64 (8)
+    // complex_list: list_size (5) * (int32 (4) + varchar (15))
+    int expectedSize =
+        (BATCH_LIST_SIZE_ESTIMATE * 8)
+            + (BATCH_LIST_SIZE_ESTIMATE * (4 + BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+
+    assertEquals(
+        expectedSize,
+        schema.estimateRecordSize(
+            BATCH_LIST_SIZE_ESTIMATE, BATCH_MAP_SIZE_ESTIMATE, BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+  }
+
+  @Test
+  public void testEstimateRecordSizeForPrimitiveMaps() {
+    // Map<varchar, int32>
+    Field primitiveMap =
+        map("primitive_map", varchar("key"), Field.nullable("value", new ArrowType.Int(32, true)));
+
+    // Map<int32, varchar>
+    Field reverseMap =
+        map("reverse_map", Field.nullable("key", new ArrowType.Int(32, true)), varchar("value"));
+
+    BatchSchema schema = BatchSchema.of(primitiveMap, reverseMap);
+
+    // For each map entry:
+    // primitive_map: varchar key (15) + int32 value (4)
+    // reverse_map: int32 key (4) + varchar value (15)
+    // Multiply by list size estimate (5) since maps are stored as lists of entries
+    int expectedSize =
+        (BATCH_MAP_SIZE_ESTIMATE * (BATCH_VARIABLE_FIELD_SIZE_ESTIMATE + 4))
+            + (BATCH_MAP_SIZE_ESTIMATE * (4 + BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+
+    assertEquals(
+        expectedSize,
+        schema.estimateRecordSize(
+            BATCH_LIST_SIZE_ESTIMATE, BATCH_MAP_SIZE_ESTIMATE, BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
+  }
+
+  @Test
+  public void testEstimateRecordSizeForComplexMaps() {
+    // Create a struct for map value
+    Field structField =
+        struct(
+            "struct_value",
+            Field.nullable("int_field", new ArrowType.Int(32, true)),
+            Field.nullable("str_field", new ArrowType.Utf8()));
+
+    // Create a list for map value
+    Field listField =
+        list("list_value", Field.nullable(DATA_VECTOR_NAME, new ArrowType.Int(64, true)));
+
+    // Map<varchar, struct<int_field: int32, str_field: varchar>>
+    Field structMap = map("struct_map", varchar("key"), structField);
+
+    // Map<varchar, list<int64>>
+    Field listMap = map("list_map", varchar("key"), listField);
+
+    BatchSchema schema = BatchSchema.of(structMap, listMap);
+
+    // For each map:
+    // struct_map: varchar key (15) + struct value (4 + 15)
+    // list_map: varchar key (15) + list value (8 * 5)
+    int expectedSize =
+        (BATCH_MAP_SIZE_ESTIMATE
+                * (BATCH_VARIABLE_FIELD_SIZE_ESTIMATE + (4 + BATCH_VARIABLE_FIELD_SIZE_ESTIMATE)))
+            + (BATCH_MAP_SIZE_ESTIMATE
+                * (BATCH_VARIABLE_FIELD_SIZE_ESTIMATE + (8 * BATCH_LIST_SIZE_ESTIMATE)));
+
+    assertEquals(
+        expectedSize,
+        schema.estimateRecordSize(
+            BATCH_LIST_SIZE_ESTIMATE, BATCH_MAP_SIZE_ESTIMATE, BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
   }
 
   private static Field varchar(String name) {

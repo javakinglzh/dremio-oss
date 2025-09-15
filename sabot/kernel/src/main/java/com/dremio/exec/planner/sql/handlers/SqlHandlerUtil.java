@@ -637,6 +637,63 @@ public class SqlHandlerUtil {
     return parametersSqlShuttle.containsParameter();
   }
 
+  /**
+   * Validates if a column exists
+   *
+   * @param schema table schema
+   * @param columnName the name of the column to be validated
+   * @return if the column exists it returns the arrow field
+   * @throws UserException when the column does not exist
+   */
+  public static Field validateColumnExists(BatchSchema schema, String columnName)
+      throws UserException {
+    Optional<Field> field = schema.findFieldIgnoreCase(columnName);
+    if (field.isEmpty()) {
+      throw UserException.validationError()
+          .message("Column '%s' does not exist in the table.", columnName)
+          .buildSilently();
+    }
+    return field.get();
+  }
+
+  public enum Operations {
+    PARTITION,
+    LOCALSORT
+    // Incomplete, add more in case you need them
+  }
+
+  /**
+   * Validates if a column is a primitive type
+   *
+   * @param field the arrow field (column)
+   * @param operation operation name for Exception message
+   * @throws UserException when the column is not a primitive type
+   */
+  public static void validateColumnIsPrimitiveType(Field field, Operations operation)
+      throws UserException {
+    if (field.getType().isComplex()) {
+      throw UserException.validationError()
+          .message(
+              "Cannot perform %s operation on a complex column '%s'. Only primitive types are allowed.",
+              operation.name(), field.getName())
+          .buildSilently();
+    }
+  }
+
+  /**
+   * Validates if a column exists, and if it has a primitive type
+   *
+   * @param schema table schema
+   * @param columnName the name of the column to be validated
+   * @param operation operation name for Exception message
+   * @throws UserException when the column does not exist or when the column is not a primitive type
+   */
+  public static void validateColumnExistsAndIsPrimitiveType(
+      BatchSchema schema, String columnName, Operations operation) throws UserException {
+    Field field = SqlHandlerUtil.validateColumnExists(schema, columnName);
+    SqlHandlerUtil.validateColumnIsPrimitiveType(field, operation);
+  }
+
   /*
   Sql shuttle to find parameters inside a Sql node.
    */

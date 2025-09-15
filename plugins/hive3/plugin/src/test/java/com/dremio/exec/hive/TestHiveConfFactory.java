@@ -17,22 +17,32 @@
 package com.dremio.exec.hive;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.when;
 
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.store.hive.Hive3StoragePluginConfig;
 import com.dremio.exec.store.hive.HiveConfFactory;
 import com.dremio.exec.store.hive.HiveStoragePluginConfig;
+import com.dremio.options.OptionManager;
 import java.util.ArrayList;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.mockito.Mock;
+import org.mockito.junit.MockitoJUnitRunner;
 
 /** Tests for {@link com.dremio.exec.store.hive.HiveConfFactory} */
+@RunWith(MockitoJUnitRunner.class)
 public class TestHiveConfFactory {
+
+  @Mock private OptionManager optionManager;
 
   @Test
   public void testS3ImplDefaults() {
     HiveConfFactory hiveConfFactory = new HiveConfFactory();
-    HiveConf confWithDefaults = hiveConfFactory.createHiveConf(getTestConfig());
+    HiveConf confWithDefaults = hiveConfFactory.createHiveConf(getTestConfig(), optionManager);
     assertEquals("org.apache.hadoop.fs.s3a.S3AFileSystem", confWithDefaults.get("fs.s3.impl"));
     assertEquals("org.apache.hadoop.fs.s3a.S3AFileSystem", confWithDefaults.get("fs.s3n.impl"));
 
@@ -42,7 +52,7 @@ public class TestHiveConfFactory {
         new Property("fs.s3.impl", "com.dremio.test.CustomS3Impl"));
     configWithOverrides.propertyList.add(
         new Property("fs.s3n.impl", "com.dremio.test.CustomS3NImpl"));
-    HiveConf confWithOverrides = hiveConfFactory.createHiveConf(configWithOverrides);
+    HiveConf confWithOverrides = hiveConfFactory.createHiveConf(configWithOverrides, optionManager);
     assertEquals("com.dremio.test.CustomS3Impl", confWithOverrides.get("fs.s3.impl"));
     assertEquals("com.dremio.test.CustomS3NImpl", confWithOverrides.get("fs.s3n.impl"));
   }
@@ -50,7 +60,7 @@ public class TestHiveConfFactory {
   @Test
   public void testS3ImplDefaultsUseSecretPropertyList() {
     HiveConfFactory hiveConfFactory = new HiveConfFactory();
-    HiveConf confWithDefaults = hiveConfFactory.createHiveConf(getTestConfig());
+    HiveConf confWithDefaults = hiveConfFactory.createHiveConf(getTestConfig(), optionManager);
     assertEquals("org.apache.hadoop.fs.s3a.S3AFileSystem", confWithDefaults.get("fs.s3.impl"));
     assertEquals("org.apache.hadoop.fs.s3a.S3AFileSystem", confWithDefaults.get("fs.s3n.impl"));
 
@@ -60,9 +70,17 @@ public class TestHiveConfFactory {
         new Property("fs.s3.impl", "com.dremio.test.CustomS3Impl"));
     configWithOverrides.secretPropertyList.add(
         new Property("fs.s3n.impl", "com.dremio.test.CustomS3NImpl"));
-    HiveConf confWithOverrides = hiveConfFactory.createHiveConf(configWithOverrides);
+    HiveConf confWithOverrides = hiveConfFactory.createHiveConf(configWithOverrides, optionManager);
     assertEquals("com.dremio.test.CustomS3Impl", confWithOverrides.get("fs.s3.impl"));
     assertEquals("com.dremio.test.CustomS3NImpl", confWithOverrides.get("fs.s3n.impl"));
+  }
+
+  @Test
+  public void testPropagateEnableS3V2Client() {
+    HiveConfFactory hiveConfFactory = new HiveConfFactory();
+    when(optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT)).thenReturn(true);
+    HiveConf conf = hiveConfFactory.createHiveConf(getTestConfig(), optionManager);
+    assertTrue(conf.getBoolean(ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(), false));
   }
 
   private HiveStoragePluginConfig getTestConfig() {

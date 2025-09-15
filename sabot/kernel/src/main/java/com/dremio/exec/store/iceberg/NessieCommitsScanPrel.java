@@ -59,7 +59,9 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
   private final BatchSchema batchSchema;
   private final String fsScheme;
   private final String schemeVariate;
-  private final List<String> excludedContentIDs;
+  private final boolean excludeMode;
+  private final List<String> listedContentIDs;
+  private final boolean dryRun;
 
   public NessieCommitsScanPrel(
       RelOptCluster cluster,
@@ -72,7 +74,9 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
       int maxParallelizationWidth,
       String fsScheme,
       String schemeVariate,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(cluster, traitSet);
     this.batchSchema = batchSchema;
     this.relDataType = VacuumOutputSchema.getRowType(batchSchema, cluster.getTypeFactory());
@@ -83,7 +87,9 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
     this.userName = userName;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
-    this.excludedContentIDs = excludedContentIDs;
+    this.excludeMode = excludeMode;
+    this.listedContentIDs = listedContentIDs;
+    this.dryRun = dryRun;
   }
 
   public RelDataType getRelDataType() {
@@ -126,7 +132,9 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
         maxParallelizationWidth,
         fsScheme,
         schemeVariate,
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override
@@ -142,7 +150,9 @@ public class NessieCommitsScanPrel extends AbstractRelNode implements LeafPrel {
         maxParallelizationWidth,
         fsScheme,
         schemeVariate,
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override

@@ -954,7 +954,66 @@ public class TestIcebergSortOrder extends BaseTestQuery {
               runSQL(query);
             })
         .isInstanceOf(UserException.class) // Replace with your actual exception class
-        .hasMessageContaining("SortOrder column col2 cannot be found in table");
+        .hasMessageContaining(localsortNotFoundErrorMessage(COL_2));
+  }
+
+  /**
+   * Should fail when sorting on a column of type MAP when creating a table <br>
+   * This is not supported by iceberg
+   */
+  @Test
+  public void testSortOrderInvalidMapColumnType() {
+    String tableName = "testSortOrderInvalidMapColumnType";
+    Assertions.assertThatThrownBy(
+            () -> {
+              runSQL(
+                  "CREATE TABLE %s.%s (%s MAP<INT,INT>) LOCALSORT BY (%s)",
+                  TEMP_SCHEMA, tableName, COL_1, COL_1);
+            })
+        .isInstanceOf(UserException.class)
+        .hasMessageContaining(localsortNotPrimitiveTypeErrorMessage(COL_1));
+  }
+
+  /**
+   * Should fail when sorting on a column of type LIST when creating a table <br>
+   * This is not supported by iceberg
+   */
+  @Test
+  public void testSortOrderInvalidListColumnType() {
+    String tableName = "testSortOrderInvalidListColumnType";
+    Assertions.assertThatThrownBy(
+            () -> {
+              runSQL(
+                  "CREATE TABLE %s.%s (%s INT, %s List<INT>) LOCALSORT BY (%s)",
+                  TEMP_SCHEMA, tableName, COL_1, COL_2, COL_2);
+            })
+        .isInstanceOf(UserException.class)
+        .hasMessageContaining(localsortNotPrimitiveTypeErrorMessage(COL_2));
+  }
+
+  /**
+   * Should fail when sorting on a column of type STRUCT when creating a table <br>
+   * This is not supported by iceberg
+   */
+  @Test
+  public void testSortOrderInvalidStructColumnType() {
+    String tableName = "testSortOrderInvalidStructColumnType";
+    Assertions.assertThatThrownBy(
+            () -> {
+              runSQL(
+                  "CREATE TABLE %s.%s (%s STRUCT<nested: INT>) LOCALSORT BY (%s)",
+                  TEMP_SCHEMA, tableName, COL_1, COL_1);
+            })
+        .isInstanceOf(UserException.class)
+        .hasMessageContaining(localsortNotPrimitiveTypeErrorMessage(COL_1));
+  }
+
+  private static String localsortNotPrimitiveTypeErrorMessage(String column) {
+    return String.format("Cannot sort order on a complex column '%s'.", column);
+  }
+
+  private static String localsortNotFoundErrorMessage(String column) {
+    return String.format("Sort order column '%s' cannot be found in table.", column);
   }
 
   protected static File createTempLocation() {

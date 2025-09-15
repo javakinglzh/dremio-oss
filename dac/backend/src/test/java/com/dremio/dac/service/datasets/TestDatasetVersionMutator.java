@@ -16,6 +16,7 @@
 package com.dremio.dac.service.datasets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -23,12 +24,14 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.ProtostuffUtil;
+import com.dremio.dac.explore.QueryParser;
 import com.dremio.dac.explore.model.DatasetName;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.model.sources.SourceName;
@@ -43,6 +46,7 @@ import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.VersionedPlugin;
 import com.dremio.exec.planner.logical.ViewTable;
+import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.StoragePlugin;
@@ -62,10 +66,19 @@ import com.dremio.service.namespace.proto.EntityId;
 import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.google.common.collect.ImmutableList;
 import java.util.List;
+import java.util.stream.Stream;
+import org.apache.calcite.jdbc.JavaTypeFactoryImpl;
+import org.apache.calcite.rel.type.RelDataType;
+import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -175,6 +188,54 @@ public class TestDatasetVersionMutator {
     assertEquals(uiProto.getCreatedAt(), storageProto.getDataset().getCreatedAt());
   }
 
+  static Stream<Arguments> queriesWithExpectedFailure() {
+    return Stream.of(
+        Arguments.of("SELECT 1 AS col, 2 AS col", List.of("col", "col"), true),
+        Arguments.of(
+            "SELECT a.x, b.x FROM (SELECT 1 AS x) a, (SELECT 2 AS x) b", List.of("x", "x"), true),
+        Arguments.of("SELECT 1 AS col1, 2 AS col2", List.of("col1", "col2"), false));
+  }
+
+  @ParameterizedTest
+  @MethodSource("queriesWithExpectedFailure")
+  public void testPutRejectsOrAcceptsBasedOnDuplicateColumns(
+      String sql, List<String> colNames, boolean shouldFail) {
+    RelDataTypeFactory typeFactory = new JavaTypeFactoryImpl();
+    RelDataType intType = typeFactory.createSqlType(SqlTypeName.INTEGER);
+
+    RelDataType rowType = typeFactory.createStructType(List.of(intType, intType), colNames);
+
+    ConvertedRelNode mockRelNode = mock(ConvertedRelNode.class);
+    when(mockRelNode.getValidatedRowType()).thenReturn(rowType);
+
+    try (MockedStatic<QueryParser> queryParserMock = mockStatic(QueryParser.class)) {
+      queryParserMock
+          .when(() -> QueryParser.validateVersions(any(), any(), any()))
+          .thenReturn(mockRelNode);
+
+      VirtualDatasetUI uiProto =
+          new VirtualDatasetUI()
+              .setId("1")
+              .setFullPathList(ImmutableList.of("myspace", "query_" + colNames.get(0)))
+              .setSql(sql)
+              .setSqlFieldsList(
+                  colNames.stream()
+                      .map(name -> new ViewFieldType().setName(name).setType("INTEGER"))
+                      .collect(ImmutableList.toImmutableList()))
+              .setState(new VirtualDatasetState())
+              .setVersion(new DatasetVersion("1"));
+
+      if (shouldFail) {
+        assertThatThrownBy(() -> datasetVersionMutator.put(uiProto))
+            .isInstanceOf(UserException.class)
+            .hasMessageContaining("Duplicate column name '" + colNames.get(0) + "'");
+      } else {
+        when(catalogService.getSystemUserCatalog()).thenReturn(mock(Catalog.class));
+        assertThatCode(() -> datasetVersionMutator.put(uiProto)).doesNotThrowAnyException();
+      }
+    }
+  }
+
   @Test
   public void testGettingCorrectSavedVersion() throws NamespaceNotFoundException {
     List<String> path = ImmutableList.of("path");
@@ -242,6 +303,76 @@ public class TestDatasetVersionMutator {
         datasetVersionMutator.getLatestVersionByOrigin(
             new DatasetPath(path), third.getVersion(), DatasetVersionOrigin.SAVE),
         second.getVersion());
+  }
+
+  @Test
+  public void testGetLatestVersionByOriginBrokenHistory() throws NamespaceNotFoundException {
+    List<String> path = ImmutableList.of("path");
+    VirtualDatasetUI first =
+        new VirtualDatasetUI()
+            .setId("1")
+            .setFullPathList(path)
+            .setSqlFieldsList(ImmutableList.of(new ViewFieldType().setName("a").setType("int")))
+            .setState(new VirtualDatasetState())
+            .setVersion(new DatasetVersion("1"))
+            .setDatasetVersionOrigin(DatasetVersionOrigin.SAVE);
+
+    VirtualDatasetUI second =
+        new VirtualDatasetUI()
+            .setId("2")
+            .setFullPathList(path)
+            .setSqlFieldsList(ImmutableList.of(new ViewFieldType().setName("a").setType("int")))
+            .setState(new VirtualDatasetState())
+            .setVersion(new DatasetVersion("2"))
+            .setDatasetVersionOrigin(DatasetVersionOrigin.RUN);
+
+    VirtualDatasetUI third =
+        new VirtualDatasetUI()
+            .setId("3")
+            .setFullPathList(path)
+            .setSqlFieldsList(ImmutableList.of(new ViewFieldType().setName("a").setType("int")))
+            .setState(new VirtualDatasetState())
+            .setVersion(new DatasetVersion("3"))
+            .setDatasetVersionOrigin(DatasetVersionOrigin.RUN);
+
+    NameDatasetRef firstRef =
+        new NameDatasetRef()
+            .setDatasetPath("path")
+            .setDatasetVersion(first.getVersion().getVersion());
+    second.setPreviousVersion(firstRef);
+
+    NameDatasetRef secondRef =
+        new NameDatasetRef()
+            .setDatasetPath("path")
+            .setDatasetVersion(second.getVersion().getVersion());
+    third.setPreviousVersion(secondRef);
+
+    when(catalogService.getSystemUserCatalog()).thenReturn(catalog);
+    when(catalog.getSource(Mockito.<String>any())).thenReturn(sourcePlugin);
+    when(sourcePlugin.isWrapperFor(SupportsIcebergRestApi.class)).thenReturn(false);
+
+    // Don't put first version to validate behavior when it's missing
+    datasetVersionMutator.putVersion(second);
+    datasetVersionMutator.putVersion(third);
+
+    when(datasetVersions.get(
+            new DatasetVersionMutator.VersionDatasetKey(new DatasetPath(path), first.getVersion())))
+        .thenReturn(null);
+
+    when(datasetVersions.get(
+            new DatasetVersionMutator.VersionDatasetKey(
+                new DatasetPath(path), second.getVersion())))
+        .thenReturn(DatasetsUtil.toVirtualDatasetVersion(second));
+
+    when(datasetVersions.get(
+            new DatasetVersionMutator.VersionDatasetKey(new DatasetPath(path), third.getVersion())))
+        .thenReturn(DatasetsUtil.toVirtualDatasetVersion(third));
+
+    // the version history looks like third (run) -> second (run) -> first, with first missing from
+    // the dataset version store. Therefore, we will return null since no saved origin will be found
+    assertNull(
+        datasetVersionMutator.getLatestVersionByOrigin(
+            new DatasetPath(path), third.getVersion(), DatasetVersionOrigin.SAVE));
   }
 
   @Test

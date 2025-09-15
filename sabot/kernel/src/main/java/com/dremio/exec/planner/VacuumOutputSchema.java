@@ -15,6 +15,9 @@
  */
 package com.dremio.exec.planner;
 
+import static com.dremio.exec.store.SystemSchemas.FILE_PATH;
+import static com.dremio.exec.store.SystemSchemas.FILE_SIZE;
+
 import com.dremio.common.expression.CompleteType;
 import com.dremio.exec.catalog.VacuumOptions;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
@@ -23,6 +26,7 @@ import org.apache.arrow.vector.types.Types;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
+import org.apache.calcite.sql.type.SqlTypeName;
 
 /** Static schema from VACUUM TABLE. */
 public class VacuumOutputSchema {
@@ -72,7 +76,21 @@ public class VacuumOutputSchema {
     throw new IllegalArgumentException("Invalid vacuum options: " + vacuumOptions);
   }
 
-  public static RelDataType getCatalogOutputRelDataType(RelDataTypeFactory typeFactory) {
+  public static RelDataType getCatalogOutputRelDataType(
+      RelDataTypeFactory typeFactory, boolean dryRun) {
+    if (dryRun) {
+      return typeFactory
+          .builder()
+          .add(
+              FILE_PATH,
+              typeFactory.createTypeWithNullability(
+                  typeFactory.createSqlType(SqlTypeName.VARCHAR), true))
+          .add(
+              FILE_SIZE,
+              typeFactory.createTypeWithNullability(
+                  typeFactory.createSqlType(SqlTypeName.BIGINT), true))
+          .build();
+    }
     return getRowType(REMOVE_ORPHANS_OUTPUT_SCHEMA, typeFactory);
   }
 

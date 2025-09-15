@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.store.dfs;
 
+import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.eq;
@@ -27,6 +28,7 @@ import static org.mockito.Mockito.when;
 import com.dremio.common.scanner.persistence.ScanResult;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.datastore.api.FindByRange;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.CreateTableOptions;
 import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
@@ -188,7 +190,7 @@ public class TestFileSystemPlugin {
     Iterable<PartitionChunkMetadata> partitionsIterable = ImmutableList.of(partitionChunkMetadata);
     when(namespaceService.findSplits(any(FindByRange.class))).thenReturn(partitionsIterable);
     boolean hasAccess = fileSystemPlugin.hasAccessPermission(TEST_USER, TEST_KEY, datasetConfig);
-    Assert.assertTrue(hasAccess);
+    assertTrue(hasAccess);
   }
 
   /* With unlimited splits enabled (iceberg metadata), the dataset split extended property data for parquet files is
@@ -225,7 +227,7 @@ public class TestFileSystemPlugin {
     Iterable<PartitionChunkMetadata> partitionsIterable = ImmutableList.of(partitionChunkMetadata);
     when(namespaceService.findSplits(any(FindByRange.class))).thenReturn(partitionsIterable);
     boolean hasAccess = fileSystemPlugin.hasAccessPermission(TEST_USER, TEST_KEY, datasetConfig);
-    Assert.assertTrue(hasAccess);
+    assertTrue(hasAccess);
   }
 
   @Test
@@ -255,7 +257,7 @@ public class TestFileSystemPlugin {
     Iterable<PartitionChunkMetadata> partitionsIterable = ImmutableList.of(partitionChunkMetadata);
     when(namespaceService.findSplits(any(FindByRange.class))).thenReturn(partitionsIterable);
     boolean hasAccess = fileSystemPlugin.hasAccessPermission(TEST_USER, TEST_KEY, datasetConfig);
-    Assert.assertTrue(hasAccess);
+    assertTrue(hasAccess);
   }
 
   /**
@@ -310,6 +312,7 @@ public class TestFileSystemPlugin {
 
     SabotContext context = mock(SabotContext.class);
     when(context.getClasspathScan()).thenReturn(scanResult);
+    when(context.getOptionManager()).thenReturn(optionManager);
 
     FileSystem fs = mock(FileSystem.class);
 
@@ -332,6 +335,19 @@ public class TestFileSystemPlugin {
         ImmutableMap.of("type", ArrowFormatPlugin.ARROW_DEFAULT_NAME),
         CreateTableOptions.builder().setSkipFileExistenceCheck(true).build());
     verify(underlyingFs, never()).exists(any());
+  }
+
+  @Test
+  public void testPropagateEnableS3V2Client() throws IOException {
+    ScanResult scanResult = mock(ScanResult.class);
+    when(sabotContext.getClasspathScan()).thenReturn(scanResult);
+    when(optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT)).thenReturn(true);
+
+    fileSystemPlugin.start();
+    assertTrue(
+        fileSystemPlugin
+            .getFsConf()
+            .getBoolean(ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(), false));
   }
 
   class MockFileSystemConf extends FileSystemConf<MockFileSystemConf, MockFileSystemPlugin> {

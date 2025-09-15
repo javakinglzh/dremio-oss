@@ -20,7 +20,6 @@ import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.proto.UserSessionProtobuf;
 import com.dremio.exec.proto.UserSessionProtobuf.UserSessionRPC;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
@@ -49,17 +48,11 @@ public final class GrpcUserSessionConverter {
    * @return the protobuf representation of the object
    */
   public static UserSessionRPC toProtoBuf(UserSession session) throws JsonProcessingException {
-    final UserSessionProtobuf.SubstitutionSettingsRPC substitutionSettingsRPC =
-        UserSessionProtobuf.SubstitutionSettingsRPC.newBuilder()
-            .addAllExclusions(session.getSubstitutionSettings().getExclusions())
-            .addAllInclusions(session.getSubstitutionSettings().getInclusions())
-            .build();
 
     final UserSessionProtobuf.UserSessionRPC.Builder sessionBuilder =
         UserSessionProtobuf.UserSessionRPC.newBuilder()
             .setSupportFullyQualifiedProjections(session.supportFullyQualifiedProjections())
             .setUseLegacyCatalogName(session.useLegacyCatalogName())
-            .setSubstitutionSettings(substitutionSettingsRPC)
             .setSupportComplexTypes(session.isSupportComplexTypes())
             .setExposeInternalSources(session.exposeInternalSources())
             .setTracingEnabled(session.isTracingEnabled());
@@ -178,13 +171,6 @@ public final class GrpcUserSessionConverter {
   public static UserSession fromProtoBuf(UserSessionProtobuf.UserSessionRPC userSessionRPC)
       throws JsonProcessingException {
 
-    final SubstitutionSettings substitutionSettings =
-        new SubstitutionSettings(userSessionRPC.getSubstitutionSettings().getExclusionsList());
-    if (!userSessionRPC.getSubstitutionSettings().getInclusionsList().isEmpty()) {
-      substitutionSettings.setInclusions(
-          userSessionRPC.getSubstitutionSettings().getInclusionsList());
-    }
-
     final UserProtos.UserProperties.Builder userPropBuilder =
         UserProtos.UserProperties.newBuilder()
             .addProperties(
@@ -238,10 +224,6 @@ public final class GrpcUserSessionConverter {
     final ProtocolStringList defaultSchemaPathList = userSessionRPC.getDefaultSchemaPathList();
     if (defaultSchemaPathList != null && !defaultSchemaPathList.isEmpty()) {
       sessionBuilder.withDefaultSchema(defaultSchemaPathList);
-    }
-
-    if (userSessionRPC.hasSubstitutionSettings()) {
-      sessionBuilder.withSubstitutionSettings(substitutionSettings);
     }
 
     if (userSessionRPC.hasRecordBatchFormat()) {

@@ -49,6 +49,7 @@ public class IcebergManifestListScanCreator
                   .withAsyncOptions(true)
                   .filePath(config.getLocation())
                   .userName(config.getProps().getUserName())
+                  .userId(config.getProps().getUserId())
                   .operatorContext(context)
                   .datasetFromTablePaths(config.getReferencedTables()));
     } catch (IOException e) {

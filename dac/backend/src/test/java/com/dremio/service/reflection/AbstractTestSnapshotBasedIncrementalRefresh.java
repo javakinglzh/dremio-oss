@@ -84,7 +84,6 @@ public abstract class AbstractTestSnapshotBasedIncrementalRefresh extends BaseTe
   private final String testTableName =
       "test_snapshot_based_incremental_reflections" + TABLE_NUMBER.getAndIncrement();
   private BufferAllocator allocator;
-  private final ReflectionMonitor monitor = newReflectionMonitor();
 
   protected abstract String getTestTablePath();
 
@@ -96,10 +95,6 @@ public abstract class AbstractTestSnapshotBasedIncrementalRefresh extends BaseTe
 
   protected void refreshTableMetadata() {}
   ;
-
-  protected ReflectionMonitor getMonitor() {
-    return monitor;
-  }
 
   @BeforeClass
   public static void prepare() throws Exception {
@@ -119,8 +114,7 @@ public abstract class AbstractTestSnapshotBasedIncrementalRefresh extends BaseTe
   public void after() throws Exception {
     resetSystemOption(ENABLE_OPTIMIZE_TABLE_FOR_INCREMENTAL_REFLECTIONS);
     setDeletionGracePeriod();
-    getReflectionService().clearAll();
-    monitor.waitUntilNoMaterializationsAvailable();
+    clearReflections();
     resetSettings();
     allocator.close();
   }

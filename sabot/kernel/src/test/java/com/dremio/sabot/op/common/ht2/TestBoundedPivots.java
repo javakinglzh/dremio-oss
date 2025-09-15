@@ -57,9 +57,9 @@ public class TestBoundedPivots extends BaseTestWithAllocator {
       assertEquals(32, pivot.getBlockWidth());
 
       try (FixedBlockVector fixed =
-              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, true);
+              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, false);
           VariableBlockVector variable =
-              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 10, true)) {
+              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 10, false)) {
         fixedOnlyHelper(pivot, fixed, variable, 0, 4096, false, col1Val, col2Val, col3Val, col4Val);
         fixedOnlyHelper(pivot, fixed, variable, 0, 128, true, col1Val, col2Val, col3Val, col4Val);
         fixedOnlyHelper(pivot, fixed, variable, 0, 17, true, col1Val, col2Val, col3Val, col4Val);
@@ -100,9 +100,9 @@ public class TestBoundedPivots extends BaseTestWithAllocator {
       assertEquals(32, pivot.getBlockWidth());
 
       try (FixedBlockVector fixed =
-              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, true);
+              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, false);
           VariableBlockVector variable =
-              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 10, true)) {
+              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 10, false)) {
         fixedOnlyHelper(pivot, fixed, variable, 0, 4096, false, col1Val, col2Val, col3Val, col4Val);
         fixedOnlyHelper(pivot, fixed, variable, 0, 128, true, col1Val, col2Val, col3Val, col4Val);
         fixedOnlyHelper(pivot, fixed, variable, 0, 17, true, col1Val, col2Val, col3Val, col4Val);
@@ -178,9 +178,9 @@ public class TestBoundedPivots extends BaseTestWithAllocator {
       assertEquals(20, pivot.getBlockWidth());
 
       try (FixedBlockVector fixed =
-              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, true);
+              new FixedBlockVector(allocator, pivot.getBlockWidth(), 1024, false);
           VariableBlockVector variable =
-              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 2, true)) {
+              new VariableBlockVector(allocator, pivot.getVariableCount(), 64 * 1024, false)) {
         fixedVariableHelper(pivot, fixed, variable, 0, 4096, false, col1Val, col2Val, col3Val);
         fixedVariableHelper(pivot, fixed, variable, 0, 128, true, col1Val, col2Val, col3Val);
         fixedVariableHelper(pivot, fixed, variable, 0, 17, true, col1Val, col2Val, col3Val);
@@ -215,9 +215,9 @@ public class TestBoundedPivots extends BaseTestWithAllocator {
       assertEquals(20, pivot.getBlockWidth());
 
       try (FixedBlockVector fixed =
-              new FixedBlockVector(allocator, pivot.getBlockWidth(), 4096, true);
+              new FixedBlockVector(allocator, pivot.getBlockWidth(), 1024, false);
           VariableBlockVector variable =
-              new VariableBlockVector(allocator, pivot.getVariableCount(), 4096 * 2, true)) {
+              new VariableBlockVector(allocator, pivot.getVariableCount(), 1024 * 2, false)) {
         fixedVariableHelper(pivot, fixed, variable, 0, 4096, false, col1Val, col2Val, col3Val);
         fixedVariableHelper(pivot, fixed, variable, 0, 128, true, col1Val, col2Val, col3Val);
         fixedVariableHelper(pivot, fixed, variable, 0, 17, true, col1Val, col2Val, col3Val);
@@ -577,7 +577,7 @@ public class TestBoundedPivots extends BaseTestWithAllocator {
       final PivotDef pivot = PivotBuilder.getBlockDefinition(new FieldVectorPair(in, out));
       try (final FixedBlockVector fbv = new FixedBlockVector(allocator, pivot.getBlockWidth());
           final VariableBlockVector vbv =
-              new VariableBlockVector(allocator, pivot.getVariableCount()); ) {
+              new VariableBlockVector(allocator, pivot.getVariableCount(), 1024, false); ) {
         fbv.ensureAvailableBlocks(count);
         Pivots.pivot(pivot, count, fbv, vbv);
 

@@ -61,8 +61,8 @@ public class CompilationOptions {
     return optionResolver.getOption(ExecConstants.CODE_GEN_FUNCTION_EXPRESSION_COUNT_THRESHOLD);
   }
 
-  public boolean getAllowEmptyBlock() {
-    return optionResolver.getOption(ExecConstants.CODE_GEN_ALLOW_EMPTY_BLOCK);
+  public boolean getAutoUnnestBlock() {
+    return optionResolver.getOption(ExecConstants.CODE_GEN_AUTO_UNNEST_BLOCK);
   }
 
   public OptionResolver getOptionResolver() {

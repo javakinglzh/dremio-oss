@@ -33,6 +33,8 @@ import com.google.protobuf.InvalidProtocolBufferException;
  * {@link ReadSignatureProvider} to be used during full metadata refresh of Hive tables
  */
 public class HiveFullRefreshReadSignatureProvider extends AbstractReadSignatureProvider {
+  private static final org.slf4j.Logger LOGGER =
+      org.slf4j.LoggerFactory.getLogger(HiveFullRefreshReadSignatureProvider.class);
 
   protected static final String EMPTY_STRING = "";
   protected final List<String> partitionPaths;
@@ -47,10 +49,26 @@ public class HiveFullRefreshReadSignatureProvider extends AbstractReadSignatureP
   @Override
   public ByteString compute(Set<IcebergPartitionData> addedPartitions, Set<IcebergPartitionData> deletedPartitions) {
     // Add table root dir for non-partitioned table and if not already present
+    if (partitionPaths == null) {
+      LOGGER.debug("Object 'partitionPaths' is null");
+    } else {
+      LOGGER.debug("Object 'partitionPaths': {}", partitionPaths);
+    }
+
+    if (addedPartitions == null) {
+      LOGGER.debug("Object 'addedPartitions' is null");
+    } else {
+      LOGGER.debug("Object 'addedPartitions': {}", addedPartitions);
+    }
+
+    if (deletedPartitions == null) {
+      LOGGER.debug("Object 'deletedPartitions' is null");
+    } else {
+      LOGGER.debug("Object 'deletedPartitions': {}", deletedPartitions);
+    }
     if (partitionPaths.size() == 0 && (pathsInReadSignature.size() == 0 || !pathsInReadSignature.contains(tableRoot))) {
       pathsInReadSignature.add(tableRoot);
     } else {
-      assertPartitionsCount(addedPartitions, deletedPartitions);
       pathsInReadSignature.addAll(partitionPaths);
     }
     Preconditions.checkState(pathsInReadSignature.size() != 0, "No paths added to compute read signature");
@@ -66,11 +84,6 @@ public class HiveFullRefreshReadSignatureProvider extends AbstractReadSignatureP
       .addAllFsPartitionUpdateKeys(fileSystemPartitionUpdateKeys)
       .build()
       .toByteString();
-  }
-
-  protected void assertPartitionsCount(Set<IcebergPartitionData> addedPartitions, Set<IcebergPartitionData> deletedPartitions) {
-    Preconditions.checkArgument(addedPartitions.size() <= partitionPaths.size());
-    Preconditions.checkArgument(deletedPartitions.size() == 0, "Delete data file operation not allowed in full metadata refresh");
   }
 
   static HiveReaderProto.HiveReadSignature decodeHiveReadSignatureByteString(ByteString readSig) {

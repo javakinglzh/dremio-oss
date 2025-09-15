@@ -131,25 +131,24 @@ public class FilesystemScanDrel extends FilterableScan implements Rel, Pruneable
 
   // Clone with new conditions
   private FilesystemScanDrel(FilesystemScanDrel that, ParquetScanFilter filter) {
-    super(
+    this(
         that.getCluster(),
         that.getTraitSet(),
         that.getTable(),
         that.getPluginId(),
         that.getTableMetadata(),
         that.getProjectedColumns(),
+        filter,
+        that.getRowGroupFilter(),
         that.getObservedRowcountAdjustment(),
         that.getHints(),
+        that.isArrowCachingEnabled(),
+        that.getPartitionFilter(),
+        that.getSurvivingRowCount(),
+        that.getSurvivingFileCount(),
         that.getSnapshotDiffContext(),
+        that.isPartitionValuesEnabled(),
         that.getPartitionStatsStatus());
-    assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-    this.filter = filter;
-    this.rowGroupFilter = that.getRowGroupFilter();
-    this.arrowCachingEnabled = that.isArrowCachingEnabled();
-    this.partitionFilter = that.getPartitionFilter();
-    this.survivingRowCount = that.getSurvivingRowCount();
-    this.survivingFileCount = that.getSurvivingFileCount();
-    this.partitionValuesEnabled = that.isPartitionValuesEnabled();
   }
 
   // Clone with partition filter
@@ -158,94 +157,90 @@ public class FilesystemScanDrel extends FilterableScan implements Rel, Pruneable
       PruneFilterCondition partitionFilter,
       Long survivingRowCount,
       Long survivingFileCount) {
-    super(
+    this(
         that.getCluster(),
         that.getTraitSet(),
         that.getTable(),
         that.getPluginId(),
         that.getTableMetadata(),
         that.getProjectedColumns(),
+        that.getFilter(),
+        that.getRowGroupFilter(),
         that.getObservedRowcountAdjustment(),
         that.getHints(),
+        that.isArrowCachingEnabled(),
+        partitionFilter,
+        survivingRowCount,
+        survivingFileCount,
         that.getSnapshotDiffContext(),
+        that.isPartitionValuesEnabled(),
         that.getPartitionStatsStatus());
-    assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-    this.filter = that.getFilter();
-    this.rowGroupFilter = that.getRowGroupFilter();
-    this.arrowCachingEnabled = that.isArrowCachingEnabled();
-    this.partitionFilter = partitionFilter;
-    this.survivingRowCount = survivingRowCount;
-    this.survivingFileCount = survivingFileCount;
-    this.partitionValuesEnabled = that.isPartitionValuesEnabled();
   }
 
   // Clone with new dataset pointer
   private FilesystemScanDrel(FilesystemScanDrel that, TableMetadata newDatasetPointer) {
-    super(
+    this(
         that.getCluster(),
         that.getTraitSet(),
         new RelOptNamespaceTable(newDatasetPointer, that.getCluster()),
         that.getPluginId(),
         newDatasetPointer,
         that.getProjectedColumns(),
+        that.getFilter(),
+        that.getRowGroupFilter(),
         that.getObservedRowcountAdjustment(),
         that.getHints(),
+        that.isArrowCachingEnabled(),
+        that.getPartitionFilter(),
+        that.getSurvivingRowCount(),
+        that.getSurvivingFileCount(),
         that.getSnapshotDiffContext(),
+        that.isPartitionValuesEnabled(),
         that.getPartitionStatsStatus());
-    assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-    this.filter = that.getFilter();
-    this.rowGroupFilter = that.getRowGroupFilter();
-    this.arrowCachingEnabled = that.isArrowCachingEnabled();
-    this.partitionFilter = that.getPartitionFilter();
-    this.survivingRowCount = that.getSurvivingRowCount();
-    this.survivingFileCount = that.getSurvivingFileCount();
-    this.partitionValuesEnabled = that.isPartitionValuesEnabled();
   }
 
   // Clone with new arrowCachingEnabled
   private FilesystemScanDrel(FilesystemScanDrel that, boolean arrowCachingEnabled) {
-    super(
+    this(
         that.getCluster(),
         that.getTraitSet(),
         that.getTable(),
         that.getPluginId(),
         that.getTableMetadata(),
         that.getProjectedColumns(),
+        that.getFilter(),
+        that.getRowGroupFilter(),
         that.getObservedRowcountAdjustment(),
         that.getHints(),
+        arrowCachingEnabled,
+        that.getPartitionFilter(),
+        that.getSurvivingRowCount(),
+        that.getSurvivingFileCount(),
         that.getSnapshotDiffContext(),
+        that.isPartitionValuesEnabled(),
         that.getPartitionStatsStatus());
-    assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-    this.filter = that.getFilter();
-    this.rowGroupFilter = that.getRowGroupFilter();
-    this.arrowCachingEnabled = arrowCachingEnabled;
-    this.partitionFilter = that.getPartitionFilter();
-    this.survivingRowCount = that.getSurvivingRowCount();
-    this.survivingFileCount = that.getSurvivingFileCount();
-    this.partitionValuesEnabled = that.isPartitionValuesEnabled();
   }
 
   // Clone with new rowGroupFilter
   private FilesystemScanDrel(FilesystemScanDrel that, ParquetScanRowGroupFilter rowGroupFilter) {
-    super(
+    this(
         that.getCluster(),
         that.getTraitSet(),
         that.getTable(),
         that.getPluginId(),
         that.getTableMetadata(),
         that.getProjectedColumns(),
+        that.getFilter(),
+        rowGroupFilter,
         that.getObservedRowcountAdjustment(),
         that.getHints(),
+        that.isArrowCachingEnabled(),
+        that.getPartitionFilter(),
+        that.getSurvivingRowCount(),
+        that.getSurvivingFileCount(),
         that.getSnapshotDiffContext(),
+        that.isPartitionValuesEnabled(),
         that.getPartitionStatsStatus());
-    assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-    this.filter = that.getFilter();
-    this.rowGroupFilter = rowGroupFilter;
-    this.arrowCachingEnabled = that.isArrowCachingEnabled();
-    this.partitionFilter = that.getPartitionFilter();
-    this.survivingRowCount = that.getSurvivingRowCount();
-    this.survivingFileCount = that.getSurvivingFileCount();
-    this.partitionValuesEnabled = that.isPartitionValuesEnabled();
   }
 
   @Override
@@ -355,6 +350,11 @@ public class FilesystemScanDrel extends FilterableScan implements Rel, Pruneable
         snapshotDiffContext,
         partitionValuesEnabled,
         getPartitionStatsStatus());
+  }
+
+  @Override
+  public boolean hasFilter() {
+    return filter != null || rowGroupFilter != null || partitionFilter != null;
   }
 
   @Override

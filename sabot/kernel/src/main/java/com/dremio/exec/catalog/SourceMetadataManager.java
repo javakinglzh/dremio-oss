@@ -530,10 +530,32 @@ class SourceMetadataManager implements AutoCloseable {
       return Optional.ofNullable(icebergDatasetMetadataState.getIfPresent(key))
           .orElseGet(() -> DatasetMetadataState.builder().setIsExpired(true).build());
     }
-    return DatasetMetadataState.builder()
-        .setIsExpired(config.getLastModified() == null)
-        .setLastRefreshTimeMillis(config.getLastModified())
-        .build();
+    ImmutableDatasetMetadataState.Builder builder = DatasetMetadataState.builder();
+    builder.setIsExpired(config.getLastModified() == null);
+    if (config.getLastModified() != null) {
+      builder.setLastRefreshTimeMillis(config.getLastModified());
+    }
+    return builder.build();
+  }
+
+  protected MetadataSynchronizer getMetadataSynchronizer(
+      NamespaceService systemNamespace,
+      NamespaceKey sourceKey,
+      ManagedStoragePlugin.MetadataBridge bridge,
+      MetadataPolicy metadataPolicy,
+      DatasetSaver datasetSaver,
+      DatasetRetrievalOptions retrievalOptions,
+      OptionManager optionManager,
+      SabotQueryContext sabotQueryContextDoNotUse) {
+    return new MetadataSynchronizer(
+        systemNamespace,
+        sourceKey,
+        bridge,
+        metadataPolicy,
+        datasetSaver,
+        retrievalOptions,
+        optionManager,
+        sabotQueryContextDoNotUse);
   }
 
   /** An abstract implementation of refresh logic. */
@@ -705,7 +727,7 @@ class SourceMetadataManager implements AutoCloseable {
 
       final Stopwatch stopwatch = Stopwatch.createStarted();
       final MetadataSynchronizer synchronizeRun =
-          new MetadataSynchronizer(
+          getMetadataSynchronizer(
               systemNamespace,
               sourceKey,
               bridge,

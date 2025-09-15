@@ -302,10 +302,6 @@ public final class JobsServiceTestUtils {
         materializationSettingsBuilder.setMaterializationSummary(
             JobsProtoUtil.toBuf(jobRequest.getMaterializationSummary()));
       }
-      if (jobRequest.getSubstitutionSettings() != null) {
-        materializationSettingsBuilder.setSubstitutionSettings(
-            JobsProtoUtil.toBuf(jobRequest.getSubstitutionSettings()));
-      }
       jobRequestBuilder.setMaterializationSettings(materializationSettingsBuilder);
     }
 

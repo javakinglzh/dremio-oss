@@ -96,6 +96,7 @@ import com.dremio.service.namespace.NamespaceServiceImpl;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.catalogpubsub.CatalogEventMessagePublisherProvider;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEventsImpl;
+import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
@@ -681,6 +682,7 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
+            null,
             false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
@@ -702,6 +704,7 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
+            null,
             false);
     assertThatThrownBy(() -> catalogServiceHelper.createCatalogItem(dataset))
         .isInstanceOf(IllegalArgumentException.class);
@@ -715,6 +718,7 @@ public class TestCatalogServiceHelper {
             null,
             Dataset.DatasetType.VIRTUAL_DATASET,
             Arrays.asList("source", "path"),
+            null,
             null,
             null,
             null,
@@ -741,6 +745,7 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
+            null,
             "sql",
             null,
             null,
@@ -757,6 +762,7 @@ public class TestCatalogServiceHelper {
             null,
             Dataset.DatasetType.VIRTUAL_DATASET,
             Collections.emptyList(),
+            null,
             null,
             null,
             null,
@@ -781,6 +787,7 @@ public class TestCatalogServiceHelper {
             null,
             null,
             null,
+            null,
             "SELECT 1",
             null,
             null,
@@ -797,6 +804,7 @@ public class TestCatalogServiceHelper {
             null,
             Dataset.DatasetType.VIRTUAL_DATASET,
             Arrays.asList("NonExistentSpace", "dataset"),
+            null,
             null,
             null,
             null,
@@ -1050,6 +1058,7 @@ public class TestCatalogServiceHelper {
             Dataset.DatasetType.VIRTUAL_DATASET,
             Arrays.asList("source", "path"),
             null,
+            null,
             0L,
             "1",
             null,
@@ -1078,6 +1087,7 @@ public class TestCatalogServiceHelper {
             id.asString(),
             Dataset.DatasetType.VIRTUAL_DATASET,
             path,
+            null,
             null,
             0L,
             "1",
@@ -1127,6 +1137,7 @@ public class TestCatalogServiceHelper {
             Dataset.DatasetType.VIRTUAL_DATASET,
             path,
             null,
+            null,
             0L,
             config.getTag(),
             null,
@@ -1174,6 +1185,7 @@ public class TestCatalogServiceHelper {
             Dataset.DatasetType.VIRTUAL_DATASET,
             path,
             null,
+            null,
             0L,
             config.getTag(),
             null,
@@ -1193,6 +1205,7 @@ public class TestCatalogServiceHelper {
             null,
             Dataset.DatasetType.VIRTUAL_DATASET,
             Arrays.asList("source", "path"),
+            null,
             null,
             0L,
             "1",
@@ -1239,6 +1252,7 @@ public class TestCatalogServiceHelper {
             "dataset-id",
             Dataset.DatasetType.PHYSICAL_DATASET,
             Arrays.asList("source", "path"),
+            null,
             null,
             0L,
             addedDataset.getTag(),
@@ -1297,6 +1311,7 @@ public class TestCatalogServiceHelper {
             id,
             Dataset.DatasetType.PHYSICAL_DATASET,
             path,
+            null,
             null,
             0L,
             addedConfig.getTag(),
@@ -1829,6 +1844,7 @@ public class TestCatalogServiceHelper {
               null,
               null,
               null,
+              null,
               "sql",
               null,
               null,
@@ -1862,6 +1878,7 @@ public class TestCatalogServiceHelper {
               id.asString(),
               Dataset.DatasetType.VIRTUAL_DATASET,
               tableKey,
+              null,
               null,
               null,
               null,
@@ -1905,6 +1922,7 @@ public class TestCatalogServiceHelper {
               null,
               null,
               null,
+              null,
               "SELECT 1",
               null,
               null,
@@ -1939,6 +1957,7 @@ public class TestCatalogServiceHelper {
               id.asString(),
               Dataset.DatasetType.VIRTUAL_DATASET,
               tableKey,
+              null,
               null,
               null,
               null,
@@ -2169,6 +2188,20 @@ public class TestCatalogServiceHelper {
     assertEquals(Lists.newArrayList("myTable"), fileFormat.getFullPath());
     assertEquals(123L, fileFormat.getCtime());
     assertTrue(fileFormat.getIsFolder());
+  }
+
+  @Test
+  public void testToDatasetAPI_convertsDatasetVersion() {
+    var datasetVersion = DatasetVersion.newVersion();
+    DatasetConfig config =
+        new DatasetConfig()
+            .setId(new EntityId().setId("id"))
+            .setFullPathList(List.of("a", "b"))
+            .setName("b")
+            .setType(DatasetType.VIRTUAL_DATASET)
+            .setVirtualDataset(new VirtualDataset().setVersion(datasetVersion).setSql("SELECT 1"));
+    var apiDataset = catalogServiceHelper.toDatasetAPI(config, null, null);
+    assertThat(apiDataset.getDatasetVersion()).isEqualTo(datasetVersion.getVersion());
   }
 
   private static SourceConfig newTestSource(String sourceName) {

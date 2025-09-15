@@ -106,6 +106,16 @@ public abstract class EasyFormatPlugin<T extends FormatPluginConfig> extends Bas
     return compressible;
   }
 
+  /**
+   * Whether or not the format can skip implicit columns. If this is true, then implicit columns are
+   * not prepared to be wrapped onto a RecordReader during a scan operation.
+   *
+   * @return True if implicit columns can be skipped.
+   */
+  public boolean canSkipAddingImplicitColumns() {
+    return false;
+  }
+
   public abstract RecordReader getRecordReader(
       OperatorContext context,
       FileSystem dfs,

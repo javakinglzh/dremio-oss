@@ -24,6 +24,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.stream.Collectors;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.recipes.locks.InterProcessSemaphoreV2;
 import org.apache.curator.framework.recipes.locks.Lease;
@@ -189,6 +190,14 @@ class ZkDistributedSemaphore implements DistributedSemaphore {
     @Override
     public void close() throws Exception {
       AutoCloseables.close(leases);
+    }
+
+    @Override
+    public String formatAsString() {
+      return leases.stream()
+          .map(Lease::getNodeName)
+          .map(it -> ZKPaths.makePath(path, it))
+          .collect(Collectors.joining(",", "[", "]"));
     }
   }
 }

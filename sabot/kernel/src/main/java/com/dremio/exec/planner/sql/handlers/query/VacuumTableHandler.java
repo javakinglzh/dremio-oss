@@ -17,16 +17,21 @@ package com.dremio.exec.planner.sql.handlers.query;
 
 import static com.dremio.exec.planner.ResultWriterUtils.storeQueryResultsIfNeeded;
 import static com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler.refreshDataset;
+import static com.dremio.exec.store.iceberg.IcebergUtils.convertListTablePropertiesToMap;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.context.ContextUtil;
 import com.dremio.context.RequestContext;
 import com.dremio.exec.ExecConstants;
+import com.dremio.exec.calcite.logical.VacuumTableCrel;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
+import com.dremio.exec.catalog.DremioTable;
+import com.dremio.exec.catalog.VacuumOptions;
 import com.dremio.exec.ops.PlannerCatalog;
 import com.dremio.exec.physical.PhysicalPlan;
 import com.dremio.exec.physical.base.PhysicalOperator;
+import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.planner.logical.Rel;
 import com.dremio.exec.planner.logical.ScreenRel;
@@ -39,10 +44,12 @@ import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.SqlToRelTransformer;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DremioHint;
+import com.dremio.exec.planner.sql.parser.SqlVacuum;
 import com.dremio.exec.planner.sql.parser.SqlVacuumTable;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionValue;
 import com.dremio.service.namespace.NamespaceKey;
+import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.sql.SqlNode;
@@ -76,7 +83,7 @@ public class VacuumTableHandler extends TableManagementHandler {
           .buildSilently();
     }
 
-    if (sqlVacuumTable.getVacuumOptions().isRemoveOrphans()
+    if (sqlVacuumTable.isRemoveOrphans()
         && !config
             .getContext()
             .getOptions()
@@ -105,6 +112,13 @@ public class VacuumTableHandler extends TableManagementHandler {
       PlannerCatalog catalog,
       RelNode relNode)
       throws Exception {
+    DremioTable table = catalog.getTableWithSchema(path);
+    IcebergMetadata metadata = table.getDatasetConfig().getPhysicalDataset().getIcebergMetadata();
+    VacuumOptions vacuumOptions =
+        VacuumOptions.createInstance(
+            convertListTablePropertiesToMap(metadata.getTablePropertiesList()),
+            (SqlVacuum) sqlNode);
+
     CreateTableEntry createTableEntry =
         IcebergUtils.getIcebergCreateTableEntry(
             config,
@@ -114,7 +128,9 @@ public class VacuumTableHandler extends TableManagementHandler {
             null,
             null);
     Rel convertedRelNode =
-        DrelTransformer.convertToDrel(config, createTableEntryShuttle(relNode, createTableEntry));
+        DrelTransformer.convertToDrel(
+            config,
+            (createTableEntryShuttle(rewriteCrel(relNode, vacuumOptions), createTableEntry)));
     convertedRelNode = storeQueryResultsIfNeeded(config, convertedRelNode);
 
     return new ScreenRel(
@@ -189,5 +205,30 @@ public class VacuumTableHandler extends TableManagementHandler {
   @VisibleForTesting
   public Prel getPrel() {
     return prel;
+  }
+
+  protected static RelNode rewriteCrel(RelNode relNode, VacuumOptions vacuumOptions) {
+    return CrelVacuumOptionsApplier.apply(relNode, vacuumOptions);
+  }
+
+  private static class CrelVacuumOptionsApplier extends StatelessRelShuttleImpl {
+    private final VacuumOptions vacuumOptions;
+
+    private CrelVacuumOptionsApplier(VacuumOptions vacuumOptions) {
+      this.vacuumOptions = vacuumOptions;
+    }
+
+    private static RelNode apply(RelNode relNode, VacuumOptions vacuumOptions) {
+      CrelVacuumOptionsApplier applier = new CrelVacuumOptionsApplier(vacuumOptions);
+      return applier.visit(relNode);
+    }
+
+    @Override
+    public RelNode visit(RelNode other) {
+      if (other instanceof VacuumTableCrel) {
+        other = (VacuumTableCrel) ((VacuumTableCrel) other).createWith(vacuumOptions);
+      }
+      return super.visit(other);
+    }
   }
 }

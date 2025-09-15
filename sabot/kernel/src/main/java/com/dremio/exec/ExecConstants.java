@@ -126,6 +126,10 @@ public interface ExecConstants {
   PositiveLongValidator MAX_SPLITS_PER_EXPRESSION =
       new PositiveLongValidator(MAX_SPLITS_PER_EXPR_KEY, Long.MAX_VALUE, 10);
 
+  // Topological sort optimization in expression splitter pipeline creation
+  BooleanValidator ENABLE_EXPRESSION_SPLIT_PIPELINE_TOPOLOGICAL_SORT =
+      new BooleanValidator("exec.expression.split.pipeline.topological_sort.enabled", true);
+
   // Configuration option for deciding how much work should be done in Gandiva when there are
   // excessive splits
   // MAX_SPLITS_PER_EXPRESSION is used to configure excessive splits
@@ -194,8 +198,8 @@ public interface ExecConstants {
       new PositiveLongValidator(
           "exec.operator.codegen.function_expression_count.threshold", Integer.MAX_VALUE, 35);
 
-  BooleanValidator CODE_GEN_ALLOW_EMPTY_BLOCK =
-      new BooleanValidator("exec.operator.codegen.allow_empty_block", true);
+  BooleanValidator CODE_GEN_AUTO_UNNEST_BLOCK =
+      new BooleanValidator("exec.operator.codegen.auto_unnest.block", true);
 
   /**
    * Number of constants in expression above which constants are defined inside JAVA arrays in
@@ -230,6 +234,8 @@ public interface ExecConstants {
       new PositiveLongValidator("exec.batch.size-bytes", Integer.MAX_VALUE, 1024 * 1024);
   PositiveLongValidator BATCH_LIST_SIZE_ESTIMATE =
       new PositiveLongValidator("exec.batch.field.list.size-estimate", Integer.MAX_VALUE, 5);
+  PositiveLongValidator BATCH_MAP_SIZE_ESTIMATE =
+      new PositiveLongValidator("exec.batch.field.map.size-estimate", Integer.MAX_VALUE, 5);
   PositiveLongValidator BATCH_VARIABLE_FIELD_SIZE_ESTIMATE =
       new PositiveLongValidator(
           "exec.batch.field.variable-width.size-estimate", Integer.MAX_VALUE, 15);
@@ -1040,10 +1046,10 @@ public interface ExecConstants {
   BooleanValidator ENABLE_STORE_PARQUET_ASYNC_TIMESTAMP_CHECK =
       new BooleanValidator("store.parquet.async.enable_timestamp_check", true);
 
-  // option used to determine S3AsyncClient should get used or S3SyncWithAsync wrapper, false value
-  // to support prev implementation
-  BooleanValidator S3_NATIVE_ASYNC_CLIENT =
-      new BooleanValidator("dremio.s3.use_native_async_client", true);
+  // option used to enable the S3 client from AWS SDK for Java V2 instead of the V1
+  // in S3FileSystem
+  BooleanValidator ENABLE_S3_V2_CLIENT =
+      new BooleanValidator("dremio.s3.enable_s3_v2_client", true);
 
   // option used to enable/disable internal schema
   BooleanValidator ENABLE_INTERNAL_SCHEMA =
@@ -1313,6 +1319,8 @@ public interface ExecConstants {
       new PositiveLongValidator("limits.row_size_bytes", Integer.MAX_VALUE, 16 * 1024 * 1024);
   PositiveLongValidator LIMIT_BATCH_ROW_SIZE_BYTES =
       new PositiveLongValidator("limits.batch_row_size_bytes", Integer.MAX_VALUE, 10 * 1024 * 1024);
+  BooleanValidator USE_FIRST_VALUE_MAP_LOOKUP =
+      new BooleanValidator("use.first_value.map.lookup", false);
 
   /**
    * Default value for table property WRITE_TARGET_FILE_SIZE_BYTES when table is created by Dremio

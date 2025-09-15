@@ -18,11 +18,14 @@ package com.dremio.exec.catalog.dataplane;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneStorage.BucketSelection.PRIMARY_BUCKET;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DATAPLANE_PLUGIN_NAME;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAULT_BRANCH_NAME;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.joinedTableKey;
 import static com.dremio.exec.catalog.dataplane.test.TestDataplaneAssertions.getSubPathFromNessieTableContent;
 import static com.dremio.exec.planner.VacuumOutputSchema.DELETED_FILES_COUNT;
 import static com.dremio.exec.planner.VacuumOutputSchema.DELETED_FILES_SIZE_MB;
 import static com.dremio.services.nessie.validation.GarbageCollectorConfValidator.NEW_FILES_GRACE_PERIOD;
 import static org.apache.iceberg.DremioTableProperties.NESSIE_GC_ENABLED;
+import static org.apache.iceberg.TableProperties.MAX_SNAPSHOT_AGE_MS;
+import static org.apache.iceberg.TableProperties.MIN_SNAPSHOTS_TO_KEEP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -33,6 +36,7 @@ import com.dremio.exec.catalog.dataplane.test.SkipForStorageType;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -69,13 +73,22 @@ public class ITDataplanePluginVacuum extends ITDataplanePluginVacuumTestSetup {
         getSubPathFromNessieTableContent(tablePath, DEFAULT_BRANCH_NAME, this);
     String orphanPath = placeOrphanFile(tableSubPath);
 
-    runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
+    final List<String> dryRunPaths = getDryRunPaths();
+    final Integer deleteCount = runVacuumAndGetDeleteCount();
+    assertThat(deleteCount).isEqualTo(dryRunPaths.size());
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
 
     assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, orphanPath)).isFalse();
     setNessieGCDefaultCutOffPolicy("PT100M"); // only live snapshots will be retained
 
     // Ensure orphan is retained if creation time is recent to cut-off
     String retainedOrphanPath = placeOrphanFile(tableSubPath);
+    final List<String> dryRunPathsRetained = getDryRunPaths();
+    assertThat(dryRunPathsRetained.size()).isEqualTo(0);
     runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
 
     assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, retainedOrphanPath)).isTrue();
@@ -116,7 +129,14 @@ public class ITDataplanePluginVacuum extends ITDataplanePluginVacuumTestSetup {
         .commit();
 
     wait1MS();
-    runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
+    final List<String> dryRunPaths = getDryRunPaths();
+    final Integer deleteCount = runVacuumAndGetDeleteCount();
+    assertThat(deleteCount).isEqualTo(dryRunPaths.size());
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
 
     // Select queries work on branch head
     assertDoesNotThrow(() -> selectQuery(table1, "BRANCH " + defaultBranch.getName()));
@@ -174,7 +194,14 @@ public class ITDataplanePluginVacuum extends ITDataplanePluginVacuumTestSetup {
         .commit();
 
     wait1MS();
-    runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
+    final List<String> dryRunPaths = getDryRunPaths();
+    final Integer deleteCount = runVacuumAndGetDeleteCount();
+    assertThat(deleteCount).isEqualTo(dryRunPaths.size());
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
 
     // Select queries work on branch head
     assertDoesNotThrow(() -> selectQuery(table1, "BRANCH " + defaultBranch.getName()));
@@ -283,12 +310,179 @@ public class ITDataplanePluginVacuum extends ITDataplanePluginVacuumTestSetup {
     IntStream.range(0, numOfSnapshots).forEach(i -> tables.forEach(this::newSnapshot));
 
     setTargetBatchSize(2);
-    runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
+    final List<String> dryRunPaths = getDryRunPaths();
+    final Integer deleteCount = runVacuumAndGetDeleteCount();
+    assertThat(deleteCount).isEqualTo(dryRunPaths.size());
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
     resetTargetBatchSize();
 
     tables.forEach(t -> assertDoesNotThrow(() -> selectQuery(t, "BRANCH main")));
     tables.forEach(t -> assertThat(snapshots(t, "main")).hasSize(1));
 
     tables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testInclude() throws Exception {
+    List<String> table1 = createTable();
+    List<String> table2 = createTable();
+    int numOfSnapshots = 5;
+
+    // Create 5 snapshots for each table
+    IntStream.range(0, numOfSnapshots)
+        .forEach(i -> List.of(table1, table2).forEach(this::newSnapshot));
+
+    // Create orphan files
+    String table1OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table1, DEFAULT_BRANCH_NAME, this));
+    String table2OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table2, DEFAULT_BRANCH_NAME, this));
+
+    // Act
+    final String query =
+        String.format(
+            "VACUUM CATALOG %s INCLUDE (%s.%s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table1));
+    final List<String> dryRunPaths = getDryRunPaths(query + " DRY RUN");
+    final Integer deleteCount = runVacuumAndGetDeleteCount(query);
+    assertThat(dryRunPaths.size()).isEqualTo(11);
+    assertThat(deleteCount).isEqualTo(11);
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
+
+    // Assert
+    assertThat(snapshots(table1, "main")).hasSize(1);
+    assertThat(snapshots(table2, "main")).hasSize(6);
+
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table1OrphanPath)).isFalse();
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table2OrphanPath)).isTrue();
+
+    // Cleanup
+    cleanupSilently(table1);
+    cleanupSilently(table2);
+  }
+
+  @Test
+  public void testExclude() throws Exception {
+    List<String> table1 = createTable();
+    List<String> table2 = createTable();
+    int numOfSnapshots = 5;
+
+    // Create 5 snapshots for each table
+    IntStream.range(0, numOfSnapshots)
+        .forEach(i -> List.of(table1, table2).forEach(this::newSnapshot));
+
+    // Create orphan files
+    String table1OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table1, DEFAULT_BRANCH_NAME, this));
+    String table2OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table2, DEFAULT_BRANCH_NAME, this));
+
+    // Act
+    final String query =
+        String.format(
+            "VACUUM CATALOG %s EXCLUDE (%s.%s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table2));
+    final List<String> dryRunPaths = getDryRunPaths(query + " DRY RUN");
+    final Integer deleteCount = runVacuumAndGetDeleteCount(query);
+    assertThat(dryRunPaths.size()).isEqualTo(11);
+    assertThat(deleteCount).isEqualTo(11);
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
+
+    // Assert
+    assertThat(snapshots(table1, "main")).hasSize(1);
+    assertThat(snapshots(table2, "main")).hasSize(6);
+
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table1OrphanPath)).isFalse();
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table2OrphanPath)).isTrue();
+
+    // Cleanup
+    cleanupSilently(table1);
+    cleanupSilently(table2);
+  }
+
+  @Test
+  public void testTableOverrideMaxSnapshotAge() throws Exception {
+    List<String> table1 = createTable();
+    List<String> table2 = createTable();
+    int numOfSnapshots = 5;
+
+    // Create 5 snapshots for each table
+    IntStream.range(0, numOfSnapshots)
+        .forEach(i -> List.of(table1, table2).forEach(this::newSnapshot));
+
+    // Create orphan files
+    String table1OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table1, DEFAULT_BRANCH_NAME, this));
+    String table2OrphanPath =
+        placeOrphanFile(getSubPathFromNessieTableContent(table2, DEFAULT_BRANCH_NAME, this));
+
+    // Override table2's max snapshots age to keep
+    Table icebergTable2 =
+        loadTable(
+            String.format(
+                "%s@%s", String.join(".", table2), getNessieApi().getDefaultBranch().getName()));
+    icebergTable2
+        .updateProperties()
+        .set(MAX_SNAPSHOT_AGE_MS, "86400000")
+        .set(MIN_SNAPSHOTS_TO_KEEP, "5")
+        .commit();
+    wait1MS();
+
+    // Act
+    final List<String> dryRunPaths = getDryRunPaths();
+    final Integer deleteCount = runVacuumAndGetDeleteCount();
+    assertThat(dryRunPaths.size()).isEqualTo(12);
+    assertThat(deleteCount).isEqualTo(12);
+
+    // Verify that all files identified in dry run no longer exist
+    for (String path : dryRunPaths) {
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, path)).isFalse();
+    }
+
+    // Assert
+    assertThat(snapshots(table1, "main")).hasSize(1);
+    assertThat(snapshots(table2, "main")).hasSize(6);
+
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table1OrphanPath)).isFalse();
+    assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, table2OrphanPath)).isFalse();
+
+    // Cleanup
+    cleanupSilently(table1);
+    cleanupSilently(table2);
+  }
+
+  private List<String> getDryRunPaths() throws Exception {
+    return getDryRunPaths("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME + " DRY RUN");
+  }
+
+  private List<String> getDryRunPaths(String query) throws Exception {
+    List<String> markedFiles = new ArrayList<>();
+    final List<List<String>> dryRunResults = runSqlWithResults(query);
+    for (List<String> row : dryRunResults) {
+      markedFiles.add(row.get(0));
+      assertThat(getDataplaneStorage().doesObjectExist(PRIMARY_BUCKET, row.get(0))).isTrue();
+    }
+    return markedFiles;
+  }
+
+  private Integer runVacuumAndGetDeleteCount() throws Exception {
+    return runVacuumAndGetDeleteCount("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME);
+  }
+
+  private Integer runVacuumAndGetDeleteCount(String query) throws Exception {
+    final List<List<String>> vacuumResults = runSqlWithResults(query);
+    return Integer.parseInt(vacuumResults.get(0).get(0));
   }
 }

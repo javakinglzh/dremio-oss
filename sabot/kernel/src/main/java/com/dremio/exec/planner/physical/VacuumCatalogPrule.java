@@ -59,7 +59,9 @@ public class VacuumCatalogPrule extends Prule {
             vacuumCatalogDRel.getFsScheme(),
             vacuumCatalogDRel.getSchemeVariate(),
             context,
-            vacuumCatalogDRel.getExcludedContentIDs());
+            vacuumCatalogDRel.isExcludeMode(),
+            vacuumCatalogDRel.getListedContentIDs(),
+            vacuumCatalogDRel.isDryRun());
 
     return planGenerator.buildPlan();
   }

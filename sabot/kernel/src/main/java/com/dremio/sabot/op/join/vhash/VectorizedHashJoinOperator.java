@@ -60,6 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
@@ -123,7 +125,8 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
 
   private final RuntimeFilterManager filterManager;
   private final boolean runtimeFilterEnabled;
-
+  private final Map<Integer, AtomicBoolean> remainingRuntimeFilterMessages;
+  private final AtomicInteger remainingRuntimeFilterMessageCount;
   private final VectorContainer outgoing;
   private final Map<String, String> build2ProbeKeyMap = new HashMap<>();
   private ExpandableHyperContainer hyperContainer;
@@ -178,6 +181,11 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
             context.getAllocator(),
             RuntimeFilterUtil.getRuntimeValFilterCap(context),
             allMinorFragments);
+    // use a map here instead of array, in case, for some reason, the minor fragment list is not
+    // sequential list of integers starting at 0
+    this.remainingRuntimeFilterMessages =
+        allMinorFragments.stream().collect(Collectors.toMap(f -> f, f -> new AtomicBoolean()));
+    this.remainingRuntimeFilterMessageCount = new AtomicInteger(allMinorFragments.size());
     this.rowSizeLimit =
         Math.toIntExact(this.context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
     this.rowSizeLimitEnabled =
@@ -616,6 +624,16 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
     }
   }
 
+  private boolean shouldWaitForRuntimeFilters() {
+    if (runtimeFilterEnabled
+        && !config.getRuntimeFilterInfo().isBroadcastJoin()
+        && context.getFragmentHandle().getMinorFragmentId()
+            <= RuntimeFilterUtil.RF_PROCESS_MINOR_FRAGMENT_ID_RANGE) {
+      return remainingRuntimeFilterMessageCount.get() > 0;
+    }
+    return false;
+  }
+
   @Override
   public void noMoreToConsumeRight() throws Exception {
     state.is(State.CAN_CONSUME_R);
@@ -628,7 +646,9 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
       tryPushRuntimeFilter();
     }
 
-    if ((table.size() == 0) && !(joinType == JoinRelType.LEFT || joinType == JoinRelType.FULL)) {
+    if ((table.size() == 0)
+        && !(joinType == JoinRelType.LEFT || joinType == JoinRelType.FULL)
+        && !shouldWaitForRuntimeFilters()) {
       // nothing needs to be read on the left side as right side is empty
       state = State.DONE;
       return;
@@ -659,6 +679,14 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
   @Override
   public void consumeDataLeft(int records) throws Exception {
     state.is(State.CAN_CONSUME_L);
+
+    if ((table.size() == 0)
+        && !(joinType == JoinRelType.LEFT || joinType == JoinRelType.FULL)
+        && !shouldWaitForRuntimeFilters()) {
+      // nothing needs to be read on the left side as right side is empty
+      state = State.DONE;
+      return;
+    }
 
     // ensure that none of the variable length vectors are corrupt so we can avoid doing bounds
     // checking later.
@@ -844,6 +872,11 @@ public class VectorizedHashJoinOperator implements DualInputOperator {
   public void workOnOOB(OutOfBandMessage message) {
     if (runtimeFilterEnabled) {
       RuntimeFilterUtil.workOnOOB(message, filterManager, context, config);
+      if (remainingRuntimeFilterMessages
+          .get(message.getSendingMinorFragmentId())
+          .compareAndSet(false, true)) {
+        remainingRuntimeFilterMessageCount.decrementAndGet();
+      }
     }
   }
 

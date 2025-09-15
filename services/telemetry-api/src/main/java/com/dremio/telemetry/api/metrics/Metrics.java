@@ -58,6 +58,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.servlet.Servlet;
 import org.jetbrains.annotations.NotNull;
@@ -109,7 +110,9 @@ public final class Metrics {
                     // the global registry
                     PrometheusMeterRegistry newPrometheusRegistry =
                         newPrometheusMeterRegistry(oHistogramFlavor);
-                    newPrometheusRegistry.getPrometheusRegistry().register(new StandardExports());
+                    newPrometheusRegistry
+                        .getPrometheusRegistry()
+                        .register(new FilteredStandardExports());
                     globalRegistry.add(newPrometheusRegistry);
 
                     JmxMeterRegistry jmxMeterRegistry =
@@ -291,5 +294,18 @@ public final class Metrics {
 
   public static String scrape() {
     return RegistryHolder.getPrometheusMeterRegistry().scrape();
+  }
+
+  /**
+   * Custom legacy StandardExports that filters out process_start_time_seconds to avoid duplication
+   * with UptimeMetrics
+   */
+  private static final class FilteredStandardExports extends StandardExports {
+    @Override
+    public List<Collector.MetricFamilySamples> collect() {
+      return super.collect().stream()
+          .filter(sample -> !sample.name.equals("process_start_time_seconds"))
+          .collect(Collectors.toList());
+    }
   }
 }

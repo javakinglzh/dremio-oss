@@ -29,11 +29,14 @@ import com.dremio.common.types.Types;
 import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.physical.PrelUtil;
+import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.sql.ConsistentTypeUtil;
 import com.dremio.exec.planner.sql.TypeInferenceUtils;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.resolver.TypeCastRules;
+import com.dremio.exec.store.DelegatingTableMetadata;
 import com.dremio.exec.store.NamespaceTable;
+import com.dremio.exec.store.TableMetadata;
 import com.dremio.exec.store.parquet.ParquetTypeHelper;
 import com.dremio.service.Pointer;
 import com.dremio.service.namespace.capabilities.SourceCapabilities;
@@ -2085,6 +2088,18 @@ public final class MoreRelOptUtil {
           }
         });
     return hasher.hash().asLong();
+  }
+
+  public static TableMetadata extendTableMetadataSchema(RelDataType type, ScanRelBase scan) {
+    return new DelegatingTableMetadata(scan.getTableMetadata()) {
+      @Override
+      public BatchSchema getSchema() {
+        return BatchSchema.newBuilder()
+            .addFields(super.getSchema())
+            .addFields(CalciteArrowHelper.fromCalciteRowType(type))
+            .build();
+      }
+    };
   }
 
   public static class TransformCollectingCall extends RelOptRuleCall {

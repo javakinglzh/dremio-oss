@@ -27,7 +27,6 @@ import com.dremio.config.DremioConfig;
 import com.dremio.datastore.api.LegacyKVStore;
 import com.dremio.datastore.api.LegacyKVStoreProvider;
 import com.dremio.exec.ExecConstants;
-import com.dremio.exec.catalog.CatalogImpl.IdentityResolver;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.exec.ops.OptimizerRulesContext;
@@ -57,19 +56,14 @@ import com.dremio.service.coordinator.DistributedSemaphore.DistributedLease;
 import com.dremio.service.listing.DatasetListingService;
 import com.dremio.service.namespace.NamespaceAttribute;
 import com.dremio.service.namespace.NamespaceException;
-import com.dremio.service.namespace.NamespaceIdentity;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceNotFoundException;
 import com.dremio.service.namespace.NamespaceService;
-import com.dremio.service.namespace.NamespaceUser;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEvent;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEventTopic;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEvents;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusSubscriber;
-import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.namespace.dataset.proto.DatasetType;
-import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.source.SourceNamespaceService;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
 import com.dremio.service.namespace.source.proto.SourceChangeState;
@@ -80,8 +74,7 @@ import com.dremio.service.scheduler.ModifiableSchedulerService;
 import com.dremio.service.scheduler.Schedule;
 import com.dremio.service.scheduler.SchedulerService;
 import com.dremio.service.users.SystemUser;
-import com.dremio.service.users.User;
-import com.dremio.service.users.UserNotFoundException;
+import com.dremio.service.users.UserService;
 import com.dremio.services.fabric.ProxyConnection;
 import com.dremio.services.fabric.api.FabricRunnerFactory;
 import com.dremio.services.fabric.api.FabricService;
@@ -167,6 +160,7 @@ public class CatalogServiceImpl implements CatalogService {
   private final Provider<VersionedDatasetAdapterFactory> versionedDatasetAdapterFactoryProvider;
   private final Provider<CatalogStatusEvents> catalogStatusEventsProvider;
   private final Provider<NamespaceService.Factory> namespaceServiceFactoryProvider;
+  private final Provider<UserService> userServiceProvider;
 
   public CatalogServiceImpl(
       Provider<SabotContext> sabotContextProvider,
@@ -186,7 +180,8 @@ public class CatalogServiceImpl implements CatalogService {
       Provider<VersionedDatasetAdapterFactory> versionedDatasetAdapterFactoryProvider,
       Provider<CatalogStatusEvents> catalogStatusEventsProvider,
       Provider<ExecutorService> executorServiceProvider,
-      Provider<NamespaceService.Factory> namespaceServiceFactoryProvider) {
+      Provider<NamespaceService.Factory> namespaceServiceFactoryProvider,
+      Provider<UserService> userServiceProvider) {
     this(
         sabotContextProvider,
         scheduler,
@@ -206,7 +201,8 @@ public class CatalogServiceImpl implements CatalogService {
         versionedDatasetAdapterFactoryProvider,
         catalogStatusEventsProvider,
         executorServiceProvider,
-        namespaceServiceFactoryProvider);
+        namespaceServiceFactoryProvider,
+        userServiceProvider);
   }
 
   @VisibleForTesting
@@ -229,7 +225,8 @@ public class CatalogServiceImpl implements CatalogService {
       Provider<VersionedDatasetAdapterFactory> versionedDatasetAdapterFactoryProvider,
       Provider<CatalogStatusEvents> catalogStatusEventsProvider,
       Provider<ExecutorService> executorServiceProvider,
-      Provider<NamespaceService.Factory> namespaceServiceFactoryProvider) {
+      Provider<NamespaceService.Factory> namespaceServiceFactoryProvider,
+      Provider<UserService> userServiceProvider) {
     this.catalogSabotContextProvider = sabotContextProvider::get;
     this.sabotQueryContextProviderDoNotUse = sabotContextProvider::get;
     this.scheduler = scheduler;
@@ -252,6 +249,7 @@ public class CatalogServiceImpl implements CatalogService {
     this.catalogStatusEventsProvider = catalogStatusEventsProvider;
     this.executorServiceProvider = executorServiceProvider;
     this.namespaceServiceFactoryProvider = namespaceServiceFactoryProvider;
+    this.userServiceProvider = userServiceProvider;
   }
 
   @Override
@@ -950,13 +948,19 @@ public class CatalogServiceImpl implements CatalogService {
 
   protected Catalog createCatalog(MetadataRequestOptions requestOptions) {
     return createCatalog(
-        requestOptions, new CatalogIdentityResolver(), namespaceServiceFactoryProvider.get());
+        requestOptions,
+        new CatalogIdentityResolverImpl(catalogSabotContextProvider.get().getUserService()),
+        namespaceServiceFactoryProvider.get(),
+        new CatalogEntityOwnershipImpl(namespaceServiceFactoryProvider.get().getForSystemUser()),
+        new UserOrRoleResolverImpl(userServiceProvider.get()));
   }
 
   protected Catalog createCatalog(
       MetadataRequestOptions requestOptions,
-      IdentityResolver identityProvider,
-      NamespaceService.Factory namespaceServiceFactory) {
+      CatalogIdentityResolver identityProvider,
+      NamespaceService.Factory namespaceServiceFactory,
+      CatalogEntityOwnership catalogEntityOwnership,
+      UserOrRoleResolver userOrRoleResolver) {
     OptionManager optionManager = requestOptions.getSchemaConfig().getOptions();
     if (optionManager == null) {
       optionManager = catalogSabotContextProvider.get().getOptionManager();
@@ -978,7 +982,9 @@ public class CatalogServiceImpl implements CatalogService {
         new VersionContextResolverImpl(retriever),
         catalogStatusEventsProvider.get(),
         versionedDatasetAdapterFactoryProvider.get(),
-        catalogSabotContextProvider.get().getMetadataIOPoolProvider().get());
+        catalogSabotContextProvider.get().getMetadataIOPoolProvider().get(),
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   @Override
@@ -1101,53 +1107,6 @@ public class CatalogServiceImpl implements CatalogService {
         SourceRefreshOption sourceRefreshOption,
         SourceNamespaceService.DeleteCallback callback) {
       CatalogServiceImpl.this.deleteSource(sourceConfig, subject, sourceRefreshOption, callback);
-    }
-  }
-
-  private class CatalogIdentityResolver implements IdentityResolver {
-    @Override
-    public CatalogIdentity getOwner(List<String> path) throws NamespaceException {
-      NameSpaceContainer nameSpaceContainer =
-          systemNamespace.getEntityByPath(new NamespaceKey(path));
-      if (null == nameSpaceContainer) {
-        return null;
-      }
-      switch (nameSpaceContainer.getType()) {
-        case DATASET:
-          {
-            final DatasetConfig dataset = nameSpaceContainer.getDataset();
-            if (dataset.getType() == DatasetType.VIRTUAL_DATASET) {
-              return null;
-            } else {
-              return new CatalogUser(dataset.getOwner());
-            }
-          }
-        case FUNCTION:
-          {
-            return null;
-          }
-        default:
-          throw new RuntimeException(
-              "Unexpected type for getOwner " + nameSpaceContainer.getType());
-      }
-    }
-
-    @Override
-    public NamespaceIdentity toNamespaceIdentity(CatalogIdentity identity) {
-      if (identity instanceof CatalogUser) {
-        if (identity.getName().equals(SystemUser.SYSTEM_USERNAME)) {
-          return new NamespaceUser(() -> SystemUser.SYSTEM_USER);
-        }
-
-        try {
-          final User user =
-              catalogSabotContextProvider.get().getUserService().getUser(identity.getName());
-          return new NamespaceUser(() -> user);
-        } catch (UserNotFoundException ignored) {
-        }
-      }
-
-      return null;
     }
   }
 

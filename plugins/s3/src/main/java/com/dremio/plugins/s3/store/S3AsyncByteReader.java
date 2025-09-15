@@ -15,11 +15,10 @@
  */
 package com.dremio.plugins.s3.store;
 
-import static com.amazonaws.services.s3.internal.Constants.REQUESTER_PAYS;
-
 import com.amazonaws.services.s3.internal.Constants;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.io.ReusableAsyncByteReader;
+import com.dremio.plugins.s3.store.S3PluginMetrics.OperationType;
 import com.dremio.plugins.util.CloseableRef;
 import com.google.common.base.Stopwatch;
 import io.netty.buffer.ByteBuf;
@@ -55,7 +54,6 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
   private final String bucket;
   private final String path;
   private final Instant instant;
-  private final boolean requesterPays;
   private final String threadName;
   private static final int MAX_RETRIES = 10;
   private final boolean ssecEnabled;
@@ -67,7 +65,6 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
       String bucket,
       String path,
       String version,
-      boolean requesterPays,
       boolean ssecUsed,
       String sseCustomerKey,
       boolean shouldCheckTimestamp) {
@@ -79,7 +76,6 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
     this.path = path;
     long mtime = Long.parseLong(version);
     this.instant = (mtime != 0) ? Instant.ofEpochMilli(mtime) : null;
-    this.requesterPays = requesterPays;
     this.threadName = Thread.currentThread().getName();
     this.ssecEnabled = ssecUsed;
     this.ssecKey = sseCustomerKey;
@@ -115,9 +111,6 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
         GetObjectRequest.builder().bucket(bucket).key(path).range(range(offset, len));
     if (instant != null && shouldCheckTimestamp) {
       requestBuilder.ifUnmodifiedSince(instant);
-    }
-    if (requesterPays) {
-      requestBuilder.requestPayer(REQUESTER_PAYS);
     }
     if (ssecEnabled) {
       requestBuilder.sseCustomerAlgorithm("AES256");
@@ -180,6 +173,8 @@ class S3AsyncByteReader extends ReusableAsyncByteReader {
                         .build(logger);
                   case 500:
                   case 503:
+                    S3PluginMetrics.incrementS3ClientThrottlingErrorCounter(
+                        OperationType.GET_OBJECT);
                     // Retry for Internal Server Error with 500 and 503 status code
                     retryRequest = true;
                     break;

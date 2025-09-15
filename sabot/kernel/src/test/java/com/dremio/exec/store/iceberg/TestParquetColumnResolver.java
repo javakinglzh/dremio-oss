@@ -15,6 +15,9 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.ExecTest;
 import com.dremio.exec.proto.UserBitShared;
@@ -22,6 +25,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.SampleMutator;
 import com.dremio.exec.store.parquet.ParquetColumnDefaultResolver;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import org.apache.arrow.vector.types.pojo.ArrowType;
@@ -202,6 +206,43 @@ public class TestParquetColumnResolver extends ExecTest {
     }
   }
 
+  @Test
+  public void testComplexListPathWithArraySegmentButPartialVectors() {
+    try (SampleMutator mutator = new SampleMutator(allocator);
+        SampleMutator trimmedMutator = new SampleMutator(allocator)) {
+      final BatchSchema fullSchema = createSchemaWithStructOfStringAndListOfString();
+
+      // Test Case 1: Use fullSchema to prepare vectors/mutator so that they contain vectors
+      // corresponding to all columns.
+      List<SchemaPath> schemaPaths =
+          Arrays.asList(SchemaPath.getSimplePath("c1"), SchemaPath.getSimplePath("s2"));
+      fullSchema.materializeVectors(schemaPaths, mutator);
+
+      List<SchemaPath> simpleSchemaPaths =
+          List.of(SchemaPath.getCompoundPath("c1", "s2"), SchemaPath.getCompoundPath("c1", "l2"));
+
+      // Test that toDotString handles null vector during traversal
+      testToDotString(mutator, simpleSchemaPaths, Arrays.asList("c1.s2", "c1.l2"));
+
+      // Test Case 2: Use partialSchema to prepare vectors/mutator so that vector corresponding to
+      // "l2" is not created.
+      BatchSchema partialSchema = schemaWithStructOfString();
+      partialSchema.materializeVectors(schemaPaths, trimmedMutator);
+
+      // SchemaPath with ArraySegment: c1.l2[0]
+      PathSegment.NameSegment indexedSegment =
+          new PathSegment.NameSegment(
+              "c1", new PathSegment.NameSegment("l2", new PathSegment.ArraySegment(0)));
+      SchemaPath schemaPathWithArraySegment = new SchemaPath(indexedSegment);
+
+      // Test that toDotString handles null vector during traversal
+      testToDotString(
+          trimmedMutator,
+          Collections.singletonList(schemaPathWithArraySegment),
+          Collections.singletonList("c1.l2.list.element"));
+    }
+  }
+
   @NotNull
   private SchemaPath getSchemaPathWithArraySegment() {
     UserBitShared.NamePart.Builder cPart = UserBitShared.NamePart.newBuilder();
@@ -219,5 +260,59 @@ public class TestParquetColumnResolver extends ExecTest {
     aPart.setName("a");
     aPart.setChild(bPart);
     return SchemaPath.create(aPart.build());
+  }
+
+  /**
+   * Creates a schema with struct containing list of strings.
+   *
+   * <pre
+   * BatchSchema structure: c1 row< l2: Array<varchar>, s2: varchar >
+   * </pre>
+   */
+  @NotNull
+  private BatchSchema createSchemaWithStructOfStringAndListOfString() {
+    Field elementField = new Field("$data$", FieldType.nullable(ArrowType.Utf8.INSTANCE), null);
+    Field l2 =
+        new Field(
+            "l2",
+            FieldType.nullable(ArrowType.List.INSTANCE),
+            Collections.singletonList(elementField));
+    Field s2 = new Field("s2", FieldType.nullable(ArrowType.Utf8.INSTANCE), null);
+    Field c1 = new Field("c1", FieldType.nullable(ArrowType.Struct.INSTANCE), List.of(l2, s2));
+
+    return BatchSchema.of(Collections.singletonList(c1).toArray(new Field[0]));
+  }
+
+  /**
+   * Creates a schema with struct containing list of strings.
+   *
+   * <pre>
+   * BatchSchema structure: c1 row< s2: varchar >
+   * </pre>
+   */
+  @NotNull
+  private BatchSchema schemaWithStructOfString() {
+    Field s2 = new Field("s2", FieldType.nullable(ArrowType.Utf8.INSTANCE), null);
+    Field c1 =
+        new Field(
+            "c1", FieldType.nullable(ArrowType.Struct.INSTANCE), Collections.singletonList(s2));
+
+    return BatchSchema.of(Collections.singletonList(c1).toArray(new Field[0]));
+  }
+
+  /** Tests toDotString method with given expected result. */
+  private void testToDotString(
+      SampleMutator mutator, List<SchemaPath> schemaPaths, List<String> expectedResolvedColumns) {
+
+    ParquetColumnDefaultResolver columnDefaultResolver =
+        new ParquetColumnDefaultResolver(schemaPaths);
+
+    for (int i = 0; i < schemaPaths.size(); i++) {
+      String result =
+          columnDefaultResolver.toDotString(
+              schemaPaths.get(i), mutator.getVector(schemaPaths.get(i).getRootSegment().getPath()));
+
+      assertThat(result).isEqualToIgnoringCase(expectedResolvedColumns.get(i));
+    }
   }
 }

@@ -29,7 +29,6 @@ import com.dremio.proto.model.attempts.RequestType;
 import com.dremio.service.job.QueryType;
 import com.dremio.service.job.SearchJobsRequest;
 import com.dremio.service.job.SqlQuery;
-import com.dremio.service.job.SubstitutionSettings;
 import com.dremio.service.job.proto.DataSet;
 import com.dremio.service.job.proto.JobAttempt;
 import com.dremio.service.job.proto.JobCancellationInfo;
@@ -732,28 +731,6 @@ public final class JobsProtoUtil {
       default:
         throw new IllegalArgumentException();
     }
-  }
-
-  public static com.dremio.exec.work.user.SubstitutionSettings toPojo(
-      SubstitutionSettings substitutionSettings) {
-    final com.dremio.exec.work.user.SubstitutionSettings substitutionSettings1 =
-        new com.dremio.exec.work.user.SubstitutionSettings(
-            substitutionSettings.getExclusionsList());
-    substitutionSettings1.setInclusions(substitutionSettings.getInclusionsList());
-    return substitutionSettings1;
-  }
-
-  public static SubstitutionSettings toBuf(
-      com.dremio.exec.work.user.SubstitutionSettings substitutionSettings) {
-    final com.dremio.service.job.SubstitutionSettings.Builder substitutionSettingsOrBuilder =
-        com.dremio.service.job.SubstitutionSettings.newBuilder();
-    if (substitutionSettings.getExclusions() != null) {
-      substitutionSettingsOrBuilder.addAllExclusions(substitutionSettings.getExclusions());
-    }
-    if (substitutionSettings.getInclusions() != null) {
-      substitutionSettingsOrBuilder.addAllInclusions(substitutionSettings.getInclusions());
-    }
-    return substitutionSettingsOrBuilder.build();
   }
 
   public static com.dremio.service.job.proto.QueryType toStuff(QueryType queryType) {

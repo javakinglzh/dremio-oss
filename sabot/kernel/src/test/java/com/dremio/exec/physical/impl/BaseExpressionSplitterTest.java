@@ -162,7 +162,8 @@ public class BaseExpressionSplitterTest extends BaseTestFunction {
               OptionValue.OptionType.SYSTEM, ExecConstants.SPLIT_ENABLED.getOptionName(), true));
       ExpressionEvaluationOptions options = new ExpressionEvaluationOptions(optionManager);
       options.setCodeGenOption(SupportedEngines.CodeGenOption.Gandiva.toString());
-      splitter = new ExpressionSplitter(context, vectorContainer, options, annotator, "_xxx", true);
+      splitter =
+          new ExpressionSplitter(null, context, vectorContainer, options, annotator, "_xxx", true);
       NamedExpression namedExpression = new NamedExpression(expr, new FieldReference("out"));
       // split the expression and set the splits up for execution
       dataOut = context.createOutputVectorContainer();

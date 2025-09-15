@@ -552,8 +552,8 @@ public class PluginsManager implements AutoCloseable, Iterable<StoragePlugin> {
   @Override
   public Iterator<StoragePlugin> iterator() {
     return plugins.values().stream()
+        .filter(msp -> msp.getState().getStatus() != SourceStatus.bad)
         .map(input -> input.unwrap(StoragePlugin.class))
-        .filter(input -> input.getState().getStatus() != SourceStatus.bad)
         .iterator();
   }
 

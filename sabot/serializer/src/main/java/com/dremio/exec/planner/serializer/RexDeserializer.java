@@ -44,6 +44,7 @@ import com.google.common.collect.ImmutableList;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -113,171 +114,292 @@ public class RexDeserializer {
     this.sqlOperatorSerde = sqlOperatorSerde;
   }
 
-  public RexNode convert(PRexNode node, RelDataType rowType) {
-    switch (node.getRexTypeCase()) {
-      case REX_WINDOW_AGG_CALL:
-        return convertWindowAggCall(node.getRexWindowAggCall());
-
-      case REX_CALL:
-        return convertCall(node.getRexCall());
-
-      case REX_INPUT_REF:
-        return convertInputRef(node.getRexInputRef(), rowType);
-
-      case REX_LITERAL:
-        return convertLiteral(node.getRexLiteral());
-
-      case REX_LOCAL_REF:
-        return convertLocalRef(node.getRexLocalRef());
-
-      case REX_OVER:
-        return convertOver(node.getRexOver());
-
-      case REX_FIELD_ACCESS:
-        return convertFieldAccess(node.getRexFieldAccess());
-
-      case REX_CORREL_VARIABLE:
-        return convertCorrelVariable(node.getRexCorrelVariable());
-
-      case REX_SUBQUERY:
-        return convertSubQuery(node.getRexSubquery());
-
-      case REX_DYNAMIC_PARAM:
-        return convertDynamicParam(node.getRexDynamicParam());
-
-      case REX_RANGE_REF:
-        return convertRangeRef(node.getRexRangeRef());
-
-      case REX_PATTERN_FIELD_REF:
-        return convertPatternFieldRef(node.getRexPatternFieldRef());
-
-      case REXTYPE_NOT_SET:
-      default:
-        break;
+  public RexNode convert(PRexNode node, RelDataType relDataType) {
+    if (node.getRexTypeCase() == PRexNode.RexTypeCase.INDIRECTION) {
+      return new PRexTraverser(node.getIndirection().getChildrenList())
+          .convert(node.getIndirection().getRex(), relDataType);
     }
-    throw new IllegalStateException("Unsupported type case: " + node.getRexTypeCase());
+    return new PRexTraverser(new ArrayList<>()).convert(node, relDataType);
   }
 
   public RexNode convert(PRexNode node) {
-    return convert(node, null);
+    if (node.getRexTypeCase() == PRexNode.RexTypeCase.INDIRECTION) {
+      return new PRexTraverser(node.getIndirection().getChildrenList())
+          .convert(node.getIndirection().getRex(), null);
+    }
+    return new PRexTraverser(new ArrayList<>()).convert(node, null);
   }
 
-  private RexNode convertSubQuery(PRexSubQuery subQuery) {
-    SqlOperator operator = sqlOperatorSerde.fromProto(subQuery.getSqlOperator());
-    PRelList list = PRelList.newBuilder().addAllNode(subQuery.getDetailsList()).build();
-    final RelNode rel =
-        RelDeserializer.deserialize(
-            registry,
-            DremioRelFactories.CALCITE_LOGICAL_BUILDER,
-            tables,
-            plugins,
-            list,
-            cluster,
-            sqlOperatorSerde);
-    CorrelationId correlationId = convertCorrelationId(subQuery.getCorrelationId());
-    switch (operator.getKind()) {
-      case IN:
-      case NOT_IN:
-        return RexSubQuery.in(
-            rel,
-            ImmutableList.copyOf(
-                subQuery.getOperandsList().stream()
-                    .map(this::convert)
-                    .collect(Collectors.toList())),
-            correlationId);
-      case EXISTS:
-        return RexSubQuery.exists(rel, correlationId);
-      case SCALAR_QUERY:
-        return RexSubQuery.scalar(rel, correlationId);
-      case SOME:
-        return RexSubQuery.some(
-            rel,
-            ImmutableList.copyOf(
-                subQuery.getOperandsList().stream()
-                    .map(this::convert)
-                    .collect(Collectors.toList())),
-            (SqlQuantifyOperator) operator,
-            correlationId);
-      case ARRAY_QUERY_CONSTRUCTOR:
-        return RexSubQuery.array(rel, correlationId);
-      default:
-        throw new IllegalStateException("Unsupported subquery type: " + operator.getKind());
+  private class PRexTraverser {
+
+    private final List<PRexNode> protoList;
+
+    public PRexTraverser(List<PRexNode> protoList) {
+      this.protoList = protoList;
+    }
+
+    public RexNode convert(PRexNode baseProto, RelDataType rowType) {
+      PRexNode node =
+          baseProto.getRexTypeCase() == PRexNode.RexTypeCase.REFERENCE
+              ? protoList.get(baseProto.getReference())
+              : baseProto;
+      switch (node.getRexTypeCase()) {
+        case REX_WINDOW_AGG_CALL:
+          return convertWindowAggCall(node.getRexWindowAggCall());
+
+        case REX_CALL:
+          return convertCall(node.getRexCall());
+
+        case REX_INPUT_REF:
+          return convertInputRef(node.getRexInputRef(), rowType);
+
+        case REX_LITERAL:
+          return convertLiteral(node.getRexLiteral());
+
+        case REX_LOCAL_REF:
+          return convertLocalRef(node.getRexLocalRef());
+
+        case REX_OVER:
+          return convertOver(node.getRexOver());
+
+        case REX_FIELD_ACCESS:
+          return convertFieldAccess(node.getRexFieldAccess());
+
+        case REX_CORREL_VARIABLE:
+          return convertCorrelVariable(node.getRexCorrelVariable());
+
+        case REX_SUBQUERY:
+          return convertSubQuery(node.getRexSubquery());
+
+        case REX_DYNAMIC_PARAM:
+          return convertDynamicParam(node.getRexDynamicParam());
+
+        case REX_RANGE_REF:
+          return convertRangeRef(node.getRexRangeRef());
+
+        case REX_PATTERN_FIELD_REF:
+          return convertPatternFieldRef(node.getRexPatternFieldRef());
+
+        case INDIRECTION:
+          return new PRexTraverser(node.getIndirection().getChildrenList())
+              .convert(node.getIndirection().getRex(), null);
+
+        case REFERENCE:
+        case REXTYPE_NOT_SET:
+        default:
+          break;
+      }
+      throw new IllegalStateException("Unsupported type case: " + node.getRexTypeCase());
+    }
+
+    private RexNode convertSubQuery(PRexSubQuery subQuery) {
+      SqlOperator operator = sqlOperatorSerde.fromProto(subQuery.getSqlOperator());
+      PRelList list = PRelList.newBuilder().addAllNode(subQuery.getDetailsList()).build();
+      final RelNode rel =
+          RelDeserializer.deserialize(
+              registry,
+              DremioRelFactories.CALCITE_LOGICAL_BUILDER,
+              tables,
+              plugins,
+              list,
+              cluster,
+              sqlOperatorSerde);
+      CorrelationId correlationId = convertCorrelationId(subQuery.getCorrelationId());
+      switch (operator.getKind()) {
+        case IN:
+        case NOT_IN:
+          return RexSubQuery.in(
+              rel,
+              ImmutableList.copyOf(
+                  subQuery.getOperandsList().stream()
+                      .map(node -> this.convert(node, null))
+                      .collect(Collectors.toList())),
+              correlationId);
+        case EXISTS:
+          return RexSubQuery.exists(rel, correlationId);
+        case SCALAR_QUERY:
+          return RexSubQuery.scalar(rel, correlationId);
+        case SOME:
+          return RexSubQuery.some(
+              rel,
+              ImmutableList.copyOf(
+                  subQuery.getOperandsList().stream()
+                      .map(node -> this.convert(node, null))
+                      .collect(Collectors.toList())),
+              (SqlQuantifyOperator) operator,
+              correlationId);
+        case ARRAY_QUERY_CONSTRUCTOR:
+          return RexSubQuery.array(rel, correlationId);
+        default:
+          throw new IllegalStateException("Unsupported subquery type: " + operator.getKind());
+      }
+    }
+
+    private CorrelationId convertCorrelationId(@Nullable Integer correlationId) {
+      if (correlationId == null) {
+        return null;
+      }
+      return new CorrelationId(correlationId);
+    }
+
+    private RexNode convertCorrelVariable(PRexCorrelVariable fieldAccess) {
+      return rexBuilder.makeCorrel(
+          types.fromProto(fieldAccess.getDataType()),
+          new CorrelationId(fieldAccess.getCorrelationId()));
+    }
+
+    private RexNode convertFieldAccess(PRexFieldAccess fieldAccess) {
+      return rexBuilder.makeFieldAccess(
+          convert(fieldAccess.getExpression(), null), fieldAccess.getField().getIndex());
+    }
+
+    private RexNode convertOver(PRexOver over) {
+      PRexWindow window = over.getRexWindow();
+      boolean isRows = window.getIsRows();
+
+      List<RexNode> partitionKeys =
+          window.getPartitionKeysList().stream()
+              .map(p -> this.convert(p, null))
+              .collect(Collectors.toList());
+      List<RexFieldCollation> orderKeys =
+          window.getOrderKeysList().stream().map(this::convert).collect(Collectors.toList());
+
+      return rexBuilder.makeOver(
+          types.fromProto(over.getDataType()),
+          (SqlAggFunction) sqlOperatorSerde.fromProto(over.getSqlOperator()),
+          over.getOperandsList().stream()
+              .map(o -> this.convert(o, null))
+              .collect(Collectors.toList()),
+          partitionKeys,
+          ImmutableList.copyOf(orderKeys),
+          window.hasLowerBound() ? convertWindowBound(window.getLowerBound()) : null,
+          window.hasUpperBound() ? convertWindowBound(window.getUpperBound()) : null,
+          isRows, // physical,
+          true, // allowPartial,
+          false, // nullWhenCountZero,
+          over.getDistinct());
+    }
+
+    public RexFieldCollation convert(PRexFieldCollation pRexFieldCollation) {
+      RexNode left = this.convert(pRexFieldCollation.getLeft(), null);
+      Set<SqlKind> right = new HashSet<>();
+      for (PRexFieldCollation.PSortFlag flag : pRexFieldCollation.getRightList()) {
+        SqlKind kind = this.convert(flag);
+        right.add(kind);
+      }
+
+      return new RexFieldCollation(left, right);
+    }
+
+    private SqlKind convert(PRexFieldCollation.PSortFlag pSortFlag) {
+      switch (pSortFlag) {
+        case DESCENDING:
+          return SqlKind.DESCENDING;
+        case NULLS_FIRST:
+          return SqlKind.NULLS_FIRST;
+        case NULLS_LAST:
+          return SqlKind.NULLS_LAST;
+        default:
+          throw new UnsupportedOperationException("Unknown type: " + pSortFlag);
+      }
+    }
+
+    private RexNode convertInputRef(PRexInputRef inputRef, RelDataType rowType) {
+      int index = inputRef.getIndex();
+      final RelDataType dataType =
+          rowType == null
+              ? types.fromProto(inputRef.getDataType())
+              : rowType.getFieldList().get(index).getType();
+      return rexBuilder.makeInputRef(dataType, index);
+    }
+
+    private RexNode convertLocalRef(PRexLocalRef localRef) {
+      return new RexLocalRef(localRef.getIndex(), types.fromProto(localRef.getDataType()));
+    }
+
+    private RexWinAggCall convertWindowAggCall(PRexWinAggCall pRexWinAggCall) {
+      RexCall rexCall = (RexCall) convertCall(pRexWinAggCall.getRexCall());
+      SqlAggFunction sqlAggFunction = (SqlAggFunction) rexCall.getOperator();
+      /*
+       RexWinAggCall contains SqlAggFunction which is an instance of SqlOperator. SqlOperator contains
+       few properties which is not serializable. So we have a hack in SqlOperatorSerde which serializes
+       and deserializes only sqlOperator's name and from that name it looks up DremioSqlStdOperator table
+       to fetch the respective sql operator. We are assuming that there is only one overload of each
+       agg function/Sql operator, which is why this hack works in the first place.
+       Here are assertions to validate that assumption.
+      */
+      assert isValidSqlAggFunction(sqlAggFunction, pRexWinAggCall.getSqlAggFunction());
+      return new RexWinAggCall(
+          sqlAggFunction,
+          rexCall.getType(),
+          rexCall.getOperands(),
+          pRexWinAggCall.getOrdinal(),
+          pRexWinAggCall.getDistinct(),
+          pRexWinAggCall.getIgnoreNulls());
+    }
+
+    private boolean isValidSqlAggFunction(
+        SqlAggFunction sqlAggFunction, PSqlAggFunction pSqlAggFunction) {
+      return sqlAggFunction.requiresOrder() == pSqlAggFunction.getRequiresOrder()
+          && sqlAggFunction.requiresOver() == pSqlAggFunction.getRequiresOver()
+          && sqlAggFunction.requiresGroupOrder()
+              == fromProto(pSqlAggFunction.getRequiresGroupOrder());
+    }
+
+    private Optionality fromProto(POptionality pOptionality) {
+      switch (pOptionality) {
+        case OPTIONAL:
+          return Optionality.OPTIONAL;
+        case MANDATORY:
+          return Optionality.MANDATORY;
+        case FORBIDDEN:
+          return Optionality.FORBIDDEN;
+        default:
+          return Optionality.IGNORED;
+      }
+    }
+
+    private RexNode convertCall(PRexCall call) {
+      SqlOperator operator = sqlOperatorSerde.fromProto(call.getSqlOperator());
+      if (operator instanceof SqlFlattenOperator) {
+        operator = ((SqlFlattenOperator) operator).withIndex(call.getIndex());
+      }
+
+      RelDataType type = types.fromProto(call.getDataType());
+      return rexBuilder.makeCall(
+          type,
+          operator,
+          call.getOperandsList().stream()
+              .map(node -> this.convert(node, null))
+              .collect(Collectors.toList()));
+    }
+
+    private RexNode convertDynamicParam(PRexDynamicParam dynamicParam) {
+      return new RexDynamicParam(
+          types.fromProto(dynamicParam.getRexVariable().getType()), dynamicParam.getIndex());
+    }
+
+    private RexNode convertRangeRef(PRexRangeRef rangeRef) {
+      return rexBuilder.makeRangeReference(
+          types.fromProto(rangeRef.getType()), rangeRef.getOffset(), false);
+    }
+
+    private RexNode convertPatternFieldRef(PRexPatternFieldRef rexPatternFieldRef) {
+      Preconditions.checkNotNull(rexPatternFieldRef);
+
+      return new RexPatternFieldRef(
+          rexPatternFieldRef.getAlpha(),
+          rexPatternFieldRef.getRexInputRef().getIndex(),
+          types.fromProto(rexPatternFieldRef.getRexInputRef().getDataType()));
     }
   }
 
-  private CorrelationId convertCorrelationId(@Nullable Integer correlationId) {
-    if (correlationId == null) {
-      return null;
-    }
-    return new CorrelationId(correlationId);
-  }
-
-  private RexNode convertCorrelVariable(PRexCorrelVariable fieldAccess) {
-    return rexBuilder.makeCorrel(
-        types.fromProto(fieldAccess.getDataType()),
-        new CorrelationId(fieldAccess.getCorrelationId()));
-  }
-
-  private RexNode convertFieldAccess(PRexFieldAccess fieldAccess) {
-    return rexBuilder.makeFieldAccess(
-        convert(fieldAccess.getExpression()), fieldAccess.getField().getIndex());
-  }
-
-  private RexNode convertOver(PRexOver over) {
-    PRexWindow window = over.getRexWindow();
-    boolean isRows = window.getIsRows();
-
-    List<RexNode> partitionKeys =
-        window.getPartitionKeysList().stream()
-            .map(p -> this.convert(p))
-            .collect(Collectors.toList());
-    List<RexFieldCollation> orderKeys =
-        window.getOrderKeysList().stream().map(this::convert).collect(Collectors.toList());
-
-    return rexBuilder.makeOver(
-        types.fromProto(over.getDataType()),
-        (SqlAggFunction) sqlOperatorSerde.fromProto(over.getSqlOperator()),
-        over.getOperandsList().stream().map(o -> this.convert(o)).collect(Collectors.toList()),
-        partitionKeys,
-        ImmutableList.copyOf(orderKeys),
-        window.hasLowerBound() ? convert(window.getLowerBound()) : null,
-        window.hasUpperBound() ? convert(window.getUpperBound()) : null,
-        isRows, // physical,
-        true, // allowPartial,
-        false, // nullWhenCountZero,
-        over.getDistinct());
-  }
-
-  public RexFieldCollation convert(PRexFieldCollation pRexFieldCollation) {
-    RexNode left = this.convert(pRexFieldCollation.getLeft());
-    Set<SqlKind> right = new HashSet<>();
-    for (PRexFieldCollation.PSortFlag flag : pRexFieldCollation.getRightList()) {
-      SqlKind kind = this.convert(flag);
-      right.add(kind);
-    }
-
-    return new RexFieldCollation(left, right);
-  }
-
-  private SqlKind convert(PRexFieldCollation.PSortFlag pSortFlag) {
-    switch (pSortFlag) {
-      case DESCENDING:
-        return SqlKind.DESCENDING;
-      case NULLS_FIRST:
-        return SqlKind.NULLS_FIRST;
-      case NULLS_LAST:
-        return SqlKind.NULLS_LAST;
-      default:
-        throw new UnsupportedOperationException("Unknown type: " + pSortFlag);
-    }
-  }
-
-  public RexWindowBound convert(PRexWindowBound bound) {
+  public RexWindowBound convertWindowBound(PRexWindowBound bound) {
     SqlNode sqlNode;
     RexNode rexNode;
     switch (bound.getRexWindowBoundCase()) {
       case BOUNDED:
-        RexNode offset = convert(bound.getBounded().getOffset());
+        RexNode offset = convert(bound.getBounded().getOffset(), null);
         sqlNode = SqlNodeList.EMPTY;
         SqlOperator boundOption =
             bound.getBounded().getBoundOption() == PBoundOption.PRECEDING
@@ -305,33 +427,6 @@ public class RexDeserializer {
     }
 
     return RexWindowBound.create(sqlNode, rexNode);
-  }
-
-  private RexNode convertInputRef(PRexInputRef inputRef, RelDataType rowType) {
-    int index = inputRef.getIndex();
-    final RelDataType dataType =
-        rowType == null
-            ? types.fromProto(inputRef.getDataType())
-            : rowType.getFieldList().get(index).getType();
-    return rexBuilder.makeInputRef(dataType, index);
-  }
-
-  private RexNode convertLocalRef(PRexLocalRef localRef) {
-    return new RexLocalRef(localRef.getIndex(), types.fromProto(localRef.getDataType()));
-  }
-
-  private static void must(RelDataType actual, SqlTypeName... expected) {
-    SqlTypeName a = actual.getSqlTypeName();
-    for (SqlTypeName e : expected) {
-      if (e == a) {
-        return;
-      }
-    }
-
-    throw new IllegalStateException(
-        String.format(
-            "Unexpected type. Expected one of types %s but type was actually %s",
-            Arrays.toString(expected), actual));
   }
 
   public RexLiteral convertLiteral(PRexLiteral literal) {
@@ -435,7 +530,7 @@ public class RexDeserializer {
               NlsString utf8NlsString =
                   new NlsString(literal.getStringValue(), "UTF-8", Utf8SqlCollation);
               RelDataType utf8RelDataType =
-                  this.types
+                  types
                       .getFactory()
                       .createTypeWithCharsetAndCollation(
                           type, StandardCharsets.UTF_8, Utf8SqlCollation);
@@ -468,6 +563,20 @@ public class RexDeserializer {
     throw new IllegalStateException("Unknown value handling: " + literal.getValueTypeCase());
   }
 
+  private void must(RelDataType actual, SqlTypeName... expected) {
+    SqlTypeName a = actual.getSqlTypeName();
+    for (SqlTypeName e : expected) {
+      if (e == a) {
+        return;
+      }
+    }
+
+    throw new IllegalStateException(
+        String.format(
+            "Unexpected type. Expected one of types %s but type was actually %s",
+            Arrays.toString(expected), actual));
+  }
+
   private Enum makeEnum(PSymbol symbol) {
     String clazz = symbol.getClazz();
     try {
@@ -475,79 +584,5 @@ public class RexDeserializer {
     } catch (ClassNotFoundException ex) {
       throw new RuntimeException(ex);
     }
-  }
-
-  private RexWinAggCall convertWindowAggCall(PRexWinAggCall pRexWinAggCall) {
-    RexCall rexCall = (RexCall) convertCall(pRexWinAggCall.getRexCall());
-    SqlAggFunction sqlAggFunction = (SqlAggFunction) rexCall.getOperator();
-    /*
-     RexWinAggCall contains SqlAggFunction which is an instance of SqlOperator. SqlOperator contains
-     few properties which is not serializable. So we have a hack in SqlOperatorSerde which serializes
-     and deserializes only sqlOperator's name and from that name it looks up DremioSqlStdOperator table
-     to fetch the respective sql operator. We are assuming that there is only one overload of each
-     agg function/Sql operator, which is why this hack works in the first place.
-     Here are assertions to validate that assumption.
-    */
-    assert isValidSqlAggFunction(sqlAggFunction, pRexWinAggCall.getSqlAggFunction());
-    return new RexWinAggCall(
-        sqlAggFunction,
-        rexCall.getType(),
-        rexCall.getOperands(),
-        pRexWinAggCall.getOrdinal(),
-        pRexWinAggCall.getDistinct(),
-        pRexWinAggCall.getIgnoreNulls());
-  }
-
-  private boolean isValidSqlAggFunction(
-      SqlAggFunction sqlAggFunction, PSqlAggFunction pSqlAggFunction) {
-    return sqlAggFunction.requiresOrder() == pSqlAggFunction.getRequiresOrder()
-        && sqlAggFunction.requiresOver() == pSqlAggFunction.getRequiresOver()
-        && sqlAggFunction.requiresGroupOrder()
-            == fromProto(pSqlAggFunction.getRequiresGroupOrder());
-  }
-
-  private Optionality fromProto(POptionality pOptionality) {
-    switch (pOptionality) {
-      case OPTIONAL:
-        return Optionality.OPTIONAL;
-      case MANDATORY:
-        return Optionality.MANDATORY;
-      case FORBIDDEN:
-        return Optionality.FORBIDDEN;
-      default:
-        return Optionality.IGNORED;
-    }
-  }
-
-  private RexNode convertCall(PRexCall call) {
-    SqlOperator operator = sqlOperatorSerde.fromProto(call.getSqlOperator());
-    if (operator instanceof SqlFlattenOperator) {
-      operator = ((SqlFlattenOperator) operator).withIndex(call.getIndex());
-    }
-
-    RelDataType type = types.fromProto(call.getDataType());
-    return rexBuilder.makeCall(
-        type,
-        operator,
-        call.getOperandsList().stream().map(this::convert).collect(Collectors.toList()));
-  }
-
-  private RexNode convertDynamicParam(PRexDynamicParam dynamicParam) {
-    return new RexDynamicParam(
-        this.types.fromProto(dynamicParam.getRexVariable().getType()), dynamicParam.getIndex());
-  }
-
-  private RexNode convertRangeRef(PRexRangeRef rangeRef) {
-    return rexBuilder.makeRangeReference(
-        this.types.fromProto(rangeRef.getType()), rangeRef.getOffset(), false);
-  }
-
-  private RexNode convertPatternFieldRef(PRexPatternFieldRef rexPatternFieldRef) {
-    Preconditions.checkNotNull(rexPatternFieldRef);
-
-    return new RexPatternFieldRef(
-        rexPatternFieldRef.getAlpha(),
-        rexPatternFieldRef.getRexInputRef().getIndex(),
-        this.types.fromProto(rexPatternFieldRef.getRexInputRef().getDataType()));
   }
 }

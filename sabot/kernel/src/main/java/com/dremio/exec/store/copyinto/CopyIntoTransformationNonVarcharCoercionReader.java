@@ -137,7 +137,7 @@ public class CopyIntoTransformationNonVarcharCoercionReader extends NonVarcharCo
       VectorContainer projectorOutput)
       throws Exception {
     projectorOptions.setCanDirectTransfer(false);
-    return ProjectOperator.createSplitterWithExpressions(
+    return ProjectOperator.createSplitterWithExpressionsStatic(
         incoming,
         exprs,
         transfers,

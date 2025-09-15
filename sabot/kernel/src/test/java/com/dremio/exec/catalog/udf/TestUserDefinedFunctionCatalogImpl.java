@@ -16,10 +16,8 @@
 package com.dremio.exec.catalog.udf;
 
 import static com.dremio.common.expression.CompleteType.VARBINARY;
-import static com.dremio.exec.catalog.CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED;
 import static com.dremio.exec.store.sys.udf.UserDefinedFunctionSerde.toProto;
 import static org.assertj.core.api.Assertions.assertThatNoException;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -31,7 +29,6 @@ import static org.mockito.Mockito.when;
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
-import com.dremio.common.exceptions.UserException;
 import com.dremio.common.expression.CompleteType;
 import com.dremio.exec.catalog.FunctionManagingPlugin;
 import com.dremio.exec.catalog.MutablePlugin;
@@ -103,27 +100,7 @@ public class TestUserDefinedFunctionCatalogImpl {
   }
 
   @Test
-  public void testCreateFunction_versionedSourceNotEnabled() {
-    when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(false);
-    final MockVersionedPlugin mockVersionedPlugin = mock(MockVersionedPlugin.class);
-
-    NamespaceKey namespaceKey = new NamespaceKey("versioned");
-    when(sourceCatalog.getSource(eq(namespaceKey.getRoot()))).thenReturn(mockVersionedPlugin);
-    when(mockVersionedPlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(mockVersionedPlugin.unwrap(VersionedPlugin.class)).thenReturn(mockVersionedPlugin);
-    UserDefinedFunction userDefinedFunction = mock(UserDefinedFunction.class);
-    when(userDefinedFunction.getReturnType()).thenReturn(VARBINARY);
-
-    CatalogEntityKey catalogEntityKey = CatalogEntityKey.fromNamespaceKey(namespaceKey);
-    assertThatThrownBy(() -> newUDFCatalog().createFunction(catalogEntityKey, userDefinedFunction))
-        .isInstanceOf(UserException.class)
-        .hasMessageContaining("You cannot store a user-defined function in source 'versioned'.");
-    verifyNoInteractions(userNamespaceService);
-  }
-
-  @Test
   public void testCreateFunction_versionedSourceEnabled() throws IOException {
-    when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(true);
     MockVersionedPlugin mockVersionedPlugin = mock(MockVersionedPlugin.class);
 
     String sourceName = "versioned";
@@ -154,13 +131,12 @@ public class TestUserDefinedFunctionCatalogImpl {
 
   @Test
   public void testGetFunction_versionedSourceEnabled() {
-    when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(true);
     MockVersionedPlugin mockVersionedPlugin = mock(MockVersionedPlugin.class);
 
     NamespaceKey namespaceKey = new NamespaceKey("versioned");
     when(sourceCatalog.getSource(eq(namespaceKey.getRoot()))).thenReturn(mockVersionedPlugin);
-    when(mockVersionedPlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
-    when(mockVersionedPlugin.unwrap(VersionedPlugin.class)).thenReturn(mockVersionedPlugin);
+    when(mockVersionedPlugin.isWrapperFor(FunctionManagingPlugin.class)).thenReturn(true);
+    when(mockVersionedPlugin.unwrap(FunctionManagingPlugin.class)).thenReturn(mockVersionedPlugin);
     when(mockVersionedPlugin.getFunction(any())).thenReturn(Optional.of(functionConfig));
     UserSession userSession = mock(UserSession.class);
     when(queryContext.getSession()).thenReturn(userSession);
@@ -181,7 +157,6 @@ public class TestUserDefinedFunctionCatalogImpl {
 
   @Test
   public void testGetAllFunctions_NoThrow() {
-    when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(true);
     MockVersionedPlugin mockVersionedPlugin = mock(MockVersionedPlugin.class);
     when(mockVersionedPlugin.isWrapperFor(VersionedPlugin.class)).thenReturn(true);
     when(mockVersionedPlugin.unwrap(VersionedPlugin.class)).thenReturn(mockVersionedPlugin);

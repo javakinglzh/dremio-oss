@@ -16,6 +16,8 @@
 package com.dremio.exec.store.mfunctions;
 
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.planner.fragment.DistributionAffinity;
 import com.dremio.exec.planner.physical.LeafPrel;
@@ -69,8 +71,10 @@ final class MFunctionQueryScanPrel extends MFunctionQueryRelBase implements Leaf
 
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
+    UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+    String userId = userContext != null ? userContext.getUserId() : null;
     return new MetadataFunctionsGroupScan(
-        creator.props(this, user, tableMetadata.getBatchSchema()),
+        creator.props(this, user, userId, tableMetadata.getBatchSchema()),
         tableMetadata,
         tableMetadata.getBatchSchema(),
         projectedColumns,

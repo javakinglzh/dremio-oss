@@ -17,6 +17,7 @@ package com.dremio.exec.store.parquet;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.common.types.TypeProtos.MinorType;
 import com.dremio.exec.ExecConstants;
 import com.dremio.io.file.Path;
 import java.net.URL;
@@ -31,6 +32,14 @@ import org.apache.parquet.format.converter.ParquetMetadataConverter;
 import org.apache.parquet.hadoop.metadata.BlockMetaData;
 import org.apache.parquet.hadoop.metadata.ColumnChunkMetaData;
 import org.apache.parquet.hadoop.metadata.ParquetMetadata;
+import org.apache.parquet.schema.LogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DateLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.DecimalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.IntervalLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.StringLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeLogicalTypeAnnotation;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimeUnit;
+import org.apache.parquet.schema.LogicalTypeAnnotation.TimestampLogicalTypeAnnotation;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -358,5 +367,94 @@ public class ParquetTypeHelperTest extends BaseTestQuery {
             block, parquetMetadata.getFileMetaData().getSchema(), projectedColumns);
     Assert.assertEquals(4, chunks.size());
     Assert.assertEquals(expectedKeys, chunks.keySet());
+  }
+
+  @Test
+  public void testGetLogicalTypeForMinorType() {
+    // Test DECIMAL type
+    LogicalTypeAnnotation decimalType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.DECIMAL, 2, 10, false);
+    Assert.assertTrue(decimalType instanceof DecimalLogicalTypeAnnotation);
+    DecimalLogicalTypeAnnotation decimalAnnotation = (DecimalLogicalTypeAnnotation) decimalType;
+    Assert.assertEquals(2, decimalAnnotation.getScale());
+    Assert.assertEquals(10, decimalAnnotation.getPrecision());
+
+    // Test VARCHAR type
+    LogicalTypeAnnotation varcharType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.VARCHAR, null, null, false);
+    Assert.assertTrue(varcharType instanceof StringLogicalTypeAnnotation);
+
+    // Test DATE type
+    LogicalTypeAnnotation dateType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.DATE, null, null, false);
+    Assert.assertTrue(dateType instanceof DateLogicalTypeAnnotation);
+
+    // Test TIME type
+    LogicalTypeAnnotation timeType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.TIME, null, null, false);
+    Assert.assertTrue(timeType instanceof TimeLogicalTypeAnnotation);
+    TimeLogicalTypeAnnotation timeAnnotation = (TimeLogicalTypeAnnotation) timeType;
+    Assert.assertEquals(TimeUnit.MILLIS, timeAnnotation.getUnit());
+    Assert.assertFalse(timeAnnotation.isAdjustedToUTC());
+
+    // Test TIMETZ type
+    LogicalTypeAnnotation timetzType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.TIMETZ, null, null, false);
+    Assert.assertTrue(timetzType instanceof TimeLogicalTypeAnnotation);
+    TimeLogicalTypeAnnotation timetzAnnotation = (TimeLogicalTypeAnnotation) timetzType;
+    Assert.assertEquals(TimeUnit.MILLIS, timetzAnnotation.getUnit());
+    Assert.assertTrue(timetzAnnotation.isAdjustedToUTC());
+
+    // Test TIMESTAMPMILLI type - non-Iceberg
+    LogicalTypeAnnotation timestampMilliType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.TIMESTAMPMILLI, null, null, false);
+    Assert.assertTrue(timestampMilliType instanceof TimestampLogicalTypeAnnotation);
+    TimestampLogicalTypeAnnotation timestampMilliAnnotation =
+        (TimestampLogicalTypeAnnotation) timestampMilliType;
+    Assert.assertEquals(TimeUnit.MILLIS, timestampMilliAnnotation.getUnit());
+    Assert.assertFalse(timestampMilliAnnotation.isAdjustedToUTC());
+
+    // Test TIMESTAMPMILLI type - Iceberg
+    LogicalTypeAnnotation timestampMilliIcebergType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.TIMESTAMPMILLI, null, null, true);
+    Assert.assertTrue(timestampMilliIcebergType instanceof TimestampLogicalTypeAnnotation);
+    TimestampLogicalTypeAnnotation timestampMilliIcebergAnnotation =
+        (TimestampLogicalTypeAnnotation) timestampMilliIcebergType;
+    Assert.assertEquals(TimeUnit.MILLIS, timestampMilliIcebergAnnotation.getUnit());
+    Assert.assertTrue(timestampMilliIcebergAnnotation.isAdjustedToUTC());
+
+    // Test TIMESTAMPTZ type
+    LogicalTypeAnnotation timetstzType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.TIMESTAMPTZ, null, null, false);
+    Assert.assertTrue(timetstzType instanceof TimestampLogicalTypeAnnotation);
+    TimestampLogicalTypeAnnotation timetstzAnnotation =
+        (TimestampLogicalTypeAnnotation) timetstzType;
+    Assert.assertEquals(TimeUnit.MILLIS, timetstzAnnotation.getUnit());
+    Assert.assertTrue(timetstzAnnotation.isAdjustedToUTC());
+
+    // Test INTERVALDAY type
+    LogicalTypeAnnotation intervalDayType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.INTERVALDAY, null, null, false);
+    Assert.assertTrue(intervalDayType instanceof IntervalLogicalTypeAnnotation);
+
+    // Test INTERVALYEAR type
+    LogicalTypeAnnotation intervalYearType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.INTERVALYEAR, null, null, false);
+    Assert.assertTrue(intervalYearType instanceof IntervalLogicalTypeAnnotation);
+
+    // Test INTERVAL type
+    LogicalTypeAnnotation intervalType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.INTERVAL, null, null, false);
+    Assert.assertTrue(intervalType instanceof IntervalLogicalTypeAnnotation);
+
+    // Test unsupported type (should return null)
+    LogicalTypeAnnotation unsupportedType =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.INT, null, null, false);
+    Assert.assertNull(unsupportedType);
+
+    // Test another unsupported type (should return null)
+    LogicalTypeAnnotation unsupportedType2 =
+        ParquetTypeHelper.getLogicalTypeForMinorType(MinorType.BIGINT, null, null, false);
+    Assert.assertNull(unsupportedType2);
   }
 }

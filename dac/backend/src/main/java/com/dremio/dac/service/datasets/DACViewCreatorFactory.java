@@ -128,8 +128,12 @@ public class DACViewCreatorFactory implements ViewCreatorFactory {
                 tmpPath, response.getDataset().getDatasetVersion(), isVersionedSource);
 
         // TODO - Remove dependency on a Resource file.
+        // The tool.newUntitled method always "creates" temp dataset in TMP_DATASET_PATH.
+        // Hence tmpPath is always <TempSpaceName>.UNTITLED, e.g. tmp.UNTITLED.
+        // The temp space is protected. Users can't create views there.
+        // Therefore this is always saving the temp dataset in the datasetPath, i.e. save as.
         newDatasetVersionResource(securityContext, tool, version, tmpPath, allocator)
-            .save(vds, datasetPath, null, null, isVersionedSource, attributes);
+            .save(vds, datasetPath, null, null, isVersionedSource, true, attributes);
       } catch (Exception e) {
         throw Throwables.propagate(e);
       }

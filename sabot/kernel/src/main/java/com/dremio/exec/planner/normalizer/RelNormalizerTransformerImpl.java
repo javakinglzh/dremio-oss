@@ -34,6 +34,7 @@ import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.RexCorrelVariableSchemaFixer;
 import com.dremio.exec.planner.sql.RexShuttleRelShuttle;
+import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.planner.sql.handlers.PlanLogUtil;
 import com.dremio.exec.planner.sql.handlers.RelTransformer;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
@@ -87,11 +88,14 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
   }
 
   @Override
-  public RelNode transform(RelNode relNode, AttemptObserver attemptObserver)
+  public RelNode transform(ConvertedRelNode convertedRelNode, AttemptObserver attemptObserver)
       throws SqlUnsupportedException {
-
     try {
-      final RelNode normalizedRel = transformPreSerialization(relNode, attemptObserver);
+      final RelNode normalizedRel =
+          transformPreSerialization(
+              convertedRelNode.getConvertedNode(),
+              attemptObserver,
+              convertedRelNode.getValidatedRowType());
 
       attemptObserver.planSerializable(normalizedRel);
       if (!plannerSettings.options.getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
@@ -111,10 +115,16 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
 
   @Override
   public RelNode transformForReflection(
-      RelNode relNode, RelTransformer relTransformer, AttemptObserver attemptObserver)
+      ConvertedRelNode convertedRelNode,
+      RelTransformer relTransformer,
+      AttemptObserver attemptObserver)
       throws SqlUnsupportedException {
     try {
-      final RelNode normalizedRel = transformPreSerialization(relNode, attemptObserver);
+      final RelNode normalizedRel =
+          transformPreSerialization(
+              convertedRelNode.getConvertedNode(),
+              attemptObserver,
+              convertedRelNode.getValidatedRowType());
 
       final RelNode transformed = relTransformer.transform(normalizedRel);
 
@@ -135,9 +145,10 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
   }
 
   @Override
-  public RelNode transformPreSerialization(RelNode relNode, AttemptObserver attemptObserver) {
+  public RelNode transformPreSerialization(
+      RelNode relNode, AttemptObserver attemptObserver, RelDataType validatedRowType) {
     RelNode expanded = expand(relNode);
-    Optional<RelNode> hashMatched = matchHash(expanded, attemptObserver);
+    Optional<RelNode> hashMatched = matchHash(expanded, attemptObserver, validatedRowType);
     RelNode drrsMatched = matchDRRs(hashMatched.orElse(expanded), attemptObserver);
     RelNode uncollectsReplaced =
         UncollectToFlattenConverter.convert(
@@ -186,9 +197,11 @@ public class RelNormalizerTransformerImpl implements RelNormalizerTransformer {
     return expanded;
   }
 
-  private Optional<RelNode> matchHash(RelNode relNode, AttemptObserver attemptObserver) {
+  private Optional<RelNode> matchHash(
+      RelNode relNode, AttemptObserver attemptObserver, RelDataType validatedRowType) {
     final Stopwatch hashStopwatch = Stopwatch.createStarted();
-    Optional<RelNode> hashMatched = substitutionProvider.generateHashReplacement(relNode);
+    Optional<RelNode> hashMatched =
+        substitutionProvider.generateHashReplacement(relNode, validatedRowType);
     attemptObserver.planRelTransform(
         PlannerPhase.DEFAULT_HASH_MATCHING,
         null,

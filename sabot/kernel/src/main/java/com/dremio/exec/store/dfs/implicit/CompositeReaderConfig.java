@@ -15,6 +15,8 @@
  */
 package com.dremio.exec.store.dfs.implicit;
 
+import static java.util.Collections.emptyList;
+
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.RecordReader;
@@ -108,5 +110,11 @@ public class CompositeReaderConfig {
             .collect(Collectors.toList());
 
     return new CompositeReaderConfig(context, remainingColumns, implicitColumns);
+  }
+
+  /** Creates a CompositeReaderConfig with no implicit columns. */
+  public static CompositeReaderConfig getCompound(
+      OperatorContext context, List<SchemaPath> selectedColumns) {
+    return new CompositeReaderConfig(context, selectedColumns, emptyList());
   }
 }

@@ -38,7 +38,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableSet;
-import java.io.IOException;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Map;
@@ -230,9 +229,12 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
   private void deleteOrphan(String path) {
     try {
       LOGGER.debug("Removing orphan file: " + path);
+      if (!fs.supportsPathsWithScheme()) {
+        path = Path.getContainerSpecificRelativePath(Path.of(path));
+      }
       fs.delete(Path.of(path), true);
-    } catch (IOException e) {
-      LOGGER.warn("Unable to delete newly added files {}", path);
+    } catch (Exception e) {
+      LOGGER.warn("Unable to delete newly added files {} with cause {} ", path, e.getCause(), e);
       // Not an error condition if cleanup fails; VACUUM can be used to remove left-over orphan
       // files.
     }
@@ -240,7 +242,11 @@ public class IcebergOptimizeOperationCommitter implements IcebergOpCommitter {
 
   @Override
   public void cleanup(FileIO fileIO) {
-    addedDataFiles.forEach(addedDataFile -> fileIO.deleteFile(addedDataFile.path().toString()));
+    try {
+      addedDataFiles.forEach(addedDataFile -> fileIO.deleteFile(addedDataFile.path().toString()));
+    } catch (Exception e) {
+      LOGGER.warn("Unable to delete newly added files with cause {} ", e.getCause(), e);
+    }
   }
 
   @Override

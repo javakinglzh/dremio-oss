@@ -84,6 +84,8 @@ public class PlannerSettings implements Context {
   public static final LongValidator PLANNER_MEMORY_LIMIT =
       new RangeLongValidator(
           "planner.memory_limit", 0L, Long.MAX_VALUE, DEFAULT_MAX_OFF_HEAP_ALLOCATION_IN_BYTES);
+  public static final LongValidator MAX_PREDICATE_PERMUTATIONS =
+      new LongValidator("planner.max_pull_up_predicate_permutations", 10_000L);
   public static final LongValidator MAX_METADATA_CALL_COUNT =
       new LongValidator("planner.max_metadata_call_count", 10_000_000L);
 
@@ -196,6 +198,9 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.agg_join.simple", true);
   public static final BooleanValidator AGG_PUSH_DOWN_MERGE_RULE =
       new BooleanValidator("planner.agg_merge", true);
+
+  public static final BooleanValidator AGG_METADATA_PUSH_DOWN_PHASE =
+      new BooleanValidator("planner.enable_agg_metadata_pushdown", true);
 
   public static final BooleanValidator ENABLE_PROJECT_CLEANUP_LOGICAL =
       new BooleanValidator("planner.experimental.pclean_logical", false);
@@ -519,6 +524,10 @@ public class PlannerSettings implements Context {
 
   public static final BooleanValidator PUSH_FILTER_PAST_FLATTEN =
       new BooleanValidator("planner.push_filter_past_flatten", true);
+  public static final PositiveLongValidator REFLECTION_ALGEBRAIC_JOIN_UNION_LIMIT =
+      new PositiveLongValidator("reflections.planning.algebraic_match_limit", Long.MAX_VALUE, 16);
+  public static final BooleanValidator REFLECTION_ALGEBRAIC_JOIN_UNION_LIMIT_TERMINATE =
+      new BooleanValidator("reflections.planning.algebraic_match_limit.terminate", true);
   public static final BooleanValidator VERBOSE_PROFILE =
       new BooleanValidator("planner.verbose_profile", false);
   public static final BooleanValidator VERBOSE_ACCELERATION_PROFILE =
@@ -567,7 +576,7 @@ public class PlannerSettings implements Context {
   public static final BooleanValidator ENABLE_RANGE_QUERY_REWRITE =
       new BooleanValidator("planner.enable_range_query_rewrite", false);
   public static final BooleanValidator ENABLE_COUNT_STAR_OPTIMIZATION =
-      new BooleanValidator("planner.enable_count_star_optimization", false);
+      new BooleanValidator("planner.enable_count_star_optimization", true);
   public static final BooleanValidator ENABLE_MULTI_COLUMN_COUNT_REWRITE =
       new BooleanValidator("planner.enable_multi_column_count_rewrite", true);
   public static final BooleanValidator ENABLE_QUALIFIED_AGGREGATE_REWRITE =
@@ -736,7 +745,7 @@ public class PlannerSettings implements Context {
       new BooleanValidator("planner.query_plan_cache_enabled", true);
 
   public static final BooleanValidator QUERY_PLAN_USE_LEGACY_CACHE =
-      new BooleanValidator("planner.query_plan_use_legacy_cache", false);
+      new BooleanValidator("planner.query_plan_use_legacy_cache", true);
 
   public static final BooleanValidator QUERY_PLAN_CACHE_FALL_THROUGH =
       new BooleanValidator("planner.query_plan_cache_enabled_fall_through", true);
@@ -771,6 +780,11 @@ public class PlannerSettings implements Context {
 
   public static StringValidator REFRESH_MODE_STRING =
       new StringValidator("planner.reflection_refresh_mode_string", MANUAL_REFLECTION_MODE);
+
+  // Max value is being set as (Integer.MAX_VALUE / 4 - 1) because of
+  // sabot/vector-tools/src/main/java/com/dremio/exec/record/selection/SelectionVector4.java#L31-L33
+  public static final PositiveLongValidator LIMIT_TO_TOPN_THRESHOLD =
+      new PositiveLongValidator("planner.limit_to_topn_threshold", 536_870_911L, 536_870_911L);
 
   private final SabotConfig sabotConfig;
   private final ExecutionControls executionControls;
@@ -1155,6 +1169,10 @@ public class PlannerSettings implements Context {
 
   public boolean isNewSelfJoinCostEnabled() {
     return options.getOption(NEW_SELF_JOIN_COST);
+  }
+
+  public long getLimitToTopNThreshold() {
+    return options.getOption(LIMIT_TO_TOPN_THRESHOLD);
   }
 
   public void setMinimumSampleSize(long sampleSize) {

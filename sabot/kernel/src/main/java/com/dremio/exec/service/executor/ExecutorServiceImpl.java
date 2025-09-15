@@ -129,13 +129,18 @@ public class ExecutorServiceImpl extends ExecutorService {
         new MemoryIterator(context.getEndpoint(), context.getAllocator());
     final WorkStats stats = context.getWorkStatsProvider().get();
     final CoordinationProtos.NodeEndpoint ep = context.getEndpoint();
-    final double load = stats.getClusterLoad();
-    final int configuredMaxWidth =
+    final int averageExecutorCores =
         (int)
             context
                 .getClusterResourceInformation()
                 .getAverageExecutorCores(context.getOptionManager());
-    final int actualMaxWidth = (int) Math.max(1, configuredMaxWidth * stats.getMaxWidthFactor());
+    // If the number of cores is 0, it means no executors are available. We will let this RPC call
+    // passes
+    // and retrieve an executor being shutdown. The next RPC call won't be able to retrieve this
+    // executor.
+    final double load =
+        (averageExecutorCores > 0) ? stats.getClusterLoad(averageExecutorCores) : 0.0;
+    final int actualMaxWidth = (int) Math.max(1, averageExecutorCores * stats.getMaxWidthFactor());
 
     double memory = 0;
     double cpu = 0;
@@ -170,7 +175,7 @@ public class ExecutorServiceImpl extends ExecutorService {
         .setIp(ip)
         .setStatus("green")
         .setLoad(load)
-        .setConfiguredMaxWidth(configuredMaxWidth)
+        .setConfiguredMaxWidth(averageExecutorCores)
         .setActualMaxWith(actualMaxWidth)
         .setCurrent(false)
         .build();

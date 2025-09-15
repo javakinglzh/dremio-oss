@@ -149,6 +149,7 @@ public class PartitionStatsScanTableFunction extends AbstractTableFunction {
                 .withAsyncOptions(true)
                 .filePath(metadataLocation)
                 .userName(props.getUserName())
+                .userId(props.getUserId())
                 .operatorContext(context)
                 .dataset(dataset));
     FileIO io =

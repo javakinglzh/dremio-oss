@@ -44,7 +44,6 @@ import com.dremio.exec.rpc.Acks;
 import com.dremio.exec.rpc.RpcOutcomeListener;
 import com.dremio.exec.work.protector.UserResult;
 import com.dremio.exec.work.user.LocalExecutionConfig;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.plugins.elastic.ElasticsearchCluster.ColumnData;
 import com.dremio.proto.model.attempts.AttemptReason;
 import com.dremio.service.DirectProvider;
@@ -578,7 +577,6 @@ public class ITTestLimit extends ElasticBaseTestQuery {
             .setQueryResultsStorePath(format("%s.\"%s\"", TEMP_SCHEMA, "elasticLimitOne"))
             .setAllowPartitionPruning(true)
             .setExposeInternalSources(false)
-            .setSubstitutionSettings(SubstitutionSettings.of())
             .setReflectionMode(MANUAL_REFLECTION_MODE)
             .build();
 

@@ -15,14 +15,17 @@
  */
 package com.dremio.exec.planner.acceleration;
 
+import static com.dremio.exec.planner.acceleration.ExpansionLeafNode.EXPANSION_MAX_DEPTH;
 import static com.dremio.exec.planner.acceleration.IncrementalUpdateUtils.UPDATE_COLUMN;
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.calcite.logical.ScanCrel;
 import com.dremio.exec.ops.DremioCatalogReader;
 import com.dremio.exec.ops.QueryContext;
+import com.dremio.exec.planner.acceleration.ExpansionLeafNode.TerminationResult;
 import com.dremio.exec.planner.acceleration.StrippingFactory.StripResult;
 import com.dremio.exec.planner.acceleration.descriptor.UnexpandedMaterializationDescriptor;
+import com.dremio.exec.planner.acceleration.substitution.JoinUnionCounter;
 import com.dremio.exec.planner.common.MoreRelOptUtil;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer.Options;
@@ -42,12 +45,18 @@ import com.dremio.exec.store.NamespaceTable;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Stopwatch;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.apache.calcite.plan.CopyWithCluster;
+import org.apache.calcite.plan.CopyWithCluster.CopyToCluster;
+import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelOptTable.ToRelContext;
 import org.apache.calcite.plan.RelOptUtil;
+import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.AbstractRelNode;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.RelShuttle;
 import org.apache.calcite.rel.logical.LogicalProject;
@@ -62,6 +71,7 @@ import org.apache.calcite.util.Pair;
 
 /** Expander for materialization list. */
 public final class MaterializationExpander {
+
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(MaterializationExpander.class);
   private final SqlConverter parent;
@@ -73,12 +83,15 @@ public final class MaterializationExpander {
   }
 
   public DremioMaterialization expand(UnexpandedMaterializationDescriptor descriptor) {
+    Stopwatch deserStopwatch = Stopwatch.createStarted();
     RelNode queryRel = deserializePlan(descriptor.getPlan(), parent, catalogService);
     RelNode hashFragment = null;
     if (descriptor.getMatchingHash() != null) {
       hashFragment = deserializePlan(descriptor.getHashFragementBytes(), parent, catalogService);
     }
+    deserStopwatch.stop();
 
+    Stopwatch normalizeStopwatch = Stopwatch.createStarted();
     if (parent.getSettings().getOptions().getOption(PlannerSettings.PUSH_FILTER_PAST_EXPANSIONS)) {
       try {
         queryRel =
@@ -113,7 +126,9 @@ public final class MaterializationExpander {
         MaterializationExpander.getPostStripNormalizer(descriptor.getIncrementalUpdateSettings());
     stripResult = stripResult.transformNormalized(postStripNormalizer);
 
-    logger.debug("Query rel:{}", RelOptUtil.toString(queryRel));
+    if (logger.isTraceEnabled()) {
+      logger.trace("Query rel:{}", RelOptUtil.toString(queryRel));
+    }
 
     RelNode tableRel = expandSchemaPath(descriptor.getPath());
 
@@ -156,6 +171,28 @@ public final class MaterializationExpander {
 
     final RelNode stripFragmentOnTableRel =
         stripResult.applyStrippedNodes(removeUpdateColumn(tableRel));
+    normalizeStopwatch.stop();
+
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Descriptor stats: reflection={}, materialization={} tableRelNodes={}, queryRelNodes={}, queryFields={}, stripResult={}, stripFragmentOnTableRel={}, planBytes={}, hashBytes={}, deserializeTime={}, normalizeTime={}",
+          descriptor.getLayoutId(),
+          descriptor.getMaterializationId(),
+          MoreRelOptUtil.countRelNodes(tableRel),
+          MoreRelOptUtil.countRelNodes(queryRel),
+          countScanCrelFields(queryRel),
+          MoreRelOptUtil.countRelNodes(stripResult.getNormalized()),
+          MoreRelOptUtil.countRelNodes(stripFragmentOnTableRel),
+          descriptor.getPlan().length,
+          descriptor.getHashFragementBytes() != null
+              ? descriptor.getHashFragementBytes().length
+              : 0,
+          deserStopwatch,
+          normalizeStopwatch);
+    }
+
+    Pair<RelNode, RelNode> matchingRels =
+        terminateForJoinUnionLimit(stripResult.getNormalized(), queryRel);
 
     // Wiping out RelMetadataCache. It will be holding the RelNodes from the prior
     // planning phases.
@@ -163,8 +200,8 @@ public final class MaterializationExpander {
 
     return new DremioMaterialization(
         tableRel,
-        queryRel,
-        stripResult.getNormalized(),
+        matchingRels.right,
+        matchingRels.left,
         stripFragmentOnTableRel,
         descriptor.getIncrementalUpdateSettings(),
         descriptor.getJoinDependencyProperties(),
@@ -176,6 +213,86 @@ public final class MaterializationExpander {
         descriptor.getStripVersion(), // Should use the strip version of the materialization we are
         // expanding
         hashFragment);
+  }
+
+  /** Reduce the size of query trees for reflection matching */
+  private Pair<RelNode, RelNode> terminateForJoinUnionLimit(
+      RelNode strippedQuery, RelNode expansionQuery) {
+    if (!parent
+        .getSettings()
+        .getOptions()
+        .getOption(PlannerSettings.REFLECTION_ALGEBRAIC_JOIN_UNION_LIMIT_TERMINATE)) {
+      return Pair.of(strippedQuery, expansionQuery);
+    }
+
+    long joinUnionLimit =
+        parent
+            .getSettings()
+            .getOptions()
+            .getOption(PlannerSettings.REFLECTION_ALGEBRAIC_JOIN_UNION_LIMIT);
+    JoinUnionCounter joinUnionCounterVisitor = new JoinUnionCounter();
+    expansionQuery.accept(joinUnionCounterVisitor);
+    RelNode terminatedStrippedQuery;
+    RelNode terminatedExpansionQuery = null;
+    // Include double the matching limit in case matching is able to prune away tables in the
+    // matching plan
+    if (joinUnionCounterVisitor.numUnionsAndJoins() > joinUnionLimit * 2) {
+      terminatedStrippedQuery =
+          new InvalidMatchingRel(
+              expansionQuery.getCluster(),
+              expansionQuery.getTraitSet(),
+              joinUnionCounterVisitor.numUnionsAndJoins());
+      for (int depth = EXPANSION_MAX_DEPTH - 1; depth >= 0; depth--) {
+        TerminationResult result = ExpansionLeafNode.terminateFirst(expansionQuery, depth);
+        if (result.getTerminationCount() == 1) {
+          terminatedExpansionQuery = result.getResult();
+          break;
+        }
+      }
+      if (terminatedExpansionQuery == null) {
+        terminatedExpansionQuery =
+            new InvalidMatchingRel(
+                expansionQuery.getCluster(),
+                expansionQuery.getTraitSet(),
+                joinUnionCounterVisitor.numUnionsAndJoins());
+      }
+    } else {
+      terminatedStrippedQuery = strippedQuery;
+      terminatedExpansionQuery = expansionQuery;
+    }
+    return Pair.of(terminatedStrippedQuery, terminatedExpansionQuery);
+  }
+
+  /** A simple marker node to indicate that a matching tree is invalid due to its size. */
+  public static class InvalidMatchingRel extends AbstractRelNode implements CopyToCluster {
+
+    private final int numUnionsAndJoins;
+
+    public InvalidMatchingRel(RelOptCluster cluster, RelTraitSet traitSet, int numUnionsAndJoins) {
+      super(cluster, traitSet);
+      this.numUnionsAndJoins = numUnionsAndJoins;
+    }
+
+    public int getNumUnionsAndJoins() {
+      return numUnionsAndJoins;
+    }
+
+    @Override
+    public RelNode copyWith(CopyWithCluster copier) {
+      return new InvalidMatchingRel(
+          copier.getCluster(), copier.copyOf(getTraitSet()), numUnionsAndJoins);
+    }
+  }
+
+  private int countScanCrelFields(RelNode rel) {
+    if (rel instanceof ScanCrel) {
+      return ((ScanCrel) rel).getTableMetadata().getSchema().getFieldCount();
+    }
+    int fieldCount = 0;
+    for (RelNode child : rel.getInputs()) { // Add children
+      fieldCount += countScanCrelFields(child);
+    }
+    return fieldCount;
   }
 
   public static com.dremio.exec.planner.sql.handlers.RelTransformer getPostStripNormalizer(
@@ -336,6 +453,7 @@ public final class MaterializationExpander {
 
   // Exceptions after successful deserialization
   public static class ExpansionException extends RuntimeException {
+
     public ExpansionException(String message) {
       super(message);
     }
@@ -347,6 +465,7 @@ public final class MaterializationExpander {
 
   // Exceptions when regenerating the reflection plan
   public static class RebuildPlanException extends RuntimeException {
+
     public RebuildPlanException(String message, Throwable cause) {
       super(message, cause);
     }

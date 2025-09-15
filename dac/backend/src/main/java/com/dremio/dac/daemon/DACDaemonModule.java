@@ -1044,7 +1044,8 @@ public class DACDaemonModule implements DACModule {
             registry.provider(VersionedDatasetAdapterFactory.class),
             registry.provider(CatalogStatusEvents.class),
             registry.provider(java.util.concurrent.ExecutorService.class),
-            registry.provider(NamespaceService.Factory.class)));
+            registry.provider(NamespaceService.Factory.class),
+            registry.provider(UserService.class)));
 
     registry.bind(CatalogSupplier.class, CatalogFactory.class);
 
@@ -1393,7 +1394,6 @@ public class DACDaemonModule implements DACModule {
               registry.lookup(BufferAllocator.class),
               registry.provider(RequestContext.class),
               datasetEventHub,
-              registry.provider(CacheRefresherService.class),
               registry.provider(ReflectionChangeNotificationHandler.class));
       CacheRefresherService cacheRefresherService =
           new CacheRefresherServiceImpl(
@@ -1404,8 +1404,7 @@ public class DACDaemonModule implements DACModule {
               reflectionService,
               datasetEventHub,
               reflectionService.getRelfectionGoalsStore(),
-              reflectionService.getReflectionEntriesStore(),
-              registry.lookup(java.util.concurrent.ExecutorService.class));
+              reflectionService.getReflectionEntriesStore());
 
       registry.bind(ReflectionService.class, reflectionService);
 

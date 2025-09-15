@@ -23,6 +23,7 @@ import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DmlUtils;
 import com.dremio.exec.planner.sql.parser.SqlDeleteFromTable;
 import com.dremio.exec.planner.sql.parser.SqlGrant.Privilege;
+import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.TableProperties;
 import org.apache.calcite.sql.SqlNode;
@@ -53,7 +54,8 @@ public class DeleteHandler extends DmlHandler {
   @Override
   protected RowLevelOperationMode getRowLevelOperationMode(DremioTable table) {
     TableProperties deleteDmlWriteMode =
-        DmlUtils.getDmlWriteProp(table, org.apache.iceberg.TableProperties.DELETE_MODE);
+        IcebergUtils.getSpecifiedIcebergTableProperty(
+            table, org.apache.iceberg.TableProperties.DELETE_MODE);
     return DmlUtils.getDmlWriteMode(deleteDmlWriteMode);
   }
 }

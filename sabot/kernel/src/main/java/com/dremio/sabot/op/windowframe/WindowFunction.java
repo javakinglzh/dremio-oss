@@ -401,33 +401,74 @@ public abstract class WindowFunction {
       }
 
       {
+        // Consolidated copyLeadValue method that combines all 3 steps:
+        // 1. Calculate destination lead index
+        // 2. Find appropriate batch
+        // 3. Setup and copy from appropriate batch to output
         final GeneratorMapping mapping =
-            GeneratorMapping.create("setupCopyFromNextBatch", "copyFromNextBatch", null, null);
-        final MappingSet copyFromFirstMapping =
-            new MappingSet("inIndex", "outIndex", mapping, mapping);
+            GeneratorMapping.create("setupCopyFromNextBatch", "copyLeadValue", null, null);
+        final MappingSet copyLeadMapping = new MappingSet("inIndex", "outIndex", mapping, mapping);
 
-        cg.setMappingSet(copyFromFirstMapping);
+        cg.setMappingSet(copyLeadMapping);
+
+        // Early return if not enough remaining rows in partition
         final JExpression remaining = JExpr.direct("partition.getRemaining()");
-        /*
-          if remaining rows < offset that means - value for row will be in next batch batch
-        */
-        final JExpression indexCondition =
-            JExpr.direct("inIndex")
-                .gte(JExpr.lit(0))
-                .cand(JExpr.direct("inIndex").lt(JExpr.direct("b2.getRecordCount()")));
-        final JExpression samePartition =
+        final JConditional earlyReturn = cg.getEvalBlock()._if(remaining.lt(JExpr.lit(offset)));
+        earlyReturn._then()._return();
+
+        // Step 1: Use destLeadIndex parameter and add offset to it
+        final JExpression destLeadIndex = JExpr.direct("destLeadIndex");
+        cg.getEvalBlock().directStatement("destLeadIndex = destLeadIndex + " + offset + ";");
+
+        // Early return if LEAD value is within current batch
+        final JExpression currentBatchRecordCount =
             JExpr.direct(
-                "isSamePartition(inIndex, incoming, partition.getCurrentRowInPartition(), b2)");
+                "((com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)).getRecordCount()");
+        final JConditional withinCurrentBatch =
+            cg.getEvalBlock()._if(destLeadIndex.lt(currentBatchRecordCount));
+        withinCurrentBatch._then()._return();
+
+        // Step 2: Find appropriate batch index using JModel constructs
+
+        // Adjust destLeadIndex before the while loop
+
         cg.getEvalBlock()
             .directStatement(
-                "inIndex = partition.leadIndex (" + offset + ", b2.getRecordCount());");
+                "destLeadIndex = ("
+                    + offset
+                    + " - ((com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)).getRecordCount() + inIndex);");
 
-        JConditional ifCondition =
-            cg.getEvalBlock()
-                ._if(remaining.lt(JExpr.lit(offset)).cand(indexCondition).cand(samePartition));
-        cg.nestEvalBlock(ifCondition._then());
+        cg.getEvalBlock().directStatement("currentBatchIndex++;");
+
+        // Create while loop to find the correct batch using JModel
+        final JExpression whileCondition =
+            destLeadIndex.gt(
+                JExpr.direct(
+                        "((com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)).getRecordCount()")
+                    .minus(JExpr.lit(1)));
+        final JBlock whileBody = cg.getEvalBlock()._while(whileCondition).body();
+
+        // Inside while loop: subtract current batch size and increment batch index
+
+        whileBody.directStatement(
+            "destLeadIndex -= ((com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)).getRecordCount();");
+        whileBody.directStatement("currentBatchIndex++;");
+
+        // Step 3a: Setup copy from the appropriate batch using JModel
+        cg.getEvalBlock()
+            .invoke("setupCopyFromNextBatch")
+            .arg(JExpr.direct("context"))
+            .arg(
+                JExpr.direct(
+                    "(com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)"))
+            .arg(JExpr.direct("container"));
+
+        // Step 3b: Set the correct source index using direct statement (JBlock.assign may not
+        // exist)
+        cg.getEvalBlock().directStatement("inIndex = destLeadIndex;");
+
+        // Add the actual copy expression - this generates the code that copies the value
         cg.addExpr(writeInputToLead, BlockCreateMode.MERGE);
-        cg.unNestEvalBlock();
       }
     }
 
@@ -469,7 +510,7 @@ public abstract class WindowFunction {
 
     @Override
     public boolean requiresFullPartition(final WindowPOP pop) {
-      return false;
+      return true;
     }
 
     @Override
@@ -488,6 +529,7 @@ public abstract class WindowFunction {
   }
 
   static class Lag extends WindowFunction {
+    private LogicalExpression writeLagToLag;
     private LogicalExpression writeInputToLag;
     private int offset;
 
@@ -518,6 +560,8 @@ public abstract class WindowFunction {
       final TypedFieldId outputId = batch.getValueVectorId(ne.getRef());
 
       writeInputToLag = new ValueVectorWriteExpression(outputId, input, true);
+      writeLagToLag =
+          new ValueVectorWriteExpression(outputId, new ValueVectorReadExpression(outputId), true);
       offset = offsetExpression(call);
       return true;
     }
@@ -541,38 +585,6 @@ public abstract class WindowFunction {
     @Override
     void generateCode(ClassGenerator<WindowFramer> cg) {
       {
-        final GeneratorMapping mapping =
-            GeneratorMapping.create("setupCopyFromPastBatch", "copyFromPastBatch", null, null);
-        final MappingSet mappingSet = new MappingSet("inIndex", "outIndex", mapping, mapping);
-
-        cg.setMappingSet(mappingSet);
-        final JExpression currentIndex = JExpr.direct("partition.getCurrentRowInPartition()");
-        final JExpression partitionStart = JExpr.direct("partition.getFirstRowInPartition()");
-        final JExpression indexCondition =
-            JExpr.direct("inIndex")
-                .gte(JExpr.lit(0))
-                .cand(JExpr.direct("inIndex").lt(JExpr.direct("incoming.getRecordCount()")));
-        final JExpression samePartition =
-            JExpr.direct(
-                "isSamePartition(inIndex, incoming, partition.getCurrentRowInPartition(), b2)");
-        //  (currentIndex - offset) > start of partition, copy value (if exist) from internal holder
-        cg.getEvalBlock()
-            .directStatement(
-                "inIndex = partition.lagIndex (" + offset + ", incoming.getRecordCount());");
-        JConditional ifCondition =
-            cg.getEvalBlock()
-                ._if(
-                    currentIndex
-                        .minus(JExpr.lit(offset))
-                        .lt(partitionStart)
-                        .cand(indexCondition)
-                        .cand(samePartition));
-        cg.nestEvalBlock(ifCondition._then());
-        cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
-        cg.unNestEvalBlock();
-      }
-
-      {
         // generating lag copyPrev
         final GeneratorMapping mapping =
             GeneratorMapping.create("setupCopyPrev", "copyPrev", null, null);
@@ -590,11 +602,67 @@ public abstract class WindowFunction {
         cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
         cg.unNestEvalBlock();
       }
+
+      {
+        // Consolidated copyLagValue method that combines all 3 steps:
+        // 1. Calculate destination lag index
+        // 2. Find appropriate batch
+        // 3. Setup and copy from appropriate batch to output
+        final GeneratorMapping mapping =
+            GeneratorMapping.create("setupCopyFromNextBatch", "copyLagValue", null, null);
+        final MappingSet copyLagMapping = new MappingSet("inIndex", "outIndex", mapping, mapping);
+
+        cg.setMappingSet(copyLagMapping);
+
+        // Step 1: Use destLagIndex parameter and subtract offset from it
+        final JExpression destLagIndex = JExpr.direct("destLagIndex");
+        cg.getEvalBlock().directStatement("destLagIndex = destLagIndex - " + offset + ";");
+
+        // Early return if destLagIndex is >= 0
+        final JConditional earlyReturnLag = cg.getEvalBlock()._if(destLagIndex.gte(JExpr.lit(0)));
+        earlyReturnLag._then()._return();
+
+        // Early return if partition.getLength() - partition.getRemaining() < offset
+        final JExpression partitionCondition =
+            JExpr.direct("partition.getLength()")
+                .minus(JExpr.direct("partition.getRemaining()"))
+                .minus(JExpr.lit(1))
+                .lt(JExpr.lit(offset));
+        final JConditional earlyReturnPartition = cg.getEvalBlock()._if(partitionCondition);
+        earlyReturnPartition._then()._return();
+
+        // Step 2: Modify currentBatchIndex directly
+        cg.getEvalBlock().directStatement("currentBatchIndex--;");
+
+        // Create while loop: while destLagIndex is negative, go back and add batch sizes
+        final JExpression whileCondition = destLagIndex.lt(JExpr.lit(0));
+        final JBlock whileBody = cg.getEvalBlock()._while(whileCondition).body();
+
+        // Inside while loop: go back one batch and add its size to destLagIndex
+        whileBody.directStatement(
+            "destLagIndex = destLagIndex + ((com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex)).getRecordCount();");
+        whileBody.directStatement("currentBatchIndex--;");
+
+        // Step 3a: Setup copy from the appropriate batch using JModel
+        cg.getEvalBlock()
+            .invoke("setupCopyFromNextBatch")
+            .arg(JExpr.direct("context"))
+            .arg(
+                JExpr.direct(
+                    "(com.dremio.exec.record.VectorContainer)batches.get(currentBatchIndex + 1)"))
+            .arg(JExpr.direct("container"));
+
+        // Step 3b: Set the correct source index using direct statement
+        cg.getEvalBlock().directStatement("inIndex = destLagIndex;");
+
+        // Add the actual copy expression - this generates the code that copies the value
+        cg.addExpr(writeInputToLag, BlockCreateMode.MERGE);
+      }
     }
 
     @Override
     public boolean requiresFullPartition(final WindowPOP pop) {
-      return false;
+      return true;
     }
 
     @Override
@@ -603,8 +671,6 @@ public abstract class WindowFunction {
         final WindowPOP pop,
         boolean frameEndReached,
         boolean partitionEndReached) {
-      assert numBatchesAvailable > 0
-          : "canDoWork() should not be called when numBatchesAvailable == 0";
       return partitionEndReached;
     }
 

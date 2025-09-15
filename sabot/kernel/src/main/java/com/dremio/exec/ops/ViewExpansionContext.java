@@ -30,6 +30,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import javax.annotation.Nullable;
 import org.apache.calcite.plan.RelOptTable;
 import org.apache.calcite.plan.RelOptTable.ToRelContext;
 import org.apache.calcite.rel.RelNode;
@@ -70,7 +71,8 @@ public class ViewExpansionContext {
   private final CatalogIdentity catalogIdentity;
   private final ObjectIntHashMap<CatalogIdentity> userTokens = new ObjectIntHashMap<>();
 
-  private Map<SubstitutionUtils.VersionedPath, DefaultSubstitutionInfo> defaultSubstitutionInfos;
+  private final Map<SubstitutionUtils.VersionedPath, DefaultSubstitutionInfo>
+      defaultSubstitutionInfos;
 
   public static String DEFAULT_RAW_TARGET = "default_raw_matching_target";
 
@@ -88,7 +90,7 @@ public class ViewExpansionContext {
    * @return An instance of {@link com.dremio.exec.ops.ViewExpansionContext.ViewExpansionToken}
    *     which must be released when done using the token.
    */
-  public ViewExpansionToken reserveViewExpansionToken(CatalogIdentity viewOwner) {
+  public ViewExpansionToken reserveViewExpansionToken(@Nullable CatalogIdentity viewOwner) {
     int totalTokens = 1;
     if (!Objects.equals(catalogIdentity, viewOwner)) {
       // We want to track the tokens only if the "viewOwner" is not same as the "queryUser".

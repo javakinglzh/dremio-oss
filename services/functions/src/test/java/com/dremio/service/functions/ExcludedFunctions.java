@@ -201,6 +201,7 @@ public final class ExcludedFunctions {
             "U-",
             "UNPIVOT",
             "LAST_MATCHING_MAP_ENTRY_FOR_KEY",
+            "FIRST_MATCHING_MAP_ENTRY_FOR_KEY",
             "LOCAL_LISTAGG",
             "LISTAGG_MERGE",
             "ARRAY_SORT",

@@ -42,6 +42,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.catalog.exception.CatalogEntityAlreadyExistsException;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
 import com.dremio.catalog.exception.CatalogException;
 import com.dremio.catalog.model.CatalogEntityId;
 import com.dremio.catalog.model.CatalogEntityKey;
@@ -63,7 +64,6 @@ import com.dremio.connector.metadata.options.TimeTravelOption;
 import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.SearchTypes;
 import com.dremio.datastore.api.ImmutableFindByCondition;
-import com.dremio.exec.catalog.CatalogImpl.IdentityResolver;
 import com.dremio.exec.catalog.CatalogServiceImpl.SourceModifier;
 import com.dremio.exec.dotfile.View;
 import com.dremio.exec.physical.base.ViewOptions;
@@ -127,13 +127,15 @@ public class TestCatalogImpl {
   private final ViewCreatorFactory viewCreatorFactory = mock(ViewCreatorFactory.class);
   private final SchemaConfig schemaConfig = mock(SchemaConfig.class);
   private final NamespaceService userNamespaceService = mock(NamespaceService.class);
-  private final IdentityResolver identityProvider = mock(IdentityResolver.class);
+  private final CatalogIdentityResolver identityProvider = mock(CatalogIdentityResolver.class);
   private final NamespaceIdentity namespaceIdentity = mock(NamespaceIdentity.class);
   private final VersionContextResolverImpl versionContextResolver =
       mock(VersionContextResolverImpl.class);
   private final CatalogStatusEvents catalogStatusEvents = mock(CatalogStatusEvents.class);
   private final MetadataIOPool metadataIOPool = mock(MetadataIOPool.class);
   private final String userName = "gnarly";
+  private final CatalogEntityOwnership catalogEntityOwnership = mock(CatalogEntityOwnership.class);
+  private final UserOrRoleResolver userOrRoleResolver = mock(UserOrRoleResolver.class);
 
   @Before
   public void setup() throws Exception {
@@ -165,7 +167,9 @@ public class TestCatalogImpl {
         versionContextResolver,
         catalogStatusEvents,
         new VersionedDatasetAdapterFactory(),
-        metadataIOPool);
+        metadataIOPool,
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   @Test
@@ -1227,7 +1231,7 @@ public class TestCatalogImpl {
     spyCatalog.createView(viewKey, view, viewOptions);
 
     // Verify that refreshDataset was called
-    verify(spyCatalog, times(1)).refreshDataset(viewKey, DatasetRetrievalOptions.DEFAULT);
+    verify(spyCatalog, times(1)).refreshDataset(eq(viewKey), any(DatasetRetrievalOptions.class));
   }
 
   @Test
@@ -1337,6 +1341,25 @@ public class TestCatalogImpl {
     catalog.deleteFolder(catalogEntityKey, null);
     verify(userNamespaceService).exists(namespaceKey);
     verify(userNamespaceService).deleteFolder(namespaceKey, null);
+  }
+
+  @Test
+  public void testDropTableThrowsError() throws Exception {
+    CatalogImpl catalog = newCatalogImpl(null);
+    NamespaceKey namespaceKey = new NamespaceKey(Arrays.asList("source", "folder", "table"));
+    StoragePlugin storagePlugin = mock(StoragePlugin.class);
+    SupportsDroppingTables supportsDroppingTables = mock(SupportsDroppingTables.class);
+    when(sourceModifier.getSource("source")).thenReturn(storagePlugin);
+    when(storagePlugin.isWrapperFor(SupportsDroppingTables.class)).thenReturn(true);
+    when(storagePlugin.unwrap(SupportsDroppingTables.class)).thenReturn(supportsDroppingTables);
+    when(userNamespaceService.exists(namespaceKey)).thenReturn(true);
+    doNothing().when(userNamespaceService).deleteEntity(namespaceKey);
+    doThrow(new CatalogEntityNotFoundException("Table not found"))
+        .when(supportsDroppingTables)
+        .dropTable(eq(namespaceKey), any(SchemaConfig.class), eq(null));
+    assertThatThrownBy(() -> catalog.dropTable(namespaceKey, null))
+        .isInstanceOf(UserException.class)
+        .hasMessageContaining("Table not found");
   }
 
   private static FolderConfig convertToNS(CatalogFolder catalogFolder) {

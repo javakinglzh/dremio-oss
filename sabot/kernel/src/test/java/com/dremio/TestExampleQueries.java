@@ -2900,4 +2900,70 @@ public class TestExampleQueries extends PlanTestBase {
         .build()
         .run();
   }
+
+  @Test
+  public void TestSHJPageSizeReplayMode() throws Exception {
+    String query =
+        "select t1.columns[1] from cp.\"table_200k_value.csv\" as t1 JOIN cp.\"table_200k_value.csv\" as t2 ON t1.columns[0] = t2.columns[0]";
+
+    try {
+      testBuilder()
+          .unOrdered()
+          .sqlQuery(query)
+          .baselineColumns("t1.columns[1]")
+          .baselineValues(0)
+          .optionSettingQueriesForTestQuery(
+              "ALTER SESSION SET \"exec.op.join.spill.page_size\" = 131072;"
+                  + "ALTER SESSION SET \"exec.op.join.spill.test_spill_mode\" = 'replay'")
+          .build()
+          .run();
+    } catch (Exception e) {
+      assertTrue(e.getMessage().contains("is too large to fit into page size"));
+    }
+  }
+
+  @Test
+  public void TestHJCumulativeKeyLen() throws Exception {
+    String query =
+        "select t1.columns[0] as c1, t1.columns[3] as c2 ,t2.columns[3] as c3 from cp.\"table_70k_value.csv\" as t1 JOIN cp.\"table_70k_value.csv\" as t2 ON t1.columns[0] = t2.columns[0]"
+            + "and t1.columns[1] = t2.columns[1] and t1.columns[2] = t2.columns[2]";
+    try {
+      testBuilder()
+          .unOrdered()
+          .sqlQuery(query)
+          .baselineColumns("c1", "c2", "c3")
+          .baselineValues(1, "AAA", "BBB")
+          .baselineValues(2, "BBB", "DDD")
+          .build()
+          .run();
+    } catch (Exception e) {
+      assertTrue(
+          e.getMessage()
+              .contains(
+                  "Pivoted variable keys [$f10, $f20, $f30] length 140009 bytes can't be more than the maximum allowed variable block size of 131064 bytes"));
+    }
+  }
+
+  @Test
+  public void Test_DX_104899() throws Exception {
+    // Tests DX-104899
+    // In this test the build variable length is 120000 bytes and the probe variable length is
+    // 120000 bytes.
+    // The carry-over columns + pivoted variable and fixed exceeds the HashTable.PAGE_SIZE but
+    // within HashJoinOperator.MAX_PAGE_SIZE.
+    String query =
+        "select t1.columns[0] as c1, t1.columns[3] as c2 ,t2.columns[3] as c3 from cp.\"table_60k_value.csv\" as t1 JOIN cp.\"table_60k_value.csv\" as t2 ON t1.columns[0] = t2.columns[0]"
+            + "and t1.columns[1] = t2.columns[1] and t1.columns[2] = t2.columns[2]";
+
+    testBuilder()
+        .unOrdered()
+        .sqlQuery(query)
+        .baselineColumns("c1", "c2", "c3")
+        .sqlBaselineQuery(query)
+        .optionSettingQueriesForTestQuery(
+            "ALTER SESSION SET \"exec.op.join.spill.test_spill_mode\" = 'buildAndReplay'")
+        .build()
+        .run();
+    assertTrue("TestSHJProbeSpill failed", true);
+  }
 }

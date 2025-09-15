@@ -27,7 +27,6 @@ import com.dremio.exec.proto.UserProtos.RecordBatchFormat;
 import com.dremio.exec.proto.UserProtos.UserProperties;
 import com.dremio.exec.server.options.SessionOptionManager;
 import com.dremio.exec.store.ischema.InfoSchemaConstants;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.options.OptionManager;
 import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.BooleanValidator;
@@ -230,7 +229,6 @@ public class UserSession {
   private RecordBatchFormat recordBatchFormat = RecordBatchFormat.DREMIO_23_0;
   private boolean exposeInternalSources = false;
   private boolean tracingEnabled = false;
-  private SubstitutionSettings substitutionSettings = SubstitutionSettings.of();
   private int maxMetadataCount = 0;
   private boolean checkMetadataValidity = true;
   private boolean neverPromote = false;
@@ -338,11 +336,6 @@ public class UserSession {
       return this;
     }
 
-    public Builder withSubstitutionSettings(final SubstitutionSettings substitutionSettings) {
-      userSession.substitutionSettings = substitutionSettings;
-      return this;
-    }
-
     public Builder withUserProperties(UserProperties properties) {
       if (properties == null) {
         return this;
@@ -431,7 +424,6 @@ public class UserSession {
     this.recordBatchFormat = userSession.recordBatchFormat;
     this.exposeInternalSources = userSession.exposeInternalSources;
     this.tracingEnabled = userSession.tracingEnabled;
-    this.substitutionSettings = new SubstitutionSettings(userSession.substitutionSettings);
     this.maxMetadataCount = userSession.maxMetadataCount;
     this.checkMetadataValidity = userSession.checkMetadataValidity;
     this.neverPromote = userSession.neverPromote;
@@ -517,10 +509,6 @@ public class UserSession {
 
   public boolean isTracingEnabled() {
     return tracingEnabled;
-  }
-
-  public SubstitutionSettings getSubstitutionSettings() {
-    return substitutionSettings;
   }
 
   public String getCatalogName() {

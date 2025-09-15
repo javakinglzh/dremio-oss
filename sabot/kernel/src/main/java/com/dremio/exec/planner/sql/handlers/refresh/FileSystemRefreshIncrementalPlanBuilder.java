@@ -132,7 +132,8 @@ public class FileSystemRefreshIncrementalPlanBuilder extends FileSystemFullRefre
         metadataProvider,
         paths,
         x -> getRowCountEstimates("DirList"),
-        ImmutableList.of());
+        ImmutableList.of(),
+        false);
   }
 
   @Override

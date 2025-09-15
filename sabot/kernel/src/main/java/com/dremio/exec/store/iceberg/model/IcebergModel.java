@@ -23,6 +23,7 @@ import com.dremio.exec.store.dfs.ColumnOperations;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
 import com.dremio.io.file.FileSystem;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -64,6 +65,7 @@ public interface IcebergModel {
   /**
    * Get committer for Full metadata refresh
    *
+   * @param optionManager
    * @param tableName
    * @param datasetPath
    * @param tableLocation
@@ -76,6 +78,7 @@ public interface IcebergModel {
    * @return
    */
   IcebergOpCommitter getFullMetadataRefreshCommitter(
+      OptionManager optionManager,
       String tableName,
       List<String> datasetPath,
       String tableLocation,

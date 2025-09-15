@@ -49,4 +49,4 @@ if [ -n "$DREMIO_ADMIN_LOG_VERBOSITY" ]; then
 fi
 
 exec "$JAVA" $DREMIO_JAVA_OPTS $LOG_PARAM -Dlogback.configurationFile=logback-admin.xml -cp $DREMIO_CLASSPATH \
-  com.dremio.dac.cmd.AdminCommandRunner $@
+  com.dremio.dac.cmd.AdminCommandRunner "$@"

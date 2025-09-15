@@ -706,7 +706,6 @@ public class ForemenWorkManager implements Service, SafeExit {
                       UserCredentials.newBuilder().setUserName(config.getUsername()).build())
                   .exposeInternalSources(config.isExposingInternalSources())
                   .withDefaultSchema(config.getSqlContext())
-                  .withSubstitutionSettings(config.getSubstitutionSettings())
                   .withClientInfos(UserRpcUtils.getRpcEndpointInfos("Dremio Java local client"))
                   .withEngineName(config.getEngineName())
                   .withSourceVersionMapping(config.getSourceVersionMapping())

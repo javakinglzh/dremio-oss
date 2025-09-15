@@ -407,7 +407,9 @@ public class Reflection {
     details.setPartitionDistributionStrategy(partitionDistributionStrategy);
     goal.setDetails(details);
     goal.setIsDremioManaged(
-        reflectionMode != null && !MANUAL_REFLECTION_MODE.equals(reflectionMode));
+        reflectionMode != null
+            && !reflectionMode.isEmpty()
+            && !MANUAL_REFLECTION_MODE.equals(reflectionMode));
 
     if (enabled == null) {
       throw new ClientErrorException("Reflections must have the enabled field set");

@@ -16,6 +16,7 @@
 package com.dremio.plugins.dataplane.exec;
 
 import static com.dremio.exec.store.IcebergExpiryMetric.COMMIT_SCAN_TIME;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createCommitScanLog;
 import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createTableSkipLog;
 import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
 import static org.projectnessie.gc.contents.LiveContentSet.Status.IDENTIFY_SUCCESS;
@@ -46,9 +47,11 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.apache.arrow.memory.OutOfMemoryException;
 import org.apache.arrow.vector.ValueVector;
@@ -206,11 +209,14 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
       NessieLiveContentRetriever nessieLiveContentRetriever,
       SnapshotsScanOptions snapshotsScanOptions,
       Stopwatch liveContentScanWatch) {
+    final String queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
+
     try {
       liveContentSet =
           nessieLiveContentRetriever.getLiveContentSet(
               CutoffPolicy.atTimestamp(
-                  Instant.ofEpochMilli(snapshotsScanOptions.getOlderThanInMillis())));
+                  Instant.ofEpochMilli(snapshotsScanOptions.getOlderThanInMillis())),
+              queryId);
 
       Preconditions.checkState(
           liveContentSet.status().equals(IDENTIFY_SUCCESS),
@@ -221,29 +227,70 @@ public abstract class AbstractNessieCommitRecordsReader implements RecordReader 
           .addLongStat(
               IcebergExpiryMetric.NUM_TABLES, liveContentSet.fetchDistinctContentIdCount());
 
-      try (Stream<String> stream =
-          liveContentSet
-              .fetchContentIds()
-              .filter(
-                  contentId -> {
-                    boolean isExcludedContentId =
-                        config.getExcludedContentIDs().contains(contentId);
-                    final String queryId =
-                        QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
-                    if (isExcludedContentId) {
-                      vacuumLogger.warn(
-                          createTableSkipLog(
-                              queryId,
-                              contentId,
-                              ErrorType.VACUUM_EXCEPTION,
-                              String.format(
-                                  "Skipping commit scan on contentID %s because it was excluded through SQL.",
-                                  contentId)),
-                          "");
-                    }
-                    return !isExcludedContentId;
-                  })) {
-        liveContentIdsSetIterator = stream.iterator();
+      try (Stream<String> stream = liveContentSet.fetchContentIds()) {
+        if (config.isExcludeMode()) {
+          Set<String> filteredLiveContentIds =
+              stream
+                  .filter(
+                      contentId -> {
+                        boolean isExcludedContentId =
+                            config.getListedContentIDs().contains(contentId);
+                        if (isExcludedContentId) {
+                          vacuumLogger.warn(
+                              createTableSkipLog(
+                                  queryId,
+                                  contentId,
+                                  ErrorType.VACUUM_EXCEPTION,
+                                  String.format(
+                                      "Skipping commit scan on contentID %s because it was excluded through SQL.",
+                                      contentId)),
+                              "");
+                        } else {
+                          vacuumLogger.info(
+                              createCommitScanLog(
+                                  queryId,
+                                  contentId,
+                                  "",
+                                  ErrorType.NO_ERROR,
+                                  String.format(
+                                      "Accepted valid content ID %s for scan.", contentId)),
+                              "");
+                        }
+                        return !isExcludedContentId;
+                      })
+                  .collect(Collectors.toSet());
+          liveContentIdsSetIterator = filteredLiveContentIds.iterator();
+        } else {
+          // In include mode, validate that all included content IDs exist in the live content set
+          Set<String> liveContentIds = stream.collect(Collectors.toSet());
+
+          for (String contentId : config.getListedContentIDs()) {
+            if (!liveContentIds.contains(contentId)) {
+              final String errorMsg =
+                  String.format(
+                      "Content ID %s specified in include list was not found in the live content set.",
+                      contentId);
+              vacuumLogger.error(
+                  createTableSkipLog(
+                      queryId,
+                      contentId,
+                      ErrorType.VACUUM_EXCEPTION,
+                      errorMsg + " Live Content Set IDs are: " + liveContentIds),
+                  "");
+              throw new RuntimeException(errorMsg);
+            } else {
+              vacuumLogger.info(
+                  createCommitScanLog(
+                      queryId,
+                      contentId,
+                      "",
+                      ErrorType.NO_ERROR,
+                      String.format("Accepted supplied content ID %s for scan.", contentId)),
+                  "");
+            }
+          }
+          liveContentIdsSetIterator = config.getListedContentIDs().iterator();
+        }
       }
     } catch (LiveContentSetNotFoundException e) {
       throw new RuntimeException(e);

@@ -204,7 +204,7 @@ public class ExprCachePrewarmService implements Service {
         Stopwatch javaCodeGenWatch = Stopwatch.createUnstarted();
         Stopwatch gandivaCodeGenWatch = Stopwatch.createUnstarted();
         try (ExpressionSplitter splitter =
-            ProjectOperator.createSplitterWithExpressions(
+            ProjectOperator.createSplitterWithExpressionsStatic(
                 incoming,
                 exprs,
                 transfers,

@@ -476,7 +476,8 @@ public class SystemStoragePluginInitializer implements Initializer<Void> {
       ProjectConfig.DistPathConfig pathConfig,
       TypeValidators.BooleanValidator optionValidator) {
     boolean enableCachingForAcceleration = enable(config, DremioConfig.DEBUG_DIST_CACHING_ENABLED);
-    if (FileSystemConf.isCloudFileSystemScheme(pathConfig.getUri().getScheme())) {
+    final String uriScheme = pathConfig.getUri().getScheme();
+    if (uriScheme != null && FileSystemConf.isCloudFileSystemScheme(uriScheme)) {
       enableCachingForAcceleration = sabotContext.getOptionManager().getOption(optionValidator);
     }
     return enableCachingForAcceleration;

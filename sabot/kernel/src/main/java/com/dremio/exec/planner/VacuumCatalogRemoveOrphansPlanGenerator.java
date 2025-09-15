@@ -19,6 +19,7 @@ import static com.dremio.exec.ExecConstants.ENABLE_VACUUM_CATALOG_BRIDGE_OPERATO
 import static com.dremio.exec.planner.VacuumOutputSchema.getRowType;
 import static com.dremio.exec.store.SystemSchemas.CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA;
 import static com.dremio.exec.store.SystemSchemas.FILE_PATH;
+import static com.dremio.exec.store.SystemSchemas.FILE_SIZE;
 import static com.dremio.exec.store.SystemSchemas.ICEBERG_SNAPSHOTS_SCAN_SCHEMA;
 import static com.dremio.exec.store.SystemSchemas.METADATA_FILE_PATH;
 import static com.dremio.exec.store.SystemSchemas.METADATA_PATH_SCAN_SCHEMA;
@@ -54,6 +55,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import org.apache.calcite.plan.RelOptCluster;
 import org.apache.calcite.plan.RelTraitSet;
+import org.apache.calcite.rel.InvalidRelException;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeField;
 import org.apache.calcite.rex.RexBuilder;
@@ -71,7 +73,9 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
   private final OptionManager optionManager;
   private BridgeExchangePrel bridgePrel;
   private String bridgeId;
-  private List<String> excludedContentIDs;
+  private final boolean excludeMode;
+  private List<String> listedContentIDs;
+  private final boolean dryRun;
 
   public VacuumCatalogRemoveOrphansPlanGenerator(
       RelOptCluster cluster,
@@ -83,7 +87,9 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
       String fsScheme,
       String schemeVariate,
       OptimizerRulesContext context,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(
         cluster,
         traitSet,
@@ -101,7 +107,9 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
     this.optionManager = ((QueryContext) context).getOptions();
-    this.excludedContentIDs = excludedContentIDs;
+    this.excludeMode = excludeMode;
+    this.listedContentIDs = listedContentIDs;
+    this.dryRun = dryRun;
   }
 
   private Prel createMetadataPathScanPlan() {
@@ -130,7 +138,9 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
         1,
         fsScheme,
         getSchemeVariate(),
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override
@@ -214,12 +224,52 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
         1,
         fsScheme,
         getSchemeVariate(),
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override
   protected BatchSchema getCarryForwardSchema() {
     return CARRY_FORWARD_FILE_PATH_TYPE_WITH_DATASET_SCHEMA;
+  }
+
+  @Override
+  protected Prel deleteOrphanFilesPlan(Prel input) {
+    if (dryRun) {
+      // Project filePath and fileSize for dry run output
+      RexBuilder rexBuilder = cluster.getRexBuilder();
+      List<RexNode> projectExpressions = new ArrayList<>();
+      List<String> fieldNames = new ArrayList<>();
+
+      RelDataTypeField filePathField = input.getRowType().getField(FILE_PATH, false, false);
+      RelDataTypeField fileSizeField = input.getRowType().getField(FILE_SIZE, false, false);
+      projectExpressions.add(
+          rexBuilder.makeInputRef(filePathField.getType(), filePathField.getIndex()));
+      projectExpressions.add(
+          rexBuilder.makeInputRef(fileSizeField.getType(), fileSizeField.getIndex()));
+      fieldNames.add(FILE_PATH);
+      fieldNames.add(FILE_SIZE);
+
+      RelDataType rowType =
+          RexUtil.createStructType(
+              rexBuilder.getTypeFactory(),
+              projectExpressions,
+              fieldNames,
+              SqlValidatorUtil.F_SUGGESTER);
+
+      return ProjectPrel.create(
+          input.getCluster(), input.getTraitSet(), input, projectExpressions, rowType);
+    }
+    return super.deleteOrphanFilesPlan(input);
+  }
+
+  @Override
+  protected Prel outputSummaryPlan(Prel input) throws InvalidRelException {
+    if (dryRun) {
+      return input;
+    }
+    return super.outputSummaryPlan(input);
   }
 
   /**
@@ -252,7 +302,9 @@ public class VacuumCatalogRemoveOrphansPlanGenerator extends VacuumTableRemoveOr
             1,
             fsScheme,
             getSchemeVariate(),
-            excludedContentIDs);
+            excludeMode,
+            listedContentIDs,
+            dryRun);
     bridgeId = UUID.randomUUID().toString();
     bridgePrel =
         new BridgeExchangePrel(scanPrel.getCluster(), scanPrel.getTraitSet(), scanPrel, bridgeId);

@@ -19,8 +19,8 @@ import static com.dremio.catalog.model.VersionContext.NOT_SPECIFIED;
 import static com.dremio.dac.explore.DatasetResourceUtils.findLongestPeriodBetweenRefreshes;
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
+import com.dremio.catalog.exception.CatalogException;
 import com.dremio.catalog.model.CatalogEntityKey;
-import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.exceptions.UserException;
@@ -30,8 +30,6 @@ import com.dremio.dac.explore.model.DatasetName;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.DatasetUI;
 import com.dremio.dac.explore.model.InitialDataPreviewResponse;
-import com.dremio.dac.explore.model.VersionContextReq;
-import com.dremio.dac.explore.model.VersionContextReq.VersionContextType;
 import com.dremio.dac.explore.model.VersionContextUtils;
 import com.dremio.dac.model.job.JobData;
 import com.dremio.dac.model.job.JobDataWrapper;
@@ -40,7 +38,6 @@ import com.dremio.dac.resource.BaseResourceWithAllocator;
 import com.dremio.dac.server.BufferAllocatorFactory;
 import com.dremio.dac.service.collaboration.CollaborationHelper;
 import com.dremio.dac.service.datasets.DatasetVersionMutator;
-import com.dremio.dac.service.errors.ClientErrorException;
 import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.errors.DatasetVersionNotFoundException;
 import com.dremio.dac.service.reflection.ReflectionServiceHelper;
@@ -48,8 +45,6 @@ import com.dremio.dac.util.JobRequestUtil;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
-import com.dremio.exec.catalog.TableMutationOptions;
-import com.dremio.exec.physical.base.ViewOptions;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.service.job.QueryType;
 import com.dremio.service.job.SqlQuery;
@@ -373,80 +368,46 @@ public class DatasetResource extends BaseResourceWithAllocator {
     return newDataset(virtualDataset);
   }
 
+  private TableVersionContext getTableVersionContext(String refType, String refValue) {
+    switch (refType) {
+      case "BRANCH":
+        return TableVersionContext.of(VersionContext.ofBranch(refValue));
+      case "TAG":
+        return TableVersionContext.of(VersionContext.ofTag(refValue));
+      case "COMMIT":
+        return TableVersionContext.of(VersionContext.ofCommit(refValue));
+      default:
+        throw new IllegalArgumentException("Invalid refType: " + refType);
+    }
+  }
+
   @DELETE
   @Produces(APPLICATION_JSON)
   public DatasetUI deleteDataset(
       @QueryParam("savedTag") String savedTag,
       @QueryParam("refType") String refType,
       @QueryParam("refValue") String refValue)
-      throws DatasetNotFoundException, NamespaceException, IOException {
-    final VersionContextReq versionContextReq = VersionContextReq.tryParse(refType, refValue);
-    final boolean versioned = isDatasetVersioned();
-
-    if (!versioned && savedTag == null) {
-      throw new ClientErrorException("Missing savedTag parameter");
-    } else if (versioned && versionContextReq.getType() != VersionContextType.BRANCH) {
-      throw new ClientErrorException(
-          "To delete a versioned virtual dataset the refType must be BRANCH");
-    }
-
-    DatasetUI datasetUI = null;
-    if (versioned) {
-      deleteVersionedDatasetHelper(refValue);
+      throws DatasetNotFoundException, NamespaceException, IOException, CatalogException {
+    CatalogEntityKey key;
+    if (refValue != null && refType != null) {
+      key =
+          CatalogEntityKey.newBuilder()
+              .keyComponents(datasetPath.toPathList())
+              .tableVersionContext(getTableVersionContext(refType, refValue))
+              .build();
     } else {
-      try {
-        final VirtualDatasetUI virtualDataset = datasetVersionMutator.get(datasetPath);
-        datasetUI = newDataset(virtualDataset);
-        datasetVersionMutator.deleteDataset(datasetPath, savedTag);
-      } catch (DatasetVersionNotFoundException e) {
-        datasetVersionMutator.deleteDataset(datasetPath, null);
-      }
+      key = CatalogEntityKey.fromNamespaceKey(datasetPath.toNamespaceKey());
+    }
+    try {
+      userCatalog.deleteEntity(key, savedTag);
+    } catch (DatasetVersionNotFoundException e) {
+      userCatalog.deleteEntity(key, null);
     }
 
     final ReflectionSettings reflectionSettings = reflectionServiceHelper.getReflectionSettings();
     reflectionSettings.removeSettings(datasetPath.toNamespaceKey());
 
-    return datasetUI;
-  }
-
-  private void deleteVersionedDatasetHelper(String branchName) throws IOException {
-    NamespaceKey namespaceKey = new NamespaceKey(datasetPath.toPathList());
-    final ResolvedVersionContext resolvedVersionContext =
-        CatalogUtil.resolveVersionContext(
-            userCatalog, datasetPath.getRoot().getName(), VersionContext.ofBranch(branchName));
-    DatasetType datasetType =
-        userCatalog.getDatasetType(
-            CatalogEntityKey.newBuilder()
-                .keyComponents(datasetPath.toPathList())
-                .tableVersionContext(TableVersionContext.of(resolvedVersionContext))
-                .build());
-    if (datasetType == DatasetType.VIRTUAL_DATASET) {
-      deleteVersionedView(namespaceKey, resolvedVersionContext);
-    } else if (datasetType == DatasetType.PHYSICAL_DATASET) {
-      deleteVersionedTable(namespaceKey, resolvedVersionContext);
-    } else {
-      throw new ClientErrorException("Dataset not found");
-    }
-  }
-
-  protected void deleteVersionedTable(
-      NamespaceKey namespaceKey, ResolvedVersionContext resolvedVersionContext) {
-    final TableMutationOptions tableMutationOptions =
-        TableMutationOptions.newBuilder().setResolvedVersionContext(resolvedVersionContext).build();
-    userCatalog.dropTable(namespaceKey, tableMutationOptions);
-  }
-
-  protected void deleteVersionedView(
-      NamespaceKey namespaceKey, ResolvedVersionContext resolvedVersionContext) throws IOException {
-    final ViewOptions viewOptions =
-        new ViewOptions.ViewOptionsBuilder().version(resolvedVersionContext).build();
-    userCatalog.dropView(namespaceKey, viewOptions);
-  }
-
-  private boolean isDatasetVersioned() {
-    final NamespaceKey namespaceKey = datasetPath.toNamespaceKey();
-
-    return CatalogUtil.requestedPluginSupportsVersionedTables(namespaceKey, userCatalog);
+    return null;
   }
 
   /**

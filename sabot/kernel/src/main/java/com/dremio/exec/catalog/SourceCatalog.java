@@ -25,7 +25,7 @@ import java.util.List;
 /** Interface to perform actions on sources. */
 public interface SourceCatalog {
 
-  SourceState refreshSourceStatus(NamespaceKey key) throws Exception;
+  SourceState refreshSourceStatus(NamespaceKey key);
 
   /**
    * Get a source based on the provided name. If the source doesn't exist, synchronize with the

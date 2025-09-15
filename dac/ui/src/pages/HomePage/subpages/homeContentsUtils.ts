@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import Immutable from "immutable";
 import { useSelector, useDispatch } from "react-redux";
 import { getViewState } from "#oss/selectors/resources";
@@ -73,31 +73,16 @@ export const useIsSourceDisabled = (
 export const useHandleInvalidatedState = ({
   viewState,
   load,
-  source,
-  prevViewState,
 }: {
   viewState: Immutable.Map<string, any>;
   load: any;
-  source: Immutable.Map<string, any> | null;
-  prevViewState: Immutable.Map<string, any> | null;
 }) => {
   useEffect(() => {
-    const prevInvalidated =
-      (prevViewState &&
-        prevViewState.get("invalidated") &&
-        prevViewState.get("isInProgress") !== undefined) ||
-      (source && !source.get("sourceChangeState"));
-
-    const invalidated =
-      (viewState?.get("invalidated") &&
-        viewState.get("isInProgress") !== undefined) ||
-      (source && !source.get("sourceChangeState"));
-
-    if (invalidated && invalidated !== prevInvalidated) {
+    const invalidated = viewState && viewState.get("invalidated");
+    if (invalidated) {
       load();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewState]);
+  }, [viewState, load]);
 };
 
 export const useHandleAsyncNotification = ({
@@ -195,12 +180,4 @@ export const useIsLoading = (
       return false;
     }
   });
-};
-
-export const usePrevious = (props: any) => {
-  const ref = useRef<any>(null);
-  useEffect(() => {
-    ref.current = props;
-  }, [props]);
-  return ref.current;
 };

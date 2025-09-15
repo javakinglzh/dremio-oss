@@ -63,7 +63,6 @@ public class ReflectionManagerFactory {
   private final DependenciesStore dependenciesStore;
   private final BufferAllocator allocator;
   private final Provider<MaterializationCache> materializationCache;
-  private final WakeUpCallback wakeUpCacheRefresherCallback;
 
   ReflectionManagerFactory(ReflectionManagerFactory that) {
     this.sabotContext = that.sabotContext;
@@ -84,7 +83,6 @@ public class ReflectionManagerFactory {
     this.dependenciesStore = that.dependenciesStore;
     this.allocator = that.allocator;
     this.materializationCache = that.materializationCache;
-    this.wakeUpCacheRefresherCallback = that.wakeUpCacheRefresherCallback;
   }
 
   ReflectionManagerFactory(
@@ -105,8 +103,7 @@ public class ReflectionManagerFactory {
       RefreshRequestsStore requestsStore,
       DependenciesStore dependenciesStore,
       BufferAllocator allocator,
-      Provider<MaterializationCache> materializationCache,
-      WakeUpCallback wakeUpCacheRefresherCallback) {
+      Provider<MaterializationCache> materializationCache) {
     this.sabotContext = sabotContext;
     this.storeProvider = storeProvider;
     this.jobsService = jobsService;
@@ -125,7 +122,6 @@ public class ReflectionManagerFactory {
     this.dependenciesStore = dependenciesStore;
     this.allocator = allocator;
     this.materializationCache = materializationCache;
-    this.wakeUpCacheRefresherCallback = wakeUpCacheRefresherCallback;
   }
 
   ReflectionSettings newReflectionSettings() {
@@ -176,7 +172,6 @@ public class ReflectionManagerFactory {
         new DependencyResolutionContextFactory(
             reflectionSettings, requestsStore, getOptionManager()),
         datasetEventHub,
-        wakeUpCacheRefresherCallback,
         sabotContext.get().getEndpoint(),
         sabotContext.get().getClusterCoordinator(),
         sabotContext.get().getCoordinatorModeInfoProvider(),

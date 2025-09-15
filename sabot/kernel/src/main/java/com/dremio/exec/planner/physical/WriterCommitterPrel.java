@@ -124,7 +124,8 @@ public class WriterCommitterPrel extends SingleRel implements Prel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     return new WriterCommitterPOP(
-        creator.props(this, userName, RecordWriter.SCHEMA, RESERVE, LIMIT),
+        creator.props(
+            this, userName, createTableEntry.getUserId(), RecordWriter.SCHEMA, RESERVE, LIMIT),
         tempLocation,
         finalLocation,
         createTableEntry.getIcebergTableProps(),

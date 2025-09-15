@@ -16,6 +16,8 @@
 package com.dremio.exec.store.iceberg;
 
 import com.dremio.common.expression.SchemaPath;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.ops.SnapshotDiffContext;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.planner.common.ScanRelBase;
@@ -96,8 +98,14 @@ public class IcebergManifestListPrel extends AbstractRelNode
 
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
+    final UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+    final String userId =
+        (tableMetadata.getUserId() != null)
+            ? tableMetadata.getUserId()
+            : (userContext != null) ? userContext.getUserId() : null;
+
     return new IcebergGroupScan(
-        creator.props(this, tableMetadata.getUser(), schema, RESERVE, LIMIT),
+        creator.props(this, tableMetadata.getUser(), userId, schema, RESERVE, LIMIT),
         tableMetadata,
         projectedColumns,
         icebergExpression,

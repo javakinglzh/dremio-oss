@@ -1920,6 +1920,7 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
     return new StatsEstimationParameters(
         hiveSettings.useStatsInMetastore(),
         toIntExact(optionManager.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE)),
+        toIntExact(optionManager.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE)),
         toIntExact(optionManager.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE)),
         hiveSettings);
   }
@@ -2283,10 +2284,15 @@ public class Hive3StoragePlugin extends BaseHiveStoragePlugin
       tableExtended.setTableStorageHandlerSubscript(
           metadataAccumulator.getTableStorageHandlerSubscript(storageHandler));
     }
-
+    String lib;
+    if (table.getSd().getSerdeInfo() == null
+        || table.getSd().getSerdeInfo().getSerializationLib() == null) {
+      lib = "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe"; // default lib
+    } else {
+      lib = table.getSd().getSerdeInfo().getSerializationLib();
+    }
     tableExtended.setTableSerializationLibSubscript(
-        metadataAccumulator.getTableSerializationLibSubscript(
-            table.getSd().getSerdeInfo().getSerializationLib()));
+        metadataAccumulator.getTableSerializationLibSubscript(lib));
   }
 
   @Override

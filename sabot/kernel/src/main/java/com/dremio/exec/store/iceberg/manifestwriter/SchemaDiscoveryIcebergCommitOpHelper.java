@@ -220,6 +220,7 @@ public class SchemaDiscoveryIcebergCommitOpHelper extends IcebergCommitOpHelper
         createReadSignProvider(icebergTableProps, true);
         icebergOpCommitter =
             icebergModel.getFullMetadataRefreshCommitter(
+                context.getOptions(),
                 icebergTableProps.getTableName(),
                 config.getDatasetPath().getPathComponents(),
                 icebergTableProps.getDataTableLocation(),

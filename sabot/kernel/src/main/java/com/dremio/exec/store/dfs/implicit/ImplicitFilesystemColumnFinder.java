@@ -22,6 +22,7 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.exception.SchemaChangeException;
 import com.dremio.exec.physical.base.GroupScan;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
+import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.easy.FileWork;
 import com.dremio.exec.store.dfs.implicit.ConstantColumnPopulators.BigIntNameValuePair;
@@ -36,6 +37,7 @@ import com.dremio.options.Options;
 import com.dremio.options.TypeValidators.BooleanValidator;
 import com.dremio.options.TypeValidators.StringValidator;
 import com.dremio.service.Pointer;
+import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
 import com.google.common.base.Function;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
@@ -48,6 +50,9 @@ import java.util.List;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import org.apache.arrow.vector.types.pojo.ArrowType;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.commons.lang3.ArrayUtils;
 
 @Options
@@ -183,17 +188,35 @@ public class ImplicitFilesystemColumnFinder {
     return hasImplicitColumns || selectAllColumns;
   }
 
-  public static List<String> getEnabledNonPartitionColumns(OptionResolver options) {
-    ImmutableList.Builder<String> builder = ImmutableList.builder();
-    builder.add(IncrementalUpdateUtils.UPDATE_COLUMN);
+  public static List<Field> getEnabledNonPartitionFields(
+      OptionResolver options, boolean addUpdateColumn) {
+    ImmutableList.Builder<Field> builder = ImmutableList.builder();
+    if (addUpdateColumn) {
+      builder.add(
+          Field.nullable(IncrementalUpdateUtils.UPDATE_COLUMN, new ArrowType.Int(64, true)));
+    }
     if (options.getOption(IMPLICIT_FILE_FIELD_ENABLE)) {
-      builder.add(options.getOption(IMPLICIT_FILE_FIELD_LABEL));
+      builder.add(
+          Field.nullable(options.getOption(IMPLICIT_FILE_FIELD_LABEL), ArrowType.Utf8.INSTANCE));
     }
     if (options.getOption(IMPLICIT_MOD_FIELD_ENABLE)) {
-      builder.add(options.getOption(IMPLICIT_MOD_FIELD_LABEL));
+      builder.add(
+          Field.nullable(options.getOption(IMPLICIT_MOD_FIELD_LABEL), new ArrowType.Int(64, true)));
     }
-
     return builder.build();
+  }
+
+  public static List<String> getEnabledNonPartitionColumns(
+      OptionResolver options, boolean addUpdateColumn) {
+    return getEnabledNonPartitionFields(options, addUpdateColumn).stream()
+        .map(Field::getName)
+        .collect(Collectors.toList());
+  }
+
+  public static List<String> getEnabledNonPartitionColumns(OptionResolver options) {
+    return getEnabledNonPartitionFields(options, true).stream()
+        .map(Field::getName)
+        .collect(Collectors.toList());
   }
 
   public static String getModifiedTimeColumnName(OptionResolver options) {
@@ -399,9 +422,7 @@ public class ImplicitFilesystemColumnFinder {
                               .toString();
 
                       if (prefixString.length() < fullString.length()) {
-                        path.path =
-                            removeLeadingSlash(
-                                fullString.substring(prefixString.length(), fullString.length()));
+                        path.path = removeLeadingSlash(fullString.substring(prefixString.length()));
                       } else {
                         path.path = removeLeadingSlash(fullString);
                       }
@@ -472,5 +493,57 @@ public class ImplicitFilesystemColumnFinder {
     }
 
     return pairs;
+  }
+
+  public static SplitAndPartitionInfo augmentPartitionInfo(
+      OptionManager optionManager,
+      SplitAndPartitionInfo split,
+      Path resolvedTablePath,
+      Path filePath,
+      long fileLastModificationTime) {
+
+    final String prefixString = Path.withoutSchemeAndAuthority(resolvedTablePath).toString();
+    final String fullString = Path.withoutSchemeAndAuthority(filePath).toString();
+    final String finalFilePath =
+        (prefixString.length() < fullString.length())
+            ? removeLeadingSlash(fullString.substring(prefixString.length(), fullString.length()))
+            : removeLeadingSlash(fullString);
+
+    final List<String> implicitColumns = getEnabledNonPartitionColumns(optionManager, false);
+
+    final PartitionProtobuf.NormalizedPartitionInfo partitionInfo = split.getPartitionInfo();
+    PartitionProtobuf.NormalizedPartitionInfo.Builder newPartitionInfoBuilder =
+        partitionInfo.toBuilder();
+
+    final String fileColumnName = getFileColumnName(optionManager);
+    final String modifiedTimeColumnName = getModifiedTimeColumnName(optionManager);
+
+    implicitColumns.stream()
+        .forEach(
+            c -> {
+              if (c.equalsIgnoreCase(fileColumnName)
+                  && partitionInfo.getValuesList().stream()
+                      .noneMatch(v -> v.getColumn().equalsIgnoreCase(fileColumnName))) {
+                PartitionProtobuf.PartitionValue partitionValue =
+                    PartitionProtobuf.PartitionValue.newBuilder()
+                        .setStringValue(finalFilePath)
+                        .setColumn(fileColumnName)
+                        .build();
+                newPartitionInfoBuilder.addValues(partitionValue);
+              }
+
+              if (c.equalsIgnoreCase(modifiedTimeColumnName)
+                  && partitionInfo.getValuesList().stream()
+                      .noneMatch(v -> v.getColumn().equalsIgnoreCase(modifiedTimeColumnName))) {
+                PartitionProtobuf.PartitionValue partitionValue =
+                    PartitionProtobuf.PartitionValue.newBuilder()
+                        .setLongValue(fileLastModificationTime)
+                        .setColumn(modifiedTimeColumnName)
+                        .build();
+                newPartitionInfoBuilder.addValues(partitionValue);
+              }
+            });
+
+    return new SplitAndPartitionInfo(newPartitionInfoBuilder.build(), split.getDatasetSplitInfo());
   }
 }

@@ -91,6 +91,13 @@ public class DremioFileIO implements FileIO {
           // exist
           fileSize = null;
           mtime = null;
+        } catch (RuntimeException e) {
+          if (e.getCause() instanceof FileNotFoundException) {
+            fileSize = null;
+            mtime = null;
+          } else {
+            throw e;
+          }
         }
       } else {
         fileSize = fileLength;

@@ -374,6 +374,7 @@ message UsedReflections {
   }
   UsageType usage_type = 1;
   repeated string reflection_ids = 2;
+  // bool match_all_reflection_ids = 3; Obsolete
 }
 
 message VersionedDatasetPath {
@@ -538,7 +539,9 @@ message SqlQuery {
   map <string, VersionContext> source_version_mapping = 6;
 }
 
+
 message SubstitutionSettings {
+  option deprecated = true;
   repeated string exclusions = 1;
   repeated string inclusions = 2;
 }
@@ -560,7 +563,7 @@ message SubmitJobRequest {
 
 message MaterializationSettings {
   com.dremio.service.job.proto.MaterializationSummary materializationSummary = 1;
-  SubstitutionSettings substitutionSettings = 2;
+  SubstitutionSettings substitutionSettings = 2 [deprecated = true];
 }
 
 message DownloadSettings {

@@ -21,7 +21,6 @@ import com.dremio.exec.planner.logical.PushFilterPastProjectRule;
 import com.dremio.exec.planner.logical.PushProjectIntoScanRule;
 import com.dremio.exec.planner.logical.RelDataTypeEqualityComparer;
 import com.dremio.exec.planner.logical.RewriteProjectToFlattenRule;
-import com.dremio.exec.planner.logical.RollupWithBridgeExchangeRule;
 import com.dremio.exec.planner.normalizer.ArraySubQueryRemoveRule;
 import com.dremio.exec.planner.normalizer.DremioAggregateRemoveRule;
 import com.dremio.exec.planner.normalizer.RemoveSingleValueAggregateRule;
@@ -58,7 +57,6 @@ public final class HepRuleCallRelDataTypeChecker {
           AggregateProjectMergeRule.class,
           MultiJoinOptimizeBushyRule.class,
           AggregateJoinTransposeRule.class,
-          RollupWithBridgeExchangeRule.class,
           ProjectToWindowRule.class,
           ProjectMergeRule.class,
           ProjectJoinTransposeRule.class,

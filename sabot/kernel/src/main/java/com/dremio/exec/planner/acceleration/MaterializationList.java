@@ -21,9 +21,9 @@ import com.dremio.exec.planner.acceleration.substitution.MaterializationProvider
 import com.dremio.exec.planner.acceleration.substitution.SubstitutionUtils;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.observer.AttemptObserver;
+import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.server.MaterializationDescriptorProvider;
-import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
@@ -31,6 +31,7 @@ import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -59,21 +60,25 @@ public class MaterializationList implements MaterializationProvider {
 
   private final MaterializationDescriptorProvider provider;
   private final SqlConverter converter;
-  private final UserSession session;
   private final AttemptObserver observer;
   private final SabotConfig config;
+  private final boolean verboseAcceleration;
+  private boolean isUsedForIncrementalRefresh = false;
 
   public MaterializationList(
       final SqlConverter converter,
-      final UserSession session,
       final MaterializationDescriptorProvider provider,
       final AttemptObserver observer,
       final SabotConfig config) {
     this.provider = Preconditions.checkNotNull(provider, "provider is required");
     this.converter = Preconditions.checkNotNull(converter, "converter is required");
-    this.session = Preconditions.checkNotNull(session, "session is required");
     this.observer = Preconditions.checkNotNull(observer, "observer is required");
     this.config = Preconditions.checkNotNull(config, "config is required");
+    verboseAcceleration =
+        converter
+            .getFunctionContext()
+            .getOptions()
+            .getOption(PlannerSettings.VERBOSE_ACCELERATION_PROFILE);
   }
 
   @Override
@@ -99,6 +104,11 @@ public class MaterializationList implements MaterializationProvider {
       }
     }
     return matches;
+  }
+
+  @Override
+  public void notifyIncrementalRefresh() {
+    isUsedForIncrementalRefresh = true;
   }
 
   @Override
@@ -157,27 +167,39 @@ public class MaterializationList implements MaterializationProvider {
     final Set<SubstitutionUtils.ExternalQueryDescriptor> externalQueries =
         SubstitutionUtils.findExternalQueries(userQueryNode);
 
+    final List<String> allAvailable = Lists.newArrayList();
+    final List<String> excludedHints = Lists.newArrayList();
+    final List<String> excludedStaleIceberg = Lists.newArrayList();
+    final List<String> excludedIncrementalRefresh = Lists.newArrayList();
+    final List<String> excludedNotApplicable = Lists.newArrayList();
+    final List<String> excludedNotUseTableOrVds = Lists.newArrayList();
+
     HintChecker hintChecker = getHintChecker();
     final List<DremioMaterialization> materializations = Lists.newArrayList();
     for (final MaterializationDescriptor descriptor : provider.get()) {
+      allAvailable.add(descriptor.getMaterializationId());
       if (hintChecker.isExcluded(descriptor)) {
+        excludedHints.add(descriptor.getMaterializationId());
         continue;
       }
       try {
         // Only allow a field based incremental reflection to accelerate another
         // incremental reflection refresh
-        if (session.getSubstitutionSettings().isIncrementalRefresh()
+        if (isUsedForIncrementalRefresh
             && (descriptor.getIncrementalUpdateSettings().isFileMtimeBasedUpdate()
                 || descriptor.getIncrementalUpdateSettings().isSnapshotBasedUpdate())) {
+          excludedIncrementalRefresh.add(descriptor.getMaterializationId());
           continue;
         }
         // Prune the reflection early if the descriptor is already expanded
         if (!descriptor.isApplicable(queryTablesUsed, queryVdsUsed, externalQueries)) {
+          excludedNotApplicable.add(descriptor.getMaterializationId());
           continue;
         }
 
         // Prune the reflection if the descriptor should be excluded due to staleness
         if (hintChecker.isExcludedDueToStaleness(descriptor, false)) {
+          excludedStaleIceberg.add(descriptor.getMaterializationId());
           continue;
         }
 
@@ -187,6 +209,7 @@ public class MaterializationList implements MaterializationProvider {
         }
         if (!SubstitutionUtils.usesTableOrVds(
             queryTablesUsed, queryVdsUsed, externalQueries, materialization.getQueryRel())) {
+          excludedNotUseTableOrVds.add(descriptor.getMaterializationId());
           continue;
         }
         final NamespaceKey path = new NamespaceKey(descriptor.getPath());
@@ -197,8 +220,23 @@ public class MaterializationList implements MaterializationProvider {
         logger.warn("failed to expand materialization {}", descriptor.getMaterializationId(), e);
       }
     }
+    if (verboseAcceleration) {
+      log("available", allAvailable);
+      log("excludedHints", excludedHints);
+      log("excludedStaleIceberg", excludedStaleIceberg);
+      log("excludedIncrementalRefresh", excludedIncrementalRefresh);
+      log("excludedNotApplicable", excludedNotApplicable);
+      log("excludedNotUseTableOrView", excludedNotUseTableOrVds);
+    }
+
     this.materializations = materializations;
     return materializations;
+  }
+
+  private void log(String step, Collection<String> materializations) {
+    converter
+        .getObserver()
+        .substitutionFailures(ImmutableList.of(String.format("%s: %s", step, materializations)));
   }
 
   public static Set<String> parseReflectionIds(String value) {
@@ -210,10 +248,7 @@ public class MaterializationList implements MaterializationProvider {
 
   private HintChecker getHintChecker() {
     HintChecker defaultHintChecker =
-        new HintChecker(
-            converter.getFunctionContext().getOptions(),
-            session.getSubstitutionSettings(),
-            observer);
+        new HintChecker(converter.getFunctionContext().getOptions(), observer);
     return config.getInstance(
         HINT_CHECKER, HintChecker.class, defaultHintChecker, defaultHintChecker);
   }

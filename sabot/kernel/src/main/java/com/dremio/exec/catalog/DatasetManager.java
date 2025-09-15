@@ -18,6 +18,7 @@ package com.dremio.exec.catalog;
 import static com.dremio.exec.catalog.CatalogUtil.permittedNessieKey;
 
 import com.dremio.catalog.exception.SourceMalfunctionException;
+import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.common.concurrent.ContextAwareCompletableFuture;
@@ -34,10 +35,11 @@ import com.dremio.connector.metadata.DatasetMetadata;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.PartitionChunkListing;
 import com.dremio.connector.metadata.SourceMetadata;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.api.FindByCondition;
 import com.dremio.datastore.api.ImmutableFindByCondition;
-import com.dremio.exec.catalog.CatalogImpl.IdentityResolver;
 import com.dremio.exec.catalog.ManagedStoragePlugin.MetadataAccessType;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.dotfile.View;
@@ -106,28 +108,31 @@ class DatasetManager {
   private final NamespaceService userNamespaceService;
   private final OptionManager optionManager;
   private final String userName;
-  private final IdentityResolver identityProvider;
   private final VersionContextResolver versionContextResolver;
   private final VersionedDatasetAdapterFactory versionedDatasetAdapterFactory;
   private final MetadataIOPool metadataIOPool;
+  private final CatalogEntityOwnership catalogEntityOwnership;
+  private final UserOrRoleResolver userOrRoleResolver;
 
   public DatasetManager(
       PluginRetriever plugins,
       NamespaceService userNamespaceService,
       OptionManager optionManager,
       String userName,
-      IdentityResolver identityProvider,
       VersionContextResolver versionContextResolver,
       VersionedDatasetAdapterFactory versionedDatasetAdapterFactory,
-      MetadataIOPool metadataIOPool) {
+      MetadataIOPool metadataIOPool,
+      CatalogEntityOwnership catalogEntityOwnership,
+      UserOrRoleResolver userOrRoleResolver) {
     this.userNamespaceService = userNamespaceService;
     this.plugins = plugins;
     this.optionManager = optionManager;
     this.userName = userName;
-    this.identityProvider = identityProvider;
     this.versionContextResolver = versionContextResolver;
     this.versionedDatasetAdapterFactory = versionedDatasetAdapterFactory;
     this.metadataIOPool = metadataIOPool;
+    this.catalogEntityOwnership = catalogEntityOwnership;
+    this.userOrRoleResolver = userOrRoleResolver;
   }
 
   /**
@@ -293,9 +298,10 @@ class DatasetManager {
             canonicalKey = getCanonicalKey(canonicalKey);
           }
 
+          // TODO (DX-104638): DatasetConfig fetching should work with non-namespace entities
           return new ImmutableNamespaceKeyWithConfig.Builder()
               .setKey(canonicalKey)
-              .setDatasetConfig(config)
+              .setDatasetConfig(config != null ? config : getConfig(canonicalKey))
               .build();
         };
 
@@ -425,6 +431,7 @@ class DatasetManager {
       throws SourceMalfunctionException {
     final String accessUserName =
         getAccessUserName(plugin, storagePlugin, options.getSchemaConfig());
+    final String accessUserId = getUserOrRoleId(accessUserName);
 
     Span.current().setAttribute("dremio.namespace.key.schemapath", key.getSchemaPath());
     plugin.checkAccess(key, datasetConfig, accessUserName, options);
@@ -455,7 +462,9 @@ class DatasetManager {
                 datasetConfig,
                 options.getSchemaConfig(),
                 key,
-                savePrimaryKeyInKvStore));
+                savePrimaryKeyInKvStore),
+            null,
+            accessUserId);
     return new NamespaceTable(tableMetadata, plugin.getDatasetMetadataState(datasetConfig), true);
   }
 
@@ -883,6 +892,10 @@ class DatasetManager {
     return accessUserName;
   }
 
+  private String getUserOrRoleId(String userName) {
+    return userOrRoleResolver.resolveUserOrRoleId(userName).orElse(null);
+  }
+
   @WithSpan("create-table-from-view")
   private ViewTable createTableFromVirtualDataset(
       DatasetConfig datasetConfig, @Nullable ManagedStoragePlugin managedStoragePlugin) {
@@ -901,10 +914,12 @@ class DatasetManager {
               datasetConfig.getVirtualDataset().getContextList(),
               schema);
 
+      final List<String> fullPathList = datasetConfig.getFullPathList();
+
       return new ViewTable(
-          new NamespaceKey(datasetConfig.getFullPathList()),
+          new NamespaceKey(fullPathList),
           view,
-          identityProvider.getOwner(datasetConfig.getFullPathList()),
+          getEntityOwner(CatalogEntityKey.of(fullPathList)),
           datasetConfig,
           schema,
           managedStoragePlugin == null
@@ -913,7 +928,8 @@ class DatasetManager {
     } catch (Exception e) {
       throw new RuntimeException(
           String.format(
-              "Failure while constructing the ViewTable from datasetConfig for key %s with datasetId %s",
+              "Failure while constructing the ViewTable from datasetConfig for key %s with"
+                  + " datasetId %s",
               String.join(".", datasetConfig.getFullPathList()), datasetConfig.getId().getId()),
           e);
     }
@@ -1226,5 +1242,11 @@ class DatasetManager {
                 || (msp.getPlugin().isPresent()
                     && !msp.getPlugin().get().isWrapperFor((SupportsRefreshViews.class))
                     && !msp.getPlugin().get().isWrapperFor(VersionedPlugin.class))));
+  }
+
+  private CatalogIdentity getEntityOwner(CatalogEntityKey catalogEntityKey) throws Exception {
+    return RequestContext.current()
+        .with(UserContext.CTX_KEY, UserContext.SYSTEM_USER_CONTEXT)
+        .call(() -> catalogEntityOwnership.getCatalogEntityOwner(catalogEntityKey).orElse(null));
   }
 }

@@ -1786,6 +1786,7 @@ public class HiveStoragePlugin extends BaseHiveStoragePlugin
     return new StatsEstimationParameters(
         hiveSettings.useStatsInMetastore(),
         toIntExact(optionManager.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE)),
+        toIntExact(optionManager.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE)),
         toIntExact(optionManager.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE)),
         hiveSettings);
   }

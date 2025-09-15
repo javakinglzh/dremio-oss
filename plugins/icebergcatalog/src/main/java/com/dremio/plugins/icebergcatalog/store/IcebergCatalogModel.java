@@ -23,7 +23,6 @@ import com.dremio.exec.store.iceberg.model.IcebergOpCommitter;
 import com.dremio.exec.store.iceberg.model.IcebergTableCreationCommitter;
 import com.dremio.exec.store.iceberg.model.IcebergTableIdentifier;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
-import com.dremio.io.file.Path;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.google.common.annotations.VisibleForTesting;
@@ -67,12 +66,7 @@ public class IcebergCatalogModel extends IcebergBaseModel {
         plugin.createIcebergTableOperations(fileIO, tableIdentifier, queryUserName, queryUserId);
     final String icebergPath = getIcebergPath(tableIdentifier);
 
-    return new IcebergCatalogCommand(
-        configuration,
-        Path.getContainerSpecificRelativePath(Path.of(icebergPath)),
-        icebergPath,
-        tableOperations,
-        currentQueryId());
+    return new IcebergCatalogCommand(configuration, icebergPath, tableOperations, currentQueryId());
   }
 
   @Override
@@ -88,12 +82,7 @@ public class IcebergCatalogModel extends IcebergBaseModel {
       IcebergTableIdentifier tableIdentifier, TableOperations tableOperations) {
     final String icebergPath = getIcebergPath(tableIdentifier);
 
-    return new IcebergCatalogCommand(
-        configuration,
-        Path.getContainerSpecificRelativePath(Path.of(icebergPath)),
-        icebergPath,
-        tableOperations,
-        currentQueryId());
+    return new IcebergCatalogCommand(configuration, icebergPath, tableOperations, currentQueryId());
   }
 
   @Override

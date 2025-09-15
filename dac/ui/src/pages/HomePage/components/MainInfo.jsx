@@ -313,7 +313,6 @@ export class MainInfoView extends Component {
       this.getSettingsBtnByType(
         (closeMenu) => (
           <DatasetMenu
-            sourceType={this.props?.sourceType}
             entity={item}
             entityType={entityType}
             openWikiDrawer={(dataset) => this.openDetailsPanel(dataset)}
@@ -669,7 +668,6 @@ export class MainInfoView extends Component {
                         fullPath={entity.get("fullPathList")}
                         pathname={pathname}
                         showCopyButton
-                        includeQuotes
                         extraContent={this.renderTitleExtraContent()}
                       />
                     )}

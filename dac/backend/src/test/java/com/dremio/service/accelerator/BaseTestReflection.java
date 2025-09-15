@@ -141,6 +141,8 @@ public class BaseTestReflection extends BaseTestServer {
 
   private static AtomicInteger queryNumber = new AtomicInteger(0);
 
+  public static final long TEST_MATCACHE_REFRESH_DELAY_MS = 100;
+
   protected static final String TEST_SPACE = "refl_test";
   protected static final String TEMP_SCHEMA = "dfs_test";
   protected static final List<ReflectionField> TPCH_CUSTOMER_REFLECTION_FIELDS =
@@ -159,6 +161,9 @@ public class BaseTestReflection extends BaseTestServer {
   private static MaterializationPlanStore materializationPlanStore;
   private static ReflectionEntriesStore entriesStore;
 
+  @SuppressWarnings("checkstyle:VisibilityModifier")
+  protected static ReflectionMonitor monitor;
+
   @ClassRule public static final TemporaryFolder temp = new TemporaryFolder();
 
   @BeforeClass
@@ -173,16 +178,34 @@ public class BaseTestReflection extends BaseTestServer {
     final SpaceConfig config = new SpaceConfig().setName(TEST_SPACE);
     nsService.addOrUpdateSpace(new SpacePath(config.getName()).toNamespaceKey(), config);
 
+    Preconditions.checkState(monitor == null, "Old test class not stopped properly");
+
     materializationStore = new MaterializationStore(p(LegacyKVStoreProvider.class));
     materializationPlanStore = new MaterializationPlanStore(p(LegacyKVStoreProvider.class));
     dependenciesStore = new DependenciesStore(p(LegacyKVStoreProvider.class));
     entriesStore = new ReflectionEntriesStore(p(LegacyKVStoreProvider.class));
+    monitor = newReflectionMonitor();
+
     setSystemOption(PlannerSettings.QUERY_PLAN_CACHE_ENABLED, false);
-    setSystemOption(ReflectionOptions.MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS, 100);
+    setSystemOption(
+        ReflectionOptions.MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS,
+        TEST_MATCACHE_REFRESH_DELAY_MS);
   }
 
   @AfterClass
-  public static void resetSettings() {
+  public static void tearDownClass() {
+    try {
+      resetSettings();
+    } finally {
+      materializationStore = null;
+      materializationPlanStore = null;
+      dependenciesStore = null;
+      entriesStore = null;
+      monitor = null;
+    }
+  }
+
+  protected static void resetSettings() {
     // reset deletion grace period and sync interval
     getOptionManager().setOption(REFLECTION_DELETION_GRACE_PERIOD.getDefault());
     getOptionManager().setOption(REFLECTION_MANAGER_REFRESH_DELAY_MILLIS.getDefault());
@@ -193,9 +216,8 @@ public class BaseTestReflection extends BaseTestServer {
 
   protected static void clearReflections() {
     final ReflectionService reflectionService = getReflectionService();
-    final ReflectionMonitor reflectionMonitor = newReflectionMonitor();
     reflectionService.clearAll();
-    reflectionMonitor.waitUntilNoMaterializationsAvailable();
+    monitor.waitUntilNoMaterializationsAvailable();
   }
 
   protected static MaterializationStore getMaterializationStore() {
@@ -212,6 +234,10 @@ public class BaseTestReflection extends BaseTestServer {
 
   protected static ReflectionEntriesStore getReflectionEntriesStore() {
     return entriesStore;
+  }
+
+  protected static ReflectionMonitor getMonitor() {
+    return monitor;
   }
 
   protected Catalog cat() {
@@ -277,18 +303,27 @@ public class BaseTestReflection extends BaseTestServer {
     return requestTime;
   }
 
-  protected static ReflectionMonitor newReflectionMonitor() {
-    final MaterializationStore materializationStore =
-        new MaterializationStore(p(LegacyKVStoreProvider.class));
+  private static ReflectionMonitor newReflectionMonitor(long delayMillis, long maxWaitMillis) {
+    MaterializationStore matStore = materializationStore;
+    if (matStore == null) {
+      // if the method gets called from a test class that extends BaseTestServer but not
+      // BaseTestReflection we have to use the latest
+      // LegacyKVStoreProvider from BaseTestServer to build the store
+      matStore = new MaterializationStore(p(LegacyKVStoreProvider.class));
+    }
     return new ReflectionMonitor(
         getReflectionService(),
         getReflectionStatusService(),
         getMaterializationDescriptorProvider(),
         getJobsService(),
-        materializationStore,
+        matStore,
         getOptionManager(),
-        500,
-        SECONDS.toMillis(60));
+        delayMillis,
+        maxWaitMillis);
+  }
+
+  protected static ReflectionMonitor newReflectionMonitor() {
+    return newReflectionMonitor(500, SECONDS.toMillis(60));
   }
 
   /**
@@ -297,17 +332,7 @@ public class BaseTestReflection extends BaseTestServer {
    * BaseTestReflection#newReflectionMonitor()}
    */
   protected static ReflectionMonitor newLongReflectionMonitor() {
-    final MaterializationStore materializationStore =
-        new MaterializationStore(p(LegacyKVStoreProvider.class));
-    return new ReflectionMonitor(
-        getReflectionService(),
-        getReflectionStatusService(),
-        getMaterializationDescriptorProvider(),
-        getJobsService(),
-        materializationStore,
-        getOptionManager(),
-        SECONDS.toMillis(5),
-        MINUTES.toMillis(10));
+    return newReflectionMonitor(SECONDS.toMillis(5), MINUTES.toMillis(10));
   }
 
   protected static DatasetConfig addJson(DatasetPath path) throws Exception {
@@ -639,7 +664,7 @@ public class BaseTestReflection extends BaseTestServer {
 
   protected ReflectionDependency dependency(final ReflectionId reflectionId)
       throws NamespaceException {
-    Materialization m = materializationStore.getLastMaterializationDone(reflectionId);
+    Materialization m = getMaterializationStore().getLastMaterializationDone(reflectionId);
     NamespaceKey key =
         new NamespaceKey(
             ImmutableList.of(
@@ -1051,7 +1076,7 @@ public class BaseTestReflection extends BaseTestServer {
   protected Optional<String> getCurrentSnapshotId(NamespaceKey tableNamespaceKey)
       throws NamespaceException {
     DatasetConfig dataset = getNamespaceService().getDataset(tableNamespaceKey);
-    return IcebergUtils.getCurrentSnapshotId(dataset);
+    return IcebergUtils.getSnapshotFromDatasetConfig(dataset);
   }
 
   /** Returns the namespace key for a fully qualified table name */
@@ -1100,6 +1125,8 @@ public class BaseTestReflection extends BaseTestServer {
             .map(ReflectionGoal::getId)
             .get();
 
+    // unable to use the "monitor" field because this method is public and gets called from test
+    // classes that extend BaseTestServer but not BaseTestReflection
     newReflectionMonitor().waitUntilCanAccelerate(id);
     return id;
   }

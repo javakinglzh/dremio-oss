@@ -37,11 +37,13 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.ws.rs.NotFoundException;
@@ -65,6 +67,15 @@ public class ScriptServiceImpl implements ScriptService {
           put("modifiedAt", ScriptStoreIndexedKeys.MODIFIED_AT);
         }
       };
+  private static final Map<String, Function<Script, Comparable<?>>> sortParamToComparable =
+      new HashMap<>() {
+        {
+          put("id", Script::getScriptId);
+          put("name", Script::getName);
+          put("createdAt", Script::getCreatedAt);
+          put("modifiedAt", Script::getModifiedAt);
+        }
+      };
 
   private final Provider<ScriptStore> scriptStoreProvider;
 
@@ -82,23 +93,25 @@ public class ScriptServiceImpl implements ScriptService {
   @Override
   @WithSpan
   public List<Script> getScripts(
-      int offset, int limit, String search, String orderBy, String filter, String createdBy) {
+      int offset, int limit, String search, String orderBy, String createdBy) {
     ImmutableFindByCondition.Builder builder = new ImmutableFindByCondition.Builder();
 
+    ScriptSortCondition sortCondition = getSortCondition(orderBy);
     FindByCondition condition =
         builder
-            .setCondition(getConditionForAccessibleScripts(search, filter, createdBy))
+            .setCondition(getConditionForAccessibleScripts(search, createdBy))
             .setOffset(offset)
             .setLimit(limit)
-            .setSort(getSortCondition(orderBy))
+            .setSort(sortCondition.searchFieldSortings)
             .build();
     Iterable<Document<String, Script>> scripts = scriptStore.getAllByCondition(condition);
     return Lists.newArrayList(Iterables.transform(scripts, Document<String, Script>::getValue));
   }
 
-  protected Iterable<SearchTypes.SearchFieldSorting> getSortCondition(String orderBy) {
+  protected ScriptSortCondition getSortCondition(String orderBy) {
     String[] orders = orderBy.split(",");
     List<SearchTypes.SearchFieldSorting> sortOrders = new ArrayList<>();
+    List<Comparator<Script>> comparators = new ArrayList<>();
     for (String order : orders) {
       if (order.isEmpty()) {
         continue;
@@ -111,16 +124,38 @@ public class ScriptServiceImpl implements ScriptService {
       } else {
         searchFieldSorting.setOrder(SearchTypes.SortOrder.ASCENDING);
       }
-      if (sortParamToIndex.containsKey(order)) {
-        searchFieldSorting.setType(sortParamToIndex.get(order).getSortedValueType());
-        searchFieldSorting.setField(sortParamToIndex.get(order).getIndexFieldName());
-        sortOrders.add(searchFieldSorting.build());
-      } else {
+
+      IndexKey sortIndex = sortParamToIndex.get(order);
+      if (sortIndex == null) {
         throw new IllegalArgumentException(
             String.format("sort on parameter : %s not supported.", order));
       }
+      searchFieldSorting.setType(sortIndex.getSortedValueType());
+      searchFieldSorting.setField(sortIndex.getIndexFieldName());
+      sortOrders.add(searchFieldSorting.build());
+
+      Function<Script, Comparable<?>> fieldExtractor = sortParamToComparable.get(order);
+      @SuppressWarnings("unchecked")
+      Comparator<Script> comparator =
+          (o1, o2) ->
+              ((Comparable<Object>) fieldExtractor.apply(o1)).compareTo(fieldExtractor.apply(o2));
+      comparators.add(
+          searchFieldSorting.getOrder() == SearchTypes.SortOrder.ASCENDING
+              ? comparator
+              : comparator.reversed());
     }
-    return sortOrders;
+    Comparator<Script> comparator =
+        (o1, o2) -> {
+          int comparison = 0;
+          for (Comparator<Script> comparator1 : comparators) {
+            comparison = comparator1.compare(o1, o2);
+            if (comparison != 0) {
+              return comparison;
+            }
+          }
+          return comparison;
+        };
+    return new ScriptSortCondition(sortOrders, comparator);
   }
 
   @Override
@@ -296,13 +331,13 @@ public class ScriptServiceImpl implements ScriptService {
 
   @Override
   @WithSpan
-  public Long getCountOfMatchingScripts(String search, String filter, String createdBy) {
-    SearchTypes.SearchQuery condition = getConditionForAccessibleScripts(search, filter, createdBy);
+  public Long getCountOfMatchingScripts(String search, String createdBy) {
+    SearchTypes.SearchQuery condition = getConditionForAccessibleScripts(search, createdBy);
     return scriptStore.getCountByCondition(condition);
   }
 
   private long getCountOfScriptsByCreatorId(String createdBy) {
-    SearchTypes.SearchQuery condition = getConditionForAccessibleScripts("", "", createdBy);
+    SearchTypes.SearchQuery condition = getConditionForAccessibleScripts("", createdBy);
     return scriptStore.getCountByCondition(condition);
   }
 
@@ -368,17 +403,21 @@ public class ScriptServiceImpl implements ScriptService {
   }
 
   private SearchTypes.SearchQuery getConditionForAccessibleScripts(
-      String search, String filter, String createdBy) {
+      String search, String createdBy) {
     List<SearchTypes.SearchQuery> conditions = new ArrayList<>();
-    conditions.add(
-        SearchQueryUtils.or(
-            SearchQueryUtils.newContainsTerm(ScriptStoreIndexedKeys.NAME, search),
-            SearchQueryUtils.newContainsTerm(
-                ScriptStoreIndexedKeys.NAME_LC, search.toLowerCase())));
+    if (StringUtils.isNotEmpty(search)) {
+      conditions.add(
+          SearchQueryUtils.newContainsTerm(ScriptStoreIndexedKeys.NAME_LC, search.toLowerCase()));
+    }
 
     if (createdBy != null) {
       conditions.add(SearchQueryUtils.newTermQuery(ScriptStoreIndexedKeys.CREATED_BY, createdBy));
     }
+
+    if (conditions.isEmpty()) {
+      return SearchQueryUtils.newMatchAllQuery();
+    }
+
     return SearchQueryUtils.and(conditions);
   }
 
@@ -424,4 +463,23 @@ public class ScriptServiceImpl implements ScriptService {
 
   @Override
   public void close() throws Exception {}
+
+  protected static final class ScriptSortCondition {
+    private final List<SearchTypes.SearchFieldSorting> searchFieldSortings;
+    private final Comparator<Script> comparator;
+
+    ScriptSortCondition(
+        List<SearchTypes.SearchFieldSorting> searchFieldSortings, Comparator<Script> comparator) {
+      this.searchFieldSortings = searchFieldSortings;
+      this.comparator = comparator;
+    }
+
+    public List<SearchTypes.SearchFieldSorting> getSearchFieldSortings() {
+      return searchFieldSortings;
+    }
+
+    public Comparator<Script> getComparator() {
+      return comparator;
+    }
+  }
 }

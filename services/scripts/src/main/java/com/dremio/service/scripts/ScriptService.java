@@ -33,12 +33,10 @@ public interface ScriptService extends Service {
    * @param limit
    * @param search
    * @param orderBy
-   * @param filter
    * @param createdBy
    * @return
    */
-  List<Script> getScripts(
-      int offset, int limit, String search, String orderBy, String filter, String createdBy);
+  List<Script> getScripts(int offset, int limit, String search, String orderBy, String createdBy);
 
   /**
    * create script
@@ -103,11 +101,10 @@ public interface ScriptService extends Service {
    * get count of all scripts created by user {@code createdBy} based on search and filter
    *
    * @param search
-   * @param filter
    * @param createdBy
    * @return
    */
-  Long getCountOfMatchingScripts(String search, String filter, String createdBy);
+  Long getCountOfMatchingScripts(String search, String createdBy);
 
   default boolean isTemporaryScript(Script script) {
     return script.getName().startsWith(DREMIO_TMP_PREFIX);

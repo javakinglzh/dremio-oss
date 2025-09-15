@@ -133,7 +133,8 @@ public class VectorSorter implements AutoCloseable {
 
     COPY_FROM_DISK,
     SPILL_IN_PROGRESS, // spill from memoryRun to disk
-    COPIER_SPILL_IN_PROGRESS // spill from copier to disk
+    COPIER_SPILL_IN_PROGRESS, // spill from copier to disk
+    BLOCK_SPILL // block spill till the next in line operator is processing the output.
   }
 
   public State getState() {
@@ -176,6 +177,7 @@ public class VectorSorter implements AutoCloseable {
       this.batchsizeMultiplier =
           (int) options.getOption(ExecConstants.EXTERNAL_SORT_BATCHSIZE_MULTIPLIER);
       final int listSizeEstimate = (int) options.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE);
+      final int mapSizeEstimate = (int) options.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE);
       final int varFieldSizeEstimate =
           (int) options.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
       final boolean compressSpilledBatch =
@@ -205,7 +207,9 @@ public class VectorSorter implements AutoCloseable {
 
       // estimate how much memory the outgoing batch will take in memory
       final int estimatedRecordSize =
-          incoming.getSchema().estimateRecordSize(listSizeEstimate, varFieldSizeEstimate);
+          incoming
+              .getSchema()
+              .estimateRecordSize(listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
       final int targetBatchSizeInBytes = targetBatchSize * estimatedRecordSize;
 
       if (isSpillAllowed) {
@@ -555,6 +559,12 @@ public class VectorSorter implements AutoCloseable {
     return false;
   }
 
+  public void unblockSpill() {
+    if (sortState == SortState.BLOCK_SPILL) {
+      sortState = prevSortState;
+    }
+  }
+
   /**
    * send the data generated from memory or disk to the copier for sort.
    *
@@ -583,6 +593,13 @@ public class VectorSorter implements AutoCloseable {
       w.getValueVector().setValueCount(copied);
     }
     output.setRecordCount(copied);
+
+    // Change state to block spill while the output is being consumed
+    if (sortState == SortState.COPY_FROM_MEMORY && isSpillAllowed) {
+      prevSortState = sortState;
+      sortState = SortState.BLOCK_SPILL;
+    }
+
     return copied;
   }
 

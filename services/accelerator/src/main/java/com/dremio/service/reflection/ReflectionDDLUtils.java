@@ -17,6 +17,7 @@ package com.dremio.service.reflection;
 
 import com.dremio.catalog.model.CatalogEntityId;
 import com.dremio.catalog.model.VersionedDatasetId;
+import com.dremio.exec.catalog.DremioTable;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.reflection.proto.DimensionGranularity;
 import com.dremio.service.reflection.proto.MeasureType;
@@ -109,28 +110,30 @@ public class ReflectionDDLUtils {
     appendQuoted(builder, goal.getName());
     builder.append(" USING");
     final ReflectionDetails details = goal.getDetails();
-    if (goal.getType() == com.dremio.service.reflection.proto.ReflectionType.RAW) {
-      builder.append(" DISPLAY ");
-      appendFields(builder, details.getDisplayFieldList());
-    } else {
-      if (details.getDimensionFieldList() != null) {
-        builder.append(" DIMENSIONS ");
-        appendDimensions(builder, details.getDimensionFieldList());
-      }
-      if (details.getMeasureFieldList() != null) {
-        builder.append(" MEASURES ");
-        appendMeasures(builder, details.getMeasureFieldList());
+    if (details != null) {
+      if (goal.getType() == com.dremio.service.reflection.proto.ReflectionType.RAW) {
+        builder.append(" DISPLAY ");
+        appendFields(builder, details.getDisplayFieldList());
       } else {
-        builder.append(" MEASURES () ");
+        if (details.getDimensionFieldList() != null) {
+          builder.append(" DIMENSIONS ");
+          appendDimensions(builder, details.getDimensionFieldList());
+        }
+        if (details.getMeasureFieldList() != null) {
+          builder.append(" MEASURES ");
+          appendMeasures(builder, details.getMeasureFieldList());
+        } else {
+          builder.append(" MEASURES () ");
+        }
       }
-    }
-    if (details.getPartitionFieldList() != null) {
-      builder.append(" PARTITION BY ");
-      appendPartitionFields(builder, details.getPartitionFieldList());
-    }
-    if (details.getSortFieldList() != null) {
-      builder.append(" LOCALSORT BY ");
-      appendFields(builder, details.getSortFieldList());
+      if (details.getPartitionFieldList() != null) {
+        builder.append(" PARTITION BY ");
+        appendPartitionFields(builder, details.getPartitionFieldList());
+      }
+      if (details.getSortFieldList() != null) {
+        builder.append(" LOCALSORT BY ");
+        appendFields(builder, details.getSortFieldList());
+      }
     }
     return builder.toString();
   }
@@ -216,12 +219,14 @@ public class ReflectionDDLUtils {
       appendQuoted(builder, field.getName());
       builder.append("(");
       boolean firstType = true;
-      for (MeasureType type : field.getMeasureTypeList()) {
-        if (!firstType) {
-          builder.append(",");
+      if (field.getMeasureTypeList() != null) {
+        for (MeasureType type : field.getMeasureTypeList()) {
+          if (!firstType) {
+            builder.append(",");
+          }
+          builder.append(type.toString().replace("_", " "));
+          firstType = false;
         }
-        builder.append(type.toString().replace("_", " "));
-        firstType = false;
       }
       builder.append(")");
       first = false;
@@ -234,5 +239,19 @@ public class ReflectionDDLUtils {
     build.append("\"");
     build.append(value);
     build.append("\"");
+  }
+
+  /** Generate DDL for view */
+  public static String generateViewDDL(DremioTable viewTable) {
+    if (viewTable == null || viewTable.getDatasetConfig().getVirtualDataset() == null) {
+      return null;
+    }
+    StringBuilder builder = new StringBuilder();
+    builder.append("CREATE");
+    builder.append(" VIEW ");
+    builder.append(viewTable.getPath());
+    builder.append(" AS ");
+    builder.append(viewTable.getDatasetConfig().getVirtualDataset().getSql());
+    return builder.toString();
   }
 }

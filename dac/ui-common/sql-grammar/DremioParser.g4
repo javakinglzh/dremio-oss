@@ -223,9 +223,9 @@ vacuumTableRemoveOrphanFilesOptions : (OLDER_THAN EQ? stringLiteral)? (LOCATION 
 
 sqlVacuumTable : compoundIdentifier (EXPIRE SNAPSHOTS vacuumTableExpireSnapshotOptions | REMOVE ORPHAN FILES vacuumTableRemoveOrphanFilesOptions)  ;
 
-sqlVacuumCatalog : simpleIdentifier (EXCLUDE LPAREN tableWithVersionContextCommaList RPAREN)?  ;
+sqlVacuumCatalog : simpleIdentifier ( (EXCLUDE | INCLUDE) LPAREN tableWithVersionContextCommaList RPAREN)?  ;
 
-tableWithVersionContextCommaList : compoundIdentifier tableWithVersionContext? (COMMA compoundIdentifier tableWithVersionContext)*  ;
+tableWithVersionContextCommaList : compoundIdentifier tableWithVersionContext? (COMMA compoundIdentifier tableWithVersionContext?)*  ;
 
 sqlTruncateTable : TRUNCATE TABLE? (IF EXISTS)? compoundIdentifier (AT BRANCH simpleIdentifier)?  ;
 

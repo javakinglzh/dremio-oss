@@ -61,6 +61,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Stack;
 
 public class ClassGenerator<T> {
 
@@ -77,7 +78,7 @@ public class ClassGenerator<T> {
   }
 
   private final long maxExpressionsInFunction;
-  private final boolean allowEmptyBlock;
+  private final boolean autoUnnestBlock;
   // It is impossible (and hence a safe limit) for a single expression to have 100000 functions and
   // not hit
   // code size limits
@@ -103,6 +104,8 @@ public class ClassGenerator<T> {
   private int labelIndex = 0;
   private MappingSet mappings;
   private FieldReference currentReference;
+  private Stack<String> setupNestStack;
+  private Stack<String> evalNestStack;
 
   public static MappingSet getDefaultMapping() {
     return new MappingSet("inIndex", "outIndex", DEFAULT_CONSTANT_MAP, DEFAULT_SCALAR_MAP);
@@ -133,12 +136,14 @@ public class ClassGenerator<T> {
                 ExecConstants.CODE_GEN_FUNCTION_EXPRESSION_COUNT_THRESHOLD
                     .getDefault()
                     .getNumVal());
-    this.allowEmptyBlock =
+    this.autoUnnestBlock =
         Optional.ofNullable(functionContext)
             .map(FunctionContext::getCompilationOptions)
-            .map(CompilationOptions::getAllowEmptyBlock)
-            .orElse(ExecConstants.CODE_GEN_ALLOW_EMPTY_BLOCK.getDefault().getBoolVal());
+            .map(CompilationOptions::getAutoUnnestBlock)
+            .orElse(ExecConstants.CODE_GEN_AUTO_UNNEST_BLOCK.getDefault().getBoolVal());
     blocks = new LinkedList[sig.size()];
+    this.setupNestStack = new Stack<>();
+    this.evalNestStack = new Stack<>();
 
     for (int i = 0; i < sig.size(); i++) {
       blocks[i] = Lists.newLinkedList();
@@ -208,9 +213,6 @@ public class ClassGenerator<T> {
     if (this.blocks[sig.get(methodName)].isEmpty()) {
       logger.warn("getBlock has no blocks to return. {}", methodName);
       logger.trace("empty block requested by {}", new StackTrace());
-      if (allowEmptyBlock) {
-        rotateBlock();
-      }
     }
     JBlock blk = null;
     if (!this.blocks[sig.get(methodName)].isEmpty()) {
@@ -301,11 +303,22 @@ public class ClassGenerator<T> {
     logger.trace("nestEvalBlock {}", methodName);
     evaluationVisitor.newScope();
     this.blocks[sig.get(methodName)].addLast(new SizedJBlock(block));
+    evalNestStack.push(methodName);
   }
 
   public void unNestEvalBlock() {
-    String methodName = getCurrentMapping().getMethodName(BlockType.EVAL);
-    logger.trace("unNestEvalBlock {}", methodName);
+    String mappedMethodName = getCurrentMapping().getMethodName(BlockType.EVAL);
+    String stackMethodName = null;
+
+    if (!evalNestStack.isEmpty()) {
+      stackMethodName = evalNestStack.pop();
+    }
+    logger.trace("unNestEvalBlock {} {}", mappedMethodName, stackMethodName);
+    String methodName =
+        Optional.ofNullable(stackMethodName)
+            .filter(name -> autoUnnestBlock)
+            .orElse(mappedMethodName);
+
     evaluationVisitor.leaveScope();
     this.blocks[sig.get(methodName)].removeLast();
     if (this.blocks[sig.get(methodName)].isEmpty()) {
@@ -317,11 +330,22 @@ public class ClassGenerator<T> {
     String methodName = getCurrentMapping().getMethodName(BlockType.SETUP);
     logger.trace("nestSetupBlock {}", methodName);
     this.blocks[sig.get(methodName)].addLast(new SizedJBlock(block));
+    setupNestStack.push(methodName);
   }
 
   public void unNestSetupBlock() {
-    String methodName = getCurrentMapping().getMethodName(BlockType.SETUP);
-    logger.trace("unNestSetupBlock {}", methodName);
+    String mappedMethodName = getCurrentMapping().getMethodName(BlockType.SETUP);
+    String stackMethodName = null;
+
+    if (!setupNestStack.isEmpty()) {
+      stackMethodName = setupNestStack.pop();
+    }
+    logger.trace("unNestSetupBlock {} {}", mappedMethodName, stackMethodName);
+    String methodName =
+        Optional.ofNullable(stackMethodName)
+            .filter(name -> autoUnnestBlock)
+            .orElse(mappedMethodName);
+
     this.blocks[sig.get(methodName)].removeLast();
     if (this.blocks[sig.get(methodName)].isEmpty()) {
       logger.trace("unNestSetupBlock 0 blocks left by: {}", new StackTrace());

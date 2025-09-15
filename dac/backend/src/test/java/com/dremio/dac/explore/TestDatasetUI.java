@@ -20,9 +20,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.dremio.catalog.model.VersionContext;
 import com.dremio.catalog.model.VersionedDatasetId;
 import com.dremio.catalog.model.dataset.TableVersionContext;
-import com.dremio.dac.explore.model.DatasetUI;
+import com.dremio.dac.model.common.NamespacePathUtils;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import com.dremio.service.namespace.proto.NameSpaceContainer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +31,7 @@ import org.junit.jupiter.api.Test;
 
 public class TestDatasetUI {
   private final List<String> homeDatasetFullPath = Arrays.asList("@dremio", "table1");
-  private final List<String> spaceDatasetFullPath = Arrays.asList("view1");
+  private final List<String> spaceDatasetFullPath = Arrays.asList("spaceName", "view1");
   private final List<String> sourceDatasetFullPath = Arrays.asList("other", "table1");
   private final List<String> versionedPhysicalDatasetFullPath =
       Arrays.asList("versioned", "table1");
@@ -56,29 +57,34 @@ public class TestDatasetUI {
   @Test
   public void testCreateLinksForVersionedPhysicalDataset() throws Exception {
     final Map<String, String> linksMap =
-        DatasetUI.createLinks(
+        NamespacePathUtils.createLinks(
             versionedPhysicalDatasetFullPath,
             versionedPhysicalDatasetFullPath,
             datasetVersion,
             false,
+            false,
             versionedPhysicalDatasetId.asString(),
-            DatasetType.PHYSICAL_DATASET);
+            DatasetType.PHYSICAL_DATASET,
+            NameSpaceContainer.Type.SOURCE);
 
-    assertThat(linksMap.get("edit"))
-        .isEqualTo("/source/versioned/table1?mode=edit&version=7fffffffffffffff");
+    assertThat(linksMap.get("jobs"))
+        .isEqualTo(
+            "/jobs?filters=%7B%22ads%22%3A%5B%22versioned.table1%22%5D%2C%22qt%22%3A%5B%22UI%22%2C%22EXTERNAL%22%5D%7D");
     assertThat(linksMap.get("self")).isEqualTo("/source/versioned/table1?version=7fffffffffffffff");
   }
 
   @Test
   public void testCreateLinksForVersionedVirtualDataset() throws Exception {
     final Map<String, String> linksMap =
-        DatasetUI.createLinks(
+        NamespacePathUtils.createLinks(
             versionedVirtualDatasetFullPath,
             versionedVirtualDatasetFullPath,
             datasetVersion,
             false,
+            false,
             versionedVirtualDatasetId.asString(),
-            DatasetType.VIRTUAL_DATASET);
+            DatasetType.VIRTUAL_DATASET,
+            NameSpaceContainer.Type.SOURCE);
 
     assertThat(linksMap.get("edit"))
         .isEqualTo("/source/versioned/view1?mode=edit&version=7fffffffffffffff");
@@ -88,13 +94,15 @@ public class TestDatasetUI {
   @Test
   public void testCreateLinksForHomePhysicalDataset() throws Exception {
     final Map<String, String> linksMap =
-        DatasetUI.createLinks(
+        NamespacePathUtils.createLinks(
             homeDatasetFullPath,
             homeDatasetFullPath,
             datasetVersion,
+            false,
             true,
             null,
-            DatasetType.PHYSICAL_DATASET);
+            DatasetType.VIRTUAL_DATASET,
+            NameSpaceContainer.Type.HOME);
 
     assertThat(linksMap.get("edit"))
         .isEqualTo("/home/%40dremio/table1?mode=edit&version=7fffffffffffffff");
@@ -104,13 +112,15 @@ public class TestDatasetUI {
   @Test
   public void testCreateLinksForSourcePhysicalDataset() throws Exception {
     final Map<String, String> linksMap =
-        DatasetUI.createLinks(
+        NamespacePathUtils.createLinks(
             sourceDatasetFullPath,
             sourceDatasetFullPath,
             datasetVersion,
+            false,
             true,
             null,
-            DatasetType.PHYSICAL_DATASET);
+            DatasetType.VIRTUAL_DATASET,
+            NameSpaceContainer.Type.SOURCE);
 
     assertThat(linksMap.get("edit"))
         .isEqualTo("/source/other/table1?mode=edit&version=7fffffffffffffff");
@@ -118,17 +128,20 @@ public class TestDatasetUI {
   }
 
   @Test
-  public void testCreateLinksForSpaceVirtualDataset() throws Exception {
+  public void testCreateLinksForSpaceVirtualDataset() {
     final Map<String, String> linksMap =
-        DatasetUI.createLinks(
+        NamespacePathUtils.createLinks(
             spaceDatasetFullPath,
             spaceDatasetFullPath,
             datasetVersion,
             false,
+            false,
             null,
-            DatasetType.VIRTUAL_DATASET);
+            DatasetType.VIRTUAL_DATASET,
+            NameSpaceContainer.Type.SPACE);
 
-    assertThat(linksMap.get("edit")).isEqualTo("/space/view1/?mode=edit&version=7fffffffffffffff");
-    assertThat(linksMap.get("self")).isEqualTo("/space/view1/?version=7fffffffffffffff");
+    assertThat(linksMap.get("edit"))
+        .isEqualTo("/space/spaceName/view1?mode=edit&version=7fffffffffffffff");
+    assertThat(linksMap.get("self")).isEqualTo("/space/spaceName/view1?version=7fffffffffffffff");
   }
 }

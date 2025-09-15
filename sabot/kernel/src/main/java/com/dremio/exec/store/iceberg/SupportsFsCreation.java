@@ -15,12 +15,12 @@
  */
 package com.dremio.exec.store.iceberg;
 
+import com.dremio.context.UserContext;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.planner.logical.CreateTableEntry;
 import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.io.file.FileSystem;
 import com.dremio.sabot.exec.context.OperatorContext;
-import com.dremio.service.users.SystemUser;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
 import java.io.IOException;
@@ -46,6 +46,7 @@ public interface SupportsFsCreation {
     private boolean isWithoutHDFSCache;
     private String filePath;
     private String userName;
+    private String userId;
     private OperatorContext operatorContext;
     private List<String> dataset;
 
@@ -95,12 +96,26 @@ public interface SupportsFsCreation {
     }
 
     public Builder withSystemUserName() {
-      this.userName = SystemUser.SYSTEM_USERNAME;
+      this.userName = UserContext.SYSTEM_USER_NAME;
+      return this;
+    }
+
+    public Builder withSystemUserId() {
+      this.userId = UserContext.SYSTEM_USER_CONTEXT_ID;
       return this;
     }
 
     public String userName() {
       return this.userName;
+    }
+
+    public Builder userId(String userId) {
+      this.userId = userId;
+      return this;
+    }
+
+    public String userId() {
+      return this.userId;
     }
 
     public Builder operatorContext(OperatorContext operatorContext) {

@@ -26,21 +26,46 @@ public class CloseableResource<T> implements AutoCloseable {
   private T resource;
   private Consumer<T> closerFunc;
   private int refCnt = 1;
+  private final int identityHashCode;
+  private final String resourceClassName;
 
   public CloseableResource(T resource, Consumer<T> closerFunc) {
+    Preconditions.checkNotNull(
+        resource, "A CloseableResource object cannot be initialized with a null resource.");
     this.resource = resource;
     this.closerFunc = closerFunc;
+    identityHashCode = System.identityHashCode(resource);
+    resourceClassName = resource.getClass().getSimpleName();
+
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (logger.isInfoEnabled()) {
+      logger.info(
+          "Class {} created a new CloseableResource for {}:{}. Reference count = 1",
+          getCallingClass(),
+          resourceClassName,
+          identityHashCode);
+    }
   }
 
   public synchronized T getResource() {
-    Preconditions.checkNotNull(resource);
-    ++refCnt;
-    logger.debug(
-        "Class {} acquired the ref for {}:{}, Ref {}",
-        getCallingClass(),
-        resource.getClass().getSimpleName(),
-        System.identityHashCode(resource),
+    Preconditions.checkNotNull(
+        resource,
+        "Attempting to acquire a reference for %s:%s after the resource was made null. Reference count = %s",
+        resourceClassName,
+        identityHashCode,
         refCnt);
+    ++refCnt;
+
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (logger.isInfoEnabled()) {
+      logger.info(
+          "Class {} acquired the reference for {}:{}. Reference count = {}",
+          getCallingClass(),
+          resourceClassName,
+          identityHashCode,
+          refCnt);
+    }
+
     return resource;
   }
 
@@ -51,17 +76,18 @@ public class CloseableResource<T> implements AutoCloseable {
     }
 
     if (--refCnt == 0 && resource != null) {
-      logger.debug("Closing resource {}", resource.getClass().getSimpleName());
+      logger.info("Closing the reference for {}:{}", resourceClassName, identityHashCode);
       closerFunc.accept(resource);
       resource = null;
     }
 
-    if (resource != null) {
-      logger.debug(
-          "Class {} released the ref for {}:{}, Current ref count:{}",
+    // Performance optimization: avoid expensive getStackTrace() when logging is disabled.
+    if (resource != null && logger.isInfoEnabled()) {
+      logger.info(
+          "Class {} released the reference for {}:{}. Reference count = {}",
           getCallingClass(),
-          resource.getClass().getSimpleName(),
-          System.identityHashCode(resource),
+          resourceClassName,
+          identityHashCode,
           refCnt);
     }
   }

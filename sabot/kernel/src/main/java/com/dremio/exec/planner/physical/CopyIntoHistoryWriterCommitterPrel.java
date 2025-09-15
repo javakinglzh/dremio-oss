@@ -137,7 +137,13 @@ public class CopyIntoHistoryWriterCommitterPrel extends WriterCommitterPrel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     return new CopyIntoHistoryWriterCommitterPOP(
-        creator.props(this, getUserName(), RecordWriter.SCHEMA, RESERVE, LIMIT),
+        creator.props(
+            this,
+            getUserName(),
+            getCreateTableEntry().getUserId(),
+            RecordWriter.SCHEMA,
+            RESERVE,
+            LIMIT),
         getTempLocation(),
         getFinalLocation(),
         getCreateTableEntry().getIcebergTableProps(),

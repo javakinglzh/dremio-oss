@@ -147,7 +147,7 @@ public class BlockJoinTable implements JoinTable {
             new VariableBlockVector(allocator, buildPivot.getVariableCount())) {
       // STEP 1: first we pivot.
       pivotBuildWatch.start();
-      Pivots.pivot(buildPivot, records, fbv, var);
+      Pivots.pivot(buildPivot, records, fbv, var, true);
       pivotBuildWatch.stop();
 
       if (tableTracing) {
@@ -194,7 +194,7 @@ public class BlockJoinTable implements JoinTable {
         ArrowBuf hashValues = allocator.buffer(records * 8)) {
       // STEP 1: first we pivot.
       probePivotWatch.start();
-      Pivots.pivot(probePivot, records, fbv, var);
+      Pivots.pivot(probePivot, records, fbv, var, true);
       probePivotWatch.stop();
 
       // STEP 2: then we do the hash computation on entire batch

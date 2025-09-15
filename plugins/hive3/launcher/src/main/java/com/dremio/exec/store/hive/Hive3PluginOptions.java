@@ -89,4 +89,11 @@ public interface Hive3PluginOptions {
   /** Option to specify the object pool size of HMS Client instances. Set 0 to turn pooling off */
   TypeValidators.LongValidator HIVE_CLIENT_POOL_SIZE =
       new TypeValidators.RangeLongValidator("store.hive3.client_pool_size", 0, 100, 10);
+
+  /**
+   * Option to enable recursive directory scanning for metadata refresh on select partitions too.
+   * This is required for transactional Hive tables.
+   */
+  BooleanValidator HIVE_RECURSIVE_PARTIAL_METADATA_REFRESH =
+      new BooleanValidator("store.hive3.recursive_partial_metadata_refresh", true);
 }

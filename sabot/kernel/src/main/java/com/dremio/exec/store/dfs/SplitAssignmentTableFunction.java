@@ -306,7 +306,8 @@ public class SplitAssignmentTableFunction extends AbstractTableFunction {
     }
   }
 
-  private FileSystem getFs(String filePath) {
+  @VisibleForTesting
+  protected FileSystem getFs(String filePath) {
     if (fs == null) {
       try {
         fs =
@@ -314,6 +315,7 @@ public class SplitAssignmentTableFunction extends AbstractTableFunction {
                 SupportsFsCreation.builder()
                     .filePath(filePath)
                     .userName(props.getUserName())
+                    .userId(props.getUserId())
                     .operatorContext(context)
                     .datasetFromTableFunctionConfig(functionConfig));
       } catch (IOException e) {

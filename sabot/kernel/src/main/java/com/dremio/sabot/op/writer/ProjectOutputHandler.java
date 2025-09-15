@@ -102,7 +102,7 @@ public class ProjectOutputHandler implements WriterCommitterOutputHandler {
         : "Named expressions schema doesn't match RecordWriter Schema";
 
     Project projectConfig = new Project(config.getProps(), null, namedExpressions);
-    this.project = new ProjectOperator(context, projectConfig);
+    this.project = new ProjectOperator(null, context, projectConfig);
     return project.setup(accessible);
   }
 

@@ -130,9 +130,23 @@ public class PageBatchSlicer {
    * @return RecordBatch of copied data
    */
   public RecordBatchPage copyToPageTillFull(Page page, int startIdx, int maxIdx) {
+    sizer.reset();
     PageFitResult fitResult =
         countRecordsToFitInPage(
             page.getRemainingBytes() * BYTE_SIZE_BITS, sv2, startIdx, maxIdx - startIdx + 1);
+    if (fitResult.recordCount == 0) {
+      int required = sizer.computeBitsNeeded(sv2, startIdx, 1);
+
+      throw UserException.unsupportedError()
+          .message(
+              String.format(
+                  "Individual record size (%s) is too large to fit into page size (%s). "
+                      + "Please contact Dremio support for assistance.",
+                  FormattingUtils.formatBytes(required / BYTE_SIZE_BITS),
+                  FormattingUtils.formatBytes(page.getRemainingBytes())))
+          .buildSilently();
+    }
+
     PagePlan plan =
         new PagePlan(
             fitResult.sizeBits,

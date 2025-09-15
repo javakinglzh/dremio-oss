@@ -50,14 +50,14 @@ public interface ReflectionOptions {
       new PositiveLongValidator(
           "reflection.materialization.cache.refresh.delay_millis",
           Long.MAX_VALUE,
-          TimeUnit.SECONDS.toMillis(30));
+          TimeUnit.SECONDS.toMillis(10));
   // how often should all the reflection entries be checked whether the anchor datasets are deleted
   // set to the same as MATERIALIZATION_CACHE_REFRESH_DELAY_MILLIS for performance consideration
   PositiveLongValidator DELETED_DATASET_HANDLING_DELAY_MILLIS =
       new PositiveLongValidator(
           "reflection.deleted_dataset_handling.delay_millis",
           Long.MAX_VALUE,
-          TimeUnit.SECONDS.toMillis(30));
+          TimeUnit.SECONDS.toMillis(10));
   // how long the planner can block waiting on materialization cache initialization before
   // continuing without reflections
   PositiveLongValidator MATERIALIZATION_CACHE_INIT_TIMEOUT_SECONDS =
@@ -150,6 +150,13 @@ public interface ReflectionOptions {
   PositiveLongValidator MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS =
       new PositiveLongValidator(
           "reflection.manager.max_reflection_refresh_retry_attempts", Integer.MAX_VALUE, 24);
+  // Maximum retry window in minutes for failed/canceled materialization before the reflection is
+  // given up and marked as FAILED. Default number is 4320 minutes (72 hours).
+  PositiveLongValidator MAX_REFLECTION_REFRESH_RETRY_WINDOW_MINUTES =
+      new PositiveLongValidator(
+          "reflection.manager.max_reflection_refresh_retry_window_minutes",
+          Integer.MAX_VALUE,
+          4320);
   // Retry using retry backoff by default. Immediate retry when the support key is off.
   BooleanValidator ENABLE_EXPONENTIAL_BACKOFF_FOR_RETRY_POLICY =
       new BooleanValidator("reflection.manager.enable_exponential_backoff_for_retry_policy", true);

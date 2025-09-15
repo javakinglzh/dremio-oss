@@ -43,4 +43,34 @@ public class ITAlter extends ITDmlQueryBase {
   public void testChangeColumnNameWithDot() throws Exception {
     AlterTests.testChangeColumnNameWithDot(allocator, SOURCE);
   }
+
+  @Test
+  public void testSortOrderWithPrimitiveType() throws Exception {
+    AlterTests.testSortOrderWithPrimitiveType();
+  }
+
+  @Test
+  public void testSortOrderWithPrimitiveNotNullType() throws Exception {
+    AlterTests.testSortOrderWithPrimitiveNotNullType();
+  }
+
+  @Test
+  public void testSortOrderShouldFailWithListType() throws Exception {
+    AlterTests.testSortOrderShouldFailWithListType();
+  }
+
+  @Test
+  public void testSortOrderShouldFailWithMapType() throws Exception {
+    AlterTests.testSortOrderShouldFailWithMapType();
+  }
+
+  @Test
+  public void testSortOrderShouldFailWithStructType() throws Exception {
+    AlterTests.testSortOrderShouldFailWithStructType();
+  }
+
+  @Test
+  public void testSortOrderWithPartitionColumn() throws Exception {
+    AlterTests.testSortOrderWithPartitionColumn();
+  }
 }

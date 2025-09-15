@@ -51,6 +51,7 @@ import org.apache.commons.collections4.CollectionUtils;
 public class RuntimeFilterUtil {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(RuntimeFilterUtil.class);
+  public static final int RF_PROCESS_MINOR_FRAGMENT_ID_RANGE = 2;
 
   @VisibleForTesting
   public static boolean isRuntimeFilterEnabledForNonPartitionedCols(
@@ -183,7 +184,9 @@ public class RuntimeFilterUtil {
     }
 
     RuntimeFilterManager.RuntimeFilterManagerEntry fmEntry = null;
-    if (!isBroadcastJoin && operatorContext.getFragmentHandle().getMinorFragmentId() <= 2) {
+    if (!isBroadcastJoin
+        && operatorContext.getFragmentHandle().getMinorFragmentId()
+            <= RF_PROCESS_MINOR_FRAGMENT_ID_RANGE) {
       // This fragment is one of the merge points. Set up FilterManager for interim use.
       fmEntry =
           runtimeFilterManager.coalesce(

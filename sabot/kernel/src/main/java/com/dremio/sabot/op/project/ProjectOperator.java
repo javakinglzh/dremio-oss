@@ -52,6 +52,7 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.util.ColumnUtils;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.project.Projector.ComplexWriterCreator;
 import com.dremio.sabot.op.project.ProjectorStats.Metric;
@@ -110,6 +111,7 @@ public class ProjectOperator implements SingleInputOperator {
   private CombinedSizer variableVectorSizer;
   private final boolean rowSizeLimitEnabled;
   private boolean rowSizeLimitEnabledForThisOperator;
+  private final FragmentExecutionContext fec;
 
   public static enum EvalMode {
     DIRECT,
@@ -119,7 +121,8 @@ public class ProjectOperator implements SingleInputOperator {
 
   private static Set<ExpressionHashKey> exprHashSet = ConcurrentHashMap.newKeySet();
 
-  public ProjectOperator(final OperatorContext context, final Project config)
+  public ProjectOperator(
+      FragmentExecutionContext fec, final OperatorContext context, final Project config)
       throws OutOfMemoryException {
     this.config = config;
     this.context = context;
@@ -132,6 +135,7 @@ public class ProjectOperator implements SingleInputOperator {
     this.outgoing = context.createOutputVectorContainer();
     this.rowSizeLimitEnabled =
         context.getOptions().getOption(ExecConstants.ENABLE_ROW_SIZE_LIMIT_ENFORCEMENT);
+    this.fec = fec;
     this.rowSizeLimitEnabledForThisOperator = rowSizeLimitEnabled;
     this.rowSizeLimit =
         Math.toIntExact(context.getOptions().getOption(ExecConstants.LIMIT_ROW_SIZE_BYTES));
@@ -451,7 +455,14 @@ public class ProjectOperator implements SingleInputOperator {
     @Override
     public SingleInputOperator create(OperatorContext context, Project operator)
         throws ExecutionSetupException {
-      return new ProjectOperator(context, operator);
+      return create(null, context, operator);
+    }
+
+    @Override
+    public SingleInputOperator create(
+        FragmentExecutionContext fec, OperatorContext context, Project operator)
+        throws ExecutionSetupException {
+      return new ProjectOperator(fec, context, operator);
     }
   }
 
@@ -461,11 +472,41 @@ public class ProjectOperator implements SingleInputOperator {
     public SingleInputOperator create(OperatorContext context, ComplexToJson operator)
         throws ExecutionSetupException {
       Project project = new Project(operator.getProps(), null, null);
-      return new ProjectOperator(context, project);
+      return new ProjectOperator(null, context, project);
     }
   }
 
-  public static ExpressionSplitter createSplitterWithExpressions(
+  public ExpressionSplitter createSplitterWithExpressions(
+      VectorAccessible incoming,
+      List<NamedExpression> exprs,
+      List<TransferPair> transfers,
+      ClassGenerator<Projector> cg,
+      IntHashSet transferFieldIds,
+      OperatorContext context,
+      ExpressionEvaluationOptions options,
+      VectorContainer outgoing,
+      BatchSchema targetSchema,
+      List<NamedExpression> nonDirectExprs)
+      throws Exception {
+    return createSplitterWithExpressionsInternal(
+        fec,
+        incoming,
+        exprs,
+        transfers,
+        cg,
+        transferFieldIds,
+        context,
+        options,
+        outgoing,
+        targetSchema,
+        nonDirectExprs);
+  }
+
+  /**
+   * Static method for creating ExpressionSplitter when FragmentExecutionContext is not available.
+   * This is used by classes that don't have access to a ProjectOperator instance.
+   */
+  public static ExpressionSplitter createSplitterWithExpressionsStatic(
       VectorAccessible incoming,
       List<NamedExpression> exprs,
       List<TransferPair> transfers,
@@ -476,7 +517,7 @@ public class ProjectOperator implements SingleInputOperator {
       VectorContainer outgoing,
       BatchSchema targetSchema)
       throws Exception {
-    return createSplitterWithExpressions(
+    return createSplitterWithExpressionsStatic(
         incoming,
         exprs,
         transfers,
@@ -489,7 +530,42 @@ public class ProjectOperator implements SingleInputOperator {
         null);
   }
 
-  public static ExpressionSplitter createSplitterWithExpressions(
+  /**
+   * Static method for creating ExpressionSplitter when FragmentExecutionContext is not available.
+   * This is used by classes that don't have access to a ProjectOperator instance.
+   */
+  public static ExpressionSplitter createSplitterWithExpressionsStatic(
+      VectorAccessible incoming,
+      List<NamedExpression> exprs,
+      List<TransferPair> transfers,
+      ClassGenerator<Projector> cg,
+      IntHashSet transferFieldIds,
+      OperatorContext context,
+      ExpressionEvaluationOptions options,
+      VectorContainer outgoing,
+      BatchSchema targetSchema,
+      List<NamedExpression> nonDirectExprs)
+      throws Exception {
+    return createSplitterWithExpressionsInternal(
+        null,
+        incoming,
+        exprs,
+        transfers,
+        cg,
+        transferFieldIds,
+        context,
+        options,
+        outgoing,
+        targetSchema,
+        nonDirectExprs);
+  }
+
+  /**
+   * Internal method that contains the actual implementation for creating ExpressionSplitter. This
+   * method is shared by both instance and static methods to avoid code duplication.
+   */
+  private static ExpressionSplitter createSplitterWithExpressionsInternal(
+      FragmentExecutionContext fec,
       VectorAccessible incoming,
       List<NamedExpression> exprs,
       List<TransferPair> transfers,
@@ -503,12 +579,20 @@ public class ProjectOperator implements SingleInputOperator {
       throws Exception {
     ExpressionSplitter splitter =
         new ExpressionSplitter(
+            fec,
             context,
             incoming,
             options,
             context.getClassProducer().getFunctionLookupContext().isDecimalV2Enabled());
 
     for (int i = 0; i < exprs.size(); i++) {
+      if (fec != null && fec.isCancelled()) {
+        throw new Exception(
+            String.format(
+                "Operator %s setup for query fragment %s aborted due to cancellation",
+                context.getStats().getOperatorId(),
+                QueryIdHelper.getExecutorThreadName(context.getFragmentHandle())));
+      }
       final NamedExpression namedExpression = exprs.get(i);
       if (namedExpression == null) {
         continue;

@@ -32,7 +32,7 @@ import org.testcontainers.utility.DockerImageName;
 public final class OpenSearchContainer extends OpensearchContainer<OpenSearchContainer>
     implements DremioContainer {
   private static final DockerImageName IMAGE =
-      DockerImageName.parse("opensearchproject/opensearch:2.19.0");
+      DockerImageName.parse("opensearchproject/opensearch:2.19.2");
   private static final Base64.Encoder BASE64_ENCODER = Base64.getEncoder();
 
   public OpenSearchContainer() {

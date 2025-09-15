@@ -38,11 +38,13 @@ class DatasetResourcePathUtils {
    *
    */
   toHrefV2(datasetFullPath) {
-    const encodedDatasetFullPath = datasetFullPath
-      .toJS()
-      .map((item) =>
-        encodeURIComponent(item.includes(".") ? `"${item}"` : item),
-      );
+    const encodedDatasetFullPath = datasetFullPath.toJS().map((item, i) =>
+      encodeURIComponent(
+        item.includes(".") && i === datasetFullPath.size - 1 // only wrap dataset name in quotes
+          ? `"${item}"`
+          : item,
+      ),
+    );
     const rootSpace = encodedDatasetFullPath.shift();
     return `/space/${rootSpace}/${encodedDatasetFullPath.join(".")}`;
   }

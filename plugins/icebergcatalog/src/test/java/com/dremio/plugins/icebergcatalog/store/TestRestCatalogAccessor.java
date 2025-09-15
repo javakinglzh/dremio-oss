@@ -17,8 +17,10 @@ package com.dremio.plugins.icebergcatalog.store;
 
 import static com.dremio.exec.catalog.CatalogOptions.RESTCATALOG_VIEWS_SUPPORTED;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_CATALOG_EXPIRE_SECONDS;
+import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS;
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_TABLE_CACHE_SIZE_ITEMS;
+import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_VIEW_CACHE_ENABLED;
 import static com.dremio.plugins.icebergcatalog.store.AbstractRestCatalogAccessor.DEFAULT_BASE_LOCATION;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,17 +30,24 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import com.dremio.connector.ConnectorException;
 import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.DatasetHandleListing;
 import com.dremio.connector.metadata.DatasetMetadata;
+import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.ViewDatasetHandle;
+import com.dremio.connector.metadata.options.ForceUpdateOption;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
 import com.dremio.exec.store.iceberg.dremioudf.core.udf.InMemoryCatalog;
 import com.dremio.options.OptionManager;
@@ -50,16 +59,24 @@ import java.io.Closeable;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import org.apache.iceberg.HasTableOperations;
+import org.apache.iceberg.Table;
+import org.apache.iceberg.TableMetadata;
+import org.apache.iceberg.TableOperations;
 import org.apache.iceberg.catalog.Catalog;
 import org.apache.iceberg.catalog.Namespace;
 import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.rest.RESTCatalog;
 import org.apache.iceberg.view.BaseView;
+import org.apache.iceberg.view.View;
 import org.apache.iceberg.view.ViewMetadata;
 import org.apache.iceberg.view.ViewOperations;
+import org.apache.iceberg.view.ViewVersion;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -406,5 +423,319 @@ public class TestRestCatalogAccessor {
         .thenReturn(ImmutableMap.of(DEFAULT_BASE_LOCATION, defaultBaseLocationInCatalog));
     String expectedDefaultBaseLocation = restCatalogAccessor.getDefaultBaseLocation();
     assertThat(expectedDefaultBaseLocation).isEqualTo(defaultBaseLocationInCatalog);
+  }
+
+  @Test
+  public void testTableCacheUserAware() throws Exception {
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED)).thenReturn(true);
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_VIEW_CACHE_ENABLED)).thenReturn(true);
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+
+    final GetDatasetOption forceUpdateOnce = new ForceUpdateOption(ForceUpdateOption.Mode.ONCE);
+    final GetDatasetOption forceUpdateAlways = new ForceUpdateOption(ForceUpdateOption.Mode.ALWAYS);
+
+    final TableIdentifier tableName = TableIdentifier.of("table_cached");
+    final TableIdentifier viewName = TableIdentifier.of("view_cached");
+
+    Table table = mock(Table.class);
+    View view = mock(View.class);
+
+    AtomicInteger loadTableCalls = new AtomicInteger(0);
+    AtomicInteger loadViewCalls = new AtomicInteger(0);
+
+    doAnswer(
+            invocationOnMock -> {
+              loadTableCalls.incrementAndGet();
+              return table;
+            })
+        .when(mockRestCatalog)
+        .loadTable(eq(tableName));
+
+    doAnswer(
+            invocationOnMock -> {
+              loadViewCalls.incrementAndGet();
+              return view;
+            })
+        .when(mockRestCatalog)
+        .loadView(eq(viewName));
+
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+
+    String user1 = UUID.randomUUID().toString();
+    String user2 = UUID.randomUUID().toString();
+    // Tables - (also testing ForceUpdateOption class)
+    RequestContext.current()
+        .with(UserContext.CTX_KEY, UserContext.of(user1))
+        .run(
+            () -> {
+              accessor.loadTable(tableName);
+              accessor.loadTable(tableName);
+            });
+    // expecting 1 cache miss and 1 cache hit
+    assertEquals(1, loadTableCalls.get());
+    RequestContext.current()
+        .with(UserContext.CTX_KEY, UserContext.of(user2))
+        .run(
+            () -> {
+              accessor.loadTable(tableName);
+              accessor.loadTable(tableName);
+            });
+    // expecting 1 cache miss and 1 cache hit for different user
+    assertEquals(2, loadTableCalls.get());
+
+    // Views - (also testing ForceUpdateOption class)
+    RequestContext.current()
+        .with(UserContext.CTX_KEY, UserContext.of(user1))
+        .run(
+            () -> {
+              accessor.loadView(viewName);
+              accessor.loadView(viewName);
+            });
+    // expecting 1 cache miss and 1 cache hit
+    assertEquals(1, loadViewCalls.get());
+    RequestContext.current()
+        .with(UserContext.CTX_KEY, UserContext.of(user2))
+        .run(
+            () -> {
+              accessor.loadView(viewName);
+              accessor.loadView(viewName);
+            });
+    // expecting 1 cache miss and 1 cache hit for different user
+    assertEquals(2, loadViewCalls.get());
+  }
+
+  @Test
+  public void testTableCacheInvalidationOnDML() {
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED)).thenReturn(true);
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_VIEW_CACHE_ENABLED)).thenReturn(true);
+    when(mockOptionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)).thenReturn(true);
+
+    final GetDatasetOption forceUpdateOnce = new ForceUpdateOption(ForceUpdateOption.Mode.ONCE);
+    final GetDatasetOption forceUpdateAlways = new ForceUpdateOption(ForceUpdateOption.Mode.ALWAYS);
+
+    final TableIdentifier tableName = TableIdentifier.of("table_cached");
+    final TableIdentifier viewName = TableIdentifier.of("view_cached");
+
+    Table table = mock(Table.class);
+    View view = mock(View.class);
+
+    AtomicInteger loadTableCalls = new AtomicInteger(0);
+    AtomicInteger loadViewCalls = new AtomicInteger(0);
+
+    doAnswer(
+            invocationOnMock -> {
+              loadTableCalls.incrementAndGet();
+              return table;
+            })
+        .when(mockRestCatalog)
+        .loadTable(eq(tableName));
+
+    doAnswer(
+            invocationOnMock -> {
+              loadViewCalls.incrementAndGet();
+              return view;
+            })
+        .when(mockRestCatalog)
+        .loadView(eq(viewName));
+
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+
+    // Tables - (also testing ForceUpdateOption class)
+    // No GetDatasetOption specified - expecting 1 cache miss, 2 cache hits
+    accessor.loadTable(tableName);
+    accessor.loadTable(tableName);
+    accessor.loadTable(tableName);
+    assertEquals(1, loadTableCalls.get());
+
+    // Force update once
+    accessor.loadTable(tableName, forceUpdateOnce);
+    assertEquals(2, loadTableCalls.get());
+    accessor.loadTable(tableName, forceUpdateOnce);
+    assertEquals(2, loadTableCalls.get());
+
+    // Force update always
+    accessor.loadTable(tableName, forceUpdateAlways);
+    assertEquals(3, loadTableCalls.get());
+    accessor.loadTable(tableName, forceUpdateAlways);
+    assertEquals(4, loadTableCalls.get());
+
+    // Views
+    // GetDatasetOption specified - expecting 1 cache miss, 2 cache hits
+    accessor.loadView(viewName);
+    accessor.loadView(viewName);
+    accessor.loadView(viewName);
+    assertEquals(1, loadViewCalls.get());
+
+    // Force update
+    accessor.loadView(viewName, forceUpdateAlways);
+    assertEquals(2, loadViewCalls.get());
+    accessor.loadView(viewName, forceUpdateAlways);
+    assertEquals(3, loadViewCalls.get());
+  }
+
+  @Test
+  public void testGetViewHandleInternal() {
+    List<String> viewPath = List.of("catalog", "ns", "view");
+    final TableIdentifier tableIdentifier = TableIdentifier.of("ns", "view");
+
+    SupportsIcebergRootPointer mockPlugin = mock(SupportsIcebergRootPointer.class);
+    ViewVersion mockViewVersion = mock(ViewVersion.class);
+    when(mockPlugin.loadViewMetadata(any(TableIdentifier.class))).thenReturn(mockBaseView);
+    when(mockViewMetadata.currentVersion()).thenReturn(mockViewVersion);
+    when(mockViewVersion.defaultCatalog()).thenReturn("catalog");
+
+    AbstractRestCatalogAccessor accessor =
+        (AbstractRestCatalogAccessor) restCatalogAccessorWithViewSupport;
+    DatasetHandle datasetHandle =
+        accessor.getViewHandleInternal(viewPath, tableIdentifier, mockPlugin);
+    assertThat(datasetHandle).isInstanceOf(IcebergCatalogViewProvider.class);
+    IcebergCatalogViewProvider icebergCatalogViewProvider =
+        datasetHandle.unwrap(IcebergCatalogViewProvider.class);
+    icebergCatalogViewProvider.getCatalog();
+
+    verify(mockPlugin, times(1)).loadViewMetadata(tableIdentifier);
+  }
+
+  @Test
+  public void testInvalidateTableCacheForAllUsers() {
+    // Arrange
+    List<String> tablePath = Arrays.asList("test_source", "namespace1", "test_table");
+    TableIdentifier tableId = TableIdentifier.of("namespace1", "test_table");
+
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED)).thenReturn(true);
+    Table mockTable = mock(Table.class, withSettings().extraInterfaces(HasTableOperations.class));
+    TableOperations mockTableOps = mock(TableOperations.class);
+    TableMetadata mockTableMetadata = mock(TableMetadata.class);
+
+    when(((HasTableOperations) mockTable).operations()).thenReturn(mockTableOps);
+    when(mockTableOps.current()).thenReturn(mockTableMetadata);
+
+    RESTCatalog mockCatalog = mock(RESTCatalog.class);
+    when(mockCatalog.loadTable(any(TableIdentifier.class))).thenReturn(mockTable);
+    when(validSupplierCatalog.get()).thenReturn(mockCatalog);
+
+    // Act - Load table to populate cache, then invalidate, then load again
+
+    // First load - should populate cache
+    restCatalogAccessor.getTableMetadata(tablePath);
+    verify(mockCatalog, times(1)).loadTable(any(TableIdentifier.class));
+
+    // Second load - should hit cache (no additional catalog call)
+    restCatalogAccessor.getTableMetadata(tablePath);
+    verify(mockCatalog, times(1)).loadTable(any(TableIdentifier.class)); // Still 1 call
+
+    // Invalidate cache for all users
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+    accessor.invalidateTableCacheForAllUsers(tableId);
+
+    // Third load - should miss cache after invalidation (new catalog call)
+    restCatalogAccessor.getTableMetadata(tablePath);
+    verify(mockCatalog, times(2)).loadTable(any(TableIdentifier.class)); // Now 2 calls
+  }
+
+  @Test
+  public void testInvalidateTableCacheForAllUsersWithEmptyCache() {
+    // Arrange
+    TableIdentifier tableId = TableIdentifier.of("namespace1", "test_table");
+
+    // Act - Test invalidation on empty cache (no prior loads)
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+    // This should not throw an exception even with empty cache
+    assertDoesNotThrow(() -> accessor.invalidateTableCacheForAllUsers(tableId));
+  }
+
+  @Test
+  public void testInvalidateTableCacheForAllUsersWithNullTableIdentifier() {
+    // Arrange
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+
+    // Act & Assert
+    assertThatThrownBy(() -> accessor.invalidateTableCacheForAllUsers(null))
+        .isInstanceOf(IllegalArgumentException.class)
+        .hasMessage("TableIdentifier cannot be null");
+  }
+
+  @Test
+  public void testInvalidateTableCacheForAllUsersWithSingleUser() {
+    // Arrange
+    List<String> tablePath = Arrays.asList("test_source", "namespace1", "test_table");
+    TableIdentifier tableId = TableIdentifier.of("namespace1", "test_table");
+
+    // Create a mock table that implements HasTableOperations
+    Table mockTable = mock(Table.class, withSettings().extraInterfaces(HasTableOperations.class));
+    TableOperations mockTableOps = mock(TableOperations.class);
+    TableMetadata mockTableMetadata = mock(TableMetadata.class);
+
+    // Configure the HasTableOperations behavior
+    when(((HasTableOperations) mockTable).operations()).thenReturn(mockTableOps);
+    when(mockTableOps.current()).thenReturn(mockTableMetadata);
+
+    // Create a mock catalog to track loadTable calls
+    RESTCatalog mockCatalog = mock(RESTCatalog.class);
+    when(mockCatalog.loadTable(any(TableIdentifier.class))).thenReturn(mockTable);
+    when(validSupplierCatalog.get()).thenReturn(mockCatalog);
+
+    // Act - Test with single user scenario
+
+    // Load table once to populate cache
+    restCatalogAccessor.getTableMetadata(tablePath);
+    verify(mockCatalog, times(1)).loadTable(any(TableIdentifier.class));
+
+    // Invalidate cache
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+    accessor.invalidateTableCacheForAllUsers(tableId);
+
+    // Load again - should call catalog again after invalidation
+    restCatalogAccessor.getTableMetadata(tablePath);
+    verify(mockCatalog, times(2)).loadTable(any(TableIdentifier.class));
+  }
+
+  @Test
+  public void testInvalidateTableCacheForAllUsersWithMultipleNamespaces() {
+    // Arrange
+    List<String> tablePath1 = Arrays.asList("test_source", "namespace1", "test_table");
+    List<String> tablePath2 = Arrays.asList("test_source", "namespace2", "test_table");
+    TableIdentifier tableId1 = TableIdentifier.of("namespace1", "test_table");
+    TableIdentifier tableId2 = TableIdentifier.of("namespace2", "test_table");
+
+    when(mockOptionManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED)).thenReturn(true);
+    Table mockTable1 = mock(Table.class, withSettings().extraInterfaces(HasTableOperations.class));
+    Table mockTable2 = mock(Table.class, withSettings().extraInterfaces(HasTableOperations.class));
+    TableOperations mockTableOps1 = mock(TableOperations.class);
+    TableOperations mockTableOps2 = mock(TableOperations.class);
+    TableMetadata mockTableMetadata1 = mock(TableMetadata.class);
+    TableMetadata mockTableMetadata2 = mock(TableMetadata.class);
+
+    when(((HasTableOperations) mockTable1).operations()).thenReturn(mockTableOps1);
+    when(mockTableOps1.current()).thenReturn(mockTableMetadata1);
+    when(((HasTableOperations) mockTable2).operations()).thenReturn(mockTableOps2);
+    when(mockTableOps2.current()).thenReturn(mockTableMetadata2);
+
+    RESTCatalog mockCatalog = mock(RESTCatalog.class);
+    when(mockCatalog.loadTable(tableId1)).thenReturn(mockTable1);
+    when(mockCatalog.loadTable(tableId2)).thenReturn(mockTable2);
+    when(validSupplierCatalog.get()).thenReturn(mockCatalog);
+
+    // Act
+
+    // Load both tables  twice to populate cache
+    restCatalogAccessor.getTableMetadata(tablePath1);
+    restCatalogAccessor.getTableMetadata(tablePath2);
+    restCatalogAccessor.getTableMetadata(tablePath1);
+    restCatalogAccessor.getTableMetadata(tablePath2);
+    verify(mockCatalog, times(1)).loadTable(tableId1);
+    verify(mockCatalog, times(1)).loadTable(tableId2);
+
+    // Invalidate only namespace1.test_table
+    AbstractRestCatalogAccessor accessor = (AbstractRestCatalogAccessor) restCatalogAccessor;
+    accessor.invalidateTableCacheForAllUsers(tableId1);
+
+    // Load namespace1 table again - should call catalog (cache invalidated)
+    restCatalogAccessor.getTableMetadata(tablePath1);
+    verify(mockCatalog, times(2)).loadTable(tableId1); // Called again
+
+    // Load namespace2 table again - should NOT call catalog (cache still valid)
+    restCatalogAccessor.getTableMetadata(tablePath2);
+    verify(mockCatalog, times(1)).loadTable(tableId2); // Still only 1 call
   }
 }

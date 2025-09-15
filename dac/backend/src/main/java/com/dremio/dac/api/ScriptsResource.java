@@ -88,10 +88,10 @@ public class ScriptsResource {
     String finalSearch = (search == null) ? "" : search;
     String finalOrderBy = (orderBy == null) ? "" : orderBy;
 
-    Long totalScripts = scriptService.getCountOfMatchingScripts(finalSearch, "", createdBy);
+    Long totalScripts = scriptService.getCountOfMatchingScripts(finalSearch, createdBy);
     List<ScriptEntity> scripts =
         scriptService
-            .getScripts(finalOffset, finalMaxResults, finalSearch, finalOrderBy, "", createdBy)
+            .getScripts(finalOffset, finalMaxResults, finalSearch, finalOrderBy, createdBy)
             .parallelStream()
             .map(script -> convertScriptToScriptEntity(script))
             .collect(Collectors.toList());

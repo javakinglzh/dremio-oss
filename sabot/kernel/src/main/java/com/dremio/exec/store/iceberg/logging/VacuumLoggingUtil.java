@@ -25,6 +25,7 @@ import com.dremio.exec.store.iceberg.logging.VacuumLogProto.ExpireSnapshotInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.NessieCommitScanInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.SnapshotInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.TableSkipInfo;
+import com.dremio.exec.store.iceberg.logging.VacuumLogProto.VacuumCatalogInfo;
 import com.dremio.exec.store.iceberg.logging.VacuumLogProto.VacuumLog;
 import java.util.List;
 
@@ -34,6 +35,7 @@ public class VacuumLoggingUtil {
   private static final String NESSIE_COMMIT_SCAN_ACTION = "NessieCommitScan";
   private static final String EXPIRE_SNAPSHOT_ACTION = "ExpireSnapshot";
   private static final String SNAPSHOT_INFO = "SnapshotInfo";
+  private static final String VACUUM_CATALOG_INFO_ACTION = "VacuumCatalogInfo";
 
   public static StructuredLogger getVacuumLogger() {
     return StructuredLogger.get(VacuumLog.class, "VacuumLogger");
@@ -189,6 +191,15 @@ public class VacuumLoggingUtil {
         .build();
   }
 
+  public static VacuumLog createVacuumCatalogInfoLog(String queryId, String info) {
+    final VacuumCatalogInfo.Builder vacuumCatalogInfo =
+        VacuumCatalogInfo.newBuilder().setInfo(info);
+
+    return commonVacuumLogBuilder(queryId, true, vacuumCatalogInfo.build())
+        .setErrorType(ErrorType.NO_ERROR)
+        .build();
+  }
+
   private static VacuumLog.Builder commonVacuumLogBuilder(
       String queryId, boolean status, ExpireSnapshotInfo expireSnapshotInfo) {
     return VacuumLog.newBuilder()
@@ -233,5 +244,14 @@ public class VacuumLoggingUtil {
         .setAction(SNAPSHOT_INFO)
         .setStatus(true)
         .setActionTarget(ActionTarget.newBuilder().setSnapshotInfo(snapshotInfo).build());
+  }
+
+  private static VacuumLog.Builder commonVacuumLogBuilder(
+      String queryId, boolean status, VacuumCatalogInfo vacuumCatalogInfo) {
+    return VacuumLog.newBuilder()
+        .setJobId(queryId)
+        .setAction(VACUUM_CATALOG_INFO_ACTION)
+        .setStatus(status)
+        .setActionTarget(ActionTarget.newBuilder().setVacuumCatalogInfo(vacuumCatalogInfo).build());
   }
 }

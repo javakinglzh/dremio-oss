@@ -16,6 +16,7 @@
 package com.dremio.io;
 
 import com.dremio.common.exceptions.ErrorHelper;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.buffer.ByteBuf;
 import java.util.List;
@@ -25,14 +26,23 @@ import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Decorator over AsyncByteReader with timeout. */
 public class AsyncByteReaderWithTimeout extends ReusableAsyncByteReader {
-  private static ScheduledThreadPoolExecutor delayer;
+  private static final Logger logger = LoggerFactory.getLogger(AsyncByteReaderWithTimeout.class);
+  private static final ScheduledThreadPoolExecutor delayer;
   private final AtomicInteger numOutstandingReads = new AtomicInteger(0);
-  private AsyncByteReader inner;
-  private long timeoutInMillis;
+  private final AsyncByteReader inner;
+  private final long timeoutInMillis;
+
+  // Metrics tracking
+  private static final AtomicLong totalTimeoutTasksScheduled = new AtomicLong(0);
+  private static final AtomicLong totalTimeoutTasksCompleted = new AtomicLong(0);
+  private static final AtomicLong totalTimeoutTasksCancelled = new AtomicLong(0);
 
   static {
     delayer =
@@ -42,9 +52,11 @@ public class AsyncByteReaderWithTimeout extends ReusableAsyncByteReader {
     delayer.setRemoveOnCancelPolicy(true);
   }
 
-  public AsyncByteReaderWithTimeout(AsyncByteReader inner, long timeoutInMillis) {
+  public AsyncByteReaderWithTimeout(
+      AsyncByteReader inner, long timeoutInMillis, int delayerThreadCount) {
     this.inner = inner;
     this.timeoutInMillis = timeoutInMillis;
+    delayer.setCorePoolSize(delayerThreadCount);
   }
 
   /**
@@ -72,16 +84,26 @@ public class AsyncByteReaderWithTimeout extends ReusableAsyncByteReader {
               }
               numOutstandingReads.getAndDecrement();
             });
+    if (logger.isDebugEnabled()) {
+      logger.debug(getThreadPoolStats());
+    }
     return future;
   }
 
   /** if the future cannot complete within 'millis', fail with TimeoutException. */
   private static <T> CompletableFuture<T> within(CompletableFuture<T> future, long millis) {
+    // Track that we're scheduling a timeout task
+    totalTimeoutTasksScheduled.incrementAndGet();
+
     // schedule a task to generate a timeout after 'millis'
     final CompletableFuture<T> timeout = new CompletableFuture<>();
     ScheduledFuture timeoutTask =
         delayer.schedule(
-            () -> timeout.completeExceptionally(new AsyncTimeoutException()),
+            () -> {
+              // Track that the timeout was reached
+              totalTimeoutTasksCompleted.incrementAndGet();
+              timeout.completeExceptionally(new AsyncTimeoutException());
+            },
             millis,
             TimeUnit.MILLISECONDS);
 
@@ -89,7 +111,16 @@ public class AsyncByteReaderWithTimeout extends ReusableAsyncByteReader {
     // task in either case.
     return future
         .applyToEither(timeout, Function.identity())
-        .whenComplete((x, y) -> timeoutTask.cancel(true));
+        .whenComplete(
+            (x, y) -> {
+              if (timeoutTask.cancel(true) && y == null) {
+                // Track that the timout task was cancelled because the wrapped future was completed
+                totalTimeoutTasksCancelled.incrementAndGet();
+              }
+              if (logger.isDebugEnabled()) {
+                logger.debug(getThreadPoolStats());
+              }
+            });
   }
 
   @Override
@@ -100,5 +131,31 @@ public class AsyncByteReaderWithTimeout extends ReusableAsyncByteReader {
   @Override
   public List<ReaderStat> getStats() {
     return inner.getStats();
+  }
+
+  /**
+   * Get current thread pool statistics for monitoring.
+   *
+   * @return formatted string with thread pool metrics
+   */
+  @VisibleForTesting
+  static String getThreadPoolStats() {
+    if (delayer == null) {
+      return "Thread pool not initialized";
+    }
+
+    return String.format(
+        "AsyncByteReaderWithTimeout ThreadPool Stats: "
+            + "queueSize=%d, activeThreads=%d, corePoolSize=%d, "
+            + "completedTasks=%d, totalTasks=%d, "
+            + "customScheduled=%d, customCompleted=%d, customCancelled=%d",
+        delayer.getQueue().size(),
+        delayer.getActiveCount(),
+        delayer.getCorePoolSize(),
+        delayer.getCompletedTaskCount(),
+        delayer.getTaskCount(),
+        totalTimeoutTasksScheduled.get(),
+        totalTimeoutTasksCompleted.get(),
+        totalTimeoutTasksCancelled.get());
   }
 }

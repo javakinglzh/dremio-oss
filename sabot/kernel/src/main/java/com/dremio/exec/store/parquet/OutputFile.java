@@ -31,10 +31,6 @@ public final class OutputFile implements org.apache.parquet.io.OutputFile {
   }
 
   public static OutputFile of(FileSystem fs, Path path) {
-    // TODO: DX-99828 - IcebergCatalog using ContainerFS with non-container path here
-    if (!fs.supportsPathsWithScheme()) {
-      path = Path.of(Path.getContainerSpecificRelativePath(path));
-    }
     return new OutputFile(fs, path);
   }
 

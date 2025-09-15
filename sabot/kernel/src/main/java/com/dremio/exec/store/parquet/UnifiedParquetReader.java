@@ -326,19 +326,6 @@ public class UnifiedParquetReader implements RecordReader {
         Metric.NUM_NON_VECTORIZED_COLUMNS, Long.valueOf(nonVectorizableReaderColumns.size()));
     setMetricValue(Metric.FILTER_EXISTS, filters.getPushdownFilters().size() > 0 ? 1L : 0L);
 
-    boolean enableColumnTrim =
-        context.getOptions().getOption(ExecConstants.TRIM_COLUMNS_FROM_ROW_GROUP);
-    if (output.getSchemaChanged() || !enableColumnTrim) {
-      return;
-    }
-
-    // remove information about columns that we dont care about
-    Set<String> parquetColumnNamesToRetain = getParquetColumnNamesToRetain();
-    if (parquetColumnNamesToRetain != null) {
-      long numColumnsTrimmed = footer.removeUnneededColumns(parquetColumnNamesToRetain);
-      addMetricValue(Metric.NUM_COLUMNS_TRIMMED, numColumnsTrimmed);
-    }
-
     createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
 
     this.variableVectorSizer = VectorContainerHelper.createSizer(output.getVectors(), false);
@@ -353,6 +340,19 @@ public class UnifiedParquetReader implements RecordReader {
         throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
             rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
       }
+    }
+
+    boolean enableColumnTrim =
+        context.getOptions().getOption(ExecConstants.TRIM_COLUMNS_FROM_ROW_GROUP);
+    if (output.getSchemaChanged() || !enableColumnTrim) {
+      return;
+    }
+
+    // remove information about columns that we dont care about
+    Set<String> parquetColumnNamesToRetain = getParquetColumnNamesToRetain();
+    if (parquetColumnNamesToRetain != null) {
+      long numColumnsTrimmed = footer.removeUnneededColumns(parquetColumnNamesToRetain);
+      addMetricValue(Metric.NUM_COLUMNS_TRIMMED, numColumnsTrimmed);
     }
   }
 

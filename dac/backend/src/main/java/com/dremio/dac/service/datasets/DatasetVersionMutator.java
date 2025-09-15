@@ -66,6 +66,7 @@ import com.dremio.exec.dotfile.View;
 import com.dremio.exec.physical.base.ViewOptions;
 import com.dremio.exec.planner.logical.ViewTable;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
+import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.SabotQueryContext;
@@ -104,14 +105,17 @@ import com.google.common.collect.Maps;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.inject.Inject;
 import javax.inject.Provider;
+import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.tools.RelConversionException;
 import org.apache.calcite.tools.ValidationException;
 import org.slf4j.Logger;
@@ -162,13 +166,30 @@ public class DatasetVersionMutator {
         optionManager);
   }
 
+  public static boolean isValid(DatasetPath path, VirtualDatasetUI ds) {
+    String invalidityReason = getInvalidityReason(path, ds);
+    if (invalidityReason != null) {
+      logger.debug("Dataset version is invalid: {}", invalidityReason);
+      return false;
+    }
+    return true;
+  }
+
   public static void validate(DatasetPath path, VirtualDatasetUI ds) {
+    String invalidityReason = getInvalidityReason(path, ds);
+    if (invalidityReason != null) {
+      throw new IllegalArgumentException(invalidityReason);
+    }
+  }
+
+  private static String getInvalidityReason(DatasetPath path, VirtualDatasetUI ds) {
     if (ds.getSqlFieldsList() == null || ds.getSqlFieldsList().isEmpty()) {
-      throw new IllegalArgumentException("SqlFields can't be null for " + path);
+      return "SqlFields can't be null for " + path;
     }
     if (ds.getState() == null) {
-      throw new IllegalArgumentException("state can't be null for " + path);
+      return "state can't be null for " + path;
     }
+    return null;
   }
 
   private void putVersion(
@@ -246,7 +267,10 @@ public class DatasetVersionMutator {
     validatePaths(path, null);
     validate(path, ds);
     final SqlQuery query = new SqlQuery(ds.getSql(), ds.getState().getContextList(), ds.getOwner());
-    validateVersions(query, null);
+
+    ConvertedRelNode convertedRelNode = validateVersions(query, null);
+    ensureUniqueColumnNames(convertedRelNode);
+
     DatasetConfig datasetConfig = toVirtualDatasetVersion(ds).getDataset();
     datasetConfig.getVirtualDataset().setSchemaOutdated(false);
     getCatalog().addOrUpdateDataset(path.toNamespaceKey(), datasetConfig, attributes);
@@ -254,6 +278,36 @@ public class DatasetVersionMutator {
     ds.setSavedTag(datasetConfig.getTag());
     // Update this version of dataset with new occ version of dataset config from namespace.
     putVersion(ds);
+  }
+
+  /**
+   * Validates that all column names in the given {@link ConvertedRelNode}'s validated row type are
+   * unique.
+   *
+   * <p>This method is intended to enforce relational schema rules when saving a dataset or view,
+   * ensuring that the resulting schema does not contain duplicate column names. Duplicate names can
+   * lead to ambiguous references in downstream queries and are disallowed in views or subqueries
+   * that are treated as relational sources.
+   *
+   * @param relNode the {@link ConvertedRelNode} containing the validated row type; may be {@code
+   *     null}, or its row type may be {@code null}, in which case the check is skipped
+   * @throws UserException if any column name appears more than once
+   */
+  private void ensureUniqueColumnNames(ConvertedRelNode relNode) {
+    if (relNode == null || relNode.getValidatedRowType() == null) {
+      return;
+    }
+
+    RelDataType rowType = relNode.getValidatedRowType();
+    Set<String> seen = new HashSet<>();
+
+    for (String name : rowType.getFieldNames()) {
+      if (!seen.add(name)) {
+        throw UserException.validationError()
+            .message("Duplicate column name '%s' detected.", name)
+            .buildSilently();
+      }
+    }
   }
 
   private ViewOptions getViewOptions(DatasetConfig datasetConfig, boolean viewExists) {
@@ -532,6 +586,10 @@ public class DatasetVersionMutator {
     VersionDatasetKey datasetKey = new VersionDatasetKey(path, version);
     do {
       VirtualDatasetVersion virtualDatasetVersion = datasetVersions.get(datasetKey);
+      if (virtualDatasetVersion == null) {
+        // History chain may be broken/corrupt
+        break;
+      }
 
       if (virtualDatasetVersion.getDatasetVersionOrigin() == datasetVersionOrigin) {
         return datasetKey.getVersion();
@@ -865,9 +923,10 @@ public class DatasetVersionMutator {
     validateVersions(query, sourceVersionMapping);
   }
 
-  private void validateVersions(SqlQuery query, Map<String, VersionContext> sourceVersionMapping) {
+  private ConvertedRelNode validateVersions(
+      SqlQuery query, Map<String, VersionContext> sourceVersionMapping) {
     try {
-      QueryParser.validateVersions(query, sabotQueryContext, sourceVersionMapping);
+      return QueryParser.validateVersions(query, sabotQueryContext, sourceVersionMapping);
     } catch (ValidationException | RelConversionException e) {
       // Calcite exception could wrap exceptions in layers.  Find the root cause to get the original
       // error message.

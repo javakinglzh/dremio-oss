@@ -32,6 +32,7 @@ import com.dremio.common.expression.SupportedEngines.Engine;
 import com.dremio.common.expression.TypedNullConstant;
 import com.dremio.common.expression.visitors.AbstractExprVisitor;
 import com.dremio.common.logical.data.NamedExpression;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.proto.UserBitShared.ExpressionSplitInfo;
 import com.dremio.exec.record.BatchSchema;
@@ -40,10 +41,12 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.op.llvm.expr.GandivaPushdownSieve;
 import com.google.common.base.Stopwatch;
 import com.google.common.collect.Lists;
 import java.io.Closeable;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -51,10 +54,10 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.apache.arrow.gandiva.exceptions.GandivaException;
 import org.apache.arrow.vector.ValueVector;
 import org.apache.arrow.vector.types.pojo.Field;
 
@@ -123,13 +126,16 @@ public class ExpressionSplitter implements AutoCloseable {
 
   private boolean isGandivaFunctionsLogged;
   private boolean isVarLengthOutputPresent;
+  private final FragmentExecutionContext fec;
 
   public ExpressionSplitter(
+      FragmentExecutionContext fec,
       OperatorContext context,
       VectorAccessible incoming,
       ExpressionEvaluationOptions options,
       boolean isDecimalV2Enabled) {
     this(
+        fec,
         context,
         incoming,
         options,
@@ -139,16 +145,26 @@ public class ExpressionSplitter implements AutoCloseable {
   }
 
   public ExpressionSplitter(
+      FragmentExecutionContext fec,
       OperatorContext context,
       VectorAccessible incoming,
       ExpressionEvaluationOptions options,
       ExpressionSplitHelper gandivaSplitHelper,
       String outputPrefix,
       boolean checkExcessiveSplits) {
-    this(context, incoming, options, gandivaSplitHelper, outputPrefix, checkExcessiveSplits, null);
+    this(
+        fec,
+        context,
+        incoming,
+        options,
+        gandivaSplitHelper,
+        outputPrefix,
+        checkExcessiveSplits,
+        null);
   }
 
   private ExpressionSplitter(
+      FragmentExecutionContext fec,
       OperatorContext context,
       VectorAccessible incoming,
       ExpressionEvaluationOptions options,
@@ -160,6 +176,7 @@ public class ExpressionSplitter implements AutoCloseable {
     this.options = options;
     this.gandivaSplitHelper = gandivaSplitHelper;
     this.outputFieldPrefix = outputPrefix;
+    this.fec = fec;
     this.splitExpressions = Lists.newArrayList();
     this.currentExprSplits = Lists.newArrayList();
     this.incoming = incoming;
@@ -196,6 +213,7 @@ public class ExpressionSplitter implements AutoCloseable {
     if (checkExcessiveSplits) {
       flipCodeGenSplitter =
           new ExpressionSplitter(
+              fec,
               context,
               incoming,
               options.flipPreferredCodeGen(),
@@ -361,6 +379,103 @@ public class ExpressionSplitter implements AutoCloseable {
 
   // iterate over the splits and find out when they can execute
   private void createPipeline() {
+    if (context
+        .getOptions()
+        .getOption(ExecConstants.ENABLE_EXPRESSION_SPLIT_PIPELINE_TOPOLOGICAL_SORT)) {
+      createPipelineWithTopologicalSort();
+    } else {
+      createPipelineWithIterativeAlgorithm();
+    }
+  }
+
+  // iterate over the splits and find out when they can execute using topological sorting
+  private void createPipelineWithTopologicalSort() {
+    if (splitExpressions.isEmpty()) {
+      return;
+    }
+
+    // Build dependency graph and calculate in-degrees
+    final int splitCount = splitExpressions.size();
+    final Map<String, ExpressionSplit> nameOfSplit = new HashMap<>();
+    final Map<ExpressionSplit, Integer> inDegree = new HashMap<>();
+    final Map<ExpressionSplit, List<ExpressionSplit>> downstreamSplits = new HashMap<>();
+
+    // First pass: build output name mapping and initialize structures
+    final Queue<ExpressionSplit> readyQueue = new ArrayDeque<>(splitCount);
+
+    for (ExpressionSplit split : splitExpressions) {
+      nameOfSplit.put(split.getOutputName(), split);
+    }
+
+    // Second pass: calculate in-degrees and build dependency relationships
+    for (ExpressionSplit split : splitExpressions) {
+      final List<String> namesOfDependencies = split.getDependencies();
+      final int depCount = namesOfDependencies.size();
+      inDegree.put(split, depCount);
+
+      // Add to ready queue if no dependencies
+      if (depCount == 0) {
+        readyQueue.offer(split);
+      }
+
+      // Build dependency relationships in same pass
+      for (String depSplitName : namesOfDependencies) {
+        ExpressionSplit depSplit = nameOfSplit.get(depSplitName);
+        if (depSplit != null) {
+          downstreamSplits.computeIfAbsent(depSplit, k -> new ArrayList<>()).add(split);
+        }
+      }
+    }
+
+    // Kahn's algorithm for topological sorting with batched execution
+    int execIteration = 1;
+
+    while (!readyQueue.isEmpty()) {
+      // Process all splits that are ready in this iteration
+      int batchSize = readyQueue.size();
+
+      final SplitStageExecutor splitStageExecutor =
+          new SplitStageExecutor(fec, context, vectorContainer, preferredEngine);
+
+      logger.trace("Planning splits in phase {}", execIteration);
+
+      // Process current batch and update dependencies
+      while (batchSize > 0) {
+
+        ExpressionSplit split = readyQueue.poll();
+        logger.trace(
+            "Split {} planned for execution in this phase", split.getNamedExpression().getExpr());
+
+        split.setExecIteration(execIteration);
+        splitStageExecutor.addSplit(split);
+        batchSize--;
+
+        // Update in-degrees of downstreamSplit
+        for (ExpressionSplit downstreamSplit :
+            downstreamSplits.getOrDefault(split, Collections.emptyList())) {
+          if (0 == inDegree.compute(downstreamSplit, (k, v) -> v - 1)) {
+            readyQueue.offer(downstreamSplit);
+          }
+        }
+      }
+      execPipeline.add(splitStageExecutor);
+      execIteration++;
+    }
+
+    // Verify all splits were processed (detect cycles)
+    if (logger.isDebugEnabled()) {
+      for (ExpressionSplit split : splitExpressions) {
+        if (inDegree.get(split) > 0) {
+          logger.warn(
+              "Circular dependency detected involving split: {}",
+              split.getNamedExpression().getExpr());
+        }
+      }
+    }
+  }
+
+  // iterate over the splits and find out when they can execute using iterative algorithm
+  private void createPipelineWithIterativeAlgorithm() {
     List<ExpressionSplit> pendingSplits = Lists.newArrayList();
     pendingSplits.addAll(splitExpressions);
     List<String> doneSplits = Lists.newArrayList();
@@ -369,7 +484,7 @@ public class ExpressionSplitter implements AutoCloseable {
       Iterator<ExpressionSplit> iterator = pendingSplits.iterator();
       List<String> doneInThisIteration = Lists.newArrayList();
       SplitStageExecutor splitStageExecutor =
-          new SplitStageExecutor(context, vectorContainer, preferredEngine);
+          new SplitStageExecutor(fec, context, vectorContainer, preferredEngine);
 
       logger.trace("Planning splits in phase {}", execIteration);
       while (iterator.hasNext()) {
@@ -406,6 +521,13 @@ public class ExpressionSplitter implements AutoCloseable {
       VectorContainer outgoing, Stopwatch javaCodeGenWatch, Stopwatch gandivaCodeGenWatch)
       throws Exception {
     for (SplitStageExecutor splitStageExecutor : execPipeline) {
+      if (fec != null && fec.isCancelled()) {
+        throw new Exception(
+            String.format(
+                "Project operator %s setup for query fragment %s aborted due to cancellation",
+                context.getStats().getOperatorId(),
+                QueryIdHelper.getExecutorThreadName(context.getFragmentHandle())));
+      }
       splitStageExecutor.setupProjector(outgoing, javaCodeGenWatch, gandivaCodeGenWatch, options);
     }
   }
@@ -413,8 +535,15 @@ public class ExpressionSplitter implements AutoCloseable {
   // setup the pipeline for filter operations
   private void filterSetup(
       VectorContainer outgoing, Stopwatch javaCodeGenWatch, Stopwatch gandivaCodeGenWatch)
-      throws GandivaException, Exception {
+      throws Exception {
     for (SplitStageExecutor splitStageExecutor : execPipeline) {
+      if (fec != null && fec.isCancelled()) {
+        throw new Exception(
+            String.format(
+                "Filter operator %s setup for query fragment %s aborted due to cancellation",
+                context.getStats().getOperatorId(),
+                QueryIdHelper.getExecutorThreadName(context.getFragmentHandle())));
+      }
       splitStageExecutor.setupFilter(outgoing, javaCodeGenWatch, gandivaCodeGenWatch, options);
     }
   }

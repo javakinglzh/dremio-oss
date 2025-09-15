@@ -496,6 +496,10 @@ public class BaseTestQuery extends ExecTest {
    */
   public static String getJDBCURL() {
     CoordinationProtos.NodeEndpoint endpoint = getFirstCoordinatorEndpoint();
+    return getJDBCURL(endpoint);
+  }
+
+  public static String getJDBCURL(CoordinationProtos.NodeEndpoint endpoint) {
     return format("jdbc:dremio:direct=%s:%d", endpoint.getAddress(), endpoint.getUserPort());
   }
 

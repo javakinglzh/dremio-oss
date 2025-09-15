@@ -2858,6 +2858,7 @@ public class VectorizedHashAggOperator implements SingleInputOperator, Shrinkabl
       statsHolder.unusedForFixedBlocks = unusedForFixedBlocks;
       statsHolder.allocatedForVarBlocks = allocatedForVarBlocks;
       statsHolder.unusedForVarBlocks = unusedForVarBlocks;
+      statsHolder.hashTableType = hashAggPartitions[0].hashTable.getHashTableType();
     }
   }
 
@@ -2951,6 +2952,7 @@ public class VectorizedHashAggOperator implements SingleInputOperator, Shrinkabl
       stats.setLongStat(Metric.ALLOCATED_FOR_VARIABLE_KEYS, statsHolder.allocatedForVarBlocks);
       stats.setLongStat(Metric.UNUSED_FOR_VARIABLE_KEYS, statsHolder.unusedForVarBlocks);
       stats.setLongStat(Metric.MAX_VARIABLE_BLOCK_LENGTH, maxVariableBlockLength);
+      stats.setLongStat(Metric.HASHTABLE_TYPE, statsHolder.hashTableType);
     }
     stats.setLongStat(Metric.SETUP_MILLIS, setUpWatch.elapsed(TimeUnit.MILLISECONDS));
     stats.setLongStat(Metric.CAN_PRODUCE_MILLIS, produceDataWatch.elapsed(TimeUnit.MILLISECONDS));
@@ -2979,6 +2981,7 @@ public class VectorizedHashAggOperator implements SingleInputOperator, Shrinkabl
     private long unusedForFixedBlocks;
     private long allocatedForVarBlocks;
     private long unusedForVarBlocks;
+    private int hashTableType;
 
     HashTableStatsHolder() {}
   }

@@ -83,12 +83,10 @@ public class Retryer implements ExponentialBackoff {
     }
     final StackTraceElement caller = Thread.currentThread().getStackTrace()[3];
     logger.warn(
-        "Retry attempt {} for the failure at {}:{}:{}, Error - {}",
-        attemptNo,
-        caller.getClassName(),
-        caller.getMethodName(),
-        caller.getLineNumber(),
-        e.getMessage());
+        String.format(
+            "Retry attempt %s for the failure at %s:%s:%s",
+            attemptNo, caller.getClassName(), caller.getMethodName(), caller.getLineNumber()),
+        e);
     switch (waitStrategy) {
       case EXPONENTIAL:
         backoffWait(attemptNo);

@@ -83,6 +83,7 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
   private UnlimitedSplitsMetadataProvider metadataProvider;
   private List<String> partialRefreshPaths;
   private Function<RelMetadataQuery, Double> estimateRowCountFn;
+  private boolean recursivePartialRefresh;
 
   public DirListingInvocationPrel(
       RelOptCluster cluster,
@@ -98,7 +99,8 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
       UnlimitedSplitsMetadataProvider metadataProvider,
       List<String> partialRefreshPaths,
       final Function<RelMetadataQuery, Double> estimateRowCountFn,
-      List<Info> runtimeFilters) {
+      List<Info> runtimeFilters,
+      boolean recursivePartialRefresh) {
     super(
         cluster,
         traitSet,
@@ -115,6 +117,7 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
     this.metadataProvider = metadataProvider;
     this.partialRefreshPaths = partialRefreshPaths;
     this.estimateRowCountFn = estimateRowCountFn;
+    this.recursivePartialRefresh = recursivePartialRefresh;
   }
 
   @Override
@@ -133,7 +136,8 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
         metadataProvider,
         partialRefreshPaths,
         estimateRowCountFn,
-        getRuntimeFilters());
+        getRuntimeFilters(),
+        recursivePartialRefresh);
   }
 
   @Override
@@ -152,7 +156,8 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
         metadataProvider,
         partialRefreshPaths,
         estimateRowCountFn,
-        getRuntimeFilters());
+        getRuntimeFilters(),
+        recursivePartialRefresh);
   }
 
   @Override
@@ -161,40 +166,51 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
   }
 
   /*                     +------------------------------------------------------------+
-   *                     |            Project                                         |
-   *                     |   coalesce(filePath != null then filePath else dataFilePath|
-   *                     +------------------------------------------------------------+
-   *                                       |
-   *                     +------------------------------------------+
-   *                     |           Filter                         |
-   *                     | filePath is null or dataFilePath is null |
-   *                     +------------------------------------------+
-   *                                      |
-   *                     +--------------------------------------+
-   *                     |            HashJoin                  |
-   *                     | full join on filePath = datafilePath |
-   *                     +--------------------------------------+
-   *                                      |
-   *               |------------------------------------------------------------------------|
-   *               |                                                                        |
-   * +----------------------------+                                             +----------------------------+
-   * |  HashToRandomExchangePrel  |                                             |  HashToRandomExchangePrel  |
-   * +----------------------------+                                             +----------------------------+
-   *               |                                                                        |
-   *               |                                                                        |
-   *               |                                                                        |
-   *               |                                                                        |
-   *               |                                                 +--------------------------------------------------------------------+
-   *               |                                                 |               ManifestScanTableFunction                            |
-   *               |                                                 |        (generate dataFilePath by reading manifestFiles)            |
-   *               |                                                 +--------------------------------------------------------------------+
-   *               |                                                                        |
-   *               |                                                                        |
-   * +------------------------------------+                         +--------------------------------------------------------------------+
-   * |         DirListScan                |                         |         IcebergManifestListScan                                    |
-   * |  (list files as filePath)          |                         |  (Scan manifest list file to generate manifest files)              |
-   * +------------------------------------+                         +--------------------------------------------------------------------+
-   */
+  *                     |            Project                                         |
+  *                     |   coalesce(filePath != null then filePath else dataFilePath|
+  *                     +------------------------------------------------------------+
+  *                                       |
+  *                     +------------------------------------------+
+  *                     |           Filter                         |
+  *                     | filePath is null or dataFilePath is null |
+  *                     +------------------------------------------+
+  *                                      |
+  *                     +--------------------------------------+
+  *                     |            HashJoin                  |
+  *                     | full join on filePath = datafilePath |
+  *                     +--------------------------------------+
+  *                                      |
+  *               |------------------------------------------------------------------------|
+  *               |                                                                        |
+  * +----------------------------+                                             +----------------------------+
+  * |  HashToRandomExchangePrel  |                                             |  HashToRandomExchangePrel  |
+  * +----------------------------+                                             +----------------------------+
+  *               |                                                                        |
+  *               |                                                                        |
+  *               |                                                                        |
+  *               |                                                                        |
+  *               |                                               +------------------------------------------------------+
+  *               |                                               |           <<only if: isPartialRefresh >>             |
+  *               |                                               |                     Filter                           |
+  *               |                                               |                                                      |
+  *               |                                               |       dataFilePath is under partition path           |
+  *               |                                               |                       &&                             |
+  *               |                                               |        <<only if: recursivePartialRefresh >>         |
+  *               |                                               | dataFilePath is not in a subdir under partition path |
+  *               |                                               +------------------------------------------------------+
+
+  *               |                                                                        |
+  *               |                                               +--------------------------------------------------------------------+
+  *               |                                               |               ManifestScanTableFunction                            |
+  *               |                                               |        (generate dataFilePath by reading manifestFiles)            |
+  *               |                                               +--------------------------------------------------------------------+
+  *               |                                                                        |
+  *               |                                                                        |
+  * +------------------------------------+                        +--------------------------------------------------------------------+
+  * |         DirListScan                |                        |         IcebergManifestListScan                                    |
+  * |  (list files as filePath)          |                        |  (Scan manifest list file to generate manifest files)              |
+  * +------------------------------------+                        +--------------------------------------------------------------------+
+  */
   @Override
   public Prel finalizeRel() {
     InternalIcebergScanTableMetadata icebergScanTableMetadata =
@@ -212,7 +228,7 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
             tableMetadata,
             getObservedRowcountAdjustment(),
             getHints(),
-            !isPartialRefresh,
+            !isPartialRefresh || recursivePartialRefresh,
             estimateRowCountFn,
             getRuntimeFilters());
 
@@ -526,7 +542,11 @@ public class DirListingInvocationPrel extends ScanPrelBase implements Prel, Prel
     RexNode orCondition =
         rexBuilder.makeCall(SqlStdOperatorTable.AND, isEqualPartitionPath, notHasSubDir);
     FilterPrel filterPartialRefreshPath =
-        FilterPrel.create(getCluster(), traitSet, manifestScanTf, orCondition);
+        FilterPrel.create(
+            getCluster(),
+            traitSet,
+            manifestScanTf,
+            recursivePartialRefresh ? isEqualPartitionPath : orCondition);
     return filterPartialRefreshPath;
   }
 }

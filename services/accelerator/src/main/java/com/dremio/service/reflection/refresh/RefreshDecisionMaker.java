@@ -15,6 +15,8 @@
  */
 package com.dremio.service.reflection.refresh;
 
+import static com.dremio.exec.store.iceberg.IcebergUtils.getSnapshotFromDatasetConfig;
+import static com.dremio.exec.store.iceberg.IcebergUtils.normalizeSnapshotId;
 import static com.dremio.exec.store.iceberg.IncrementalReflectionByPartitionUtils.toDisplayString;
 import static com.dremio.service.namespace.dataset.proto.DatasetType.VIRTUAL_DATASET;
 import static com.google.common.base.Preconditions.checkState;
@@ -36,7 +38,6 @@ import com.dremio.exec.planner.common.ScanRelBase;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.TableMetadata;
-import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionManager;
 import com.dremio.proto.model.MultiDatasetUpdateId;
 import com.dremio.proto.model.SingleDatasetUpdateId;
@@ -48,7 +49,6 @@ import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.AccelerationSettings;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.IcebergMetadata;
-import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.RefreshMethod;
 import com.dremio.service.reflection.DatasetHashUtils;
 import com.dremio.service.reflection.DependencyEntry;
@@ -151,7 +151,7 @@ class RefreshDecisionMaker {
                     IcebergMetadata icebergMetadata =
                         table.getDatasetConfig().getPhysicalDataset().getIcebergMetadata();
                     if (icebergMetadata != null) {
-                      path.setSnapshotId(icebergMetadata.getSnapshotId());
+                      path.setSnapshotId(normalizeSnapshotId(icebergMetadata));
                     }
                     return path;
                   })
@@ -294,7 +294,7 @@ class RefreshDecisionMaker {
       return new RefreshDecisionWrapper(
           decision.setInitialRefresh(true).setUpdateId(new UpdateId()).setSeriesId(newSeriesId),
           null,
-          "Full Refresh. \nForcing full update, possible reason is switching from Non-Iceberg reflection to Iceberg reflection or vice versa.",
+          "Full Refresh. \nForcing full update, possible reason is switching from Non-Iceberg reflection to Iceberg reflection, or vice versa, or the system failed getting the Iceberg table.",
           stopwatch.elapsed(TimeUnit.MILLISECONDS));
     }
 
@@ -404,7 +404,7 @@ class RefreshDecisionMaker {
                   ((ScanRelBase) scan).getTableMetadata().getDatasetConfig().getId().getId();
               String foundSnapshotID = currentDatasetIdToSnapshotIdMap.get(datasetID);
               Optional<String> currentSnapshotID =
-                  IcebergUtils.getCurrentSnapshotId(
+                  getSnapshotFromDatasetConfig(
                       ((ScanRelBase) scan).getTableMetadata().getDatasetConfig());
               if (foundSnapshotID != null
                   && !foundSnapshotID.equals(currentSnapshotID.orElse(""))) {
@@ -539,18 +539,7 @@ class RefreshDecisionMaker {
         }
 
         long snapshotId =
-            Optional.of(table)
-                .map(DremioTable::getDatasetConfig)
-                .map(DatasetConfig::getPhysicalDataset)
-                .map(PhysicalDataset::getIcebergMetadata)
-                .map(IcebergMetadata::getSnapshotId)
-                .orElse(0L);
-
-        if (snapshotId == 0L) {
-          return String.format(
-              "Refresh couldn't be skipped because retrieving current snapshot ID for dataset dependency %s failed.",
-              schemaPath);
-        }
+            normalizeSnapshotId(table.getDatasetConfig().getPhysicalDataset().getIcebergMetadata());
         if (snapshotId == datasetDependency.getSnapshotId()) {
           // Don't bother doing a metadata check if the snapshot ID hasn't changed
           continue;

@@ -31,6 +31,7 @@ import com.dremio.exec.planner.observer.AbstractAttemptObserver;
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.planner.sql.SqlExceptionHelper;
+import com.dremio.exec.planner.sql.handlers.ConvertedRelNode;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.query.NormalHandler;
 import com.dremio.exec.proto.UserBitShared.PlannerPhaseRulesStats;
@@ -180,16 +181,16 @@ public final class QueryParser {
     }
   }
 
-  public static void validateVersions(
+  public static ConvertedRelNode validateVersions(
       SqlQuery query,
       SabotQueryContext sabotContext,
       Map<String, VersionContext> sourceVersionMapping)
       throws Exception {
     QueryParser parser = new QueryParser(sabotContext);
-    parser.checkForUnspecifiedVersions(query, sabotContext, sourceVersionMapping);
+    return parser.checkForUnspecifiedVersions(query, sabotContext, sourceVersionMapping);
   }
 
-  private void checkForUnspecifiedVersions(
+  private ConvertedRelNode checkForUnspecifiedVersions(
       SqlQuery query,
       SabotQueryContext sabotContext,
       Map<String, VersionContext> sourceVersionMapping)
@@ -203,9 +204,9 @@ public final class QueryParser {
         // Don't need the version context verification for non-select queries like "show schemas".
         // Note that this
         // code path is possible only through the UI or REST - not through the CREATE VIEW handler.
-        return;
+        return null;
       }
-      QueryVersionUtils.checkForUnspecifiedVersionsAndReturnRelNode(
+      return QueryVersionUtils.checkForUnspecifiedVersionsAndReturnRelNode(
           sqlNode, query.getContext(), sabotContext, sourceVersionMapping, Optional.empty());
     }
   }

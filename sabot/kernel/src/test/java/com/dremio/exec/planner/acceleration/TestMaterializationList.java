@@ -35,7 +35,6 @@ import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.sql.SqlConverter;
 import com.dremio.exec.server.MaterializationDescriptorProvider;
 import com.dremio.exec.tablefunctions.ExternalQueryScanCrel;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.options.OptionResolver;
 import com.dremio.sabot.exec.context.FunctionContext;
 import com.dremio.sabot.rpc.user.UserSession;
@@ -122,23 +121,15 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createTableScan(Arrays.asList("schema", "t2"));
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings =
-        new SubstitutionSettings(ImmutableList.of("rid-1"));
-
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get()).thenReturn(ImmutableList.of(desc1, desc2));
 
-    when(optionResolver.getOption(PlannerSettings.EXCLUDE_REFLECTIONS)).thenReturn("rid-2");
+    when(optionResolver.getOption(PlannerSettings.EXCLUDE_REFLECTIONS)).thenReturn("rid-1,rid-2");
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createTableScan(Arrays.asList("schema", "t2"));
     HintChecker hintChecker1 =
-        new HintChecker(
-            converter.getFunctionContext().getOptions(),
-            session.getSubstitutionSettings(),
-            observer);
+        new HintChecker(converter.getFunctionContext().getOptions(), observer);
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),
             eq(HintChecker.class),
@@ -162,63 +153,15 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createTableScan(Arrays.asList("schema", "t2"));
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings = new SubstitutionSettings(ImmutableList.of());
-
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get()).thenReturn(ImmutableList.of(desc1, desc2));
 
     when(optionResolver.getOption(PlannerSettings.CONSIDER_REFLECTIONS)).thenReturn("rid-2");
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createTableScan(Arrays.asList("schema", "t2"));
     HintChecker hintChecker1 =
-        new HintChecker(
-            converter.getFunctionContext().getOptions(),
-            session.getSubstitutionSettings(),
-            observer);
-    when(config.getInstance(
-            eq("dremio.reflection.acceleration.hint-checker.class"),
-            eq(HintChecker.class),
-            any(HintChecker.class),
-            any(HintChecker.class)))
-        .thenReturn(hintChecker1);
-    List<DremioMaterialization> dremioMaterializations =
-        materializations.buildConsideredMaterializations(userQuery);
-
-    verify(desc1, never()).getMaterializationFor(any(SqlConverter.class));
-    verify(desc2, atLeastOnce()).getMaterializationFor(converter);
-    assertEquals(1, dremioMaterializations.size());
-    assertEquals(relOptMat2, dremioMaterializations.stream().findFirst().get());
-  }
-
-  /**
-   * Verifies that reflection excluded in substitution settings is not returned in materialization
-   * list
-   */
-  @Test
-  public void testListDiscardsGivenExclusions() {
-    when(desc1.isApplicable(any(), any(), any())).thenReturn(true);
-    when(desc2.isApplicable(any(), any(), any())).thenReturn(true);
-    RelNode relOptMat2QueryNode = createTableScan(Arrays.asList("schema", "t2"));
-    when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
-    when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings =
-        new SubstitutionSettings(ImmutableList.of("rid-1"));
-
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
-    when(provider.get()).thenReturn(ImmutableList.of(desc1, desc2));
-
-    final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
-    RelNode userQuery = createTableScan(Arrays.asList("schema", "t2"));
-    HintChecker hintChecker1 =
-        new HintChecker(
-            converter.getFunctionContext().getOptions(),
-            session.getSubstitutionSettings(),
-            observer);
+        new HintChecker(converter.getFunctionContext().getOptions(), observer);
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),
             eq(HintChecker.class),
@@ -249,13 +192,10 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createTableScan(Arrays.asList("schema", "t2"));
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings = SubstitutionSettings.of();
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get()).thenReturn(ImmutableList.of(cachedDesc1, cachedDesc2));
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createTableScan(Arrays.asList("schema", "t1"));
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),
@@ -295,13 +235,10 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createExpansionNode(Arrays.asList("schema", "v2"));
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings = SubstitutionSettings.of();
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get()).thenReturn(ImmutableList.of(cachedDesc1, cachedDesc2));
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createExpansionNode(Arrays.asList("schema", "v1"));
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),
@@ -339,13 +276,10 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createExternalQueryScanCrel("plugin", "select 2");
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings = SubstitutionSettings.of();
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get()).thenReturn(ImmutableList.of(cachedDesc1, cachedDesc2));
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createExternalQueryScanCrel("plugin", "select 1");
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),
@@ -384,16 +318,13 @@ public class TestMaterializationList {
     RelNode relOptMat2QueryNode = createTableScan(Arrays.asList("schema", "t2"));
     when(relOptMat2.getQueryRel()).thenReturn(relOptMat2QueryNode);
     when(relOptMat2.accept(any(RelShuttle.class))).thenReturn(relOptMat2);
-
-    SubstitutionSettings materializationSettings = SubstitutionSettings.of();
-    when(session.getSubstitutionSettings()).thenReturn(materializationSettings);
     when(provider.get())
         .thenReturn(
             ImmutableList.of(
                 externalMaterializationDescriptor1, externalMaterializationDescriptor2));
 
     final MaterializationList materializations =
-        new MaterializationList(converter, session, provider, observer, config);
+        new MaterializationList(converter, provider, observer, config);
     RelNode userQuery = createTableScan(Arrays.asList("schema", "t1"));
     when(config.getInstance(
             eq("dremio.reflection.acceleration.hint-checker.class"),

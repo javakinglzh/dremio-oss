@@ -17,6 +17,7 @@ package com.dremio.dac.explore;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -33,8 +34,10 @@ import com.dremio.dac.proto.model.dataset.NameDatasetRef;
 import com.dremio.dac.proto.model.dataset.Transform;
 import com.dremio.dac.proto.model.dataset.TransformType;
 import com.dremio.dac.proto.model.dataset.TransformUpdateSQL;
+import com.dremio.dac.proto.model.dataset.VirtualDatasetState;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.service.datasets.DatasetVersionMutator;
+import com.dremio.dac.service.errors.DatasetNotFoundException;
 import com.dremio.dac.service.errors.DatasetVersionNotFoundException;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.VersionedPlugin;
@@ -42,6 +45,7 @@ import com.dremio.exec.store.StoragePlugin;
 import com.dremio.service.jobs.JobsService;
 import com.dremio.service.jobs.JobsVersionContext;
 import com.dremio.service.namespace.dataset.DatasetVersion;
+import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -52,6 +56,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.ws.rs.core.SecurityContext;
+import org.apache.calcite.sql.type.SqlTypeName;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -117,6 +122,74 @@ public class TestDatasetTool {
     History newHistory = tool.getHistory(newDatasetPath, tip, tip);
     // Make sure coped VDS has 3 history items.
     Assert.assertEquals(3, newHistory.getItems().size());
+  }
+
+  @Test
+  public void testRewriteBrokenHistory() throws Exception {
+    DatasetVersionMutator datasetVersionMutator = mock(DatasetVersionMutator.class);
+    Map<DatasetPath, Map<DatasetVersion, VirtualDatasetUI>> datasetVersionsMap = new HashMap<>();
+    doAnswer(
+            invocation -> {
+              DatasetPath datasetPath = invocation.getArgument(0);
+              DatasetVersion datasetVersion = invocation.getArgument(1);
+              if (!datasetVersionsMap.containsKey(datasetPath)
+                  || !datasetVersionsMap.get(datasetPath).containsKey(datasetVersion)) {
+                throw new DatasetNotFoundException(datasetPath);
+              }
+              return datasetVersionsMap.get(datasetPath).get(datasetVersion);
+            })
+        .when(datasetVersionMutator)
+        .getVersion(any(DatasetPath.class), any(DatasetVersion.class));
+    doAnswer(
+            invocation -> {
+              VirtualDatasetUI virtualDatasetUI = invocation.getArgument(0);
+              DatasetPath datasetPath = new DatasetPath(virtualDatasetUI.getFullPathList());
+              DatasetVersion datasetVersion = virtualDatasetUI.getVersion();
+              datasetVersionsMap
+                  .computeIfAbsent(datasetPath, k -> new HashMap<>())
+                  .put(datasetVersion, virtualDatasetUI);
+              return null;
+            })
+        .when(datasetVersionMutator)
+        .putVersion(any(VirtualDatasetUI.class));
+
+    DatasetPath datasetPath = new DatasetPath(Arrays.asList("space", "dataset"));
+    DatasetPath newDatasetPath = new DatasetPath(Arrays.asList("space", "dataset-new"));
+    DatasetVersion tip = new DatasetVersion("456");
+    DatasetVersion history1 = new DatasetVersion("234");
+    DatasetVersion history2 = new DatasetVersion("123");
+
+    VirtualDatasetUI tipDataset = buildDataset(datasetPath, tip, history1.getVersion());
+    VirtualDatasetUI history1Dataset = buildDataset(datasetPath, history1, history2.getVersion());
+    datasetVersionMutator.putVersion(tipDataset);
+    datasetVersionMutator.putVersion(history1Dataset);
+    // Don't create history2Dataset, simulate it being deleted
+
+    doAnswer(
+            invocation -> {
+              DatasetPath path = invocation.getArgument(0);
+              return datasetVersionsMap.get(path).get(tip); // return tip for that name
+            })
+        .when(datasetVersionMutator)
+        .get(any(DatasetPath.class));
+
+    final DatasetTool tool = buildDatasetTool(datasetVersionMutator);
+
+    tool.rewriteHistory(tipDataset, newDatasetPath);
+
+    // Make sure history1Dataset was rewritten to not have a previous dataset version, as
+    // history2Dataset is missing
+    Assert.assertNull(
+        datasetVersionMutator.getVersion(newDatasetPath, history1).getPreviousVersion());
+
+    History newHistory = tool.getHistory(newDatasetPath, tip, tip);
+
+    // Make sure coped VDS has 2 history items, history2 is omitted as it is not found
+    Assert.assertEquals(2, newHistory.getItems().size());
+    Assert.assertEquals(history1, newHistory.getItems().get(0).getDatasetVersion());
+    Assert.assertEquals(newDatasetPath, newHistory.getItems().get(0).getDataset());
+    Assert.assertEquals(tip, newHistory.getItems().get(1).getDatasetVersion());
+    Assert.assertEquals(newDatasetPath, newHistory.getItems().get(1).getDataset());
   }
 
   @Test
@@ -243,6 +316,8 @@ public class TestDatasetTool {
               .setDatasetVersion(previousVersion)
               .setDatasetPath(datasetPath.toString()));
     }
+    dataset.setSqlFieldsList(List.of(new ViewFieldType("test", SqlTypeName.VARCHAR.getName())));
+    dataset.setState(new VirtualDatasetState());
     Transform transform = new Transform(TransformType.updateSQL);
     transform.setUpdateSQL(new TransformUpdateSQL("sql"));
     dataset.setLastTransform(transform);

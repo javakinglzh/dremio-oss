@@ -228,13 +228,30 @@ public class FileSystemRulesFactory extends StoragePluginTypeRulesFactory {
     @Override
     public RelNode convert(RelNode rel) {
       FilesystemScanDrel drel = (FilesystemScanDrel) rel;
-      return IcebergScanPlanBuilder.fromDrel(
-              drel,
-              context,
+      IcebergScanPrel prel =
+          new IcebergScanPrel(
+              drel.getCluster(),
+              drel.getTraitSet().plus(Prel.PHYSICAL),
+              drel.getTable(),
+              drel.getPluginId(),
+              drel.getTableMetadata(),
+              drel.getProjectedColumns(),
+              drel.getObservedRowcountAdjustment(),
+              drel.getHints(),
+              drel.getFilter(),
+              drel.getRowGroupFilter(),
               drel.isArrowCachingEnabled(),
+              drel.getPartitionFilter(),
+              context,
+              false,
+              drel.getSurvivingRowCount(),
+              drel.getSurvivingFileCount(),
               drel.canUsePartitionStats(),
-              drel.isPartitionValuesEnabled())
-          .build();
+              ManifestScanFilters.empty(),
+              drel.getSnapshotDiffContext(),
+              drel.isPartitionValuesEnabled(),
+              drel.getPartitionStatsStatus());
+      return new IcebergScanPlanBuilder(prel).build();
     }
 
     @Override

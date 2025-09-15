@@ -21,7 +21,6 @@ import com.dremio.exec.proto.UserBitShared.UserCredentials;
 import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.proto.UserProtos.RecordBatchFormat;
 import com.dremio.exec.proto.UserProtos.UserProperties;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.sabot.rpc.user.SessionOptionValue;
 import com.dremio.sabot.rpc.user.UserSession;
 import java.util.Arrays;
@@ -54,10 +53,6 @@ public class TestGrpcUserSessionConverter {
         "Int64Value", SessionOptionValue.Builder.newBuilder().setInt64Value(1000L).build());
     optionsMap.put(
         "Int32Value", SessionOptionValue.Builder.newBuilder().setInt32Value(1004).build());
-
-    // SubstitutionSettings
-    final List<String> exclusions = Arrays.asList("a", "b", "c");
-    final SubstitutionSettings substitutionSettings = new SubstitutionSettings(exclusions);
 
     // ClientInfos
     UserBitShared.RpcEndpointInfos rpcEndpointInfos =
@@ -102,7 +97,6 @@ public class TestGrpcUserSessionConverter {
     UserSession inUserSession =
         UserSession.Builder.newBuilder()
             .withSessionOptions(optionsMap)
-            .withSubstitutionSettings(substitutionSettings)
             .exposeInternalSources(true)
             .withClientInfos(rpcEndpointInfos)
             .setSupportComplexTypes(false)
@@ -146,11 +140,6 @@ public class TestGrpcUserSessionConverter {
       Assert.assertEquals(
           inUserSession.getSessionOptionsMap().get("Int32Value").getInt32Value(),
           outUserSession.getSessionOptionsMap().get("Int32Value").getInt32Value());
-
-      // SubstitutionSettings
-      Assert.assertEquals(
-          substitutionSettings.getExclusions(),
-          outUserSession.getSubstitutionSettings().getExclusions());
 
       // ExposeInternalSources
       Assert.assertTrue(outUserSession.exposeInternalSources());

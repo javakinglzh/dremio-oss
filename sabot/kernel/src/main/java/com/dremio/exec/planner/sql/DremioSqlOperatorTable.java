@@ -1379,6 +1379,88 @@ public class DremioSqlOperatorTable extends ReflectiveSqlOperatorTable {
   // MAP Functions
   // ---------------------
 
+  public static final SqlOperator FIRST_MATCHING_MAP_ENTRY_FOR_KEY =
+      SqlOperatorBuilder.name(MapFunctions.FIRST_MATCHING_ENTRY_FUNC)
+          .returnType(
+              new SqlReturnTypeInference() {
+                @Override
+                public RelDataType inferReturnType(SqlOperatorBinding opBinding) {
+                  RelDataType keyType = opBinding.getOperandType(0).getKeyType();
+                  RelDataType valueType = opBinding.getOperandType(0).getValueType();
+
+                  // This is just to comply with the item operator
+                  // But we should fix last_matching_map_entry to differentiate between key not
+                  // found and key found but value is null.
+                  RelDataType withNullable =
+                      opBinding.getTypeFactory().createTypeWithNullability(valueType, true);
+                  return opBinding
+                      .getTypeFactory()
+                      .createStructType(
+                          ImmutableList.of(keyType, withNullable),
+                          ImmutableList.of("key", "value"));
+                }
+              })
+          .operandTypes(
+              new SqlOperandTypeChecker() {
+                @Override
+                public boolean checkOperandTypes(
+                    SqlCallBinding callBinding, boolean throwOnFailure) {
+                  SqlTypeName collectionType = callBinding.getOperandType(0).getSqlTypeName();
+                  if (collectionType != SqlTypeName.MAP) {
+                    if (!throwOnFailure) {
+                      return false;
+                    }
+
+                    throw UserException.validationError()
+                        .message(
+                            "Expected first argument to 'first_matching_entry_func' to be a map, but instead got: "
+                                + collectionType)
+                        .buildSilently();
+                  }
+
+                  SqlTypeName indexType = callBinding.getOperandType(1).getSqlTypeName();
+                  SqlTypeName keyType = callBinding.getOperandType(0).getKeyType().getSqlTypeName();
+                  if (indexType != keyType) {
+                    if (!throwOnFailure) {
+                      return false;
+                    }
+
+                    throw UserException.validationError()
+                        .message(
+                            "Expected second argument to 'first_matching_entry_func' to match the key type of the map. "
+                                + "Map key type is: "
+                                + keyType
+                                + "and "
+                                + "index type is: "
+                                + indexType)
+                        .buildSilently();
+                  }
+
+                  return true;
+                }
+
+                @Override
+                public SqlOperandCountRange getOperandCountRange() {
+                  return SqlOperandCountRanges.of(2);
+                }
+
+                @Override
+                public String getAllowedSignatures(SqlOperator op, String opName) {
+                  return null;
+                }
+
+                @Override
+                public Consistency getConsistency() {
+                  return null;
+                }
+
+                @Override
+                public boolean isOptional(int i) {
+                  return false;
+                }
+              })
+          .build();
+
   public static final SqlOperator LAST_MATCHING_MAP_ENTRY_FOR_KEY =
       SqlOperatorBuilder.name(MapFunctions.LAST_MATCHING_ENTRY_FUNC)
           .returnType(

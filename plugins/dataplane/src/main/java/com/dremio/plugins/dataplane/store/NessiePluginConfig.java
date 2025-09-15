@@ -15,6 +15,8 @@
  */
 package com.dremio.plugins.dataplane.store;
 
+import static com.dremio.plugins.azure.AbstractAzureStorageConf.AccountKind.STORAGE_V2;
+
 import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.catalog.conf.AWSAuthenticationType;
@@ -26,6 +28,7 @@ import com.dremio.exec.catalog.conf.Secret;
 import com.dremio.exec.catalog.conf.SecretRef;
 import com.dremio.exec.catalog.conf.SourceType;
 import com.dremio.nessiemetadata.cache.NessieDataplaneCaffeineCacheProvider;
+import com.dremio.plugins.azure.AzureStorageFileSystem;
 import io.protostuff.Tag;
 import java.util.List;
 import javax.inject.Provider;
@@ -158,6 +161,17 @@ public class NessiePluginConfig extends AbstractDataplanePluginConfig {
             assumedRoleARN,
             awsProfile));
     return properties;
+  }
+
+  /** Get the Azure mode from the properties, if present. */
+  @Override
+  protected String getAzureMode(List<Property> properties) {
+    for (Property prop : properties) {
+      if (prop.name.equals(AzureStorageFileSystem.MODE)) {
+        return prop.value;
+      }
+    }
+    return STORAGE_V2.name();
   }
 
   NessieAuthType getNessieAuthType() {

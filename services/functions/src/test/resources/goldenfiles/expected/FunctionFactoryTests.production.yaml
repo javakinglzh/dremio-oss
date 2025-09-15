@@ -2552,6 +2552,12 @@
      - "(TIME, NUMERIC) -> TIME"
      - "(TIMESTAMP, NUMERIC) -> TIMESTAMP"
  -
+  description: "FIRST_MATCHING_MAP_ENTRY_FOR_KEY"
+  input: "FIRST_MATCHING_MAP_ENTRY_FOR_KEY"
+  output:
+    name: "FIRST_MATCHING_MAP_ENTRY_FOR_KEY"
+    signatures: []
+ -
   description: "FIRST_VALUE"
   input: "FIRST_VALUE"
   output:

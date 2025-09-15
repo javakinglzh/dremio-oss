@@ -163,7 +163,7 @@ public class VectorizedHashAggOperatorNoSpill implements SingleInputOperator {
             new VariableBlockVector(context.getAllocator(), pivot.getVariableCount()); ) {
       // first we pivot.
       pivotWatch.start();
-      Pivots.pivot(pivot, records, fbv, var);
+      Pivots.pivot(pivot, records, fbv, var, true);
       pivotWatch.stop();
       final long keyFixedAddr = fbv.getMemoryAddress();
       final long keyVarAddr = var.getMemoryAddress();

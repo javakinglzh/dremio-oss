@@ -217,6 +217,20 @@ public class WriterUpdater extends BasePrelVisitor<Prel, Void, RuntimeException>
       boolean addSort,
       RelDataType expectedWriterInboundRowType) {
     WriterOptions options = tableEntry.getOptions();
+
+    if (!DmlUtils.isStorageFormatParquet(options)) {
+      throw UserException.planError()
+          .message(
+              "Unsupported file format for 'writer.default.format': %s. Dremio only supports parquet format.",
+              options
+                  .getTableFormatOptions()
+                  .getIcebergSpecificOptions()
+                  .getIcebergTableProps()
+                  .getTableProperties()
+                  .get(org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT))
+          .build(logger);
+    }
+
     if (options.hasDistributions()) {
       // we need to add a new hash value field
       // TODO: make this happen in tandem with the distribution hashing as opposed to separate).

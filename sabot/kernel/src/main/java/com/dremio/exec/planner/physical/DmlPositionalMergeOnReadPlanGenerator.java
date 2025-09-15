@@ -15,6 +15,8 @@
  */
 package com.dremio.exec.planner.physical;
 
+import static com.dremio.exec.ExecConstants.ENABLE_DML_DISPLAY_RESULT_ONLY;
+import static com.dremio.exec.planner.sql.parser.DmlUtils.SYSTEM_COLUMN_COUNT;
 import static com.dremio.exec.util.ColumnUtils.isSystemColumn;
 import static org.apache.calcite.rel.core.TableModify.Operation.DELETE;
 import static org.apache.calcite.rel.core.TableModify.Operation.MERGE;
@@ -158,6 +160,16 @@ public class DmlPositionalMergeOnReadPlanGenerator extends DmlPlanGeneratorBase 
                   ? getMergeOnReadProjectionPlanPrel(input)
                   : getMergeOnReadProjectionPlanPrel(duplicateCheckPrel);
         }
+      }
+
+      // For Debug Purposes. A Display-Only plan that does not include system columns.
+      boolean displayResultOnly =
+          PrelUtil.getPlannerSettings(cluster)
+              .getOptions()
+              .getOption(ENABLE_DML_DISPLAY_RESULT_ONLY);
+      if (displayResultOnly) {
+        writerInputPlan = removeSystemColumnsForDisplayOnlyPlanDebug(writerInputPlan);
+        return writerInputPlan;
       }
 
       return getMergeOnReadRowCountPlan(getMergeOnReadDataWriterPlan(writerInputPlan));
@@ -541,6 +553,45 @@ public class DmlPositionalMergeOnReadPlanGenerator extends DmlPlanGeneratorBase 
         rowCountAgg.getCluster(),
         rowCountAgg.getTraitSet(),
         rowCountAgg,
+        projectExprs,
+        projectRowType);
+  }
+
+  /**
+   * For Debug Purposes. A Display-Only plan that does not include system columns.
+   *
+   * @param finalInput the final input to project
+   * @return the final input with system columns removed
+   */
+  private Prel removeSystemColumnsForDisplayOnlyPlanDebug(RelNode finalInput) {
+    List<RelDataTypeField> projectFields = table.getRowType().getFieldList();
+    RexBuilder rexBuilder = cluster.getRexBuilder();
+
+    // Project all but the last 2 columns
+    List<RelDataTypeField> fieldsToProject =
+        projectFields.size() > SYSTEM_COLUMN_COUNT
+            ? projectFields.subList(0, projectFields.size() - SYSTEM_COLUMN_COUNT)
+            : projectFields;
+
+    List<String> projectNames =
+        fieldsToProject.stream().map(RelDataTypeField::getName).collect(Collectors.toList());
+
+    List<RexNode> projectExprs = new ArrayList<>();
+    int index = 0;
+    for (RelDataTypeField field : fieldsToProject) {
+      RexNode projectExpr = rexBuilder.makeInputRef(field.getType(), index);
+      projectExprs.add(projectExpr);
+      index++;
+    }
+
+    RelDataType projectRowType =
+        RexUtil.createStructType(
+            finalInput.getCluster().getTypeFactory(), projectExprs, projectNames, null);
+
+    return ProjectPrel.create(
+        finalInput.getCluster(),
+        finalInput.getTraitSet(),
+        finalInput,
         projectExprs,
         projectRowType);
   }

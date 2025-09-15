@@ -21,7 +21,9 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
 import com.dremio.exec.planner.cost.ScanCostFactor;
 import com.dremio.exec.record.BatchSchema;
+import com.dremio.exec.store.dfs.implicit.ImplicitFilesystemColumnFinder;
 import com.dremio.exec.store.iceberg.IcebergSerDe;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.store.easy.proto.EasyProtobuf;
 import com.dremio.service.catalog.AddOrUpdateDatasetRequest;
 import com.dremio.service.catalog.GetDatasetRequest;
@@ -41,7 +43,6 @@ import io.grpc.Status;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
@@ -64,6 +65,7 @@ public final class DatasetCatalogRequestBuilder {
    * @param tableLocation
    * @param batchSchema
    * @param partitionColumns
+   * @param optionManager
    * @return
    */
   public static DatasetCatalogRequestBuilder forFullMetadataRefresh(
@@ -71,14 +73,16 @@ public final class DatasetCatalogRequestBuilder {
       String tableLocation,
       BatchSchema batchSchema,
       List<String> partitionColumns,
-      DatasetConfig datasetConfig) {
+      DatasetConfig datasetConfig,
+      OptionManager optionManager) {
     if (!DatasetType.PHYSICAL_DATASET.equals(
         datasetConfig.getType())) { // non-filesystem datasets don't need implicit columns
+      List<Field> implicitFields =
+          ImplicitFilesystemColumnFinder.getEnabledNonPartitionFields(optionManager, true);
       batchSchema =
           BatchSchema.newBuilder()
               .addFields(batchSchema.getFields())
-              .addField(
-                  Field.nullable(IncrementalUpdateUtils.UPDATE_COLUMN, new ArrowType.Int(64, true)))
+              .addFields(implicitFields)
               .build();
       partitionColumns = new ArrayList<>(partitionColumns);
       partitionColumns.add(IncrementalUpdateUtils.UPDATE_COLUMN);

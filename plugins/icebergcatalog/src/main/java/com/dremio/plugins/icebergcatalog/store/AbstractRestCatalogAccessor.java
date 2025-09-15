@@ -32,13 +32,15 @@ import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.PartitionChunkListing;
+import com.dremio.connector.metadata.options.ForceUpdateOption;
 import com.dremio.connector.metadata.options.TimeTravelOption;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.IcebergViewMetadata;
 import com.dremio.exec.store.iceberg.SupportsFsCreation;
 import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
-import com.dremio.exec.store.iceberg.TableSchemaProvider;
-import com.dremio.exec.store.iceberg.TableSnapshotProvider;
+import com.dremio.exec.store.iceberg.TimeTravelProcessors;
 import com.dremio.exec.store.iceberg.model.DremioBaseTable;
 import com.dremio.options.OptionManager;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -48,7 +50,6 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 import java.io.Closeable;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -66,7 +67,6 @@ import org.apache.iceberg.BaseTransaction;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.Snapshot;
 import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableMetadata;
@@ -95,8 +95,8 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
       org.slf4j.LoggerFactory.getLogger(AbstractRestCatalogAccessor.class);
 
   private final OptionManager optionsManager;
-  private final LoadingCache<TableIdentifier, Table> tableCache;
-  private final LoadingCache<TableIdentifier, View> viewCache;
+  private final LoadingCache<CatalogAccessorTableCacheKey, Table> tableCache;
+  private final LoadingCache<CatalogAccessorTableCacheKey, View> viewCache;
   private final Supplier<Catalog> icebergCatalogSupplier;
   private final Set<Namespace> allowedNamespaces;
   private final boolean isRecursiveAllowedNamespaces;
@@ -116,11 +116,14 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
                 optionsManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS),
                 TimeUnit.SECONDS)
             .build(
-                tableIdentifier -> {
+                catalogAccessorTableCacheKey -> {
                   if (logger.isDebugEnabled()) {
-                    logger.debug("Catalog table cache: cache miss on table {}", tableIdentifier);
+                    logger.debug(
+                        "Catalog table cache: cache miss for user {} on table {}",
+                        catalogAccessorTableCacheKey.userId(),
+                        catalogAccessorTableCacheKey.tableIdentifier());
                   }
-                  return getCatalog().loadTable(tableIdentifier);
+                  return getCatalog().loadTable(catalogAccessorTableCacheKey.tableIdentifier());
                 });
     this.viewCache =
         Caffeine.newBuilder()
@@ -129,11 +132,15 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
                 optionsManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_EXPIRE_AFTER_WRITE_SECONDS),
                 TimeUnit.SECONDS)
             .build(
-                viewIdentifier -> {
+                userViewIdentifier -> {
                   if (logger.isDebugEnabled()) {
-                    logger.debug("Catalog view cache: cache miss on view {}", viewIdentifier);
+                    logger.debug(
+                        "Catalog view cache: cache miss for user {} on view {}",
+                        userViewIdentifier.userId(),
+                        userViewIdentifier.tableIdentifier());
                   }
-                  return ((ViewCatalog) getCatalog()).loadView(viewIdentifier);
+                  return ((ViewCatalog) getCatalog())
+                      .loadView(userViewIdentifier.tableIdentifier());
                 });
     if (allowedNamespaces != null) {
       String separator = optionsManager.getOption(RESTCATALOG_ALLOWED_NS_SEPARATOR);
@@ -153,22 +160,45 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
     return icebergCatalogSupplier.get();
   }
 
-  protected Table loadTable(TableIdentifier tableIdentifier) {
+  @VisibleForTesting
+  Table loadTable(TableIdentifier tableIdentifier, GetDatasetOption... options) {
     if (optionsManager.getOption(RESTCATALOG_PLUGIN_TABLE_CACHE_ENABLED)) {
-      return tableCache.get(tableIdentifier);
+      UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+      if (userContext == null) {
+        logger.warn("Missing user context when loading table");
+      }
+      String userId = userContext == null ? "" : userContext.getUserId();
+      CatalogAccessorTableCacheKey catalogAccessorTableCacheKey =
+          new CatalogAccessorTableCacheKey(userId, tableIdentifier);
+      if (ForceUpdateOption.isForceUpdate(options)) {
+        invalidateTableCacheForAllUsers(tableIdentifier);
+      }
+      return tableCache.get(catalogAccessorTableCacheKey);
     } else {
       return getCatalog().loadTable(tableIdentifier);
     }
   }
 
-  protected View loadView(TableIdentifier tableIdentifier) {
+  @VisibleForTesting
+  @Override
+  public View loadView(TableIdentifier tableIdentifier, GetDatasetOption... options) {
     if (!viewsEnabled()) {
       throw UserException.unsupportedError()
           .message("Views are not supported in this catalog.")
           .buildSilently();
     }
     if (optionsManager.getOption(RESTCATALOG_PLUGIN_VIEW_CACHE_ENABLED)) {
-      return viewCache.get(tableIdentifier);
+      UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+      if (userContext == null) {
+        logger.warn("Missing user context when loading view");
+      }
+      String userId = userContext == null ? "" : userContext.getUserId();
+      CatalogAccessorTableCacheKey catalogAccessorTableCacheKey =
+          new CatalogAccessorTableCacheKey(userId, tableIdentifier);
+      if (ForceUpdateOption.isForceUpdate(options)) {
+        invalidateViewCacheForAllUsers(tableIdentifier);
+      }
+      return viewCache.get(catalogAccessorTableCacheKey);
     } else {
       return ((ViewCatalog) getCatalog()).loadView(tableIdentifier);
     }
@@ -226,7 +256,7 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
                       Collections.addAll(dataset, rootName);
                       Collections.addAll(dataset, viewIdentifier.namespace().levels());
                       Collections.addAll(dataset, viewIdentifier.name());
-                      return getViewHandleInternal(dataset, viewIdentifier);
+                      return getViewHandleInternal(dataset, viewIdentifier, plugin);
                     })
             : Stream.empty();
 
@@ -307,46 +337,46 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
     return Stream.empty();
   }
 
-  private DatasetHandle getViewHandleInternal(
-      List<String> viewPath, TableIdentifier viewIdentifier) {
-    // Data here can be persisted into the Catalog - needs to be fresh.
-    // TODO: DX-101463 - investigate if invalidate needs to always be called
-    viewCache.invalidate(viewIdentifier);
-    return new IcebergCatalogViewProvider(new EntityPath(viewPath), () -> loadView(viewIdentifier));
+  @VisibleForTesting
+  DatasetHandle getViewHandleInternal(
+      List<String> viewPath,
+      TableIdentifier viewIdentifier,
+      SupportsIcebergRootPointer plugin,
+      GetDatasetOption... options) {
+    return new IcebergCatalogViewProvider(
+        new EntityPath(viewPath), () -> plugin.loadViewMetadata(viewIdentifier, options));
   }
 
   @Override
-  @Nullable
-  public DatasetHandle getDatasetHandle(
+  public Optional<DatasetHandle> getDatasetHandle(
       List<String> dataset, SupportsIcebergRootPointer plugin, GetDatasetOption... options) {
     TableIdentifier tableIdentifier = tableIdentifierFromDataset(dataset);
     if (getCatalog().tableExists(tableIdentifier)) {
-      return getTableHandleInternal(dataset, tableIdentifier, plugin, options);
+      return Optional.of(getTableHandleInternal(dataset, tableIdentifier, plugin, options));
     }
 
-    // TODO: DX-101592 - viewsEnabled() can be incorrect for Generic REST sources.
-    //  viewExists() can throw for Generic REST, so needs to be called after tableExists().
     if (viewsEnabled() && ((ViewCatalog) getCatalog()).viewExists(tableIdentifier)) {
-      return getViewHandleInternal(dataset, tableIdentifier);
+      return Optional.of(getViewHandleInternal(dataset, tableIdentifier, plugin, options));
     }
 
-    logger.warn("DatasetHandle '{}' empty, table not found.", dataset);
-    return null;
+    logger.warn("DatasetHandle '{}' not found - table or view not found.", dataset);
+    return Optional.empty();
   }
 
+  @VisibleForTesting
   public DatasetHandle getTableHandleInternal(
       List<String> dataset,
       TableIdentifier tableIdentifier,
       SupportsIcebergRootPointer plugin,
       GetDatasetOption... options) {
-    // Data here can be persisted into the Catalog - needs to be fresh.
-    // DX-101463: investigate if invalidate needs to always be called
-    tableCache.invalidate(tableIdentifier);
-
+    TimeTravelOption.TimeTravelRequest timeTravelRequest =
+        Optional.ofNullable(TimeTravelOption.getTimeTravelOption(options))
+            .map(TimeTravelOption::getTimeTravelRequest)
+            .orElse(null);
     return new IcebergCatalogTableProvider(
         new EntityPath(dataset),
         () -> {
-          Table baseTable = loadTable(tableIdentifier);
+          Table baseTable = loadTable(tableIdentifier, options);
           // RESTSessionCatalog will provide a BaseTable for us with RESTTableOperations and
           // org.apache.iceberg.io.ResolvingFileIO as IO. We replace this with DremioFileIO
           // in order to provide our own FS constructs.
@@ -358,6 +388,7 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
                             SupportsFsCreation.builder()
                                 .filePath(baseTable.location())
                                 .withSystemUserName()
+                                .withSystemUserId()
                                 .dataset(dataset)),
                         null,
                         dataset,
@@ -367,54 +398,17 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
                 new DremioRESTTableOperations(
                     fileIO, ((HasTableOperations) baseTable).operations()),
                 baseTable.name());
-          } catch (IOException e) {
+          } catch (Exception e) {
             throw UserException.ioExceptionError(e)
-                .message("Error while trying to create DremioIO for %s", dataset)
+                .message("Error while trying to access file system.")
                 .buildSilently();
           } finally {
             baseTable.io().close();
           }
         },
-        getSnapshotProvider(dataset, options),
-        getSchemaProvider(options),
+        TimeTravelProcessors.getTableSnapshotProvider(dataset, timeTravelRequest),
+        TimeTravelProcessors.getTableSchemaProvider(timeTravelRequest),
         optionsManager);
-  }
-
-  private TableSnapshotProvider getSnapshotProvider(
-      List<String> dataset, GetDatasetOption... options) {
-    TimeTravelOption timeTravelOption = TimeTravelOption.getTimeTravelOption(options);
-    if (timeTravelOption != null
-        && timeTravelOption.getTimeTravelRequest() instanceof TimeTravelOption.SnapshotIdRequest) {
-      TimeTravelOption.SnapshotIdRequest snapshotIdRequest =
-          (TimeTravelOption.SnapshotIdRequest) timeTravelOption.getTimeTravelRequest();
-      final long snapshotId = Long.parseLong(snapshotIdRequest.getSnapshotId());
-      return t -> {
-        final Snapshot snapshot = t.snapshot(snapshotId);
-        if (snapshot == null) {
-          throw UserException.validationError()
-              .message(
-                  "For table '%s', the provided snapshot ID '%d' is invalid",
-                  String.join(".", dataset), snapshotId)
-              .buildSilently();
-        }
-        return snapshot;
-      };
-    } else {
-      return Table::currentSnapshot;
-    }
-  }
-
-  private TableSchemaProvider getSchemaProvider(GetDatasetOption... options) {
-    TimeTravelOption timeTravelOption = TimeTravelOption.getTimeTravelOption(options);
-    if (timeTravelOption != null
-        && timeTravelOption.getTimeTravelRequest() instanceof TimeTravelOption.SnapshotIdRequest) {
-      return (table, snapshot) -> {
-        Integer schemaId = snapshot.schemaId();
-        return schemaId != null ? table.schemas().get(schemaId) : table.schema();
-      };
-    } else {
-      return (table, snapshot) -> table.schema();
-    }
   }
 
   private static Namespace namespaceFromDataset(List<String> dataset) {
@@ -431,7 +425,7 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
   }
 
   @Override
-  public boolean datasetExists(List<String> dataset) throws BadRequestException {
+  public boolean datasetExists(List<String> dataset) {
     try {
       return getCatalog().tableExists(tableIdentifierFromDataset(dataset))
           || (viewsEnabled()
@@ -439,6 +433,13 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
     } catch (IllegalStateException e) {
       // This happens if the table identifier created is incorrect.
       return false;
+    } catch (BadRequestException e) {
+      // if the path to the dataset is wrong we get a BadRequestException containing "Invalid
+      // request path" message. If this is the case, just ignore it and return false.
+      if (e.getMessage().contains("Invalid request path")) {
+        return false;
+      }
+      throw e;
     }
   }
 
@@ -481,6 +482,64 @@ public abstract class AbstractRestCatalogAccessor implements CatalogAccessor {
 
   boolean viewsEnabled() {
     return optionsManager.getOption(RESTCATALOG_VIEWS_SUPPORTED);
+  }
+
+  /**
+   * Invalidates all table cache entries for the specified TableIdentifier, regardless of the
+   * userId. This is useful when you need to invalidate a table for all users (e.g., when table
+   * metadata changes).
+   *
+   * @param tableIdentifier the table identifier to invalidate for all users
+   */
+  public void invalidateTableCacheForAllUsers(TableIdentifier tableIdentifier) {
+    if (tableIdentifier == null) {
+      throw new IllegalArgumentException("TableIdentifier cannot be null");
+    }
+
+    // Get all cache keys and filter for matching table identifiers
+    Set<CatalogAccessorTableCacheKey> keysToInvalidate =
+        tableCache.asMap().keySet().stream()
+            .filter(key -> key.tableIdentifier().equals(tableIdentifier))
+            .collect(Collectors.toSet());
+
+    // Invalidate all matching keys
+    tableCache.invalidateAll(keysToInvalidate);
+
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Invalidated {} table cache entries for table: {}",
+          keysToInvalidate.size(),
+          tableIdentifier);
+    }
+  }
+
+  /**
+   * Invalidates all view cache entries for the specified TableIdentifier, regardless of the userId.
+   * This is useful when you need to invalidate a view for all users (e.g., when view metadata
+   * changes).
+   *
+   * @param tableIdentifier the table identifier to invalidate for all users
+   */
+  public void invalidateViewCacheForAllUsers(TableIdentifier tableIdentifier) {
+    if (tableIdentifier == null) {
+      throw new IllegalArgumentException("TableIdentifier cannot be null");
+    }
+
+    // Get all cache keys and filter for matching table identifiers
+    Set<CatalogAccessorTableCacheKey> keysToInvalidate =
+        viewCache.asMap().keySet().stream()
+            .filter(key -> key.tableIdentifier().equals(tableIdentifier))
+            .collect(Collectors.toSet());
+
+    // Invalidate all matching keys
+    viewCache.invalidateAll(keysToInvalidate);
+
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Invalidated {} view cache entries for view: {}",
+          keysToInvalidate.size(),
+          tableIdentifier);
+    }
   }
 
   @Override

@@ -21,6 +21,7 @@ import org.apache.hadoop.fs.Path;
 import org.joda.time.DateTimeZone;
 import org.joda.time.LocalDateTime;
 import org.junit.AfterClass;
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -83,6 +84,17 @@ public class ITHiveDeltalakeTable extends LazyDataGeneratingHiveTestBase {
         .baselineValues(3, "xyz", 4)
         .baselineValues(5, "lmn", 6)
         .go();
+    }
+  }
+
+  @Test
+  public void testSelectQueryRowCountViaPlan() throws Exception {
+    try (AutoCloseable ac = withDeltaTable("delta_extra", "(col1 INT, col2 STRING, extraCol INT)", "delta_extra")) {
+      String query = "explain plan for SELECT * FROM hive.delta_extra";
+      final String plan = getPlanInString(query, OPTIQ_FORMAT);
+      // Check and make sure that correct row count gets used in DATA_FILE_SCAN function
+      Assert.assertTrue(plan.substring(plan.indexOf("Table Function Type=[DATA_FILE_SCAN]")).split("\n")[0]
+          .contains("rowcount = 3.0"));
     }
   }
 

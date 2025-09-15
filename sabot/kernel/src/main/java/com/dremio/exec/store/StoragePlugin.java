@@ -19,6 +19,7 @@ import com.dremio.common.Wrapper;
 import com.dremio.connector.ConnectorException;
 import com.dremio.connector.metadata.SourceMetadata;
 import com.dremio.datastore.Serializer;
+import com.dremio.exec.catalog.ManagedStoragePlugin;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.service.Service;
@@ -54,9 +55,11 @@ public interface StoragePlugin extends Service, SourceMetadata, Wrapper {
   boolean hasAccessPermission(String user, NamespaceKey key, DatasetConfig datasetConfig);
 
   /**
-   * Get current state for source.
-   *
-   * @return
+   * Get current state for source. This call is expected to complete "quickly"; it should be a
+   * lightweight check to confirm the source is operational. In general, you should not call this
+   * method directly. Check the most recently cached state using {@link
+   * ManagedStoragePlugin#getState} instead, or use {@link ManagedStoragePlugin#refreshState} to
+   * wait for an up-to-date state.
    */
   SourceState getState();
 

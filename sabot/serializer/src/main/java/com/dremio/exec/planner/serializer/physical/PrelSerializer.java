@@ -291,7 +291,7 @@ public class PrelSerializer implements PrelToProto, ProtoToPrel {
     if (null == node) {
       return null;
     }
-    return node.accept(rexSerializer);
+    return rexSerializer.toProto(node);
   }
 
   @Override
@@ -324,7 +324,7 @@ public class PrelSerializer implements PrelToProto, ProtoToPrel {
 
   @Override
   public PRexLiteral toProto(RexLiteral rexLiteral) {
-    return rexSerializer.toProto(rexLiteral);
+    return rexSerializer.toProto(rexLiteral).getRexLiteral();
   }
 
   @Override

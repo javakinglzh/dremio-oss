@@ -35,6 +35,8 @@ public interface WorkStats {
    */
   float getClusterLoad();
 
+  float getClusterLoad(long maxWidthPerNode);
+
   float getClusterLoad(GroupResourceInformation groupResourceInformation);
 
   Integer getCpuTrailingAverage(long id, int seconds);
@@ -166,6 +168,11 @@ public interface WorkStats {
         @Override
         public float getClusterLoad() {
           return 1.0f;
+        }
+
+        @Override
+        public float getClusterLoad(long maxWidthPerNode) {
+          return getClusterLoad();
         }
 
         @Override

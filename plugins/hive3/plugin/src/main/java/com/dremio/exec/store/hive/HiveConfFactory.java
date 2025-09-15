@@ -18,8 +18,10 @@ package com.dremio.exec.store.hive;
 import static com.dremio.exec.store.hive.BaseHiveStoragePlugin.HIVE_DEFAULT_CTAS_FORMAT;
 
 import com.dremio.common.VM;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.store.hive.exec.FileSystemConfUtil;
+import com.dremio.options.OptionManager;
 import com.google.common.base.Joiner;
 import com.google.common.base.Preconditions;
 import java.util.HashSet;
@@ -56,8 +58,8 @@ public class HiveConfFactory {
   private static final String FS_S3N_IMPL = "fs.s3n.impl";
   private static final String FS_S3_IMPL_DEFAULT = "org.apache.hadoop.fs.s3a.S3AFileSystem";
 
-  public HiveConf createHiveConf(HiveStoragePluginConfig config) {
-    final HiveConf hiveConf = createBaseHiveConf(config);
+  public HiveConf createHiveConf(HiveStoragePluginConfig config, OptionManager optionManager) {
+    final HiveConf hiveConf = createBaseHiveConf(config, optionManager);
 
     switch (config.authType) {
       case STORAGE:
@@ -83,7 +85,8 @@ public class HiveConfFactory {
     return hiveConf;
   }
 
-  protected HiveConf createBaseHiveConf(BaseHiveStoragePluginConfig<?, ?> config) {
+  protected HiveConf createBaseHiveConf(
+      BaseHiveStoragePluginConfig<?, ?> config, OptionManager optionManager) {
     // Note: HiveConf tries to use the context classloader first, then uses the classloader that it
     // itself
     // is in. If the context classloader is non-null, it will prevnt using the PF4J classloader.
@@ -135,6 +138,11 @@ public class HiveConfFactory {
     if (HiveCommonUtilities.AWS_GLUE_HIVE_METASTORE_PLACEHOLDER.equals(config.hostname)) {
       setAwsglueSourceType(hiveConf);
     }
+
+    setConf(
+        hiveConf,
+        ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(),
+        optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT));
 
     FileSystemConfUtil.S3_PROPS.forEach(hiveConf::set);
     addUserProperties(hiveConf, config);

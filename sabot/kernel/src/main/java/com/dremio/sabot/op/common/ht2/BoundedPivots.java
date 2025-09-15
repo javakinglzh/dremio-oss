@@ -15,7 +15,8 @@
  */
 package com.dremio.sabot.op.common.ht2;
 
-import static com.dremio.sabot.op.common.ht2.LBlockHashTable.VAR_LENGTH_SIZE;
+import static com.dremio.sabot.op.common.ht2.HashTable.VAR_LENGTH_SIZE;
+import static com.dremio.sabot.op.common.ht2.HashTable.VAR_OFFSET_SIZE;
 
 import com.dremio.common.expression.Describer;
 import com.google.common.base.Preconditions;
@@ -45,7 +46,7 @@ public class BoundedPivots {
       final VariableBlockVector targetVariable,
       final int start,
       final int count) {
-    final int dataWidth = targetFixed.getBlockWidth() - HashTable.VAR_OFFSET_SIZE;
+    final int dataWidth = targetFixed.getBlockWidth() - VAR_OFFSET_SIZE;
     final int fieldCount = fields.size();
     final long[] bitAddresses = new long[fieldCount];
     final long[] offsetAddresses = new long[fieldCount];
@@ -85,6 +86,7 @@ public class BoundedPivots {
 
     final long startingVariableAddr = targetVariable.getMemoryAddress();
     final long maxTargetVariableAddr = targetVariable.getMaxMemoryAddress();
+    final long maxTargetFixedAddr = targetFixed.getMaxMemoryAddress();
     long varOffsetAddress = targetFixedAddress + dataWidth;
     long targetVariableAddr = targetVariable.getMemoryAddress();
 
@@ -93,6 +95,9 @@ public class BoundedPivots {
     ReachedTargetBufferLimit:
     while (outputRecordIdx < count) {
       int varLen = 0;
+      if (varOffsetAddress + VAR_OFFSET_SIZE > maxTargetFixedAddr) {
+        break ReachedTargetBufferLimit;
+      }
       // write the starting position of the variable width data.
       PlatformDependent.putInt(varOffsetAddress, (int) (targetVariableAddr - startingVariableAddr));
       final long varLenAddress = targetVariableAddr;
@@ -117,11 +122,16 @@ public class BoundedPivots {
         // update length.
         final int copyLength = (int) (bitVal * len);
 
-        if (copyLength > maxVariableBlockSize) {
+        if (copyLength + varLen > maxVariableBlockSize) {
           throw new UnsupportedOperationException(
               String.format(
-                  "Pivoted variable keys length of %d bytes can't be more than the maximum allowed variable block size of %d bytes",
-                  copyLength, maxVariableBlockSize));
+                  "Pivoted variable keys [%s] length %d bytes can't be more than the maximum allowed variable block size of %d bytes ",
+                  fields.stream()
+                      .limit(field + 1)
+                      .map(v -> v.getIncomingVector().getField().getName())
+                      .collect(java.util.stream.Collectors.joining(", ")),
+                  copyLength + varLen,
+                  maxVariableBlockSize));
         }
 
         // check if we are still within the buffer capacity. If not exit
@@ -138,9 +148,11 @@ public class BoundedPivots {
         varLen += VAR_LENGTH_SIZE;
 
         // copy data
-        final long dataAddress = dataAddresses[field];
-        final long srcDataStart = dataAddress + firstOffset;
-        Copier.copy(srcDataStart, targetVariableAddr, copyLength);
+        if (copyLength > 0) {
+          final long dataAddress = dataAddresses[field];
+          final long srcDataStart = dataAddress + firstOffset;
+          Copier.copy(srcDataStart, targetVariableAddr, copyLength);
+        }
 
         // update pointers.
         targetVariableAddr += copyLength;

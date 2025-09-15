@@ -16,6 +16,7 @@
 package com.dremio.exec.maestro;
 
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.exec.maestro.lifecycle.QueryLifecycle;
 import com.dremio.exec.proto.CoordExecRPC.NodeQueryCompletion;
 import com.dremio.exec.proto.CoordExecRPC.NodeQueryFirstError;
 import com.dremio.exec.proto.CoordExecRPC.NodeQueryScreenCompletion;
@@ -24,7 +25,7 @@ import com.dremio.exec.testing.ExecutionControls;
 import com.dremio.resource.exception.ResourceAllocationException;
 
 /** Handles the life-cycle of query during the execution phases (post logical planning). */
-interface QueryTracker extends AutoCloseable {
+interface QueryTracker extends AutoCloseable, QueryLifecycle {
 
   /**
    * Allocate resources required for the query (eg. slot in distributed queue).

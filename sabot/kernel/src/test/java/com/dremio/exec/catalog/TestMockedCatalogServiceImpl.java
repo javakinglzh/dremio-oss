@@ -37,6 +37,7 @@ import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.SourceState;
 import com.dremio.service.namespace.catalogstatusevents.CatalogStatusEvents;
 import com.dremio.service.scheduler.SchedulerService;
+import com.dremio.service.users.UserService;
 import com.dremio.services.fabric.api.FabricService;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -75,7 +76,8 @@ public class TestMockedCatalogServiceImpl {
                 () -> mock(VersionedDatasetAdapterFactory.class),
                 () -> mock(CatalogStatusEvents.class),
                 () -> mock(ExecutorService.class),
-                () -> mock(NamespaceService.Factory.class)));
+                () -> mock(NamespaceService.Factory.class),
+                () -> mock(UserService.class)));
 
     when(plugin.getState()).thenReturn(SourceState.GOOD);
     when(plugins.managed()).thenReturn(Arrays.asList(plugin));

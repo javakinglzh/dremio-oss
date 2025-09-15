@@ -16,7 +16,6 @@
 package com.dremio.dac.service.datasets;
 
 import com.dremio.dac.proto.model.dataset.NameDatasetRef;
-import com.dremio.dac.proto.model.dataset.VirtualDatasetVersion;
 import com.dremio.datastore.api.Document;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.google.common.base.Functions;
@@ -29,25 +28,22 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import javax.annotation.Nullable;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * Container for all versions of a dataset. Constructs linked list, checks for validity of the list,
  * etc.
  */
 final class VersionList {
-  private static final Logger logger = LoggerFactory.getLogger(VersionList.class);
-
   private final ImmutableList<
-          ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
+          ImmutableList<
+              Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>>
       linkedLists;
   private final ImmutableSet<DatasetVersionMutator.VersionDatasetKey> unusableKeys;
 
   private VersionList(
       ImmutableList<
               ImmutableList<
-                  Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
+                  Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>>
           linkedLists,
       ImmutableSet<DatasetVersionMutator.VersionDatasetKey> unusableKeys) {
     this.linkedLists = linkedLists;
@@ -59,9 +55,12 @@ final class VersionList {
     return unusableKeys;
   }
 
-  Optional<ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
+  Optional<
+          ImmutableList<
+              Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>>
       getVersionsList(DatasetVersionMutator.VersionDatasetKey headVersionKey) {
-    for (ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
+    for (ImmutableList<
+            Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>
         list : linkedLists) {
       // Normal case: there is a list matching the version stored in DatasetConfig.
       if (list.get(0).getKey().equals(headVersionKey)) {
@@ -73,14 +72,16 @@ final class VersionList {
     return Optional.empty();
   }
 
-  Optional<ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
+  Optional<
+          ImmutableList<
+              Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>>
       getFirstVersionsList() {
     return linkedLists.isEmpty() ? Optional.empty() : Optional.of(linkedLists.get(0));
   }
 
   /** Constructs {@link VersionList} with possibly multiple candidate linked lists. */
   static VersionList build(
-      Collection<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
+      Collection<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>
           allVersions,
       @Nullable DatasetVersion headVersion) {
     // Allocate linked list nodes.
@@ -114,7 +115,8 @@ final class VersionList {
     // Find list head(s) and construct linked list(s) from them, accumulate keys that cannot be used
     // because of a loop.
     ImmutableList.Builder<
-            ImmutableList<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>>
+            ImmutableList<
+                Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>>
         linkedListsBuilder = ImmutableList.builder();
     ImmutableSet.Builder<DatasetVersionMutator.VersionDatasetKey> unusableKeysBuilder =
         ImmutableSet.builder();
@@ -125,7 +127,8 @@ final class VersionList {
         .forEach(
             head -> {
               ImmutableList<
-                      Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
+                      Document<
+                          DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>
                   list =
                       buildLinkedList(head, headVersion, allVersions.size(), unusableKeysBuilder);
               if (!list.isEmpty()) {
@@ -137,7 +140,7 @@ final class VersionList {
 
   /** Attempts to build a linked list from a head node. */
   private static ImmutableList<
-          Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
+          Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>
       buildLinkedList(
           VersionListNode headNode,
           @Nullable DatasetVersion headVersion,
@@ -148,7 +151,8 @@ final class VersionList {
         "Passed headNode is not a head node.");
 
     // Traverse the list from the head. Defend against loops in the list.
-    ImmutableList.Builder<Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion>>
+    ImmutableList.Builder<
+            Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>>
         resultBuilder = ImmutableList.builder();
     VersionListNode node = headNode;
     int size = 0;
@@ -161,8 +165,8 @@ final class VersionList {
     // Check size, if it doesn't match the number of versions, the list has a loop, bail out.
     if (size > limit) {
       // Add keys from the list with loop to the list of unusable keys.
-      for (Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> document :
-          resultBuilder.build()) {
+      for (Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>
+          document : resultBuilder.build()) {
         unusableKeysBuilder.add(document.getKey());
       }
       return ImmutableList.of();
@@ -172,12 +176,13 @@ final class VersionList {
 
   /** Dataset version linked list node. */
   private static final class VersionListNode {
-    private final Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> document;
+    private final Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata>
+        document;
     private final List<VersionListNode> previous = new ArrayList<>();
     private VersionListNode next;
 
     private VersionListNode(
-        Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersion> document) {
+        Document<DatasetVersionMutator.VersionDatasetKey, VirtualDatasetVersionMetadata> document) {
       this.document = document;
     }
   }

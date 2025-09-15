@@ -15,14 +15,19 @@
  */
 package com.dremio.exec.store.dfs;
 
+import static org.junit.Assert.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 
 import com.dremio.common.expression.CompleteType;
+import com.dremio.config.DremioConfig;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.ExecTest;
 import com.dremio.exec.catalog.StoragePluginId;
@@ -36,13 +41,21 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.SplitIdentity;
+import com.dremio.exec.store.StoragePlugin;
+import com.dremio.exec.store.cache.BlockLocationsCacheManager;
 import com.dremio.exec.store.iceberg.IcebergUtils;
+import com.dremio.exec.store.iceberg.SupportsFsCreation;
+import com.dremio.exec.store.iceberg.SupportsIcebergRootPointer;
+import com.dremio.io.file.FileSystem;
 import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.service.namespace.dataset.proto.PartitionProtobuf;
+import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.service.namespace.source.proto.SourceConfig;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +70,7 @@ import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.mockito.ArgumentCaptor;
 
 /** Test for SplitAssignmentTableFunction */
 public class SplitAssignmentTableFunctionTest extends ExecTest {
@@ -284,6 +298,90 @@ public class SplitAssignmentTableFunctionTest extends ExecTest {
     }
 
     splitAssignmentTableFunction.close();
+  }
+
+  @Test
+  public void testCreateFSWithUserNameAndUserId() throws Exception {
+    // Setup
+    final String testUserName = "testUser";
+    final String testUserId = "test-user-id";
+    final String testFilePath = "/test/file/path";
+    final long testFileSize = 1024L;
+
+    // Setup
+    FileSystem fileSystem = mock(FileSystem.class);
+
+    StoragePlugin plugin =
+        mock(
+            StoragePlugin.class,
+            withSettings()
+                .extraInterfaces(SupportsFsCreation.class, SupportsIcebergRootPointer.class));
+    when(((SupportsFsCreation) plugin).createFS(any(SupportsFsCreation.Builder.class)))
+        .thenReturn(fileSystem);
+
+    StoragePluginId pluginId = mock(StoragePluginId.class);
+    SourceConfig sourceConfig = mock(SourceConfig.class);
+    when(sourceConfig.getName()).thenReturn("testPlugin");
+    when(sourceConfig.getId()).thenReturn(new EntityId("testPluginId"));
+    when(pluginId.getConfig()).thenReturn(sourceConfig);
+
+    OpProps opProps = mock(OpProps.class);
+    when(opProps.getUserName()).thenReturn(testUserName);
+    when(opProps.getUserId()).thenReturn(testUserId);
+
+    TableFunctionContext functionContext = mock(TableFunctionContext.class);
+    when(functionContext.getPluginId()).thenReturn(pluginId);
+
+    TableFunctionConfig tableFunctionConfig = mock(TableFunctionConfig.class);
+    when(tableFunctionConfig.getFunctionContext()).thenReturn(functionContext);
+
+    OperatorContext operatorContext = mock(OperatorContext.class);
+    OperatorStats operatorStats = mock(OperatorStats.class);
+    when(operatorContext.getStats()).thenReturn(operatorStats);
+
+    DremioConfig dremioConfig = mock(DremioConfig.class);
+    when(operatorContext.getDremioConfig()).thenReturn(dremioConfig);
+
+    OptionManager optionManager = mock(OptionManager.class);
+    when(operatorContext.getOptions()).thenReturn(optionManager);
+    when(optionManager.getOption(ExecConstants.ASSIGNMENT_CREATOR_BALANCE_FACTOR)).thenReturn(1.5);
+
+    CoordinationProtos.NodeEndpoint endpoint =
+        CoordinationProtos.NodeEndpoint.newBuilder()
+            .setAddress("localhost")
+            .setFabricPort(12345)
+            .build();
+    MinorFragmentEndpoint minorFragmentEndpoint = new MinorFragmentEndpoint(0, endpoint);
+    when(operatorContext.getMinorFragmentEndpoints())
+        .thenReturn(Collections.singletonList(minorFragmentEndpoint));
+
+    FragmentExecutionContext fragmentExecutionContext = mock(FragmentExecutionContext.class);
+    when(fragmentExecutionContext.getStoragePlugin(pluginId)).thenReturn(plugin);
+
+    BlockLocationsCacheManager cacheManager = mock(BlockLocationsCacheManager.class);
+    PartitionProtobuf.BlockLocationsList blockLocationsList =
+        mock(PartitionProtobuf.BlockLocationsList.class);
+    when(cacheManager.createIfAbsent(testFilePath, testFileSize)).thenReturn(blockLocationsList);
+
+    SplitAssignmentTableFunction tableFunction =
+        new SplitAssignmentTableFunction(
+            fragmentExecutionContext, operatorContext, opProps, tableFunctionConfig);
+
+    // Act
+    tableFunction.getFs(testFilePath);
+
+    // Capture the Builder argument passed to createFS
+    ArgumentCaptor<SupportsFsCreation.Builder> builderCaptor =
+        ArgumentCaptor.forClass(SupportsFsCreation.Builder.class);
+    verify((SupportsFsCreation) plugin).createFS(builderCaptor.capture());
+
+    SupportsFsCreation.Builder capturedBuilder = builderCaptor.getValue();
+
+    // Assert
+    // Verify userName and userId were correctly passed
+    assertEquals("userName should match", testUserName, capturedBuilder.userName());
+    assertEquals("userId should match", testUserId, capturedBuilder.userId());
+    assertEquals("filePath should match", testFilePath, capturedBuilder.filePath());
   }
 
   private SplitAssignmentTableFunction getSplitAssignmentTableFunction() throws Exception {

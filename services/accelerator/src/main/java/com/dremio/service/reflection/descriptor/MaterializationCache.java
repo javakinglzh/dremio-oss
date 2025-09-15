@@ -31,14 +31,12 @@ import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.descriptor.ExpandedMaterializationDescriptor;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
 import com.dremio.exec.planner.common.PlannerMetrics;
-import com.dremio.exec.planner.plancache.CacheRefresher;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.options.OptionManager;
 import com.dremio.service.Pointer;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
-import com.dremio.service.reflection.ReflectionManager;
 import com.dremio.service.reflection.ReflectionMetrics;
 import com.dremio.service.reflection.ReflectionOptions;
 import com.dremio.service.reflection.ReflectionStatusService;
@@ -57,6 +55,7 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+import com.google.common.base.Throwables;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Maps;
 import io.micrometer.core.instrument.Counter;
@@ -70,8 +69,11 @@ import io.protostuff.ByteString;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Collection;
 import java.util.ConcurrentModificationException;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -263,6 +265,9 @@ public class MaterializationCache implements MaterializationCacheViewer {
         if (materializationStalenessEnabled
             && materialization.getIsStale()
             && !cachedDescriptor.isStale()) {
+          logger.info(
+              "update staleness flag for existing descriptor {}",
+              ReflectionUtils.getId(materialization));
           updated.put(
               materialization.getId().getId(),
               new ExpandedMaterializationDescriptor(
@@ -294,16 +299,20 @@ public class MaterializationCache implements MaterializationCacheViewer {
         externalReuseCount++;
       }
     }
+    Set<String> oldKeys = new HashSet<>(old.keySet());
+    Set<String> updatedKeys = new HashSet<>(updated.keySet());
+    oldKeys.removeAll(updatedKeys);
     logger.info(
         "Materialization cache updated. Materializations: "
             + "reused={} expanded={} errors={}. External: "
-            + "reused={} expanded={} errors={}",
+            + "reused={} expanded={} errors={}. removed={}",
         materializationReuseCount,
         materializationExpandCount,
         materializationErrorCount,
         externalReuseCount,
         externalExpandCount,
-        externalErrorCount);
+        externalErrorCount,
+        oldKeys);
     Span.current()
         .setAttribute(
             "dremio.materialization_cache.materializationReuseCount", materializationReuseCount);
@@ -342,7 +351,7 @@ public class MaterializationCache implements MaterializationCacheViewer {
                     updated.value = true;
                   } else {
                     if (!datasetConfig.getTag().equals(version)) {
-                      logger.debug(
+                      logger.info(
                           "Dataset {} has new data. Invalidating cache for external reflection",
                           tableScan.getTable().getQualifiedName());
                       updated.value = true;
@@ -379,6 +388,8 @@ public class MaterializationCache implements MaterializationCacheViewer {
       final ExpandedMaterializationDescriptor descriptor = provider.expand(entry, catalog);
       if (descriptor != null) {
         cache.put(entry.getId(), descriptor);
+        logger.info(
+            "added to cache external reflection: name={}, id={}", entry.getName(), entry.getId());
         return true;
       }
     } catch (Throwable e) {
@@ -422,6 +433,7 @@ public class MaterializationCache implements MaterializationCacheViewer {
           provider.expand(materialization, catalog);
       if (descriptor != null) {
         cache.put(materialization.getId().getId(), descriptor);
+        logger.info("added to cache {}", ReflectionUtils.getId(materialization));
         retryMap.invalidate(materialization.getId());
         return true;
       }
@@ -457,12 +469,18 @@ public class MaterializationCache implements MaterializationCacheViewer {
         logger.error(failureMsg, e);
         Materialization update = materializationStore.get(materialization.getId());
         update.setState(MaterializationState.FAILED);
-        update.setFailure(new Failure().setMessage(failureMsg));
+        update.setFailure(
+            new Failure()
+                .setMessage(failureMsg)
+                .setStackTrace(Throwables.getStackTraceAsString(e)));
         try {
           materializationStore.save(update);
           incrementCounter(retryFailedCounter, e);
           ReflectionEntry entry = entriesStore.get(update.getReflectionId());
-          entry.setLastFailure(new Failure().setMessage(failureMsg));
+          entry.setLastFailure(
+              new Failure()
+                  .setMessage(failureMsg)
+                  .setStackTrace(Throwables.getStackTraceAsString(e)));
           if (!Boolean.TRUE.equals(materialization.getIsIcebergDataset())) {
             entry.setNumFailures(1); // hand it over to reflection retry policy
           }
@@ -504,18 +522,9 @@ public class MaterializationCache implements MaterializationCacheViewer {
     return !oldSchema.equals(newSchema);
   }
 
-  /**
-   * Method to allow {@link ReflectionManager} to make immediate updates to the {@link
-   * MaterializationCache} on the current coordinator. Other coordinators are updated asynchronously
-   * using {@link CacheRefresher}
-   *
-   * @param mId entry to be removed
-   */
-  public void invalidate(MaterializationId mId) {
-    if (isCacheDisabled()) {
-      return;
-    }
-
+  /** Used by reflection manager to immediately invalidate a materialization from the cache. */
+  public void invalidate(Materialization materialization) {
+    final MaterializationId mId = materialization.getId();
     boolean exchanged;
     do {
       Map<String, ExpandedMaterializationDescriptor> old = cached.get();
@@ -526,9 +535,63 @@ public class MaterializationCache implements MaterializationCacheViewer {
       Map<String, ExpandedMaterializationDescriptor> updated = Maps.newHashMap(old);
       // remove the specific materialization.
       updated.remove(mId.getId());
+      logger.info(
+          "RM invalidate {}, count={}", ReflectionUtils.getId(materialization), updated.size());
       // update the cache.
       exchanged = cached.compareAndSet(old, updated);
+      if (!exchanged) {
+        logger.warn(
+            "RM invalidate {}: Unable to compare and set cache.  Old count: {}.  Updated count: {}",
+            ReflectionUtils.getId(materialization),
+            old.size(),
+            updated.size());
+      }
     } while (!exchanged);
+  }
+
+  /**
+   * Used by reflection manager to immediately update the materialization cache when RM is on the
+   * same coordinator. Otherwise, on other coordinators, there could be a materialization cache sync
+   * delay.
+   */
+  public void update(Materialization current, Materialization previous)
+      throws InterruptedException {
+    // Let initial cold cache sync complete first so that we don't risk causing the compareAndSet to
+    // fail there.
+    latch.await(10, TimeUnit.MINUTES);
+
+    // Do expansion (including deserialization) out of the do-while loop, so that in case it takes
+    // long time
+    // the update loop does not race with MaterializationCache.refresh() and falls into infinite
+    // loop.
+    final ExpandedMaterializationDescriptor descriptor =
+        provider.expand(
+            current, CatalogUtil.getSystemCatalogForMaterializationCache(catalogService));
+    if (descriptor != null) {
+      boolean exchanged;
+      do {
+        Map<String, ExpandedMaterializationDescriptor> old = cached.get();
+        Map<String, ExpandedMaterializationDescriptor> updated =
+            Maps.newHashMap(old); // copy over everything
+        if (previous != null) {
+          updated.remove(previous.getId().getId());
+        }
+        updated.put(current.getId().getId(), descriptor);
+        logger.info(
+            "RM update current={}, previous={}, count={}",
+            ReflectionUtils.getId(current),
+            previous != null ? ReflectionUtils.getId(previous) : null,
+            updated.size());
+        exchanged = cached.compareAndSet(old, updated); // update the cache.
+        if (!exchanged) {
+          logger.warn(
+              "RM update {}: Unable to compare and set cache.  Old count: {}.  Updated count: {}",
+              ReflectionUtils.getId(current),
+              old.size(),
+              updated.size());
+        }
+      } while (!exchanged);
+    }
   }
 
   /**
@@ -549,7 +612,11 @@ public class MaterializationCache implements MaterializationCacheViewer {
       throw new MaterializationCacheTimeoutException(
           "Timed out waiting for materialization cache to initialize.");
     }
-    return Iterables.unmodifiableIterable(cached.get().values());
+    Collection<ExpandedMaterializationDescriptor> currentValues = cached.get().values();
+    if (logger.isDebugEnabled()) {
+      logger.debug("get all materializations, count={}", currentValues.size());
+    }
+    return Iterables.unmodifiableIterable(currentValues);
   }
 
   @Override
@@ -570,8 +637,17 @@ public class MaterializationCache implements MaterializationCacheViewer {
   }
 
   /** Returns descriptor for default raw reflection matching during convertToRel */
-  MaterializationDescriptor get(MaterializationId mId) {
-    return cached.get().get(mId.getId());
+  MaterializationDescriptor getOne(Materialization materialization, NamespaceKey path) {
+    final MaterializationId mId = materialization.getId();
+    final MaterializationDescriptor descriptor = cached.get().get(mId.getId());
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "get one {}, view={}, found={}",
+          ReflectionUtils.getId(materialization),
+          path.getSchemaPath(),
+          descriptor != null);
+    }
+    return descriptor;
   }
 
   public static class MaterializationCacheTimeoutException extends RuntimeException {

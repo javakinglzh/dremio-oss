@@ -102,19 +102,13 @@ public class AutoVDSFixer {
     boolean success = false;
     try {
       View newView = viewTable.getView().withRowType(validatedRowType);
-
       String sourceName = viewTable.getPath().getRoot();
       Catalog updateViewCatalog = catalog;
-      boolean versionedView =
-          CatalogUtil.requestedPluginSupportsVersionedTables(sourceName, updateViewCatalog);
-
-      // TODO(DX-48432) : Fix after DX-48432 is figured out - ownership chaining.
       if (viewTable.getViewOwner() != null) {
         updateViewCatalog = updateViewCatalog.resolveCatalog(viewTable.getViewOwner());
       }
-
       ViewOptions viewOptions = null;
-      if (versionedView) {
+      if (CatalogUtil.requestedPluginSupportsVersionedTables(sourceName, updateViewCatalog)) {
         ResolvedVersionContext resolvedVersionContext =
             CatalogUtil.resolveVersionContext(
                 updateViewCatalog, sourceName, userSession.getSessionVersionForSource(sourceName));

@@ -40,8 +40,10 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.join.vhash.spill.slicer.CombinedSizer;
 import com.dremio.sabot.op.spi.SingleInputOperator;
+import com.google.common.base.Stopwatch;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -52,6 +54,7 @@ import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.OutOfMemoryException;
@@ -88,6 +91,12 @@ public class WindowFrameOperator implements SingleInputOperator {
   private final boolean rowSizeLimitEnabled;
   private boolean rowSizeLimitEnabledForThisOperator;
   private final int rowSizeLimit;
+  private boolean hasRankingFunction = false;
+
+  // Timing metrics
+  private final Stopwatch setupWatch = Stopwatch.createUnstarted();
+  private final Stopwatch consumeWatch = Stopwatch.createUnstarted();
+  private final Stopwatch outputWatch = Stopwatch.createUnstarted();
 
   public WindowFrameOperator(OperatorContext context, WindowPOP config)
       throws OutOfMemoryException {
@@ -102,33 +111,38 @@ public class WindowFrameOperator implements SingleInputOperator {
 
   @Override
   public VectorAccessible setup(VectorAccessible accessible) throws Exception {
-    state.is(State.NEEDS_SETUP);
+    setupWatch.start();
+    try {
+      state.is(State.NEEDS_SETUP);
 
-    incoming = accessible;
-    outgoing = context.createOutputVectorContainer();
-    createFramers(incoming);
-    outgoing.buildSchema();
-    outgoing.setInitialCapacity(context.getTargetBatchSize());
-    createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
+      incoming = accessible;
+      outgoing = context.createOutputVectorContainer();
+      createFramers(incoming);
+      outgoing.buildSchema();
+      outgoing.setInitialCapacity(context.getTargetBatchSize());
+      createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
 
-    if (rowSizeLimitEnabled) {
-      fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
-      if (!isVarLenAggregatePresent()) {
-        rowSizeLimitEnabledForThisOperator = false;
-        if (fixedDataLenPerRow > rowSizeLimit) {
-          throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
-              rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+      if (rowSizeLimitEnabled) {
+        fixedDataLenPerRow = VectorContainerHelper.getFixedDataLenPerRow(outgoing);
+        if (!isVarLenAggregatePresent()) {
+          rowSizeLimitEnabledForThisOperator = false;
+          if (fixedDataLenPerRow > rowSizeLimit) {
+            throw RowSizeLimitExceptionHelper.createRowSizeLimitException(
+                rowSizeLimit, RowSizeLimitExceptionType.PROCESSING, logger);
+          }
+        } else {
+          // do row size check only in case when EvalMode is Complex or Eval (for VarChar and
+          // VarBinary
+          // output type)
+          this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
+          createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
         }
-      } else {
-        // do row size check only in case when EvalMode is Complex or Eval (for VarChar and
-        // VarBinary
-        // output type)
-        this.variableVectorSizer = VectorContainerHelper.createSizer(outgoing, false);
-        createNewRowLengthAccumulatorIfRequired(context.getTargetBatchSize());
       }
+      state = State.CAN_CONSUME;
+      return outgoing;
+    } finally {
+      setupWatch.stop();
     }
-    state = State.CAN_CONSUME;
-    return outgoing;
   }
 
   private boolean isVarLenAggregatePresent() {
@@ -160,10 +174,16 @@ public class WindowFrameOperator implements SingleInputOperator {
 
   @Override
   public void consumeData(int records) throws Exception {
-    state.is(State.CAN_CONSUME);
-    batches.add(VectorContainer.getTransferClone(incoming, context.getAllocator()));
-    if (canDoWork()) {
-      state = State.CAN_PRODUCE;
+    consumeWatch.start();
+    try {
+      state.is(State.CAN_CONSUME);
+      batches.add(VectorContainer.getTransferClone(incoming, context.getAllocator()));
+      if (canDoWork()) {
+        state = State.CAN_PRODUCE;
+      }
+    } finally {
+      consumeWatch.stop();
+      updateStats();
     }
   }
 
@@ -180,18 +200,24 @@ public class WindowFrameOperator implements SingleInputOperator {
 
   @Override
   public int outputData() throws Exception {
-    state.is(State.CAN_PRODUCE);
-    doWork();
+    outputWatch.start();
+    try {
+      state.is(State.CAN_PRODUCE);
+      doWork();
 
-    if (batches.isEmpty()) {
-      state = State.DONE;
-    } else if (!noMoreToConsume && !canDoWork()) {
-      state = State.CAN_CONSUME;
+      if (batches.isEmpty()) {
+        state = State.DONE;
+      } else if (!noMoreToConsume && !canDoWork()) {
+        state = State.CAN_CONSUME;
+      }
+      int outCount = outgoing.getRecordCount();
+      outgoing.setAllCount(outCount);
+      checkForRowSizeOverLimit(outCount);
+      return outCount;
+    } finally {
+      outputWatch.stop();
+      updateStats();
     }
-    int outCount = outgoing.getRecordCount();
-    outgoing.setAllCount(outCount);
-    checkForRowSizeOverLimit(outCount);
-    return outCount;
   }
 
   private void checkForRowSizeOverLimit(int recordCount) {
@@ -238,8 +264,7 @@ public class WindowFrameOperator implements SingleInputOperator {
             .anyMatch("lag"::equals);
 
     // if lower bound is PRECEDING it's possible that partition could be located in several batches.
-    if ((lowerBound.getType().equals(WindowPOP.BoundType.PRECEDING)
-            && !upperBound.getType().equals(BoundType.CURRENT_ROW))
+    if ((lowerBound.getType().equals(WindowPOP.BoundType.PRECEDING) && !hasRankingFunction)
         || isLagFunction) {
       // if last row from previous batch not in same partition with last row in current, we can
       // close it
@@ -282,11 +307,7 @@ public class WindowFrameOperator implements SingleInputOperator {
     }
 
     if (recordCount > 0) {
-      try {
-        outgoing.setAllCount(recordCount);
-      } catch (RuntimeException ex) {
-        throw ex;
-      }
+      outgoing.setAllCount(recordCount);
     }
   }
 
@@ -419,6 +440,11 @@ public class WindowFrameOperator implements SingleInputOperator {
         functions.add(winfun);
         requireFullPartition |= winfun.requiresFullPartition(config);
 
+        // Check if this is a ranking function
+        if (isRankingFunction(winfun)) {
+          hasRankingFunction = true;
+        }
+
         if (winfun.supportsCustomFrames()) {
           useCustomFrame = true;
         } else {
@@ -542,14 +568,39 @@ public class WindowFrameOperator implements SingleInputOperator {
     cg.getEvalBlock()._return(JExpr.TRUE);
   }
 
+  /**
+   * Checks if the given window function is a ranking function. Ranking functions include:
+   * ROW_NUMBER, RANK, DENSE_RANK, PERCENT_RANK, CUME_DIST, NTILE
+   */
+  private boolean isRankingFunction(WindowFunction windowFunction) {
+    WindowFunction.Type type = windowFunction.type;
+    return type == WindowFunction.Type.ROW_NUMBER
+        || type == WindowFunction.Type.RANK
+        || type == WindowFunction.Type.DENSE_RANK
+        || type == WindowFunction.Type.PERCENT_RANK
+        || type == WindowFunction.Type.CUME_DIST
+        || type == WindowFunction.Type.NTILE;
+  }
+
   @Override
   public <OUT, IN, EXCEP extends Throwable> OUT accept(
       OperatorVisitor<OUT, IN, EXCEP> visitor, IN value) throws EXCEP {
     return visitor.visitSingleInput(this, value);
   }
 
+  private void updateStats() {
+    final OperatorStats stats = context.getStats();
+    stats.setLongStat(
+        WindowFrameStats.Metric.SETUP_MILLIS, setupWatch.elapsed(TimeUnit.MILLISECONDS));
+    stats.setLongStat(
+        WindowFrameStats.Metric.CONSUME_MILLIS, consumeWatch.elapsed(TimeUnit.MILLISECONDS));
+    stats.setLongStat(
+        WindowFrameStats.Metric.OUTPUT_MILLIS, outputWatch.elapsed(TimeUnit.MILLISECONDS));
+  }
+
   @Override
   public void close() throws Exception {
+    updateStats();
     List<AutoCloseable> closeables = new ArrayList<>();
     closeables.add(outgoing);
     if (framers != null) {

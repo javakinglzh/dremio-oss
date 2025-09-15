@@ -283,6 +283,7 @@ public class TestKVStoreReportService extends BaseTestServer {
         Dataset.DatasetType.PHYSICAL_DATASET,
         path,
         null,
+        null,
         System.currentTimeMillis(),
         null,
         refreshPolicy,

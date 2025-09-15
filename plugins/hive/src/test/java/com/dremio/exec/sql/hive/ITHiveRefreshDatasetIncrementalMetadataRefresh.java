@@ -25,12 +25,14 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsAction;
@@ -634,6 +636,61 @@ public class ITHiveRefreshDatasetIncrementalMetadataRefresh extends LazyDataGene
         .baselineValues(2, "Jan", 2020)
         .baselineValues(1, "Jan", 2020)
         .go();
+
+      verifyIcebergExecution(EXPLAIN_PLAN + selectQuery, finalIcebergMetadataLocation);
+    } finally {
+      forgetMetadata(tableName);
+      dropTable(tableName);
+    }
+  }
+
+  @Test
+  public void testPartialRefreshExistingPartitionTransactionalTable() throws Exception {
+    final String tableName = "incrrefresh_v2_test_existing_partition_transactional" + getFileFormatLowerCase();
+    try {
+      createTable(tableName, "(id INT) PARTITIONED BY (region STRING)");
+      final String insertCmd1 = "INSERT INTO " + tableName + " PARTITION(region='EU') VALUES(1)";
+      dataGenerator.executeDDL(insertCmd1);
+      runFullRefresh(tableName);
+
+      Table icebergTable = getIcebergTable();
+      icebergTable.refresh();
+      long oldSnapshotId = icebergTable.currentSnapshot().snapshotId();
+
+      // inserting single row in different partitions
+      final String insertCmd2 = "INSERT INTO " + tableName + " PARTITION(region='US') VALUES(2)";
+      dataGenerator.executeDDL(insertCmd2);
+
+      // hack to duplicate EU content with a nested dir to simulate a nested dir content
+      // proper transactional table creation is next to impossible in these IT tests
+      java.nio.file.Path partitionDir = java.nio.file.Path.of(dataGenerator.getWhDir(), tableName, "region=EU");
+      java.nio.file.Path existingDataFile = partitionDir.resolve(java.nio.file.Path.of("000000_0"));
+      java.nio.file.Path nestedDir = partitionDir.resolve(java.nio.file.Path.of("nested"));
+      java.nio.file.Path copyDataFile = nestedDir.resolve(java.nio.file.Path.of("000000_0"));
+
+      Files.createDirectory(nestedDir);
+      Files.copy(existingDataFile, copyDataFile);
+
+      // this will do an partial refresh now on particular partition
+      // only 1 file addition will be shown as a single partition is refreshed
+      runPartialRefresh(tableName, "(\"region\" = 'EU')");
+
+      //Refresh the same iceberg table again
+      icebergTable.refresh();
+      Assert.assertNotEquals(oldSnapshotId, icebergTable.currentSnapshot().snapshotId());
+
+      verifyIcebergMetadata(finalIcebergMetadataLocation, 1, 0, new Schema(Arrays.asList(
+          Types.NestedField.optional(1, "id", new Types.IntegerType()),
+          Types.NestedField.optional(2, "region", new Types.StringType()))), Sets.newHashSet("region"), 2);
+
+      String selectQuery = "SELECT * from " + HIVE + tableName;
+      testBuilder()
+          .sqlQuery(selectQuery)
+          .unOrdered()
+          .baselineColumns("id", "region")
+          .baselineValues(1, "EU")
+          .baselineValues(1, "EU")
+          .go();
 
       verifyIcebergExecution(EXPLAIN_PLAN + selectQuery, finalIcebergMetadataLocation);
     } finally {

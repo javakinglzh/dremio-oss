@@ -37,6 +37,7 @@ import com.google.common.collect.ImmutableList;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URISyntaxException;
+import java.nio.file.AccessDeniedException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Iterator;
@@ -305,6 +306,14 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
               logger.warn("Empty response while reading azure containers " + e.getMessage());
               iterator = Collections.emptyIterator();
               return true;
+            } catch (ExecutionException e) {
+              if (e.getCause() instanceof AccessDeniedException) {
+                // Throw Exception to leave retrials
+                logger.error("Error accessing Azure containers from " + uri, e);
+                throw (AccessDeniedException) e.getCause();
+              }
+              logger.error("Execution Error during retrieving containers from " + uri, e);
+              throw e;
             } catch (Exception e) {
               // Throw ExecutionException for non-retryable cases.
               if (StringUtils.isNotEmpty(e.getMessage())
@@ -313,7 +322,6 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
                 logger.error("Error while reading containers from " + uri, e);
                 throw new ExecutionException(e);
               }
-
               // retryable
               throw new RuntimeException(e);
             }
@@ -332,6 +340,14 @@ public class AzureAsyncContainerProvider implements ContainerProvider {
 
         return iterator.hasNext() ? iterator.next() : endOfData();
       } catch (Retryer.OperationFailedAfterRetriesException e) {
+        // Was Interrupted
+        if (e.getCause() instanceof AccessDeniedException) {
+          logger.error("Access denied to Azure container: {}", e.getMessage());
+          throw UserException.connectionError(e)
+              .message("Could not connect to Azure Container.")
+              .buildSilently();
+        }
+
         // Failed after retries
         logger.error("Error while reading azure storage containers.", e);
         throw new AzureStoragePluginException(e);

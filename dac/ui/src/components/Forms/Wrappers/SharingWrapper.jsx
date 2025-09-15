@@ -16,6 +16,7 @@
 import { Component } from "react";
 import AccessControlListSection from "dyn-load/components/Forms/AccessControlListSection";
 import additionalSharingWrapperControls from "@inject/shared/AdditionalSharingWrapperControls";
+import { isLakehouseSourceType } from "@inject/constants/sourceTypes";
 import { connect } from "react-redux";
 
 import PropTypes from "prop-types";
@@ -35,7 +36,6 @@ class SharingWrapper extends Component {
       elementConfig,
       fields,
       isFileSystemSource,
-      isMetaStore,
       isExternalQueryAllowed,
       sourceType,
     } = this.props;
@@ -46,7 +46,7 @@ class SharingWrapper extends Component {
       });
     }
     if (!source) {
-      if (isFileSystemSource || isMetaStore) {
+      if (isFileSystemSource || isLakehouseSourceType(sourceType)) {
         source = "MUTABLE_SOURCE";
       } else if (isExternalQueryAllowed) {
         source = "ARP_SOURCE";

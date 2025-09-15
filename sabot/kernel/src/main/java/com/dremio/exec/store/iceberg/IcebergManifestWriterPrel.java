@@ -58,7 +58,11 @@ public class IcebergManifestWriterPrel extends WriterPrel {
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     PhysicalOperator child = ((Prel) this.getInput()).getPhysicalOperator(creator);
     OpProps props =
-        creator.props(this, creator.getContext().getQueryUserName(), RecordWriter.SCHEMA);
+        creator.props(
+            this,
+            createTableEntry.getUserName(),
+            createTableEntry.getUserId(),
+            RecordWriter.SCHEMA);
     return new IcebergManifestWriterPOP(
         props,
         child,

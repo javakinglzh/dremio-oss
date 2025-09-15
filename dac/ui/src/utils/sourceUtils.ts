@@ -123,7 +123,3 @@ export const getSourceFromState = (
   sources.find(
     (source: Record<string, any>) => source.get("name") === sourceName,
   );
-
-export const allowDatasetDelete = (sourceType: string) => {
-  return true;
-};

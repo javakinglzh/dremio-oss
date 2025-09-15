@@ -32,6 +32,10 @@ public interface ResourceSet extends Closeable {
 
   default void setCloseAction(Runnable action) {}
 
+  default String getAllocatedResourceIdentifier() {
+    return "";
+  }
+
   /** NoOp Implementation if needed to operations that don't deal with resource allocations */
   class ResourceSetNoOp implements ResourceSet {
     @Override

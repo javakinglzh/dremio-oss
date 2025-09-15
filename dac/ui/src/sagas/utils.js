@@ -80,13 +80,21 @@ export const getExplorePageLocationChangePredicate = (
     oldLocation.query?.scriptId || newLocation.query?.scriptId
   );
 
+  const isRunningQuery = !!newLocation.query?.jobId;
+
   const queryChanged = hasScriptId
     ? //Tabs: Don't consider it a page change when staying on the same tab/scriptId
       oldLocation.query?.scriptId !== newLocation.query?.scriptId
-    : !deepEqual(oldLocation.query, newLocation.query);
+    : // Avoid triggering a page change when running multiple queries
+      isRunningQuery
+      ? false
+      : !deepEqual(oldLocation.query, newLocation.query);
 
   const result = Boolean(
-    excludePageType(oldPathname) !== excludePageType(newPathname) ||
+    (oldPathname !== "/" // This is only true when multi-tabs are disabled and going to the SQL runer for the first time
+      ? excludePageType(oldPathname) !== excludePageType(newPathname)
+      : // Allows path changes when first running multiple queries
+        !isRunningQuery) ||
       pageTypeChanged ||
       queryChanged,
   );

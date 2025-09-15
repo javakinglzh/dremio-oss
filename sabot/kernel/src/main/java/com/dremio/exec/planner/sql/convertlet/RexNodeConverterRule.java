@@ -49,6 +49,8 @@ public final class RexNodeConverterRule extends RelRule<RelRule.Config> {
                 op ->
                     op.operand(RelNode.class)
                         .oneInput(input -> input.operand(RelNode.class).anyInputs())));
+    boolean useFirstValueMapLookup =
+        optionResolver.getOption(ExecConstants.USE_FIRST_VALUE_MAP_LOOKUP);
     convertlets = new ArrayList<>();
     convertlets.add(ArrayAppendConvertlet.INSTANCE);
     convertlets.add(ArrayAvgConvertlet.INSTANCE);
@@ -60,9 +62,10 @@ public final class RexNodeConverterRule extends RelRule<RelRule.Config> {
     convertlets.add(ArrayPrependConvertlet.INSTANCE);
     convertlets.add(ArraysOverlapConvertlet.INSTANCE);
     convertlets.add(ArrayValueConstructorConvertlet.INSTANCE);
+    convertlets.add(CoalesceConvertlet.INSTANCE);
     convertlets.add(ConvertFromConvertlet.INSTANCE);
     convertlets.add(ConvertToConvertlet.INSTANCE);
-    convertlets.add(IndexingOnMapConvertlet.INSTANCE);
+    convertlets.add(new IndexingOnMapConvertlet(useFirstValueMapLookup));
     convertlets.add(LikeToColumnLikeConvertlet.LIKE_TO_COL_LIKE);
     convertlets.add(LikeToColumnLikeConvertlet.REGEXP_LIKE_TO_REGEXP_COL_LIKE);
     convertlets.add(MapConstructConvertlet.INSTANCE);

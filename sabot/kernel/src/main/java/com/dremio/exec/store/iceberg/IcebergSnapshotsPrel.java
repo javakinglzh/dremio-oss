@@ -164,7 +164,7 @@ public class IcebergSnapshotsPrel extends AbstractRelNode implements LeafPrel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     return new IcebergSnapshotsGroupScan(
-        creator.props(this, userName, SNAPSHOTS_READER_SCHEMA, RESERVE, LIMIT),
+        creator.props(this, userName, userId, SNAPSHOTS_READER_SCHEMA, RESERVE, LIMIT),
         storagePluginId,
         PROJECTED_COLUMNS,
         snapshotsScanOptions,

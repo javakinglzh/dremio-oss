@@ -42,8 +42,9 @@ public class Pivots {
       final List<VectorPivotDef> fields,
       final FixedBlockVector targetFixed,
       final VariableBlockVector targetVariable,
-      final int count) {
-    final int dataWidth = targetFixed.getBlockWidth() - LBlockHashTable.VAR_OFFSET_SIZE;
+      final int count,
+      boolean limitVarBlockSize) {
+    final int dataWidth = targetFixed.getBlockWidth() - HashTable.VAR_OFFSET_SIZE;
     final int fieldCount = fields.size();
     final long[] bitAddresses = new long[fieldCount];
     final long[] offsetAddresses = new long[fieldCount];
@@ -116,11 +117,16 @@ public class Pivots {
 
         // update length.
         final int copyLength = (int) (bitVal * len);
-        if (copyLength > maxVariableBlockSize) {
+        if (limitVarBlockSize && (copyLength + varLen > maxVariableBlockSize)) {
           throw new UnsupportedOperationException(
               String.format(
-                  "Pivoted variable keys length of %d bytes can't be more than the maximum allowed variable block size of %d bytes",
-                  copyLength, maxVariableBlockSize));
+                  "Pivoted variable keys [%s] length %d bytes can't be more than the maximum allowed variable block size of %d bytes ",
+                  fields.stream()
+                      .limit(field + 1)
+                      .map(v -> v.getIncomingVector().getField().getName())
+                      .collect(java.util.stream.Collectors.joining(", ")),
+                  copyLength + varLen,
+                  maxVariableBlockSize));
         }
         PlatformDependent.putInt(targetVariableAddr, copyLength);
         targetVariableAddr += 4;
@@ -147,6 +153,15 @@ public class Pivots {
 
   public static void pivot(
       PivotDef pivot, int count, FixedBlockVector fixedBlock, VariableBlockVector variable) {
+    pivot(pivot, count, fixedBlock, variable, false);
+  }
+
+  public static void pivot(
+      PivotDef pivot,
+      int count,
+      FixedBlockVector fixedBlock,
+      VariableBlockVector variable,
+      boolean limitVarBlockSize) {
     fixedBlock.ensureAvailableBlocks(count);
     for (VectorPivotDef def : pivot.getFixedPivots()) {
       switch (def.getType()) {
@@ -169,7 +184,8 @@ public class Pivots {
       }
     }
     if (pivot.getVariableCount() > 0) {
-      pivotVariableLengths(pivot.getVariablePivots(), fixedBlock, variable, count);
+      pivotVariableLengths(
+          pivot.getVariablePivots(), fixedBlock, variable, count, limitVarBlockSize);
     }
   }
 

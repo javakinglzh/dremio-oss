@@ -25,7 +25,6 @@ import com.dremio.exec.ExecConstants;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.planner.physical.PlannerSettings.StoreQueryResultsPolicy;
 import com.dremio.options.OptionManager;
-import com.google.common.base.MoreObjects;
 import com.google.common.base.Preconditions;
 import java.util.HashMap;
 import java.util.List;
@@ -42,7 +41,6 @@ public class LocalExecutionConfig implements OptionProvider {
   private final List<String> sqlContext;
   private final boolean internalSingleThreaded;
   private final String queryResultsStorePath;
-  private final SubstitutionSettings substitutionSettings;
   private final boolean exposeInternalSources;
   private final String engineName;
   private final String sessionId;
@@ -61,7 +59,6 @@ public class LocalExecutionConfig implements OptionProvider {
       final boolean allowPartitionPruning,
       final boolean exposeInternalSources,
       final boolean ignoreColumnsLimits,
-      final SubstitutionSettings substitutionSettings,
       final String engineName,
       final String sessionId,
       final Map<String, VersionContext> sourceVersionMapping,
@@ -75,8 +72,6 @@ public class LocalExecutionConfig implements OptionProvider {
     this.internalSingleThreaded = internalSingleThreaded;
     this.queryResultsStorePath = Preconditions.checkNotNull(queryResultsStorePath);
     this.ignoreColumnsLimits = ignoreColumnsLimits;
-    this.substitutionSettings =
-        MoreObjects.firstNonNull(substitutionSettings, SubstitutionSettings.of());
     this.allowPartitionPruning = allowPartitionPruning;
     this.exposeInternalSources = exposeInternalSources;
     this.engineName = engineName;
@@ -96,10 +91,6 @@ public class LocalExecutionConfig implements OptionProvider {
 
   public List<String> getSqlContext() {
     return sqlContext;
-  }
-
-  public SubstitutionSettings getSubstitutionSettings() {
-    return substitutionSettings;
   }
 
   public boolean isFailIfNonEmptySent() {
@@ -181,7 +172,6 @@ public class LocalExecutionConfig implements OptionProvider {
     private String queryResultsStorePath;
     private boolean allowPartitionPruning;
     private boolean exposeInternalSources;
-    private SubstitutionSettings substitutionSettings;
     private String engineName;
     private String sessionId;
     private StoreQueryResultsPolicy storeQueryResultsPolicy =
@@ -302,17 +292,6 @@ public class LocalExecutionConfig implements OptionProvider {
     }
 
     /**
-     * Sets the settings related to substitution.
-     *
-     * @param substitutionSettings substitution settings
-     * @return this builder
-     */
-    public Builder setSubstitutionSettings(SubstitutionSettings substitutionSettings) {
-      this.substitutionSettings = substitutionSettings;
-      return this;
-    }
-
-    /**
      * set engine name.
      *
      * @param engineName
@@ -379,7 +358,6 @@ public class LocalExecutionConfig implements OptionProvider {
           allowPartitionPruning,
           exposeInternalSources,
           ignoreColumnsLimits,
-          substitutionSettings,
           engineName,
           sessionId,
           sourceVersionMapping,

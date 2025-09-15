@@ -466,7 +466,7 @@ final class SourceAccessChecker implements Catalog {
   }
 
   @Override
-  public SourceState refreshSourceStatus(NamespaceKey key) throws Exception {
+  public SourceState refreshSourceStatus(NamespaceKey key) {
     throwIfInvisible(key);
 
     return delegate.refreshSourceStatus(key);
@@ -630,6 +630,13 @@ final class SourceAccessChecker implements Catalog {
       final AttributeValue attributeValue) {
     throwIfInvisible(key);
     return delegate.alterColumnOption(key, columnToChange, attributeName, attributeValue);
+  }
+
+  @Override
+  public void deleteEntity(
+      CatalogEntityKey catalogEntityKey, String version, NamespaceAttribute... attributes)
+      throws NamespaceException, IOException, CatalogException {
+    delegate.deleteEntity(catalogEntityKey, version, attributes);
   }
 
   @Override
@@ -1142,5 +1149,11 @@ final class SourceAccessChecker implements Catalog {
   public Optional<CatalogFolder> getFolder(CatalogEntityKey catalogEntityKey) {
     return delegate.getFolder(catalogEntityKey);
   }
+
   //// End: NamespacePassthrough Methods
+
+  @Override
+  public Optional<CatalogIdentity> getCatalogEntityOwner(CatalogEntityKey catalogEntityKey) {
+    return delegate.getCatalogEntityOwner(catalogEntityKey);
+  }
 }

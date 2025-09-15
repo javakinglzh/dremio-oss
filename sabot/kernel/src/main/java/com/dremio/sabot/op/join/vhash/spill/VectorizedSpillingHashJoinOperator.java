@@ -80,6 +80,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.apache.arrow.memory.ArrowBuf;
 import org.apache.arrow.memory.BufferAllocator;
@@ -120,7 +122,8 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
   private final List<FieldVector> probeVectorsToValidate = new ArrayList<>();
 
   private final RuntimeFilterManager filterManager;
-
+  private final Map<Integer, AtomicBoolean> remainingRuntimeFilterMessages;
+  private final AtomicInteger remainingRuntimeFilterMessageCount;
   private final VectorContainer outgoing;
   private final int targetOutputBatchSize;
 
@@ -201,6 +204,11 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
             context.getAllocator(),
             RuntimeFilterUtil.getRuntimeValFilterCap(context),
             allMinorFragments);
+    // use a map here instead of array, in case, for some reason, the minor fragment list is not
+    // sequential list of integers starting at 0
+    this.remainingRuntimeFilterMessages =
+        allMinorFragments.stream().collect(Collectors.toMap(f -> f, f -> new AtomicBoolean()));
+    remainingRuntimeFilterMessageCount = new AtomicInteger(allMinorFragments.size());
     // not sending oob spill notifications to sibling minor fragments when MemoryArbiter is ON
     oobSpillNotificationsEnabled =
         !(context.getOptions().getOption(ENABLE_SPILLABLE_OPERATORS))
@@ -560,6 +568,10 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
     try {
       while (recordsDone < records) {
         int reqPivotRows = records - recordsDone;
+        reqPivotRows =
+            Math.min(
+                reqPivotRows,
+                pivotFixedBlock.getCapacity() / joinSetupParams.getBuildKeyPivot().getBlockWidth());
         pivotBuildWatch.start();
         int pivoted =
             BoundedPivots.pivot(
@@ -608,6 +620,16 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
     return partitionColFilters == null && nonPartitionColFilters == null;
   }
 
+  private boolean shouldWaitForRuntimeFilters() {
+    if (runtimeFilterEnabled
+        && !config.getRuntimeFilterInfo().isBroadcastJoin()
+        && context.getFragmentHandle().getMinorFragmentId()
+            <= RuntimeFilterUtil.RF_PROCESS_MINOR_FRAGMENT_ID_RANGE) {
+      return remainingRuntimeFilterMessageCount.get() > 0;
+    }
+    return false;
+  }
+
   @Override
   public void noMoreToConsumeRight() throws Exception {
     state.is(State.CAN_CONSUME_R);
@@ -620,7 +642,8 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
 
     if (partition.isBuildSideEmpty()
         && joinSetupParams.getJoinType() != JoinRelType.LEFT
-        && joinSetupParams.getJoinType() != JoinRelType.FULL) {
+        && joinSetupParams.getJoinType() != JoinRelType.FULL
+        && !shouldWaitForRuntimeFilters()) {
       // nothing needs to be read on the left side as right side is empty
       computeExternalState(InternalState.DONE);
       return;
@@ -768,12 +791,25 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
       ++oobSpills;
     } else if (runtimeFilterEnabled && !runtimeFiltersDropped()) {
       RuntimeFilterUtil.workOnOOB(message, filterManager, context, config);
+      if (remainingRuntimeFilterMessages
+          .get(message.getSendingMinorFragmentId())
+          .compareAndSet(false, true)) {
+        remainingRuntimeFilterMessageCount.decrementAndGet();
+      }
     }
   }
 
   @Override
   public void consumeDataLeft(int records) throws Exception {
     state.is(State.CAN_CONSUME_L);
+
+    if ((partition.isBuildSideEmpty())
+        && !(config.getJoinType() == JoinRelType.LEFT || config.getJoinType() == JoinRelType.FULL)
+        && !shouldWaitForRuntimeFilters()) {
+      // nothing needs to be read on the left side as right side is empty
+      state = State.DONE;
+      return;
+    }
 
     // ensure that none of the variable length vectors are corrupt so we can avoid doing bounds
     // checking later.
@@ -825,6 +861,8 @@ public class VectorizedSpillingHashJoinOperator implements DualInputOperator, Sh
         int startIdx = probePivotCursor.startPivotIdx + probePivotCursor.numPivoted;
         int records = probePivotCursor.batchSize;
         int reqPivotRows = records - startIdx;
+        reqPivotRows =
+            Math.min(reqPivotRows, pivotFixedBlock.getCapacity() / pivotFixedBlock.getBlockWidth());
         int pivoted =
             BoundedPivots.pivot(
                 joinSetupParams.getProbeKeyPivot(),

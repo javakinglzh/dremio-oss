@@ -42,11 +42,15 @@ import com.dremio.config.DremioConfig;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.context.RequestContext;
 import com.dremio.context.UserContext;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.StoragePluginId;
 import com.dremio.exec.physical.base.ViewOptions;
+import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.record.BatchSchema;
+import com.dremio.exec.store.SchemaConfig;
+import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.easy.json.JSONFormatPlugin;
 import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.IcebergFormatConfig;
@@ -66,6 +70,7 @@ import com.dremio.service.namespace.dataset.proto.IcebergViewAttributes;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,11 +79,15 @@ import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.CatalogProperties;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableOperations;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.AlreadyExistsException;
+import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.exceptions.NoSuchViewException;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.view.BaseView;
 import org.apache.iceberg.view.View;
 import org.apache.iceberg.view.ViewMetadata;
+import org.apache.iceberg.view.ViewOperations;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -426,6 +435,38 @@ public class TestRestIcebergCatalogPlugin extends BaseTestQuery {
   }
 
   @Test
+  public void testCreateNewTableShouldThrowWithoutIcebergProps() {
+    when(optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)).thenReturn(true);
+    assertThatThrownBy(
+            () ->
+                plugin.createNewTable(
+                    new NamespaceKey(List.of("source", "table", "path")),
+                    mock(SchemaConfig.class),
+                    null,
+                    WriterOptions.DEFAULT,
+                    null,
+                    null))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("Iceberg Catalog sources can only be used to manage Iceberg tables.");
+  }
+
+  @Test
+  public void testCreateNewTableShouldThrowWithInvalidStoreAsType() {
+    when(optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)).thenReturn(true);
+    assertThatThrownBy(
+            () ->
+                plugin.createNewTable(
+                    new NamespaceKey(List.of("source", "table", "path")),
+                    mock(SchemaConfig.class),
+                    mock(IcebergTableProps.class),
+                    WriterOptions.DEFAULT,
+                    Map.of("type", "parquet"),
+                    null))
+        .isInstanceOf(UnsupportedOperationException.class)
+        .hasMessageContaining("Iceberg Catalog sources can only be used to manage Iceberg tables.");
+  }
+
+  @Test
   public void testTruncateTableShouldThrowWhenSupportKeyIsDisabled() {
     when(pluginSabotContext.getOptionManager()).thenReturn(optionManager);
     when(optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)).thenReturn(false);
@@ -505,5 +546,50 @@ public class TestRestIcebergCatalogPlugin extends BaseTestQuery {
     assertThat(icebergModel).isInstanceOf(IcebergCatalogModel.class);
     IcebergCatalogModel icebergCatalogModel = (IcebergCatalogModel) icebergModel;
     assertThat(icebergCatalogModel.getQueryUserId()).isEqualTo(SYSTEM_USER_CONTEXT_ID);
+  }
+
+  @Test
+  public void testDropTableThrowsCatalogNotFoundError() {
+    when(optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)).thenReturn(true);
+    NamespaceKey namespaceKey =
+        new NamespaceKey(Arrays.asList("catalogTest", "folderTest", "tableTest"));
+    doThrow(new NoSuchTableException(""))
+        .when(mockCatalogAccessor)
+        .dropTable(namespaceKey.getPathComponents());
+    assertThatThrownBy(() -> plugin.dropTable(namespaceKey, null, null))
+        .isInstanceOf(CatalogEntityNotFoundException.class)
+        .hasMessageContaining("not found");
+  }
+
+  @Test
+  public void testLoadViewMetadata() {
+    // Setup
+    BaseView mockBaseView = mock(BaseView.class);
+    ViewOperations viewOperations = mock(ViewOperations.class);
+    ViewMetadata mockViewMetadata = mock(ViewMetadata.class);
+    TableIdentifier viewIdentifier = TableIdentifier.of("namespace", "viewName");
+
+    // Configure mock behavior
+    when(mockCatalogAccessor.loadView(eq(viewIdentifier))).thenReturn(mockBaseView);
+    when(mockBaseView.operations()).thenReturn(viewOperations);
+    when(viewOperations.current()).thenReturn(mockViewMetadata);
+
+    // Execute the method
+    plugin.loadViewMetadata(viewIdentifier);
+
+    // Verify
+    verify(mockCatalogAccessor).loadView(eq(viewIdentifier));
+  }
+
+  @Test
+  public void testEnableS3V2ClientIsPropagated() {
+    when(optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT)).thenReturn(true);
+    this.plugin =
+        new RestIcebergCatalogPluginMock(
+            mockPluginConfig, pluginSabotContext, "resticebergcatalog", () -> storagePluginId);
+    assertTrue(
+        this.plugin
+            .getFsConfCopy()
+            .getBoolean(ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(), false));
   }
 }

@@ -37,7 +37,9 @@ import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.NettyArrowBuf;
+import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 import javax.inject.Provider;
@@ -59,9 +61,8 @@ public abstract class RunQueryResponseHandler implements UserResponseHandler {
   private final BufferAllocator allocator;
   private final Runnable queryCompletionCallback;
   private RecordBatchLoader recordBatchLoader;
-
+  private final AtomicBoolean completed;
   private volatile VectorSchemaRoot vectorSchemaRoot;
-  private volatile boolean completed;
 
   RunQueryResponseHandler(
       UserBitShared.ExternalId runExternalId,
@@ -77,7 +78,7 @@ public abstract class RunQueryResponseHandler implements UserResponseHandler {
     this.allocator = allocator;
     this.queryCompletionCallback = queryCompletionCallback;
     this.recordBatchLoader = new RecordBatchLoader(allocator);
-    this.completed = false;
+    this.completed = new AtomicBoolean(false);
   }
 
   @Override
@@ -85,6 +86,7 @@ public abstract class RunQueryResponseHandler implements UserResponseHandler {
       RpcOutcomeListener<GeneralRPCProtos.Ack> outcomeListener, QueryWritableBatch result) {
     if (isCancelled()) {
       setOutcomeListenerStatusCancelled(outcomeListener);
+      Arrays.stream(result.getBuffers()).forEach(ByteBuf::release);
       return;
     }
 
@@ -216,20 +218,20 @@ public abstract class RunQueryResponseHandler implements UserResponseHandler {
 
   @Override
   public void completed(UserResult result) {
-    completed = true;
-
-    try {
-      handleUserResultState(result);
-    } finally {
+    if (completed.compareAndSet(false, true)) {
       try {
-        if (null != recordBatchLoader) {
-          recordBatchLoader.close();
-          recordBatchLoader = null;
-        }
+        handleUserResultState(result);
       } finally {
-        if (null != vectorSchemaRoot) {
-          vectorSchemaRoot.close();
-          vectorSchemaRoot = null;
+        try {
+          if (null != recordBatchLoader) {
+            recordBatchLoader.close();
+            recordBatchLoader = null;
+          }
+        } finally {
+          if (null != vectorSchemaRoot) {
+            vectorSchemaRoot.close();
+            vectorSchemaRoot = null;
+          }
         }
       }
     }
@@ -288,9 +290,22 @@ public abstract class RunQueryResponseHandler implements UserResponseHandler {
 
   /** Callback for the listener to cancel the backend query request. */
   protected void serverStreamListenerOnCancelledCallback() {
-    if (!completed) {
-      completed = true;
-      workerProvider.get().cancelQuery(runExternalId, userSession.getCredentials().getUserName());
+    if (completed.compareAndSet(false, true)) {
+      try {
+        workerProvider.get().cancelQuery(runExternalId, userSession.getCredentials().getUserName());
+      } finally {
+        try {
+          if (null != recordBatchLoader) {
+            recordBatchLoader.close();
+            recordBatchLoader = null;
+          }
+        } finally {
+          if (null != vectorSchemaRoot) {
+            vectorSchemaRoot.close();
+            vectorSchemaRoot = null;
+          }
+        }
+      }
     }
   }
 

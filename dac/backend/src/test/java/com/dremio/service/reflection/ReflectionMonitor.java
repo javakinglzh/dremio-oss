@@ -63,6 +63,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /** Monitors current status of reflections. */
 public class ReflectionMonitor {
@@ -585,17 +586,17 @@ public class ReflectionMonitor {
     Wait w = new Wait();
     String status = "Waiting for no materializations to be available";
     while (w.loop(status)) {
-      if (materializations.get().isEmpty()) {
+      List<MaterializationDescriptor> descriptors = materializations.get();
+      if (descriptors.isEmpty()) {
         w.log("waitUntilNoMaterializationsAvailable");
         return;
-      } else {
-        status =
-            String.format(
-                "Materializations %s are still available",
-                materializations.get().stream()
-                    .map(MaterializationDescriptor::getMaterializationId)
-                    .reduce((x, y) -> x + "," + y));
       }
+      status =
+          String.format(
+              "Materializations %s are still available",
+              descriptors.stream()
+                  .map(MaterializationDescriptor::getMaterializationId)
+                  .collect(Collectors.joining(",")));
     }
 
     throw new IllegalStateException();
@@ -735,12 +736,22 @@ public class ReflectionMonitor {
     }
   }
 
+  private boolean isMaterializationCached(MaterializationId materializationId) {
+    if (!optionManager.getOption(ReflectionOptions.MATERIALIZATION_CACHE_ENABLED)) {
+      return false;
+    }
+    return reflections.getCacheViewerProvider().get().isCached(materializationId);
+  }
+
   public void waitUntilDeleted(final Materialization deleteMe) {
     Wait wait = new Wait();
     String status =
         String.format(
             "Waiting for the reflection %s to get deleted", ReflectionUtils.getId(deleteMe));
     while (wait.loop(status)) {
+      if (isMaterializationCached(deleteMe.getId())) {
+        continue;
+      }
       final Materialization m = materializationStore.get(deleteMe.getId());
       if (m == null) {
         wait.log("waitUntilDeleted " + ReflectionUtils.getId(deleteMe));
@@ -756,6 +767,9 @@ public class ReflectionMonitor {
             "Waiting for materialization %s to get deprecated. Latest state is %s",
             ReflectionUtils.getId(m), materializationStore.get(m.getId()).getState());
     while (w.loop(status)) {
+      if (isMaterializationCached(m.getId())) {
+        continue;
+      }
       status =
           String.format(
               "Waiting for materialization %s to get deprecated. Latest state is %s",
@@ -768,20 +782,25 @@ public class ReflectionMonitor {
     throw new IllegalStateException();
   }
 
+  /** Collect reflection state to help debug test failures */
   private String extendWithReflectionsAndMaterializations(String original) {
     StringBuilder finalMessage = new StringBuilder(original + "\n\n");
 
-    finalMessage.append("The existing reflections are: \n");
+    finalMessage.append("REFLECTIONS: \n");
     for (ReflectionGoal goal : reflections.getAllReflections()) {
-      finalMessage.append(reflections.getEntry(goal.getId()).orElse(null) + "\n");
+      finalMessage.append(goal + "\n");
+      Optional<ReflectionEntry> entry = reflections.getEntry(goal.getId());
+      if (entry.isPresent()) {
+        finalMessage.append(entry + "\n");
+      }
     }
 
-    finalMessage.append("The existing materializations are: \n");
+    finalMessage.append("MATERIALIZATIONS: \n");
     for (Materialization m : materializationStore.getAllMaterializations()) {
       finalMessage.append(m + "\n");
     }
 
-    finalMessage.append("The existing materialization descriptors are: \n");
+    finalMessage.append("MATERIALIZATION DESCRIPTORS: \n");
     for (MaterializationDescriptor d : materializations.get()) {
       finalMessage.append(d + "\n");
     }

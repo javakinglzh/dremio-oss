@@ -16,6 +16,8 @@
 package com.dremio.exec.planner.cost;
 
 import com.dremio.exec.planner.acceleration.ExpansionNode;
+import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.planner.physical.PrelUtil;
 import com.google.common.collect.ImmutableList;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -188,6 +190,13 @@ public class RelMdPredicates implements MetadataHandler<BuiltInMetadata.Predicat
       positionsList.get(keyNode).add(o.i);
     }
 
+    PlannerSettings plannerSettings = PrelUtil.getPlannerSettings(project.getCluster());
+
+    long maxPermutations =
+        plannerSettings == null
+            ? PlannerSettings.MAX_PREDICATE_PERMUTATIONS.getDefault().getNumVal()
+            : plannerSettings.getOptions().getOption(PlannerSettings.MAX_PREDICATE_PERMUTATIONS);
+
     // Go over child pullUpPredicates. If a predicate is made from projected columns
     // then pull up the predicate in terms of the projected columns.
     // If a predicate contains columns outside the projection, see if we can pull up
@@ -195,11 +204,12 @@ public class RelMdPredicates implements MetadataHandler<BuiltInMetadata.Predicat
     for (RexNode r : inputInfo.pulledUpPredicates) {
       try {
         Map<ComparableRexNode, IndexValueHolder> referenceMap = new HashMap<>();
+        int i = 0;
         do {
           final RexNode newRex =
               r.accept(new ProjectMapper(rexBuilder, project, referenceMap, positionsList));
           projectPullUpPredicates.add(newRex);
-        } while (updateReferences(referenceMap, positionsList));
+        } while (++i < maxPermutations && updateReferences(referenceMap, positionsList));
       } catch (ProjectMapper.ProjectColumnMiss e) {
         // We do not add predicate which can not be referenced by these project fields.
       }

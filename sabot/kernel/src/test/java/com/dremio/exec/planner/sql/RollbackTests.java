@@ -25,8 +25,11 @@ import static com.dremio.exec.planner.sql.DmlQueryTestUtils.testMalformedDmlQuer
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.testQueryValidateStatusSummary;
 import static com.dremio.exec.planner.sql.DmlQueryTestUtils.waitUntilAfter;
 import static com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.getTimestampFromMillis;
+import static com.dremio.exec.store.iceberg.IcebergUtils.LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION;
+import static com.dremio.exec.store.iceberg.IcebergUtils.UNSUPPORTED_ICEBERG_FORMAT_VERSION_MSG;
 
 import com.dremio.exec.proto.UserBitShared.DremioPBError.ErrorType;
+import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
 import com.dremio.test.UserExceptionAssert;
 import com.google.common.collect.Iterables;
@@ -34,6 +37,7 @@ import java.io.File;
 import org.apache.arrow.memory.BufferAllocator;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.iceberg.Table;
+import org.assertj.core.api.Assertions;
 import org.junit.Assert;
 
 /**
@@ -112,6 +116,64 @@ public class RollbackTests extends ITDmlQueryBase {
           String.format("Table [%s] rollbacked", table.fqn),
           ArrayUtils.subarray(table.originalData, 0, table.originalData.length));
 
+      Table rollbackedTable = getIcebergTable(tableFolder, IcebergCatalogType.HADOOP);
+      Assert.assertEquals(4, Iterables.size(updatedTable.snapshots()));
+      Assert.assertEquals(5, rollbackedTable.history().size());
+      Assert.assertEquals(rollbackToSnapshotId, rollbackedTable.currentSnapshot().snapshotId());
+    }
+  }
+
+  /**
+   * Sets up an iceberg table, then alters the iceberg format version to an unsupported level. Next,
+   * attempt to rollback to a snapshot. Despite being on an unsupported table format, we expect
+   * Rollback will pass because it's a metadata operation. A subsequent SELECT will occur too, which
+   * will fail with an unsupported format version error. We can guarantee the rollback passes from
+   * the assertions at the end of the method.
+   */
+  public static void testRollbackToSnapshotOnUnsupportedIcebergFormat(
+      BufferAllocator allocator, String source) throws Exception {
+    try (DmlQueryTestUtils.Table table = createBasicTable(source, 2, 1)) {
+      String tableName =
+          table.name.startsWith("\"")
+              ? table.name.substring(1, table.name.length() - 1)
+              : table.name;
+      File tableFolder = new File(getDfsTestTmpSchemaLocation(), tableName);
+      Table icebergTable = getIcebergTable(tableFolder, IcebergCatalogType.HADOOP);
+      Assert.assertEquals(2, Iterables.size(icebergTable.snapshots()));
+      Assert.assertEquals(2, icebergTable.history().size());
+      final long rollbackToSnapshotId = icebergTable.history().get(1).snapshotId();
+
+      // Insert more rows to increase snapshots
+      addRows(table, 1);
+      addRows(table, 1);
+      Table updatedTable = getIcebergTable(tableFolder, IcebergCatalogType.HADOOP);
+      Assert.assertEquals(4, Iterables.size(updatedTable.snapshots()));
+      Assert.assertEquals(4, updatedTable.history().size());
+
+      // Increment the iceberg table format to 1 level above dremio's supported version.
+      runSQL(
+          String.format(
+              "ALTER TABLE %s SET TBLPROPERTIES ('format-version' = '%s')",
+              table.fqn, IcebergUtils.LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION + 1));
+
+      // The ROLLBACK passes, but the SELECT fails...  'testQueryValidateStatusSummary' does both
+      // We can guarantee the rollback passes from the assertions at the end of the method
+      Assertions.assertThatThrownBy(
+              () ->
+                  testQueryValidateStatusSummary(
+                      allocator,
+                      "ROLLBACK TABLE %s TO SNAPSHOT '%s'",
+                      new Object[] {table.fqn, rollbackToSnapshotId},
+                      table,
+                      true,
+                      String.format("Table [%s] rollbacked", table.fqn),
+                      ArrayUtils.subarray(table.originalData, 0, table.originalData.length)))
+          .hasMessageContaining(
+              UNSUPPORTED_ICEBERG_FORMAT_VERSION_MSG,
+              tableName,
+              LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION);
+
+      // Verification that the rollback was successful
       Table rollbackedTable = getIcebergTable(tableFolder, IcebergCatalogType.HADOOP);
       Assert.assertEquals(4, Iterables.size(updatedTable.snapshots()));
       Assert.assertEquals(5, rollbackedTable.history().size());

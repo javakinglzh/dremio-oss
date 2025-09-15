@@ -153,10 +153,11 @@ public class NessieCommitsRecordReader extends AbstractNessieCommitRecordsReader
     }
     String tableId =
         String.format(
-            "%s@%d AT %s",
+            "%s@%d AT %s [%s]",
             contentReference.contentKey(),
             contentReference.snapshotId(),
-            contentReference.commitId());
+            contentReference.commitId(),
+            contentReference.contentId());
     Stopwatch loadTime = Stopwatch.createStarted();
     try {
 

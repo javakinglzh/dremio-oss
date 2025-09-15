@@ -27,7 +27,6 @@ import com.dremio.datastore.SearchQueryUtils;
 import com.dremio.datastore.SearchTypes;
 import com.dremio.datastore.api.Document;
 import com.dremio.datastore.api.ImmutableFindByCondition;
-import com.dremio.datastore.api.LegacyIndexedStore.LegacyFindByCondition;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.options.OptionManager;
@@ -41,7 +40,6 @@ import com.dremio.service.catalog.TableType;
 import com.dremio.service.catalog.View;
 import com.dremio.service.namespace.DatasetHelper;
 import com.dremio.service.namespace.NamespaceException;
-import com.dremio.service.namespace.NamespaceIdentity;
 import com.dremio.service.namespace.NamespaceIndexKeys;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
@@ -60,6 +58,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import javax.annotation.Nullable;
 
 /** Implementation of {@link InformationSchemaCatalog} that relies on namespace. */
 class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
@@ -72,7 +71,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
 
   // Schemata are all entities in namespace that are not DATASET type.
   // TODO(DX-9909): cannot use a NOT filter
-  private static final SearchTypes.SearchQuery SCHEMATA_FILTER =
+  public static final SearchTypes.SearchQuery SCHEMATA_FILTER =
       SearchQueryUtils.or(
           SearchQueryUtils.newTermQuery(
               NamespaceIndexKeys.ENTITY_TYPE, NameSpaceContainer.Type.FOLDER.getNumber()),
@@ -83,40 +82,34 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
           SearchQueryUtils.newTermQuery(
               NamespaceIndexKeys.ENTITY_TYPE, NameSpaceContainer.Type.SPACE.getNumber()));
 
-  private static final SearchTypes.SearchQuery DATASET_FILTER =
+  public static final SearchTypes.SearchQuery DATASET_FILTER =
       SearchQueryUtils.newTermQuery(
           NamespaceIndexKeys.ENTITY_TYPE, NameSpaceContainer.Type.DATASET.getNumber());
 
-  private static final Predicate<Document<NamespaceKey, NameSpaceContainer>> IS_NOT_INTERNAL =
+  public static final Predicate<Document<NamespaceKey, NameSpaceContainer>> IS_NOT_INTERNAL =
       entry -> !entry.getKey().getRoot().startsWith("__");
 
   private static final ImmutableSet<String> SYSTEM_FIELDS =
       ImmutableSet.of(IncrementalUpdateUtils.UPDATE_COLUMN);
 
   private final NamespaceService userNamespace;
-  private final NamespaceIdentity identity;
+  // TODO: DX-104022: Properly handle user context and null users.
+  private final @Nullable String userId;
   private final PluginRetriever pluginRetriever;
-
   private final OptionManager optionManager;
 
   public InformationSchemaCatalogImpl(
       NamespaceService userNamespace,
       PluginRetriever pluginRetriever,
       OptionManager optionManager,
-      NamespaceIdentity identity) {
+      @Nullable String userId) {
     this.userNamespace = userNamespace;
     this.pluginRetriever = pluginRetriever;
     this.optionManager = optionManager;
-    this.identity = identity;
+    this.userId = userId;
   }
 
-  private static LegacyFindByCondition getCondition(SearchQuery searchQuery) {
-    return searchQuery == null
-        ? null
-        : new LegacyFindByCondition().setCondition(toSearchQuery(searchQuery));
-  }
-
-  private static SearchTypes.SearchQuery toSearchQuery(SearchQuery searchQuery) {
+  public static SearchTypes.SearchQuery toSearchQuery(SearchQuery searchQuery) {
     switch (searchQuery.getQueryCase()) {
       case EQUALS:
         switch (searchQuery.getEquals().getValueCase()) {
@@ -249,7 +242,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(userId))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.Schema> schemata =
@@ -281,7 +274,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> !alreadySent.contains(entry.getKey().toUnescapedString()))
             .peek(entry -> alreadySent.add(entry.getKey().toUnescapedString()))
-            .map(this::convertDocumentToSchema)
+            .map(InformationSchemaCatalogImpl::convertDocumentToSchema)
             .filter(Objects::nonNull)
             .iterator());
   }
@@ -298,7 +291,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(userId))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.Table> tables =
@@ -319,7 +312,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         res[0],
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
-            .map(this::convertDocumentToTable)
+            .map(InformationSchemaCatalogImpl::convertDocumentToTable)
             .filter(Objects::nonNull)
             .iterator());
   }
@@ -335,7 +328,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(userId))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.View> views =
@@ -357,7 +350,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> entry.getValue().getDataset().getType() == DatasetType.VIRTUAL_DATASET)
-            .map(this::convertDocumentToView)
+            .map(InformationSchemaCatalogImpl::convertDocumentToView)
             .filter(Objects::nonNull)
             .iterator());
   }
@@ -373,7 +366,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
           .forEach(
               versionedPlugin -> {
                 RequestContext.current()
-                    .with(UserContext.CTX_KEY, UserContext.of(identity.getId()))
+                    .with(UserContext.CTX_KEY, UserContext.of(userId))
                     .run(
                         () -> {
                           Stream<com.dremio.service.catalog.TableSchema> columns =
@@ -395,7 +388,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
         StreamSupport.stream(searchResults.spliterator(), false)
             .filter(IS_NOT_INTERNAL)
             .filter(entry -> DatasetHelper.getSchemaBytes(entry.getValue().getDataset()) != null)
-            .map(this::convertDocumentToTableSchema)
+            .map(InformationSchemaCatalogImpl::convertDocumentToTableSchema)
             .filter(Objects::nonNull)
             .iterator());
   }
@@ -415,7 +408,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
    * Adds a dataset filter to a given search query. If query is null, return just the dataset
    * filter.
    */
-  private SearchTypes.SearchQuery addDatasetFilter(SearchQuery searchQuery) {
+  public static SearchTypes.SearchQuery addDatasetFilter(SearchQuery searchQuery) {
     if (searchQuery == null) {
       return DATASET_FILTER;
     } else {
@@ -436,7 +429,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     }
   }
 
-  private Schema convertDocumentToSchema(Document<NamespaceKey, NameSpaceContainer> entry) {
+  public static Schema convertDocumentToSchema(Document<NamespaceKey, NameSpaceContainer> entry) {
     try {
       return Schema.newBuilder()
           .setCatalogName(DEFAULT_CATALOG_NAME)
@@ -454,7 +447,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     }
   }
 
-  private Table convertDocumentToTable(Document<NamespaceKey, NameSpaceContainer> entry) {
+  public static Table convertDocumentToTable(Document<NamespaceKey, NameSpaceContainer> entry) {
     try {
       final String sourceName = entry.getKey().getRoot();
 
@@ -482,7 +475,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     }
   }
 
-  private View convertDocumentToView(Document<NamespaceKey, NameSpaceContainer> entry) {
+  public static View convertDocumentToView(Document<NamespaceKey, NameSpaceContainer> entry) {
     try {
       return View.newBuilder()
           .setCatalogName(DEFAULT_CATALOG_NAME)
@@ -499,7 +492,7 @@ class InformationSchemaCatalogImpl implements InformationSchemaCatalog {
     }
   }
 
-  private TableSchema convertDocumentToTableSchema(
+  public static TableSchema convertDocumentToTableSchema(
       Document<NamespaceKey, NameSpaceContainer> entry) {
     try {
       return TableSchema.newBuilder()

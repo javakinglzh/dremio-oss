@@ -74,6 +74,10 @@ public class FragmentWorkQueue {
   public void retire() {
     synchronized (resource) {
       isRetired = true;
+      if (!workQueue.isEmpty()) {
+        // we are going to empty work queue shortly, mark blocked
+        resource.markBlocked();
+      }
     }
     while (!workQueue.isEmpty()) {
       suppressingClose(workQueue.poll().second);

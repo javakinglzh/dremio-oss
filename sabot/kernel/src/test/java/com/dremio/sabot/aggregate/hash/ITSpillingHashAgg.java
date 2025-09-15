@@ -701,6 +701,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_MINIMUM_AS_LIMIT, true)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
     /* run with micro spilling disabled */
     try (CustomHashAggDataGenerator generator =
@@ -709,6 +712,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_ENABLE_MICRO_SPILLS, false)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
   }
 
@@ -782,6 +788,8 @@ public class ITSpillingHashAgg extends BaseTestOperator {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
       final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
     /* run with allocator limit same as minimum reservation */
     try (CustomHashAggDataGenerator generator =
@@ -790,6 +798,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_MINIMUM_AS_LIMIT, true)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
     /* run with micro spilling disabled */
     try (CustomHashAggDataGenerator generator =
@@ -798,6 +809,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_ENABLE_MICRO_SPILLS, false)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
   }
 
@@ -814,6 +828,21 @@ public class ITSpillingHashAgg extends BaseTestOperator {
   public void testSpill2M(HashAggregate hashagg) throws Exception {
     final HashAggregate agg = hashagg;
     try (CustomHashAggDataGenerator generator =
+        new CustomHashAggDataGenerator(2_000_000, getTestAllocator(), false)) {
+      try (AutoCloseable options =
+              with(
+                  VectorizedHashAggOperator.VECTORIZED_HASHAGG_MINIMIZE_DISTINCT_SPILLED_PARTITIONS,
+                  false);
+          AutoCloseable numPartitions =
+              with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_NUMPARTITIONS, 4)) {
+        Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
+        validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 1024);
+        final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+        assertTrue(stats.getSpills() > 0);
+        assertTrue(stats.getOoms() > 0);
+      }
+    }
+    try (CustomHashAggDataGenerator generator =
             new CustomHashAggDataGenerator(2_000_000, getTestAllocator(), false);
         AutoCloseable options =
             with(
@@ -821,6 +850,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
                 false)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
     /* run with allocator limit same as minimum reservation */
     try (CustomHashAggDataGenerator generator =
@@ -829,6 +861,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_USE_MINIMUM_AS_LIMIT, true)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
     /* run with micro spilling disabled */
     try (CustomHashAggDataGenerator generator =
@@ -837,6 +872,9 @@ public class ITSpillingHashAgg extends BaseTestOperator {
             with(VectorizedHashAggOperator.VECTORIZED_HASHAGG_ENABLE_MICRO_SPILLS, false)) {
       Fixtures.Table table = generator.getExpectedGroupsAndAggregations();
       validateSingle(agg, VectorizedHashAggOperator.class, generator, table, 2000);
+      final VectorizedHashAggSpillStats stats = agg.getSpillStats();
+      assertTrue(stats.getSpills() > 0);
+      assertTrue(stats.getOoms() > 0);
     }
   }
 

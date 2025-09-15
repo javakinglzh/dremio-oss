@@ -25,7 +25,6 @@ import {
   useHandleInvalidatedState,
   useHandleAsyncNotification,
   useInitialLoadhomeContents,
-  usePrevious,
 } from "./homeContentsUtils";
 
 export type HomeContentsProps = {
@@ -43,7 +42,6 @@ const HomeContents = (props: HomeContentsProps) => {
   const { viewState, rightTreeVisible, entity } = useHomeContentsStates();
   const prevLoad = useRef<AbortController | null>(null);
   const sourceDisabled = useIsSourceDisabled(source);
-  const prevViewState = usePrevious(viewState);
 
   useInitialLoadhomeContents({
     prevLoad,
@@ -52,7 +50,7 @@ const HomeContents = (props: HomeContentsProps) => {
     load,
   });
 
-  useHandleInvalidatedState({ viewState, load, source, prevViewState });
+  useHandleInvalidatedState({ viewState, load });
   useHandleAsyncNotification({ sourceDisabled, source });
 
   return (

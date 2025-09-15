@@ -42,8 +42,10 @@ public abstract class SplitReaderCreator implements AutoCloseable {
   protected Path path;
   protected SplitReaderCreator next;
   protected List<List<String>> tablePath;
+  protected Path resolvedTablePath;
   protected InputStreamProvider inputStreamProvider;
   protected ParquetProtobuf.ParquetDatasetSplitScanXAttr splitXAttr;
+  protected long fileLastModificationTime;
 
   public SplitReaderCreator() {}
 

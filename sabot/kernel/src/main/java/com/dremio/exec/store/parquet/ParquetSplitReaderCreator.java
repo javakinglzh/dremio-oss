@@ -25,8 +25,10 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.FileTypeCoercion;
 import com.dremio.exec.store.RecordReader;
 import com.dremio.exec.store.SplitAndPartitionInfo;
+import com.dremio.exec.store.dfs.FileSelection;
 import com.dremio.exec.store.dfs.SplitReaderCreator;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
+import com.dremio.exec.store.dfs.implicit.ImplicitFilesystemColumnFinder;
 import com.dremio.exec.store.iceberg.deletes.EqualityDeleteFilter;
 import com.dremio.io.file.FileAttributes;
 import com.dremio.io.file.FileSystem;
@@ -174,6 +176,26 @@ public class ParquetSplitReaderCreator extends SplitReaderCreator implements Aut
     this.isConvertedIcebergDataset = isConvertedIcebergDataset;
     this.userDefinedSchemaSettings = userDefinedSchemaSettings;
     this.extendedProperties = extendedProperties;
+    this.resolvedTablePath = path;
+    handleEx(
+        () -> {
+          if (splitXAttr.hasLastModificationTime()) {
+            this.fileLastModificationTime = splitXAttr.getLastModificationTime();
+          } else {
+            FileAttributes fileAttributes = this.fs.getFileAttributes(path);
+            this.fileLastModificationTime = fileAttributes.lastModifiedTime().toMillis();
+          }
+
+          final List<String> resolvedPath =
+              parquetSplitReaderCreatorIterator.getResolvedTablePath();
+          if (!resolvedPath.isEmpty()) {
+            this.resolvedTablePath = FileSelection.getPathBasedOnFullPath(resolvedPath);
+          }
+          return null;
+        });
+    this.datasetSplit =
+        ImplicitFilesystemColumnFinder.augmentPartitionInfo(
+            context.getOptions(), datasetSplit, resolvedTablePath, path, fileLastModificationTime);
   }
 
   @Override

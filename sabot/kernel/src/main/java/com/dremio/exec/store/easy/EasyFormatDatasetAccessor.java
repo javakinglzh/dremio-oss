@@ -242,7 +242,9 @@ public class EasyFormatDatasetAccessor
               operatorContext,
               ((EasyFormatPlugin) formatPlugin)
                   .getRecordReader(operatorContext, dfs, dataset, GroupScan.ALL_COLUMNS),
-              explorer.getImplicitFieldsForSample(selection),
+              ((EasyFormatPlugin) formatPlugin).canSkipAddingImplicitColumns()
+                  ? Collections.emptyList()
+                  : explorer.getImplicitFieldsForSample(selection),
               sampleAllocator)) {
         reader.setup(mutator);
         Map<String, ValueVector> fieldVectorMap = new HashMap<>();

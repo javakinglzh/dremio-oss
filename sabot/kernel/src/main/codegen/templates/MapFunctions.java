@@ -91,5 +91,58 @@ public class GMapFunctions {
     }
   }
 
+  @FunctionTemplate(names = {MapFunctions.FIRST_MATCHING_ENTRY_FUNC}, scope = FunctionTemplate.FunctionScope.SIMPLE, nulls = NullHandling.INTERNAL, derivation = MapFunctions.KeyValueOutputFirstMatching.class)
+  public static class GetFirstMatchingMapEntryFor${holder}Key implements SimpleFunction {
+
+    @Param FieldReader input;
+    @Param ${holder} inputKey;
+    @Output BaseWriter.ComplexWriter out;
+
+    public void setup() {
+    }
+
+    public void eval() {
+      org.apache.arrow.vector.complex.writer.BaseWriter.StructWriter structWriter = out.rootAsStruct();
+      if (input.isSet() && inputKey.isSet == 1) {
+        org.apache.arrow.vector.complex.impl.UnionMapReader mapReader = (org.apache.arrow.vector.complex.impl.UnionMapReader) input;
+        int iteratorIdx = 0;
+        boolean matchFound = false;
+        while (mapReader.next()) {
+          ${holder} keyHolder = new ${holder}();
+          mapReader.key().read(keyHolder);
+           <#switch holder>
+             <#case "NullableVarCharHolder">
+            boolean isEqual = com.dremio.exec.expr.fn.impl.StringFunctionHelpers.equalsIgnoreCase(keyHolder.buffer, keyHolder.start, keyHolder.end, inputKey.buffer, inputKey.start, inputKey.end);
+             <#break>
+             <#case "NullableDecimalHolder">
+            long index = (keyHolder.start / (org.apache.arrow.vector.DecimalVector.TYPE_WIDTH));
+            java.math.BigDecimal left = org.apache.arrow.vector.util.DecimalUtility.getBigDecimalFromArrowBuf(keyHolder.buffer, org.apache.arrow.memory.util.LargeMemoryUtil.capAtMaxInt(index), keyHolder.scale, org.apache.arrow.vector.DecimalVector.TYPE_WIDTH);
+
+            index = (inputKey.start / (org.apache.arrow.vector.DecimalVector.TYPE_WIDTH));
+            java.math.BigDecimal right = org.apache.arrow.vector.util.DecimalUtility.getBigDecimalFromArrowBuf(inputKey.buffer, org.apache.arrow.memory.util.LargeMemoryUtil.capAtMaxInt(index), inputKey.scale, org.apache.arrow.vector.DecimalVector.TYPE_WIDTH);
+
+            boolean isEqual = left.compareTo(right) == 0;
+             <#break>
+             <#case "NullableVarBinaryHolder">
+            boolean isEqual = org.apache.arrow.memory.util.ByteFunctionHelpers.equal(keyHolder.buffer, keyHolder.start, keyHolder.end, inputKey.buffer, inputKey.start, inputKey.end) == 1;
+             <#break>
+             <#default>
+            boolean isEqual = keyHolder.value == inputKey.value;
+           </#switch>
+            if (isEqual) {
+              matchFound = true;
+              break;
+            }
+            iteratorIdx++;
+        }
+        if (matchFound) {
+          org.apache.arrow.vector.holders.UnionHolder mapEntryHolder = new org.apache.arrow.vector.holders.UnionHolder();
+          mapReader.read(iteratorIdx, mapEntryHolder);
+          org.apache.arrow.vector.complex.impl.ComplexCopier.copy(mapEntryHolder.reader, (org.apache.arrow.vector.complex.writer.FieldWriter) structWriter);
+        }
+      }
+    }
+  }
+
   </#list>
 }

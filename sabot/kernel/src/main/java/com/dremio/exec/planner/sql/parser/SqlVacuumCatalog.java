@@ -64,25 +64,37 @@ public class SqlVacuumCatalog extends SqlVacuum
         public SqlCall createCall(
             SqlLiteral functionQualifier, SqlParserPos pos, SqlNode... operands) {
           Preconditions.checkArgument(
-              operands.length == 2, "SqlVacuumCatalog.createCall() " + "has 1 operand!");
-          return new SqlVacuumCatalog(pos, (SqlIdentifier) operands[0], (SqlNodeList) operands[1]);
+              operands.length == 4, "SqlVacuumCatalog.createCall() " + "has 1 operand!");
+          return new SqlVacuumCatalog(
+              pos,
+              (SqlIdentifier) operands[0],
+              (SqlLiteral) operands[1],
+              (SqlNodeList) operands[2],
+              (SqlLiteral) operands[3]);
         }
 
         @Override
         public RelDataType deriveType(
             SqlValidator validator, SqlValidatorScope scope, SqlCall call) {
           final RelDataTypeFactory typeFactory = validator.getTypeFactory();
-          return VacuumOutputSchema.getCatalogOutputRelDataType(typeFactory);
+          return VacuumOutputSchema.getCatalogOutputRelDataType(
+              typeFactory, ((SqlLiteral) call.getOperandList().get(3)).booleanValue());
         }
       };
 
   private final SqlIdentifier catalogSource;
-  private final SqlNodeList excludeTableList;
+  private final SqlLiteral excludeMode;
+  private final SqlNodeList tableList;
   private SqlSelect sourceSelect;
+  private final SqlLiteral dryRun;
 
   /** Creates a SqlVacuum. */
   public SqlVacuumCatalog(
-      SqlParserPos pos, SqlIdentifier catalogSource, SqlNodeList excludeTableList) {
+      SqlParserPos pos,
+      SqlIdentifier catalogSource,
+      SqlLiteral excludeMode,
+      SqlNodeList tableList,
+      SqlLiteral dryRun) {
     super(
         pos,
         SqlLiteral.createBoolean(true, pos),
@@ -90,7 +102,9 @@ public class SqlVacuumCatalog extends SqlVacuum
         SqlNodeList.EMPTY,
         SqlNodeList.EMPTY);
     this.catalogSource = catalogSource;
-    this.excludeTableList = excludeTableList;
+    this.excludeMode = excludeMode;
+    this.tableList = tableList;
+    this.dryRun = dryRun;
   }
 
   @Override
@@ -102,8 +116,16 @@ public class SqlVacuumCatalog extends SqlVacuum
     return catalogSource;
   }
 
-  public SqlNodeList getExcludeTableList() {
-    return excludeTableList;
+  public SqlLiteral isExcludeMode() {
+    return excludeMode;
+  }
+
+  public SqlNodeList getTableList() {
+    return tableList;
+  }
+
+  public SqlLiteral isDryRun() {
+    return dryRun;
   }
 
   public void setSourceSelect(SqlSelect select) {
@@ -112,7 +134,7 @@ public class SqlVacuumCatalog extends SqlVacuum
 
   @Override
   public List<SqlNode> getOperandList() {
-    return ImmutableList.of(catalogSource, excludeTableList);
+    return ImmutableList.of(catalogSource, excludeMode, tableList, dryRun);
   }
 
   @Override
@@ -136,9 +158,13 @@ public class SqlVacuumCatalog extends SqlVacuum
     writer.keyword("CATALOG");
     catalogSource.unparse(writer, leftPrec, rightPrec);
 
-    if (excludeTableList.size() > 0) {
-      writer.keyword("EXCLUDE");
-      SqlHandlerUtil.unparseSqlNodeList(writer, leftPrec, rightPrec, excludeTableList);
+    if (tableList.size() > 0) {
+      if (excludeMode.booleanValue()) {
+        writer.keyword("EXCLUDE");
+      } else {
+        writer.keyword("INCLUDE");
+      }
+      SqlHandlerUtil.unparseSqlNodeList(writer, leftPrec, rightPrec, tableList);
     }
   }
 
@@ -160,8 +186,8 @@ public class SqlVacuumCatalog extends SqlVacuum
       Prepare.CatalogReader catalogReader,
       RelNode inputRel,
       RelOptTable.ToRelContext relContext) {
-    List<String> excludedContentIDs = new ArrayList<>();
-    for (SqlNode tableNode : excludeTableList) {
+    List<String> listedContentIDs = new ArrayList<>();
+    for (SqlNode tableNode : tableList) {
       final CatalogEntityKey catalogEntityKey =
           CatalogEntityKey.newBuilder()
               .keyComponents(DmlUtils.getPath(tableNode).getPathComponents())
@@ -169,7 +195,7 @@ public class SqlVacuumCatalog extends SqlVacuum
               .build();
       DremioCatalogReader dremioCatalogReader = catalogReader.unwrap(DremioCatalogReader.class);
       DremioTable dremioTable = dremioCatalogReader.getTable(catalogEntityKey);
-      excludedContentIDs.add(
+      listedContentIDs.add(
           VersionedDatasetId.tryParse(dremioTable.getDatasetConfig().getId().getId())
               .getContentId());
     }
@@ -183,7 +209,9 @@ public class SqlVacuumCatalog extends SqlVacuum
         null,
         null,
         null,
-        Collections.unmodifiableList(excludedContentIDs));
+        excludeMode.booleanValue(),
+        Collections.unmodifiableList(listedContentIDs),
+        dryRun.booleanValue());
   }
 
   private TableVersionContext getTableVersionContext(SqlNode table) {

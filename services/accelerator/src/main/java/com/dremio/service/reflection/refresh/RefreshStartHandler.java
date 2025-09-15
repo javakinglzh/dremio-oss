@@ -139,7 +139,7 @@ public class RefreshStartHandler {
             new WakeUpManagerWhenJobDone(wakeUpCallback, "materialization job done"),
             optionManager);
 
-    logger.debug(
+    logger.info(
         "Submitted REFRESH REFLECTION job {} for {}",
         jobId.getId(),
         ReflectionUtils.getId(entry, materialization));
@@ -180,10 +180,24 @@ public class RefreshStartHandler {
       if (entry.getRefreshMethod() == RefreshMethod.INCREMENTAL) {
         final AccelerationStoragePlugin accelerationPlugin =
             catalogService.getSource(ACCELERATOR_STORAGEPLUGIN_NAME);
-        final Table table =
-            ReflectionUtils.getIcebergTable(
-                reflectionId, latestRefresh.getBasePath(), accelerationPlugin);
-        materialization.setPreviousIcebergSnapshot(table.currentSnapshot().snapshotId());
+        try {
+          final Table table =
+              ReflectionUtils.getIcebergTable(
+                  reflectionId, latestRefresh.getBasePath(), accelerationPlugin);
+          materialization.setPreviousIcebergSnapshot(table.currentSnapshot().snapshotId());
+        } catch (IllegalStateException e) {
+          // The physical path somehow was deleted, so we need to force a full refresh so we don't
+          // get stuck.
+          logger.warn(
+              "Failed to get iceberg table for reflection {} at path {}",
+              reflectionId,
+              latestRefresh.getBasePath(),
+              e);
+          materialization
+              .setPreviousIcebergSnapshot(null)
+              .setBasePath(null)
+              .setForceFullRefresh(true);
+        }
       }
     }
   }

@@ -70,10 +70,13 @@ public class WriterPrel extends WriterRelBase implements Prel {
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     PhysicalOperator child = ((Prel) this.getInput()).getPhysicalOperator(creator);
-
     return getCreateTableEntry()
         .getWriter(
-            creator.props(this, creator.getContext().getQueryUserName(), RecordWriter.SCHEMA),
+            creator.props(
+                this,
+                creator.getContext().getQueryUserName(),
+                getCreateTableEntry().getUserId(),
+                RecordWriter.SCHEMA),
             child);
   }
 

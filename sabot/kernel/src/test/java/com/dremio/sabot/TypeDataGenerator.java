@@ -22,10 +22,12 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import org.apache.arrow.vector.BaseVariableWidthVector;
+import org.apache.arrow.vector.BigIntVector;
 import org.apache.arrow.vector.BitVector;
 import org.apache.arrow.vector.DateMilliVector;
 import org.apache.arrow.vector.FieldVector;
 import org.apache.arrow.vector.IntVector;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 
 /**
  * Generates data of a single data type for operator-level unit tests. Input - FieldInfo (to know
@@ -103,10 +105,22 @@ public class TypeDataGenerator<T extends Comparable<T>> implements Generator {
     if (absoluteIndex >= numOfRows) {
       return 0;
     }
+
+    int startIndex = absoluteIndex;
     switch (fieldInfo.getField().getFieldType().getType().getTypeID()) {
       case Int:
-        for (int i = 0; i < records && absoluteIndex < numOfRows; i++, absoluteIndex++) {
-          ((IntVector) vector).setSafe(i, (Integer) dataList.get(i));
+        ArrowType.Int intType = (ArrowType.Int) fieldInfo.getField().getFieldType().getType();
+        if (intType.getBitWidth() == 32) {
+          for (int i = 0; i < records && absoluteIndex < numOfRows; i++, absoluteIndex++) {
+            ((IntVector) vector).setSafe(i, (Integer) dataList.get(i));
+          }
+        } else if (intType.getBitWidth() == 64) {
+          for (int i = 0; i < records && absoluteIndex < numOfRows; i++, absoluteIndex++) {
+            ((BigIntVector) vector).setSafe(i, (Long) dataList.get(i));
+          }
+        } else {
+          throw new UnsupportedOperationException(
+              "Unsupported int bit width: " + intType.getBitWidth());
         }
         break;
       case Utf8:

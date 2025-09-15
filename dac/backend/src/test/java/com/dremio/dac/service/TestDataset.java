@@ -70,6 +70,7 @@ public class TestDataset {
         "id",
         Dataset.DatasetType.PHYSICAL_DATASET,
         ImmutableList.of("@user", "table"),
+        null,
         fields,
         null,
         null,

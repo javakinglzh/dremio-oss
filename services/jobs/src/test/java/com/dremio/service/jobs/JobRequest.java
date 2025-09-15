@@ -16,7 +16,6 @@
 package com.dremio.service.jobs;
 
 import com.dremio.exec.store.easy.arrow.ArrowFileMetadata;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.service.job.proto.DownloadInfo;
 import com.dremio.service.job.proto.JobId;
 import com.dremio.service.job.proto.JobInfo;
@@ -46,7 +45,6 @@ public final class JobRequest {
   private final String fileName;
 
   private final MaterializationSummary materializationSummary;
-  private final SubstitutionSettings substitutionSettings;
 
   /** if set to true, query is not going to be scheduled on a separate thread */
   private final boolean runInSameThread;
@@ -64,7 +62,6 @@ public final class JobRequest {
       String downloadId,
       String fileName,
       MaterializationSummary materializationSummary,
-      SubstitutionSettings substitutionSettings,
       boolean runInSameThread,
       boolean runInSingleThread,
       boolean streamResultsMode) {
@@ -80,7 +77,6 @@ public final class JobRequest {
     this.fileName = fileName;
 
     this.materializationSummary = materializationSummary;
-    this.substitutionSettings = substitutionSettings;
     this.runInSameThread = runInSameThread;
     this.runInSingleThread = runInSingleThread;
     this.streamResultsMode = streamResultsMode;
@@ -120,10 +116,6 @@ public final class JobRequest {
 
   public MaterializationSummary getMaterializationSummary() {
     return materializationSummary;
-  }
-
-  public SubstitutionSettings getSubstitutionSettings() {
-    return substitutionSettings;
   }
 
   public boolean runInSameThread() {
@@ -180,7 +172,6 @@ public final class JobRequest {
     private String fileName;
 
     private MaterializationSummary materializationSummary;
-    private SubstitutionSettings substitutionSettings;
     private boolean runInSameThread;
     private boolean runInSingleThread;
     private boolean streamResultsMode;
@@ -193,11 +184,9 @@ public final class JobRequest {
       this.runInSingleThread = runInSingleThread;
     }
 
-    private Builder(
-        MaterializationSummary materializationSummary, SubstitutionSettings substitutionSettings) {
+    private Builder(MaterializationSummary materializationSummary) {
       this.requestType = RequestType.MATERIALIZATION;
       this.materializationSummary = materializationSummary;
-      this.substitutionSettings = substitutionSettings;
     }
 
     private Builder() {
@@ -234,17 +223,6 @@ public final class JobRequest {
      */
     public Builder setUsername(String username) {
       this.username = username;
-      return this;
-    }
-
-    /**
-     * Set the substitution settings for this job request.
-     *
-     * @param substitutionSettings the substitution settings for this run.
-     * @return this builder.
-     */
-    public Builder setSubstitutionSettings(SubstitutionSettings substitutionSettings) {
-      this.substitutionSettings = substitutionSettings;
       return this;
     }
 
@@ -319,7 +297,6 @@ public final class JobRequest {
 
       if (requestType == RequestType.MATERIALIZATION) {
         Preconditions.checkNotNull(materializationSummary, "materialization summary not provided");
-        Preconditions.checkNotNull(substitutionSettings, "substitution settings not provided");
       }
 
       return new JobRequest(
@@ -332,7 +309,6 @@ public final class JobRequest {
           downloadId,
           fileName,
           materializationSummary,
-          substitutionSettings,
           runInSameThread,
           runInSingleThread,
           streamResultsMode);
@@ -365,11 +341,10 @@ public final class JobRequest {
    *
    * @param materializationSummary information related to materialization, like materializationId,
    *     layoutId, etc. (required)
-   * @param substitutionSettings settings related to substitution (required)
    * @return new builder
    */
   public static Builder newMaterializationJobBuilder(
-      MaterializationSummary materializationSummary, SubstitutionSettings substitutionSettings) {
-    return new Builder(materializationSummary, substitutionSettings);
+      MaterializationSummary materializationSummary) {
+    return new Builder(materializationSummary);
   }
 }

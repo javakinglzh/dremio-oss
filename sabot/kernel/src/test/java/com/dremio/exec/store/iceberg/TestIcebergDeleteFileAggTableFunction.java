@@ -116,6 +116,28 @@ public class TestIcebergDeleteFileAggTableFunction extends BaseTestTableFunction
   }
 
   @Test
+  public void testPositionalDeleteFirst() throws Exception {
+    RecordSet input =
+        rs(
+            INPUT_SCHEMA,
+            r("data1", 100L, PARTITION_1, COL_IDS_1, DELETE_1, PARTITION_SPEC_ID_1),
+            r("data2", 200L, PARTITION_1, COL_IDS_1, DELETE_2, PARTITION_SPEC_ID_1));
+
+    RecordSet output =
+        rs(
+            SystemSchemas.ICEBERG_DELETE_FILE_AGG_SCHEMA,
+            r("data1", 100L, PARTITION_1, COL_IDS_1, li(DELETE_1), PARTITION_SPEC_ID_1),
+            r("data2", 200L, PARTITION_1, COL_IDS_1, li(DELETE_2), PARTITION_SPEC_ID_1));
+
+    validateSingle(
+        getPop(),
+        TableFunctionOperator.class,
+        input,
+        new RecordBatchValidatorDefaultImpl(output),
+        3);
+  }
+
+  @Test
   public void testNullDeleteFilePath() throws Exception {
     RecordSet input =
         rs(

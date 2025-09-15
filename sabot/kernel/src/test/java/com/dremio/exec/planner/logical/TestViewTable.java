@@ -45,13 +45,12 @@ public class TestViewTable {
 
   @BeforeEach
   public void setUp() {
-
     path = new NamespaceKey("testPath");
     RelDataType rowType = mock(RelDataType.class);
     when(rowType.getSqlTypeName()).thenReturn(SqlTypeName.INTEGER);
     when(rowType.getFieldCount()).thenReturn(1);
     when(rowType.getFieldList()).thenReturn(ImmutableList.of());
-    View view = new View("testPath", "SELECT 1", rowType, ImmutableList.of(), ImmutableList.of());
+    view = new View("testPath", "SELECT 1", rowType, ImmutableList.of(), ImmutableList.of());
     viewOwner = new CatalogUser("testUser");
     schema = BatchSchema.EMPTY;
     config = new DatasetConfig();

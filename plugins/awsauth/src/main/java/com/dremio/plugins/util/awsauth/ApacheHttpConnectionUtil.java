@@ -40,10 +40,10 @@ final class ApacheHttpConnectionUtil {
     httpBuilder.maxConnections(
         intOption(conf, Constants.MAXIMUM_CONNECTIONS, Constants.DEFAULT_MAXIMUM_CONNECTIONS, 1));
     httpBuilder.connectionTimeout(
-        Duration.ofSeconds(
+        Duration.ofMillis(
             intOption(conf, Constants.ESTABLISH_TIMEOUT, Constants.DEFAULT_ESTABLISH_TIMEOUT, 0)));
     httpBuilder.socketTimeout(
-        Duration.ofSeconds(
+        Duration.ofMillis(
             intOption(conf, Constants.SOCKET_TIMEOUT, Constants.DEFAULT_SOCKET_TIMEOUT, 0)));
     httpBuilder.proxyConfiguration(initProxySupport(conf));
 

@@ -65,7 +65,7 @@
         Dependencies version for this module
         Submodules should rely on dependenciesManagement as much as possible
     -->
-    <arrow.version>18.1.0-20241227172112-b02259ea59-dremio</arrow.version>
+    <arrow.version>18.1.1-20250709131625-66bbaf1fd7-dremio</arrow.version>
     <avatica.version>1.23.0</avatica.version>
     <calcite.version>1.22.0-202501311721330426-8b30dab9</calcite.version>
     <derby.version>10.14.2.0</derby.version>
@@ -75,11 +75,11 @@
 
     <hibernate-validator.version>6.2.5.Final</hibernate-validator.version>
 
-    <hadoop.version>3.3.6-dremio-202405222026020750-207d8db4</hadoop.version>
+    <hadoop.version>3.3.6-dremio-202507241551560856-75923ad5</hadoop.version>
     <hadoop-azure.version>${plugin.hive3.hadoop-azure.version}</hadoop-azure.version>
     <azure-storage.version>8.3.0</azure-storage.version>
     <avro.version>1.11.4</avro.version>
-    <iceberg.version>1.7.0-5f7c992-20241111151254-eb8d651</iceberg.version>
+    <iceberg.version>1.7.0-5f7c992-20250730084652-3bf8b99</iceberg.version>
 
     <plugin.hive2.azure-storage.version>8.3.0</plugin.hive2.azure-storage.version>
     <plugin.hive2.azure-datalake.version>2.3.10-202208021035330109-f5bda9e</plugin.hive2.azure-datalake.version>
@@ -100,7 +100,7 @@
     -->
     <plugin.hive2.hbase.version>1.1.13</plugin.hive2.hbase.version>
 
-    <plugin.hive3.hadoop.version>3.3.6-dremio-202405222026020750-207d8db4</plugin.hive3.hadoop.version>
+    <plugin.hive3.hadoop.version>3.3.6-dremio-202507241551560856-75923ad5</plugin.hive3.hadoop.version>
     <plugin.hive3.azure-storage.version>8.3.0</plugin.hive3.azure-storage.version>
     <plugin.hive3.azure-datalake.version>2.3.10-202208021035330109-f5bda9e</plugin.hive3.azure-datalake.version>
     <plugin.hive3.hadoop-azure.version>${plugin.hive3.hadoop.version}</plugin.hive3.hadoop-azure.version>
@@ -197,7 +197,7 @@ ${errorprone.module.args}
     <snakeyaml.version>2.2</snakeyaml.version>
     <!-- make sure the snakeyaml version is equal or newer than the one in jackson -->
     <jackson.version>2.15.3</jackson.version>
-    <jetty.version>9.4.56.v20240826</jetty.version>
+    <jetty.version>9.4.58.v20250814</jetty.version>
     <javax.ws.rs-api.version>2.1.1</javax.ws.rs-api.version>
     <junit4.version>4.13.2</junit4.version>
     <junit5.version>5.10.3</junit5.version>
@@ -211,11 +211,11 @@ ${errorprone.module.args}
     <!-- try to keep above nessie versions in sync -->
     <nessie.version>0.100.3</nessie.version>
     <!-- netty-tcnative version must be the same as in the netty-bom -->
-    <netty.version>4.1.118.Final</netty.version>
-    <netty-tcnative.version>2.0.70.Final</netty-tcnative.version>
+    <netty.version>4.1.126.Final</netty.version>
+    <netty-tcnative.version>2.0.73.Final</netty-tcnative.version>
     <!-- custom-built legacy artifact of https://mvnrepository.com/artifact/io.netty/netty -->
     <netty3.version>3.10.6.Final-nohttp</netty3.version>
-    <parquet.version>1.15.1</parquet.version>
+    <parquet.version>1.15.2</parquet.version>
     <pf4j.version>3.10.0</pf4j.version>
     <postgresql.version>42.7.3</postgresql.version>
     <protobuf.version>3.25.5</protobuf.version>
@@ -230,7 +230,7 @@ ${errorprone.module.args}
     <curator.version>5.7.1</curator.version>
     <asynchttpclient.version>3.0.1</asynchttpclient.version>
     <aws-sdk.version>1.12.750</aws-sdk.version>
-    <aws-sdk-2.version>2.18.0</aws-sdk-2.version>
+    <aws-sdk-2.version>2.30.27</aws-sdk-2.version>
     <openhft-affinity.version>3.1.7</openhft-affinity.version>
     <fbs.version>1.12.0</fbs.version>
     <rocksdb.version>7.10.2</rocksdb.version>
@@ -595,7 +595,7 @@ ${errorprone.module.args}
       <dependency>
         <groupId>commons-beanutils</groupId>
         <artifactId>commons-beanutils</artifactId>
-        <version>1.9.4</version>
+        <version>1.11.0</version>
       </dependency>
       <dependency>
         <groupId>de.flapdoodle.embed</groupId>
@@ -1237,7 +1237,7 @@ ${errorprone.module.args}
       <dependency>
         <groupId>org.apache.commons</groupId>
         <artifactId>commons-lang3</artifactId>
-        <version>3.17.0</version>
+        <version>3.18.0</version>
       </dependency>
       <dependency>
         <groupId>commons-io</groupId>
@@ -3426,6 +3426,9 @@ ${errorprone.module.args}
                     <!-- For the sake of space do not include all AWS dependencies but rely on BOM and include individual ones when needed -->
                     <exclude>com.amazonaws:aws-java-sdk</exclude>
                     <exclude>software.amazon.awssdk:aws-sdk-java</exclude>
+                    <!-- ensure our bom imports are not overridden by importing quarkus-related boms -->
+                    <exclude>com.google.protobuf:*:*</exclude>
+                    <exclude>io.grpc:*:*</exclude>
                   </excludes>
                   <includes>
                     <!-- include the netty packages that match the version -->
@@ -3436,6 +3439,9 @@ ${errorprone.module.args}
                     <include>io.netty:netty-tcnative-classes:${netty-tcnative.version}</include>
                     <!-- include the parquet packages that match the version -->
                     <include>org.apache.parquet:*:${parquet.version}</include>
+                    <!-- ensure our bom imports are not overridden by importing quarkus-related boms -->
+                    <include>com.google.protobuf:*:${protobuf.version}</include>
+                    <include>io.grpc:*:${grpc.version}</include>
                   </includes>
                 </bannedDependencies>
                 <bannedPlugins>

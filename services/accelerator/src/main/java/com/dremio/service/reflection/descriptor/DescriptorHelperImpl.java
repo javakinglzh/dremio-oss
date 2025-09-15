@@ -46,7 +46,6 @@ import com.dremio.service.reflection.proto.MaterializationState;
 import com.dremio.service.reflection.proto.ReflectionEntry;
 import com.dremio.service.reflection.proto.ReflectionGoal;
 import com.dremio.service.reflection.proto.ReflectionId;
-import com.dremio.service.reflection.proto.ReflectionState;
 import com.dremio.service.reflection.refresh.ReflectionPlanGenerator;
 import com.dremio.service.reflection.store.DependenciesStore;
 import com.dremio.service.reflection.store.ExternalReflectionStore;
@@ -134,22 +133,15 @@ public class DescriptorHelperImpl implements DescriptorHelper {
   }
 
   /**
-   * @return non expired DONE materializations that have at least one refresh
+   * Returns materializations that are valid for use by the planner. A materialization is valid
+   * when: - Is not expired - Has DONE state - Has at least one child refresh record - Note that a
+   * reflection with no data still has a refresh record. The materialization still needs to be
+   * expanded into the cache and there is bounded retry logic to eventually mark the materialization
+   * as FAILED if expansion fails.
    */
   @Override
   public Iterable<Materialization> getValidMaterializations() {
-    final long now = System.currentTimeMillis();
-    return Iterables.filter(
-        materializationStore.getAllDoneWhen(now),
-        new Predicate<Materialization>() {
-          @Override
-          public boolean apply(Materialization m) {
-            ReflectionEntry entry = internalStore.get(m.getReflectionId());
-            return entry != null
-                && entry.getState() != ReflectionState.FAILED
-                && !Iterables.isEmpty(materializationStore.getRefreshes(m));
-          }
-        });
+    return materializationStore.getAllDoneWhen(System.currentTimeMillis());
   }
 
   /**
@@ -214,33 +206,32 @@ public class DescriptorHelperImpl implements DescriptorHelper {
             TimeUnit.SECONDS.toMillis(5),
             logger)) {
 
-      final ReflectionGoal goal = userStore.get(materialization.getReflectionId());
-      if (!ReflectionGoalChecker.checkGoal(goal, materialization)) {
-        Materialization update = materializationStore.get(materialization.getId());
-        update.setState(MaterializationState.FAILED);
-        update.setFailure(
-            new Failure()
-                .setMessage(
-                    "Reflection definition has changed and materialization is no longer valid."));
-        try {
-          materializationStore.save(update);
-        } catch (ConcurrentModificationException e2) {
-          // ignore in case another coordinator also tries to mark the materialization as failed
-        }
-        // reflection goal changed and corresponding materialization is no longer valid
-        throw new RuntimeException(
-            "Unable to expand materialization "
-                + materialization.getId().getId()
-                + " as it no longer matches its reflection goal");
-      }
-
       final ReflectionEntry entry = internalStore.get(materialization.getReflectionId());
-
-      MaterializationMetrics metrics = materializationStore.getMetrics(materialization).left;
-
+      final MaterializationMetrics metrics = materializationStore.getMetrics(materialization).left;
+      final ReflectionGoal goal = userStore.get(materialization.getReflectionId());
       MaterializationPlan plan =
           this.materializationPlanStore.getVersionedPlan(materialization.getId());
       if (plan == null) {
+        // Changing the reflection definition shouldn't affect existing materializations
+        // until reflection manager deprecates them.  However, if we need to rebuild the plan,
+        // then the materialization and plan could be out of sync so we need to stop
+        // using the materialization now.
+        if (!ReflectionGoalChecker.checkGoal(goal, materialization)) {
+          Materialization update = materializationStore.get(materialization.getId());
+          final String message =
+              String.format(
+                  "Plan Rebuild Failed: %s definition changed after %s.",
+                  ReflectionUtils.getId(goal), ReflectionUtils.getId(materialization));
+          update.setState(MaterializationState.FAILED);
+          update.setFailure(new Failure().setMessage(message));
+          try {
+            materializationStore.save(update);
+          } catch (ConcurrentModificationException e2) {
+            // ignore in case another coordinator also tries to mark the materialization as failed
+          }
+          throw new RuntimeException(message);
+        }
+
         try (ExpansionHelper helper = expansionHelperProvider.apply(catalog)) {
           ReflectionPlanGenerator generator =
               provider.create(

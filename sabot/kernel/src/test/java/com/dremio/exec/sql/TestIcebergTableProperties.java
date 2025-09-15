@@ -241,6 +241,48 @@ public class TestIcebergTableProperties extends BaseTestQuery {
   }
 
   @Test
+  public void tablePropertiesOverrideDefaultWriteFormat() throws Exception {
+    String tblName = "tablePropertiesOverrideDefaultWriteFormat";
+    try {
+      test(
+          "CREATE TABLE %s.%s (id int) TBLPROPERTIES (" + "'write.format.default' = 'avro')",
+          TEMP_SCHEMA, tblName);
+      String metadataJsonString = getMetadataJsonString(tblName);
+      validateTablePropertiesFromMetadataJson(metadataJsonString, "write.format.default", "avro");
+
+      List<String> expectedResult = List.of("write.format.default", "avro");
+      final String showTablePropertiesQuery =
+          String.format("SHOW TBLPROPERTIES %s.%s ", TEMP_SCHEMA, tblName);
+      validateTablePropertiesViaShowTblproperties(showTablePropertiesQuery, expectedResult);
+      UserRemoteException e =
+          Assert.assertThrows(
+              UserRemoteException.class,
+              () -> test("insert into %s.%s values(1)", TEMP_SCHEMA, tblName));
+      Assert.assertEquals(
+          "Unsupported file format for 'writer.default.format': avro. Dremio only supports parquet format.",
+          e.getOriginalMessage());
+    } finally {
+      FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), tblName));
+    }
+  }
+
+  @Test
+  public void tablePropertiesInsensitiveCase() throws Exception {
+    int i = 0;
+    for (String input : new String[] {"Parquet", "PARQUET", "parquet", "pArQuEt"}) {
+      String tblName = "tablePropertiesInsensitiveCase" + i;
+      try {
+        test(
+            "CREATE TABLE %s.%s (id int) TBLPROPERTIES ('write.format.default' = '%s')",
+            TEMP_SCHEMA, tblName, input);
+      } finally {
+        FileUtils.deleteQuietly(new File(getDfsTestTmpSchemaLocation(), tblName));
+        i++;
+      }
+    }
+  }
+
+  @Test
   public void tablePropertiesOverrideParquetRowLimit() throws Exception {
     String tblName = "tablePropertiesOverrideParquetDictSize";
     try {

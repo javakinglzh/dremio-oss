@@ -211,6 +211,10 @@
     <level value="warn"/>
   </logger>
 
+  <logger name="org.projectnessie.gc.identify.IdentifyLiveContents">
+    <level value="debug"/>
+  </logger>
+
   <root>
     <level value="${dremio.log.root.level:-error}"/>
     <if condition='isDefined("dremio.log.path")'>

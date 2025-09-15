@@ -22,6 +22,7 @@ import com.dremio.common.AutoCloseables;
 import com.dremio.common.concurrent.CloseableSchedulerThreadPool;
 import com.dremio.common.concurrent.ExtendedLatch;
 import com.dremio.common.exceptions.ExecutionSetupException;
+import com.dremio.common.logging.StructuredLogger;
 import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.ops.QueryContext;
@@ -40,6 +41,11 @@ import com.dremio.exec.testing.ControlsInjector;
 import com.dremio.exec.testing.ControlsInjectorFactory;
 import com.dremio.exec.work.foreman.CompletionListener;
 import com.dremio.options.OptionManager;
+import com.dremio.querystate.ActiveQueries;
+import com.dremio.querystate.ActiveQueryState;
+import com.dremio.querystate.ResourceAllocatedQueries;
+import com.dremio.querystate.ResourceAllocationDetails;
+import com.dremio.querystate.ResourceIdentifier;
 import com.dremio.resource.GroupResourceInformation;
 import com.dremio.resource.ResourceAllocator;
 import com.dremio.resource.ResourceSchedulingProperties;
@@ -64,8 +70,11 @@ import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 import javax.inject.Inject;
 import javax.inject.Provider;
 import javax.inject.Singleton;
@@ -105,6 +114,9 @@ public class MaestroServiceImpl implements MaestroService {
   private final Provider<OptionManager> optionManagerProvider;
   // single map of currently running queries
   private final ConcurrentMap<QueryId, QueryTracker> activeQueryMap = Maps.newConcurrentMap();
+  private final ConcurrentLinkedQueue<ResourceAllocationDetails> resourceAllocationLedger =
+      new ConcurrentLinkedQueue<>();
+  private final CloseableSchedulerThreadPool queryLifecycleObservabilityThreadPool;
   private final CloseableSchedulerThreadPool closeableSchedulerThreadPool;
 
   private final Provider<MaestroForwarder> forwarder;
@@ -115,6 +127,11 @@ public class MaestroServiceImpl implements MaestroService {
   private ExtendedLatch exitLatch =
       null; // This is used to wait to exit when things are still running
   private final Context grpcContext;
+  private final ActiveQueriesLogger activeQueriesLogger;
+  private final ResourceAllocationDetailsLogger resourceAllocationDetailsLogger;
+  private static final int ACTIVE_QUERY_LOGGING_DELAY_MILLIS = 18_00_000;
+  private static final int RESOURCE_ALLOCATION_WAITING_TIME_THRESHOLD_MILLIS = 36_00_000;
+  private static final int RESOURCE_ALLOCATION_LOGGING_DELAY_MILLIS = 18_00_000;
 
   @Inject
   public MaestroServiceImpl(
@@ -137,10 +154,14 @@ public class MaestroServiceImpl implements MaestroService {
     this.jobTelemetryClient = jobTelemetryClient;
     this.forwarder = forwarder;
     this.optionManagerProvider = optionManagerProvider;
+    this.activeQueriesLogger = new ActiveQueriesLogger();
+    this.resourceAllocationDetailsLogger = new ResourceAllocationDetailsLogger();
 
     this.closeableSchedulerThreadPool =
         new CloseableSchedulerThreadPool(
             "cancel-fragment-retry-", Runtime.getRuntime().availableProcessors() * 2);
+    this.queryLifecycleObservabilityThreadPool =
+        new CloseableSchedulerThreadPool("query-lifecycle-logger", 2);
     // separate out grpc context for jts
     this.grpcContext = Context.current().fork();
   }
@@ -148,9 +169,22 @@ public class MaestroServiceImpl implements MaestroService {
   @Override
   public void start() throws Exception {
     newGauge("maestro.active", activeQueryMap::size);
-
+    scheduleQueryLifecycleObservabilityTasks();
     execToCoordStatusHandlerImpl = new ExecToCoordStatusHandlerImpl(jobTelemetryClient);
     reader = sabotContext.get().getPlanReader();
+  }
+
+  public void scheduleQueryLifecycleObservabilityTasks() {
+    queryLifecycleObservabilityThreadPool.scheduleWithFixedDelay(
+        activeQueriesLogger,
+        ACTIVE_QUERY_LOGGING_DELAY_MILLIS,
+        ACTIVE_QUERY_LOGGING_DELAY_MILLIS,
+        TimeUnit.MILLISECONDS);
+    queryLifecycleObservabilityThreadPool.scheduleWithFixedDelay(
+        resourceAllocationDetailsLogger,
+        RESOURCE_ALLOCATION_LOGGING_DELAY_MILLIS,
+        RESOURCE_ALLOCATION_LOGGING_DELAY_MILLIS,
+        TimeUnit.MILLISECONDS);
   }
 
   @Override
@@ -190,6 +224,7 @@ public class MaestroServiceImpl implements MaestroService {
 
     // allocate execution resources on the calling thread, as this will most likely block
     queryTracker.allocateResources();
+    recordResourceAllocationDuration(queryId, queryTracker);
 
     try {
       observer.beginState(AttemptObserver.toEvent(AttemptEvent.State.EXECUTION_PLANNING));
@@ -225,6 +260,17 @@ public class MaestroServiceImpl implements MaestroService {
         context.getExecutionControls(),
         INJECTOR_EXECUTE_QUERY_END_ERROR,
         ExecutionSetupException.class);
+  }
+
+  private void recordResourceAllocationDuration(QueryId queryId, QueryTracker queryTracker) {
+    long resourceAllocationDuration = queryTracker.getResourceAllocationTimeMillis();
+    if (resourceAllocationDuration >= RESOURCE_ALLOCATION_WAITING_TIME_THRESHOLD_MILLIS) {
+      resourceAllocationLedger.add(
+          ResourceAllocationDetails.newBuilder()
+              .setQueryId(QueryIdHelper.getJobId(queryId))
+              .setAllocationWaitingDurationMillis(resourceAllocationDuration)
+              .build());
+    }
   }
 
   @Override
@@ -292,7 +338,7 @@ public class MaestroServiceImpl implements MaestroService {
 
   @Override
   public void close() throws Exception {
-    closeableSchedulerThreadPool.close();
+    AutoCloseables.close(closeableSchedulerThreadPool, queryLifecycleObservabilityThreadPool);
   }
 
   @Override
@@ -514,6 +560,80 @@ public class MaestroServiceImpl implements MaestroService {
         if (activeQueryMap.isEmpty()) {
           exitLatch.countDown();
         }
+      }
+    }
+  }
+
+  private class ActiveQueriesLogger implements Runnable {
+    private final StructuredLogger<ActiveQueries> activeQueryStateLogger;
+    private final long ACTIVE_QUERY_LIFETIME_THRESHOLD_MILLIS = 36_00_000;
+
+    public ActiveQueriesLogger() {
+      this.activeQueryStateLogger =
+          StructuredLogger.get(ActiveQueries.class, ActiveQueriesLogger.class);
+    }
+
+    @Override
+    public void run() {
+      List<ActiveQueryState> activeQueryStates =
+          activeQueryMap.entrySet().stream()
+              .filter(
+                  tuple ->
+                      tuple.getValue().getActiveTimeMillis()
+                          >= ACTIVE_QUERY_LIFETIME_THRESHOLD_MILLIS)
+              .map(
+                  it -> {
+                    ActiveQueryState.Builder builder =
+                        ActiveQueryState.newBuilder()
+                            .setQueryId(QueryIdHelper.getQueryId(it.getKey()))
+                            .setActiveDurationMillis(it.getValue().getActiveTimeMillis());
+                    if (it.getValue().resourcesAllocated()) {
+                      builder
+                          .setResourcesAllocated(true)
+                          .setAllocatedResourceIdentifier(
+                              ResourceIdentifier.newBuilder()
+                                  .setIdentifier(it.getValue().getAllocatedResourceIdentifier())
+                                  .build());
+                    }
+                    return builder.build();
+                  })
+              .collect(Collectors.toList());
+      if (!activeQueryStates.isEmpty()) {
+        ActiveQueries activeQueries =
+            ActiveQueries.newBuilder().addAllQueries(activeQueryStates).build();
+        activeQueryStateLogger.warn(
+            activeQueries,
+            "{} queries active for more than or equal to threshold time of {} ms detected",
+            activeQueryStates.size(),
+            ACTIVE_QUERY_LIFETIME_THRESHOLD_MILLIS);
+      }
+    }
+  }
+
+  private class ResourceAllocationDetailsLogger implements Runnable {
+    private final StructuredLogger<ResourceAllocatedQueries> logger;
+
+    public ResourceAllocationDetailsLogger() {
+      this.logger =
+          StructuredLogger.get(
+              ResourceAllocatedQueries.class, ResourceAllocationDetailsLogger.class);
+    }
+
+    @Override
+    public void run() {
+      List<ResourceAllocationDetails> queries = new ArrayList<>();
+      while (!resourceAllocationLedger.isEmpty()) {
+        queries.add(resourceAllocationLedger.poll());
+      }
+      if (!queries.isEmpty()) {
+        ResourceAllocatedQueries resourceAllocatedQueries =
+            ResourceAllocatedQueries.newBuilder().addAllQueries(queries).build();
+
+        logger.warn(
+            resourceAllocatedQueries,
+            "{} queries waited for more than or equal to threshold time of {} ms for resource allocation",
+            queries.size(),
+            RESOURCE_ALLOCATION_WAITING_TIME_THRESHOLD_MILLIS);
       }
     }
   }

@@ -182,6 +182,7 @@ public class IcebergOrphanFileDeleteTableFunction extends AbstractTableFunction 
                             SupportsFsCreation.builder()
                                 .filePath(usedFilePath)
                                 .userName(props.getUserName())
+                                .userId(props.getUserId())
                                 .operatorContext(context)
                                 .withAsyncOptions(true)
                                 .datasetFromTableFunctionConfig(functionConfig));

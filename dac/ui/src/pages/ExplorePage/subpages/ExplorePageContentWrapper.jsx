@@ -190,9 +190,11 @@ import { CurrentTabIdProvider } from "#oss/exports/providers/CurrentTabIdProvide
 import { QueryPageTable } from "../components/QueryPageTable/QueryPageTable";
 import { STORAGE_URI_FOLDER } from "@inject/endpoints/SupportFlags/supportFlagConstants";
 import { GraphRenderer } from "@inject/Lineage/GraphRenderer";
+import { deleteQuerySelectionsFromStorage } from "#oss/sagas/utils/querySelections";
+import { deleteScripts } from "#oss/exports/endpoints/Scripts/deleteScripts";
+import { store } from "#oss/store/store";
 
 const newQueryLink = newQuery();
-const HISTORY_BAR_WIDTH = 34;
 const SIDEBAR_MIN_WIDTH = 300;
 const COLLAPSED_SIDEBAR_WIDTH = 36;
 const SQL_EDITOR_PADDING = 20;
@@ -376,6 +378,7 @@ export class ExplorePageContentWrapper extends PureComponent {
     this.dremioSideBarDrag = createRef();
     this.explorePageRef = createRef();
     this.observeRef = createRef();
+    this.cleanUpTabsRef = createRef();
   }
   timeoutRef = undefined;
 
@@ -511,10 +514,19 @@ export class ExplorePageContentWrapper extends PureComponent {
   };
 
   checkForScriptJobs = async () => {
-    const { loadJobTabs, previousMultiSql, setPreviousAndCurrentSql } =
-      this.props;
+    const {
+      location,
+      loadJobTabs,
+      previousMultiSql,
+      setPreviousAndCurrentSql,
+    } = this.props;
 
     const script = await exploreUtils.getCurrentScript();
+
+    // Avoids overwriting script contents when opening a script through URL
+    if (location.query?.scriptId !== script.id) {
+      return;
+    }
 
     // previousMultiSql is null when refreshing the page after running a successful job
     if (!previousMultiSql) {
@@ -1200,6 +1212,7 @@ export class ExplorePageContentWrapper extends PureComponent {
     if (
       stateDetails?.get("entityId") !== argDetails?.get("entityId") ||
       stateDetails?.size !== argDetails?.size ||
+      stateDetails?.get("id") !== argDetails?.get("id") ||
       (argDetails?.get("fromTreeNode") &&
         stateDetails?.get("entityId") !== argDetails?.get("entityId"))
     ) {
@@ -1716,6 +1729,7 @@ export class ExplorePageContentWrapper extends PureComponent {
       isMultiQueryRunning,
       pageType,
       removeTabView,
+      currentSql,
     } = this.props;
 
     const isDatasetPage = exploreUtils.isExploreDatasetPage(location);
@@ -1788,6 +1802,37 @@ export class ExplorePageContentWrapper extends PureComponent {
           return;
         }
         handleOpenTabScript(this.props.router)(script);
+      }
+    };
+
+    const handleTabsCleanup = async (allScripts, sessionScriptsIds) => {
+      if (
+        !this.cleanUpTabsRef.current &&
+        allScripts.length &&
+        sessionScriptsIds.length
+      ) {
+        const deleteScriptIds = allScripts
+          .filter(
+            (script) =>
+              !sessionScriptsIds.includes(script.id) &&
+              isTemporaryScript(script),
+          )
+          .map((script) => script.id);
+        if (deleteScriptIds.length) {
+          const cleanUp = async () => {
+            deleteScriptIds.forEach((scriptId) => {
+              deleteQuerySelectionsFromStorage(scriptId);
+            });
+            try {
+              await deleteScripts({ ids: deleteScriptIds });
+            } catch (e) {
+              //
+            }
+          };
+          this.cleanUpTabsRef.current = cleanUp;
+          await this.cleanUpTabsRef.current();
+        }
+        this.cleanUpTabsRef.current = () => {};
       }
     };
 
@@ -1914,8 +1959,23 @@ export class ExplorePageContentWrapper extends PureComponent {
                                   );
                                 if (
                                   isTemporaryScript(script) &&
-                                  script.content.trim().length > 0
+                                  (script.content.trim().length > 0 ||
+                                    !!currentSql.trim().length)
                                 ) {
+                                  // Save the tempt script before showing the confirm modal
+                                  // This prevents the delete modal from appearing if the first modal
+                                  // is dismissed quickly
+                                  if (!script.content.trim()) {
+                                    store.dispatch({
+                                      type: "REPLACE_SCRIPT_CONTENTS",
+                                      scriptId: script.id,
+                                      script: {
+                                        ...script,
+                                        content: currentSql.trim(),
+                                      },
+                                    });
+                                  }
+
                                   this.setState({
                                     requestedTemporaryTabClose: scriptId,
                                   });
@@ -1991,13 +2051,33 @@ export class ExplorePageContentWrapper extends PureComponent {
                                         ScriptsResource.getResource().value?.find(
                                           (script) => script.id === tabId,
                                         );
-                                      if (isTemporaryScript(script)) {
+                                      if (
+                                        isTemporaryScript(script) &&
+                                        (script.content.trim().length > 0 ||
+                                          !!currentSql.trim().length)
+                                      ) {
+                                        // Save the tempt script before showing the confirm modal
+                                        // This prevents the delete modal from appearing if the first modal
+                                        // is dismissed quickly
+                                        if (!script.content.trim()) {
+                                          store.dispatch({
+                                            type: "REPLACE_SCRIPT_CONTENTS",
+                                            scriptId: script.id,
+                                            script: {
+                                              ...script,
+                                              content: currentSql.trim(),
+                                            },
+                                          });
+                                        }
+
                                         this.setState({
                                           requestedTemporaryTabClose: tabId,
                                         });
                                         return;
                                       }
-                                      handleTabClosed(tabId);
+                                      handleTabClosed(tabId, {
+                                        shouldDelete: isTemporaryScript(script),
+                                      });
                                     },
                                     disabled:
                                       $SqlRunnerSession.$merged.value?.scriptIds
@@ -2046,6 +2126,7 @@ export class ExplorePageContentWrapper extends PureComponent {
                                   createNewTab();
                                 }
                               }}
+                              handleTabsCleanup={handleTabsCleanup}
                             />
                           </CurrentTabIdProvider>
                         )}
@@ -2102,7 +2183,12 @@ export class ExplorePageContentWrapper extends PureComponent {
               this.setState({
                 requestedTemporaryTabClose: null,
               });
-              handleTabClosed(this.state.requestedTemporaryTabClose);
+              const script = ScriptsResource.getResource().value?.find(
+                (script) => script.id === this.state.requestedTemporaryTabClose,
+              );
+              handleTabClosed(this.state.requestedTemporaryTabClose, {
+                shouldDelete: isTemporaryScript(script),
+              });
             }}
             onSave={() => {
               this.setState({

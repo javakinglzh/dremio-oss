@@ -17,6 +17,7 @@ package com.dremio.plugins.dataplane.store;
 
 import static com.dremio.catalog.model.VersionContext.NOT_SPECIFIED;
 import static com.dremio.exec.ExecConstants.FILESYSTEM_HADOOP_CONFIGURATION_PRELOAD_ALL_DEFAULTS;
+import static com.dremio.exec.catalog.CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AWS_STORAGE_ENABLED;
 import static com.dremio.nessiemetadata.cache.NessieMetadataCacheOptions.BYPASS_DATAPLANE_CACHE;
 import static com.dremio.nessiemetadata.cache.NessieMetadataCacheOptions.DATAPLANE_ICEBERG_METADATA_CACHE_EXPIRE_AFTER_ACCESS_MINUTES;
@@ -661,6 +662,7 @@ public class TestDataplanePlugin {
 
   @Test
   public void testGetFunctionsNessieForbiddenException() {
+    when(optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)).thenReturn(true);
     doThrow(
             new NessieForbiddenException(
                 ImmutableNessieError.builder()

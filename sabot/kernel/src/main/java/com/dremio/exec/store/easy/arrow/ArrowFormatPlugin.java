@@ -72,6 +72,13 @@ public class ArrowFormatPlugin extends EasyFormatPlugin<ArrowFormatPluginConfig>
   }
 
   @Override
+  public boolean canSkipAddingImplicitColumns() {
+    // Query results are written in Arrow format, so skip implicit columns.
+    // Implicit columns may be present and there is no need to add any more implicit columns.
+    return true;
+  }
+
+  @Override
   public RecordReader getRecordReader(
       final OperatorContext context,
       final FileSystem dfs,

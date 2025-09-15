@@ -129,6 +129,7 @@ import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
 import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.dremio.service.namespace.dataset.proto.ScanStats;
 import com.dremio.service.namespace.dataset.proto.TableProperties;
+import com.dremio.service.namespace.file.proto.FileConfig;
 import com.dremio.service.namespace.file.proto.FileType;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
@@ -245,6 +246,7 @@ public class IcebergUtils {
       org.slf4j.LoggerFactory.getLogger(IcebergUtils.class);
 
   private static final int ICEBERG_TIMESTAMP_PRECISION = 6;
+  public static final int LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION = 2;
   public static final Pattern LOCALSORT_BY_PATTERN =
       Pattern.compile("LOCALSORT\\s*BY", Pattern.CASE_INSENSITIVE);
 
@@ -272,6 +274,9 @@ public class IcebergUtils {
   /** Dremio terminology for not compressed Parquet pages */
   public static final String DREMIO_PARQUET_NOT_COMPRESSED = "none";
 
+  /** v1 and v2 table with no data may have -1 or null snapshot ids */
+  public static final Long NO_CURRENT_SNAPSHOT = -1L;
+
   public static final Map<String, String> DEFAULT_TABLE_PROPERTIES =
       new HashMap<>() {
         {
@@ -283,6 +288,11 @@ public class IcebergUtils {
 
   public static final String CLUSTERING_TABLE_PROPERTY =
       "dremio.use_sort_order_as_clustering_columns";
+
+  public static final String UNSUPPORTED_ICEBERG_FORMAT_VERSION_MSG =
+      "Table ‘%s’ is using an unsupported Iceberg format version. Dremio currently supports up to version "
+          + LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION
+          + ".";
 
   public enum ReadPositionalDeleteJoinMode {
     BROADCAST("broadcast"),
@@ -790,14 +800,8 @@ public class IcebergUtils {
     try {
       SortOrder.Builder sortOrderBuilder = SortOrder.builderFor(schema);
       for (String sortColumn : sortColumns) {
-        // catch filed not found earlier instead of relying on iceberg SortOrderBuild to improve
-        // error message
-        Types.NestedField sortOrderField = schema.caseInsensitiveFindField(sortColumn);
-        if (sortOrderField == null) {
-          throw UserException.validationError()
-              .message("SortOrder column %s cannot be found in table.", sortColumn)
-              .buildSilently();
-        }
+        validateSortOrderColumn(schema, sortColumn);
+
         sortOrderBuilder.asc(
             sortColumn,
             NullOrder.NULLS_FIRST); // ASC and NULLS_FIRST are default sort parameters for a column.
@@ -806,6 +810,31 @@ public class IcebergUtils {
     } catch (Exception ex) {
       logger.warn("Unable to get IcebergSortOrder based on schema");
       throw UserException.validationError(ex).buildSilently();
+    }
+  }
+
+  /**
+   * Validates columns to be sorted when creating a new table. It validates if the column is defined
+   * in the schema and if it is a primitive type. This function aims to improve the error message
+   * instead of relying on iceberg SortOrderBuild exception messages.
+   *
+   * @param schema iceberg schema
+   * @param sortColumn name from sort order column list
+   * @throws UserException with improved message for user
+   */
+  private static void validateSortOrderColumn(Schema schema, String sortColumn)
+      throws UserException {
+    Types.NestedField sortOrderField = schema.caseInsensitiveFindField(sortColumn);
+    if (sortOrderField == null) {
+      throw UserException.validationError()
+          .message("Sort order column '%s' cannot be found in table.", sortColumn)
+          .buildSilently();
+    }
+
+    if (!sortOrderField.type().isPrimitiveType()) {
+      throw UserException.validationError()
+          .message("Cannot sort order on a complex column '%s'.", sortColumn)
+          .buildSilently();
     }
   }
 
@@ -951,12 +980,10 @@ public class IcebergUtils {
 
   /**
    * By Default, Azure-URI will use 'abfss' with the '.dfs.' authority. It can optionally write
-   * 'wasbs'.
-   *
-   * @return true (write 'wasbs') if 'dremio.azure.mode' = 'STORAGE_V1';
+   * 'wasbs' with the .blob. authority endpoint.
    */
   public static boolean writeWasbs(FileSystemConfigurationAdapter conf) {
-    return ("STORAGE_V1".equals(conf.get("dremio.azure.mode")));
+    return ("STORAGE_V1".equals(conf.get(AzureStorageConfProperties.MODE)));
   }
 
   /**
@@ -2081,6 +2108,7 @@ public class IcebergUtils {
               SupportsFsCreation.builder()
                   .filePath(metadataLocation)
                   .userName(props.getUserName())
+                  .userId(props.getUserId())
                   .operatorContext(context)
                   .withAsyncOptions(true)
                   .dataset(dataset));
@@ -2192,13 +2220,25 @@ public class IcebergUtils {
     return Objects.requireNonNull(Objects.requireNonNull(finalPath).getParent()).getParent();
   }
 
-  /** Get the current latest snapshotId of dataset */
-  public static Optional<String> getCurrentSnapshotId(DatasetConfig dataset) {
+  /**
+   * If input dataset is Iceberg, then return the normalized snapshot id. If not Iceberg, then
+   * return empty optional.
+   */
+  public static Optional<String> getSnapshotFromDatasetConfig(DatasetConfig dataset) {
     IcebergMetadata icebergMetadata = dataset.getPhysicalDataset().getIcebergMetadata();
     if (icebergMetadata != null) {
-      return Optional.of(icebergMetadata.getSnapshotId().toString());
+      return Optional.of(normalizeSnapshotId(icebergMetadata).toString());
     }
     return Optional.empty();
+  }
+
+  /** v3 Iceberg table may have a null snapshot id so normalize to -1 for backward compatibility. */
+  public static Long normalizeSnapshotId(IcebergMetadata icebergMetadata) {
+    if (icebergMetadata.getSnapshotId() != null) {
+      return icebergMetadata.getSnapshotId();
+    } else {
+      return NO_CURRENT_SNAPSHOT;
+    }
   }
 
   public static IcebergViewMetadata.SupportedIcebergViewSpecVersion findIcebergViewVersion(
@@ -2368,6 +2408,78 @@ public class IcebergUtils {
             .getEqualityDeleteStats();
 
     return deleteStats != null && deleteStats.getRecordCount() > 0;
+  }
+
+  /**
+   * Get the specified iceberg table property from the iceberg table properties list. If the
+   * property is not found, return null.
+   *
+   * @param table dremio table
+   * @param requestedPropertyName the name of the Table Property you want to get
+   * @return
+   */
+  public static final TableProperties getSpecifiedIcebergTableProperty(
+      DremioTable table, String requestedPropertyName) {
+    TableProperties requestedProperty = null;
+    List<TableProperties> tablePropertiesList = getIcebergTableProperties(table);
+
+    for (TableProperties prop : tablePropertiesList) {
+      if (prop.getTablePropertyName().equalsIgnoreCase(requestedPropertyName)) {
+        requestedProperty = prop;
+        break;
+      }
+    }
+    return requestedProperty;
+  }
+
+  /**
+   * Check if the table is an Iceberg table.
+   *
+   * @return true if the table is an Iceberg table, false otherwise.
+   */
+  public static boolean isIcebergTable(DremioTable table) {
+    FileType type =
+        Optional.ofNullable(table)
+            .map(DremioTable::getDatasetConfig)
+            .map(DatasetConfig::getPhysicalDataset)
+            .map(PhysicalDataset::getFormatSettings)
+            .map(FileConfig::getType)
+            .orElse(null);
+    return (type == FileType.ICEBERG);
+  }
+
+  /**
+   * Get the iceberg table properties list from the iceberg metadata. Gracefully assumes the table
+   * is an Iceberg Table. If at any point, the assumption is incorrect, return an empty list.
+   *
+   * @return the List of TableProperties. Note that the TableProperty Object is not Iceberg's impl.
+   */
+  public static final List<TableProperties> getIcebergTableProperties(DremioTable table) {
+    return Optional.ofNullable(table)
+        .map(DremioTable::getDatasetConfig)
+        .map(DatasetConfig::getPhysicalDataset)
+        .map(PhysicalDataset::getIcebergMetadata)
+        .map(IcebergMetadata::getTablePropertiesList)
+        .orElse(Collections.emptyList());
+  }
+
+  /**
+   * Check if the Iceberg table's format version is supported by dremio.
+   *
+   * @param table the dremio table
+   * @return true dremio supports the iceberg table's format version. Return false otherwise).
+   */
+  public static boolean isSupportedIcebergFormatVersion(DremioTable table) {
+    TableProperties formatVersion =
+        IcebergUtils.getSpecifiedIcebergTableProperty(
+            table, org.apache.iceberg.TableProperties.FORMAT_VERSION);
+
+    // Null would indicate the table is not iceberg, which we don't care about. Pass this use case.
+    if (formatVersion == null) {
+      return true;
+    }
+    return Integer.parseInt(formatVersion.getTablePropertyValue())
+        <= LATEST_SUPPORTED_ICEBERG_FORMAT_VERSION;
   }
 
   public static final org.apache.iceberg.TableMetadata fixupDefaultProperties(

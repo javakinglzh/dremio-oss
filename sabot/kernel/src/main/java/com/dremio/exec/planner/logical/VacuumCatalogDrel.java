@@ -37,7 +37,9 @@ public class VacuumCatalogDrel extends VacuumCatalogRelBase implements Rel {
       VacuumOptions vacuumOptions,
       String fsScheme,
       String schemeVariate,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(
         LOGICAL,
         cluster,
@@ -49,7 +51,9 @@ public class VacuumCatalogDrel extends VacuumCatalogRelBase implements Rel {
         vacuumOptions,
         fsScheme,
         schemeVariate,
-        excludedContentIDs);
+        excludeMode,
+        listedContentIDs,
+        dryRun);
   }
 
   @Override
@@ -64,6 +68,8 @@ public class VacuumCatalogDrel extends VacuumCatalogRelBase implements Rel {
         getVacuumOptions(),
         getFsScheme(),
         getSchemeVariate(),
-        getExcludedContentIDs());
+        isExcludeMode(),
+        getListedContentIDs(),
+        isDryRun());
   }
 }

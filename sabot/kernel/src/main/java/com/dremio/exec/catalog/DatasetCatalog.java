@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.catalog;
 
+import com.dremio.catalog.exception.CatalogException;
 import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.exception.UnsupportedForgetTableException;
 import com.dremio.catalog.model.CatalogEntityKey;
@@ -32,6 +33,7 @@ import com.dremio.service.namespace.NamespaceException;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import org.apache.arrow.vector.types.pojo.Field;
@@ -160,6 +162,13 @@ public interface DatasetCatalog {
       String columnToChange,
       final String attributeName,
       final AttributeValue attributeValue);
+
+  void deleteEntity(
+      CatalogEntityKey catalogEntityKey, String version, NamespaceAttribute... attributes)
+      throws NamespaceException, IOException, CatalogException;
+
+  // TODO(DX-102574): make sure callers of the deleteDataset in NamespacePassthrough call
+  // deleteEntity instead
 
   void addPrimaryKey(
       final NamespaceKey namespaceKey, List<String> columns, VersionContext statementVersion);

@@ -54,4 +54,7 @@ public interface MaterializationProvider {
   List<String> dumpMaterializationStateToJson();
 
   List<DremioMaterialization> getMaterializationsByHash(String hash);
+
+  /** Notify provider that it is being used to accelerate an incremental reflection refresh job */
+  void notifyIncrementalRefresh();
 }

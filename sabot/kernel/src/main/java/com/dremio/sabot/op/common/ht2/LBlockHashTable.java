@@ -2398,6 +2398,11 @@ public final class LBlockHashTable implements HashTable, AutoCloseable {
   }
 
   @Override
+  public int getHashTableType() {
+    return DEFAULT_HASH_TABLE_TYPE;
+  }
+
+  @Override
   public void registerResizeListener(ResizeListener resizeListener) {
     this.resizeListener = resizeListener;
   }

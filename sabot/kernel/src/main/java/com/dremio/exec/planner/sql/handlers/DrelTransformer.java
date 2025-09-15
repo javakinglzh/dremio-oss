@@ -44,6 +44,7 @@ import com.dremio.exec.planner.logical.DremioRelFactories;
 import com.dremio.exec.planner.logical.EnhancedFilterJoinRule;
 import com.dremio.exec.planner.logical.ProjectRel;
 import com.dremio.exec.planner.logical.Rel;
+import com.dremio.exec.planner.logical.RollupWithBridgeExchangeVisitor;
 import com.dremio.exec.planner.logical.ScreenRel;
 import com.dremio.exec.planner.logical.rule.LogicalAggregateGroupKeyFixRule;
 import com.dremio.exec.planner.normalizer.RelNormalizerTransformerImpl;
@@ -163,13 +164,15 @@ public final class DrelTransformer {
       final RelNode jdbcPushDownRel = pushDownJdbcQuery(config, decorrelatedRel);
       final RelNode nestedProjectPushdown = nestedProjectPushdown(config, jdbcPushDownRel);
       final RelNode aggJoinPushed = pushDownAggregates(config, nestedProjectPushdown);
-      final RelNode fixedGroupKeys = fixGroupKeys(aggJoinPushed);
+      final RelNode metadataOperationsPushed = pushDownMetadataOperations(config, aggJoinPushed);
+      final RelNode fixedGroupKeys = fixGroupKeys(metadataOperationsPushed);
       final RelNode trimmedAggJoinPushed = trimDrel(config, fixedGroupKeys);
       // Do Join Planning.
 
       final RelNode preConvertedRelNode = planMultiJoin(config, trimmedAggJoinPushed);
       final RelNode convertedRelNode = optimizeJoins(config, preConvertedRelNode);
-      final RelNode postJoinOptimizationRelNode = postJoinOptimize(config, convertedRelNode);
+      final RelNode rollupBroadcast = rollupBroadcastOptimization(config, convertedRelNode);
+      final RelNode postJoinOptimizationRelNode = postJoinOptimize(config, rollupBroadcast);
 
       final RelNode flattendPushed = pushFlatten(config, postJoinOptimizationRelNode);
       final Rel drel = (Rel) flattendPushed;
@@ -204,9 +207,23 @@ public final class DrelTransformer {
         true);
   }
 
+  private static RelNode pushDownMetadataOperations(SqlHandlerConfig config, RelNode relNode) {
+    return PlannerUtil.transform(
+        config,
+        PlannerType.HEP_AC,
+        PlannerPhase.AGG_METADATA_PUSHDOWN,
+        relNode,
+        relNode.getTraitSet(),
+        true);
+  }
+
   private static RelNode rewriteRangeConditions(SqlHandlerConfig config, RelNode relNode) {
     final PlannerSettings plannerSettings = config.getContext().getPlannerSettings();
     return relNode.accept(new RangeConditionRewriteVisitor(plannerSettings));
+  }
+
+  private static RelNode rollupBroadcastOptimization(SqlHandlerConfig config, RelNode relNode) {
+    return RollupWithBridgeExchangeVisitor.rewrite(relNode, DremioRelFactories.LOGICAL_BUILDER);
   }
 
   private static RelNode postJoinOptimize(SqlHandlerConfig config, RelNode relNode) {

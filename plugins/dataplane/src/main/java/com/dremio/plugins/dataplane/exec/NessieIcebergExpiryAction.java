@@ -124,7 +124,7 @@ public class NessieIcebergExpiryAction extends IcebergExpiryAction {
         .skip(1) // Skip the latest snapshot as it'll always be retained
         .filter(s -> s.timestampMillis() <= vacuumOptions.getOlderThanInMillis())
         .filter(s -> allRetainedSnapshotIds.contains(s.snapshotId()))
-        .map(s -> new SnapshotEntry(tableMetadata.metadataFileLocation(), s))
+        .map(s -> buildSnapshotEntry(tableMetadata.metadataFileLocation(), s))
         .collect(Collectors.toList());
   }
 

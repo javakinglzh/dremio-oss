@@ -397,9 +397,26 @@ public class BaseFlightQueryTest extends BaseTestQuery {
     }
   }
 
+  /**
+   * Drains the stream completely.
+   *
+   * @param stream the stream to drain
+   */
   protected static void drainStream(FlightStream stream) {
-    while (stream.next()) {
-      // Draining the stream
+    drainStream(stream, 0);
+  }
+
+  /**
+   * Drains the stream for the specified number of batches. If amount is 0, drain the stream
+   * completely.
+   *
+   * @param stream the stream to drain
+   * @param amount the number of batches to drain
+   */
+  protected static void drainStream(FlightStream stream, int amount) {
+    int batch = 0;
+    while (stream.next() && (amount == 0 || batch < amount)) {
+      batch++;
     }
   }
 }

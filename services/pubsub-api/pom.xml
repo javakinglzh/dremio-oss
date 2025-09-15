@@ -38,6 +38,11 @@
       <artifactId>dremio-services-options</artifactId>
     </dependency>
     <dependency>
+      <groupId>com.dremio.services</groupId>
+      <artifactId>dremio-services-telemetry-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.google.protobuf</groupId>
       <artifactId>protobuf-java</artifactId>
     </dependency>

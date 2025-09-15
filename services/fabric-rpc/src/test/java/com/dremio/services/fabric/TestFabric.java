@@ -37,6 +37,7 @@ import io.netty.buffer.ByteBuf;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.apache.arrow.memory.BufferAllocator;
+import org.junit.Assert;
 import org.junit.Test;
 
 /** Test fabric behaviors that aren't available at the protocol builder level. */
@@ -97,6 +98,77 @@ public class TestFabric extends BaseTestFabric {
         RpcException::mapException);
   }
 
+  @Test
+  public void closeWithoutResponse() throws Exception {
+    CountDownLatch closeLatch = new CountDownLatch(1);
+    FabricRunnerFactory factory = getFabric().registerProtocol(new Protocol(closeLatch));
+    FabricCommandRunner runner =
+        factory.getCommandRunner(getFabric().getAddress(), getFabric().getPort());
+
+    // send a message, establishing the connection.
+    final SimpleMessage[] msgs = new SimpleMessage[10];
+    {
+      SimpleMessage m = new SimpleMessage(1);
+      runner.runCommand(m);
+      DremioFutures.getChecked(
+          m.getFuture(),
+          RpcException.class,
+          1000,
+          TimeUnit.MILLISECONDS,
+          RpcException::mapException);
+      for (int i = 0; i < 10; i++) {
+        msgs[i] = new SimpleMessage(3);
+        runner.runCommand(msgs[i]);
+      }
+    }
+
+    closeLatch.countDown();
+    Thread.sleep(1);
+
+    // immediately trigger a new connection by sending messages on a soon to be closed channel.
+    final SimpleMessage[] newConnectionMessages = new SimpleMessage[100];
+    {
+      for (int i = 0; i < 100; i++) {
+        newConnectionMessages[i] = new SimpleMessage(4);
+        runner.runCommand(newConnectionMessages[i]);
+        if ((i + 1) % 10 == 0) {
+          Thread.sleep(1);
+        }
+      }
+    }
+
+    // Here some may fail with Closed channel and some may succeed.
+    int successCount = 0;
+    for (int i = 0; i < 100; i++) {
+      try {
+        DremioFutures.getChecked(
+            newConnectionMessages[i].getFuture(),
+            RpcException.class,
+            30000,
+            TimeUnit.MILLISECONDS,
+            RpcException::mapException);
+        successCount++;
+      } catch (ChannelClosedException e) {
+        // expected.
+      }
+    }
+    Assert.assertTrue("Should have at least one success.", successCount > 0);
+
+    for (int i = 0; i < 10; i++) {
+      try {
+        DremioFutures.getChecked(
+            msgs[i].getFuture(),
+            RpcException.class,
+            10000,
+            TimeUnit.MILLISECONDS,
+            RpcException::mapException);
+        Assert.fail("Should have failed.");
+      } catch (ChannelClosedException e) {
+        // expected.
+      }
+    }
+  }
+
   private class SimpleMessage extends FutureBitCommand<NodeEndpoint, ProxyConnection> {
 
     private final int type;
@@ -145,6 +217,8 @@ public class TestFabric extends BaseTestFabric {
           .timeout(0)
           .add(new FakeEnum(1), QueryId.class, new FakeEnum(1), NodeEndpoint.class)
           .add(new FakeEnum(2), QueryId.class, new FakeEnum(2), NodeEndpoint.class)
+          .add(new FakeEnum(3), QueryId.class, new FakeEnum(3), NodeEndpoint.class)
+          .add(new FakeEnum(4), QueryId.class, new FakeEnum(4), NodeEndpoint.class)
           .build();
     }
 
@@ -153,6 +227,8 @@ public class TestFabric extends BaseTestFabric {
       switch (rpcType) {
         case 1:
         case 2:
+        case 3:
+        case 4:
           return NodeEndpoint.getDefaultInstance();
 
         default:
@@ -171,23 +247,29 @@ public class TestFabric extends BaseTestFabric {
 
       switch (rpcType) {
         case 1:
+        case 4:
           sender.send(new Response(new FakeEnum(1), expectedD));
-          new Thread() {
+          if (rpcType == 1) {
+            new Thread() {
 
-            @Override
-            public void run() {
-              try {
-                closeLatch.await();
-                ((RemoteConnection) connection).getChannel().close();
-              } catch (InterruptedException e) {
+              @Override
+              public void run() {
+                try {
+                  closeLatch.await();
+                  ((RemoteConnection) connection).getChannel().close();
+                } catch (InterruptedException e) {
+                }
               }
-            }
-          }.start();
+            }.start();
+          }
 
           return;
 
         case 2:
           ((RemoteConnection) connection).getChannel().close();
+          return;
+
+        case 3:
           return;
 
         default:

@@ -555,7 +555,8 @@ public class SabotNode implements AutoCloseable {
                     getProvider(VersionedDatasetAdapterFactory.class),
                     getProvider(CatalogStatusEvents.class),
                     getProvider(ExecutorService.class),
-                    getProvider(NamespaceService.Factory.class)));
+                    getProvider(NamespaceService.Factory.class),
+                    getProvider(UserService.class)));
 
         conduitServiceRegistry.registerService(
             new InformationSchemaServiceImpl(

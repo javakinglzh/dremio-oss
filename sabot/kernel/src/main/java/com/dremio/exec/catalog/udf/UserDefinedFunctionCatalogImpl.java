@@ -15,7 +15,6 @@
  */
 package com.dremio.exec.catalog.udf;
 
-import static com.dremio.exec.catalog.CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED;
 import static com.dremio.exec.store.sys.udf.UserDefinedFunctionSerde.fromProto;
 
 import com.dremio.catalog.model.CatalogEntityKey;
@@ -85,25 +84,14 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
       } catch (UserException ue) {
         // ignored.
       }
-      if (plugin != null && plugin.isWrapperFor(VersionedPlugin.class)) {
-        FunctionManagingPlugin managingPlugin = null;
-        if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)
-            && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
-          managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
-        }
-        if (managingPlugin != null) {
-          if (!isUpdate) {
-            managingPlugin.createFunction(
-                getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
-          } else {
-            managingPlugin.updateFunction(
-                getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
-          }
+      if (plugin != null && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
+        FunctionManagingPlugin managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
+        if (!isUpdate) {
+          managingPlugin.createFunction(
+              getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
         } else {
-          throw UserException.unsupportedError()
-              .message(
-                  "You cannot store a user-defined function in source '%s'.", key.getRootEntity())
-              .buildSilently();
+          managingPlugin.updateFunction(
+              getKeyWithVersionContext(key), schemaConfig, userDefinedFunction);
         }
       } else {
         ensureNoVersionContext(key);
@@ -151,19 +139,9 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
       } catch (UserException ue) {
         // ignored.
       }
-      if (plugin != null && plugin.isWrapperFor(VersionedPlugin.class)) {
-        FunctionManagingPlugin managingPlugin = null;
-        if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)
-            && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
-          managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
-        }
-        if (managingPlugin != null) {
-          managingPlugin.dropFunction(getKeyWithVersionContext(key), schemaConfig);
-        } else {
-          throw UserException.unsupportedError()
-              .message("Drop function in source '%s' not supported.", key.getRootEntity())
-              .buildSilently();
-        }
+      if (plugin != null && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
+        FunctionManagingPlugin managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
+        managingPlugin.dropFunction(getKeyWithVersionContext(key), schemaConfig);
       } else {
         ensureNoVersionContext(key);
         userNamespaceService.deleteFunction(key.toNamespaceKey());
@@ -177,30 +155,31 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
   @Override
   public UserDefinedFunction getFunction(CatalogEntityKey key) {
     try {
-      VersionedPlugin versionedPlugin;
-      if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
-        try {
-          StoragePlugin plugin = sourceCatalog.getSource(key.getRootEntity());
-          if (plugin != null && plugin.isWrapperFor(VersionedPlugin.class)) {
-            versionedPlugin = plugin.unwrap(VersionedPlugin.class);
-            Optional<FunctionConfig> function =
-                versionedPlugin.getFunction(getKeyWithVersionContext(key));
-            if (function.isPresent()) {
-              return fromProto(function.get());
-            }
-            if (key.hasTableVersionContext()) {
-              throw UserException.resourceError()
-                  .message("Cannot find function with name %s", key)
-                  .buildSilently();
-            }
+      FunctionManagingPlugin managingPlugin;
+      try {
+        StoragePlugin plugin = sourceCatalog.getSource(key.getRootEntity());
+        if (plugin != null && plugin.isWrapperFor(FunctionManagingPlugin.class)) {
+          managingPlugin = plugin.unwrap(FunctionManagingPlugin.class);
+          Optional<FunctionConfig> function =
+              managingPlugin.getFunction(getKeyWithVersionContext(key));
+          if (function.isPresent()) {
+            return fromProto(function.get());
           }
-        } catch (UserException ue) {
-          // ignored when source is not found
-          if (ue.getErrorType() != UserBitShared.DremioPBError.ErrorType.VALIDATION) {
-            throw ue;
+          if (key.hasTableVersionContext()) {
+            throw UserException.resourceError()
+                .message("Cannot find function with name %s", key)
+                .buildSilently();
           }
         }
+      } catch (UserException ue) {
+        // ignored when source is not found
+
+        // TODO (DX-103012): stop unraveling the user exception
+        if (ue.getErrorType() != UserBitShared.DremioPBError.ErrorType.VALIDATION) {
+          throw ue;
+        }
       }
+      // If the function is not found in the plugin, check the user namespace.
       ensureNoVersionContext(key);
       return fromProto(userNamespaceService.getFunction(key.toNamespaceKey()));
     } catch (NamespaceNotFoundException e) {
@@ -220,18 +199,22 @@ public class UserDefinedFunctionCatalogImpl implements UserDefinedFunctionCatalo
         userNamespaceService.getFunctions().stream()
             .map(UserDefinedFunctionSerde::fromProto)
             .iterator());
-    if (optionManager.getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
-      Stream<VersionedPlugin> versionedPlugins = catalogService.getAllVersionedPlugins();
-      versionedPlugins.forEach(
-          v -> {
-            try {
-              functionList.add(
-                  getFunctions(v).stream().map(UserDefinedFunctionSerde::fromProto).iterator());
-            } catch (UnsupportedOperationException ex) {
-              // ignore
+    Stream<VersionedPlugin> versionedPlugins = catalogService.getAllVersionedPlugins();
+    versionedPlugins.forEach(
+        v -> {
+          try {
+            functionList.add(
+                getFunctions(v).stream().map(UserDefinedFunctionSerde::fromProto).iterator());
+          } catch (UnsupportedOperationException ex) {
+            // ignore
+          } catch (UserException ue) {
+            // ignore when UserException is unsupported
+            if (ue.getErrorType() != UserBitShared.DremioPBError.ErrorType.UNSUPPORTED_OPERATION) {
+              throw ue;
             }
-          });
-    }
+          }
+        });
+
     return () -> Iterators.concat(functionList.iterator());
   }
 

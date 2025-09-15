@@ -16,6 +16,7 @@
 package com.dremio.service.reflection;
 
 import static com.dremio.service.reflection.ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS;
+import static com.dremio.service.reflection.ReflectionOptions.MAX_REFLECTION_REFRESH_RETRY_WINDOW_MINUTES;
 import static com.dremio.service.reflection.proto.ReflectionState.ACTIVE;
 import static com.dremio.service.reflection.proto.ReflectionState.REFRESH;
 import static com.dremio.service.reflection.proto.ReflectionState.REFRESHING;
@@ -111,14 +112,12 @@ import com.google.common.base.Supplier;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import com.google.protobuf.ByteString;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.Random;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import javax.inject.Provider;
 import org.apache.arrow.memory.BufferAllocator;
@@ -501,7 +500,7 @@ public class TestReflectionManager {
     verify(subject.reflectionStore, times(2)).save(reflectionEntry);
 
     verify(subject.reflectionGoalChecker).checkHash(reflectionGoal, reflectionEntry);
-    verify(subject.descriptorCache).invalidate(materialization.getId());
+    verify(subject.descriptorCache).invalidate(materialization);
 
     verify(subject.refreshStartHandler)
         .startJob(any(), anyLong()); // Mockito does not support using a mix of any matchers....
@@ -606,7 +605,8 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setReflectionGoalHash(reflectionGoalHash)
-            .setState(ReflectionState.ACTIVE);
+            .setState(ReflectionState.ACTIVE)
+            .setLastSubmittedRefresh(0L);
 
     Materialization materialization =
         new Materialization().setId(materializationId).setReflectionId(reflectionId);
@@ -617,6 +617,7 @@ public class TestReflectionManager {
     when(dremioTable.getDatasetConfig()).thenReturn(datasetConfig);
     when(catalog.getTable(dataSetId)).thenReturn(null);
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, reflectionEntry);
 
     when(subject.contextFactory.create()).thenReturn(subject.dependencyResolutionContext);
     when(subject.dependencyManager.shouldRefresh(
@@ -776,7 +777,8 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setState(ReflectionState.REFRESHING)
-            .setType(ReflectionType.RAW);
+            .setType(ReflectionType.RAW)
+            .setLastSubmittedRefresh(0L);
 
     JobDetails job = createJobDetails();
 
@@ -791,6 +793,7 @@ public class TestReflectionManager {
     long newSnapshotId = 2; // committed new snapshot
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
 
     when(subject.materializationStore.getLastMaterialization(reflectionId)).thenReturn(m);
     when(subject.jobsService.getJobDetails(any())).thenReturn(job);
@@ -814,8 +817,7 @@ public class TestReflectionManager {
         entry, 0, new ReflectionManager.EntryCounts(), subject.dependencyResolutionContext);
 
     assertEquals(MaterializationState.FAILED, m.getState());
-    assertEquals(
-        "Reflection Job failed without reporting an error message", m.getFailure().getMessage());
+    assertEquals("Reflection Refresh Job Failed: No error message", m.getFailure().getMessage());
 
     verify(icebergTable, times(1)).manageSnapshots();
     verify(manageSnapshots, times(1)).rollbackTo(1L);
@@ -874,7 +876,8 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setType(ReflectionType.RAW)
-            .setState(ReflectionState.REFRESHING);
+            .setState(ReflectionState.REFRESHING)
+            .setLastSubmittedRefresh(0L);
 
     JobDetails job = createJobDetails();
 
@@ -889,6 +892,7 @@ public class TestReflectionManager {
     long newSnapshotId = 1; // didn't commit
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
 
     when(subject.materializationStore.getLastMaterialization(reflectionId)).thenReturn(m);
     when(subject.jobsService.getJobDetails(any())).thenReturn(job);
@@ -912,8 +916,7 @@ public class TestReflectionManager {
         entry, 0, new ReflectionManager.EntryCounts(), subject.dependencyResolutionContext);
 
     assertEquals(MaterializationState.FAILED, m.getState());
-    assertEquals(
-        "Reflection Job failed without reporting an error message", m.getFailure().getMessage());
+    assertEquals("Reflection Refresh Job Failed: No error message", m.getFailure().getMessage());
     verify(icebergTable, times(0)).manageSnapshots();
     verify(manageSnapshots, times(0)).rollbackTo(1L);
     verify(manageSnapshots, times(0)).commit();
@@ -983,9 +986,11 @@ public class TestReflectionManager {
             .setId(reflectionId)
             .setState(ReflectionState.REFRESHING)
             .setType(ReflectionType.RAW)
-            .setRefreshJobId(new JobId().setId("m_job_id"));
+            .setRefreshJobId(new JobId().setId("m_job_id"))
+            .setLastSubmittedRefresh(0L);
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
     when(subject.jobsService.getJobDetails(any()))
         .thenThrow(new JobNotFoundException(new JobId("m_job_id"), "something bad"));
     when(subject.materializationStore.getLastMaterialization(reflectionId)).thenReturn(m);
@@ -1013,9 +1018,11 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setState(ReflectionState.REFRESHING)
-            .setRefreshJobId(new JobId().setId("j_id"));
+            .setRefreshJobId(new JobId().setId("j_id"))
+            .setLastSubmittedRefresh(0L);
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
 
     JobDetails job = createJobDetails();
 
@@ -1207,7 +1214,8 @@ public class TestReflectionManager {
             .setType(ReflectionType.RAW)
             .setDatasetId("d_id")
             .setState(ReflectionState.REFRESHING)
-            .setRefreshJobId(new JobId().setId("j_id"));
+            .setRefreshJobId(new JobId().setId("j_id"))
+            .setLastSubmittedRefresh(0L);
 
     JobProtobuf.JobAttempt jobAttempt =
         JobProtobuf.JobAttempt.newBuilder()
@@ -1224,6 +1232,7 @@ public class TestReflectionManager {
             .build();
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
 
     when(subject.materializationStore.getLastMaterialization(any())).thenReturn(m);
     when(subject.jobsService.getJobDetails(any())).thenReturn(job);
@@ -1234,6 +1243,7 @@ public class TestReflectionManager {
         Mockito.mock(AccelerationStoragePluginConfig.class);
     when(pluginConfig.getPath()).thenReturn(Path.of("."));
     when(subject.accelerationPlugin.getConfig()).thenReturn(pluginConfig);
+
     reflectionManager.handleRefreshingEntry(entry, subject.dependencyResolutionContext);
 
     assertEquals(
@@ -1592,6 +1602,7 @@ public class TestReflectionManager {
 
     // ASSERT
     // Verify the map was updated
+    verify(subject.descriptorCache).update(m, null);
     verify(subject.dependencyManager, times(1))
         .updateMaterializationInfo(reflectionId, materializationId, testSnapshot, false);
   }
@@ -1628,13 +1639,15 @@ public class TestReflectionManager {
         new ReflectionEntry()
             .setId(reflectionId)
             .setState(ReflectionState.ACTIVE)
-            .setType(ReflectionType.RAW);
+            .setType(ReflectionType.RAW)
+            .setLastSubmittedRefresh(0L);
 
     long noDependencyRefreshPeriodMs = 5555L;
     IllegalStateException expectedException =
         new IllegalStateException("Caller interrupted while waiting for job submission");
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
     when(subject.dependencyManager.shouldRefresh(
             entry, noDependencyRefreshPeriodMs, subject.dependencyResolutionContext))
         .thenReturn(true);
@@ -1708,7 +1721,8 @@ public class TestReflectionManager {
             .setState(ReflectionState.REFRESHING)
             .setType(ReflectionType.RAW)
             .setNumFailures(0)
-            .setRefreshJobId(jobId);
+            .setRefreshJobId(jobId)
+            .setLastSubmittedRefresh(0L);
 
     Materialization m =
         new Materialization()
@@ -1745,6 +1759,7 @@ public class TestReflectionManager {
             .build();
 
     Subject subject = new Subject();
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
 
     when(subject.materializationStore.getLastMaterialization(reflectionId)).thenReturn(m);
     when(subject.jobsService.getJobDetails(any())).thenReturn(job);
@@ -1754,8 +1769,6 @@ public class TestReflectionManager {
         Mockito.mock(AccelerationStoragePluginConfig.class);
     when(pluginConfig.getPath()).thenReturn(Path.of("."));
     when(subject.accelerationPlugin.getConfig()).thenReturn(pluginConfig);
-    when(subject.optionManager.getOption(ReflectionOptions.BACKOFF_RETRY_POLICY)).thenReturn(true);
-    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
 
     subject.reflectionManager.handleEntry(
         entry,
@@ -1779,10 +1792,11 @@ public class TestReflectionManager {
             .setState(ReflectionState.REFRESHING)
             .setType(ReflectionType.RAW)
             .setNumFailures(0)
-            .setRefreshJobId(jobId);
+            .setRefreshJobId(jobId)
+            .setLastSubmittedRefresh(0L);
 
     Subject subject = new Subject();
-    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
+    defaultReflectionRefreshRetryBackoffSetting(subject, entry);
     when(subject.reflectionStore.find())
         .thenReturn(FluentIterable.from(Collections.singletonList(entry)));
 
@@ -1792,6 +1806,78 @@ public class TestReflectionManager {
 
     assertEquals(ACTIVE, entry.getState());
     assertEquals(1, entry.getNumFailures().intValue());
+  }
+
+  /**
+   * Test that refresh retry policy can handle the case where InitRefreshRetry in
+   * materializationInfo is null, which is a typical case during Dremio upgrade from a version that
+   * does not have this field.
+   */
+  @Test
+  public void testRetryPolicyWithNullInitRefreshRetry() throws JobNotFoundException {
+    ReflectionId reflectionId = new ReflectionId("r_id");
+    long noDependencyRefreshPeriodMs = 5555L;
+
+    ReflectionEntry entry =
+        new ReflectionEntry()
+            .setId(reflectionId)
+            .setState(ReflectionState.REFRESHING)
+            .setType(ReflectionType.RAW)
+            .setNumFailures(2)
+            .setLastSubmittedRefresh(0L)
+            .setRefreshJobId(new JobId("j_id"));
+
+    Materialization materialization =
+        new Materialization()
+            .setId(new MaterializationId("m_id"))
+            .setReflectionId(reflectionId)
+            .setState(MaterializationState.RUNNING);
+
+    Subject subject = new Subject();
+
+    when(subject.dependencyResolutionContext.hasAccelerationSettingsChanged()).thenReturn(false);
+    when(subject.materializationStore.getLastMaterialization(reflectionId))
+        .thenReturn(materialization);
+    when(subject.jobsService.getJobDetails(any())).thenThrow(JobNotFoundException.class);
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_WINDOW_MINUTES))
+        .thenReturn(4320L);
+    ImmutableMaterializationInfo materializationInfo = MaterializationInfo.builder().build();
+    when(subject.dependencyManager.getMaterializationInfo(reflectionId))
+        .thenReturn(materializationInfo);
+
+    ImmutableMaterializationInfo materializationInfo2 =
+        MaterializationInfo.builder()
+            .setInitRefreshRetry(System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(5))
+            .build();
+    when(subject.dependencyManager.updateMaterializationInfo(eq(reflectionId), any()))
+        .thenReturn(materializationInfo2);
+
+    // Test
+    subject.reflectionManager.handleEntry(
+        entry,
+        noDependencyRefreshPeriodMs,
+        new ReflectionManager.EntryCounts(),
+        subject.dependencyResolutionContext);
+
+    // Verify updateMaterializationInfo was called
+    verify(subject.dependencyManager, times(1)).updateMaterializationInfo(eq(reflectionId), any());
+  }
+
+  private void defaultReflectionRefreshRetryBackoffSetting(
+      final Subject subject, final ReflectionEntry entry) {
+    when(subject.optionManager.getOption(ReflectionOptions.BACKOFF_RETRY_POLICY)).thenReturn(true);
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_ATTEMPTS)).thenReturn(24L);
+    when(subject.optionManager.getOption(MAX_REFLECTION_REFRESH_RETRY_WINDOW_MINUTES))
+        .thenReturn(4320L);
+    ImmutableMaterializationInfo materializationInfo =
+        MaterializationInfo.builder()
+            .setInitRefreshRetry(System.currentTimeMillis() - TimeUnit.MINUTES.toMillis(5))
+            .build();
+    when(subject.dependencyManager.updateMaterializationInfo(any(), any()))
+        .thenReturn(materializationInfo);
+    when(subject.dependencyManager.getMaterializationInfo(entry.getId()))
+        .thenReturn(materializationInfo);
   }
 }
 
@@ -1829,14 +1915,8 @@ class Subject {
   @VisibleForTesting
   MaterializationCache descriptorCache = Mockito.mock(MaterializationCache.class);
 
-  @VisibleForTesting Set<ReflectionId> reflectionsToUpdate = Sets.newHashSet();
-
   @VisibleForTesting
   ReflectionManager.WakeUpCallback wakeUpCallback =
-      Mockito.mock(ReflectionManager.WakeUpCallback.class);
-
-  @VisibleForTesting
-  ReflectionManager.WakeUpCallback wakeUpCacheRefresherCallback =
       Mockito.mock(ReflectionManager.WakeUpCallback.class);
 
   @VisibleForTesting DescriptorHelper descriptorHelper = Mockito.mock(DescriptorHelper.class);
@@ -1893,7 +1973,6 @@ class Subject {
             refreshStartHandler,
             contextFactory,
             datasetEventHub,
-            wakeUpCacheRefresherCallback,
             nodeEndpoint,
             clusterCoordinator,
             coordinatorModeInfoProvider,

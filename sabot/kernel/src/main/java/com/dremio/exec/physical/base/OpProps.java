@@ -31,6 +31,7 @@ public class OpProps {
 
   private final int operatorId;
   private final String userName;
+  private final String userId;
   private final double cost;
   private final boolean singleStream;
   private final int targetBatchSize;
@@ -62,6 +63,7 @@ public class OpProps {
     this(
         operatorId,
         userName,
+        null, // Initialize userId to null
         memReserve,
         memLimit,
         memLowLimit,
@@ -78,6 +80,7 @@ public class OpProps {
   public OpProps(
       int operatorId,
       String userName,
+      String userId,
       long memReserve,
       long memLimit,
       long memLowLimit,
@@ -92,6 +95,7 @@ public class OpProps {
     super();
     this.operatorId = operatorId;
     this.userName = userName;
+    this.userId = userId;
     this.memReserve = memReserve;
     this.memLimit = memLimit;
     this.memLowLimit = memLowLimit;
@@ -110,6 +114,7 @@ public class OpProps {
   public OpProps(
       @JsonProperty("operatorId") int operatorId,
       @JsonProperty("userName") String userName,
+      @JsonProperty("userId") String userId,
       @JsonProperty("memReserve") long memReserve,
       @JsonProperty("memLimit") long memLimit,
       @JsonProperty("cost") double cost,
@@ -119,6 +124,7 @@ public class OpProps {
     super();
     this.operatorId = operatorId;
     this.userName = userName;
+    this.userId = userId;
     this.memReserve = memReserve;
     this.memLimit = memLimit;
     this.memLowLimit = 0;
@@ -135,6 +141,10 @@ public class OpProps {
 
   public String getUserName() {
     return userName;
+  }
+
+  public String getUserId() {
+    return userId;
   }
 
   public int getOperatorId() {
@@ -239,6 +249,7 @@ public class OpProps {
     return new OpProps(
         operatorId,
         userName,
+        userId,
         newReserve,
         memLimit,
         memLowLimit,
@@ -256,6 +267,7 @@ public class OpProps {
     return new OpProps(
         operatorId,
         userName,
+        userId,
         memReserve,
         memLimit,
         memLowLimit,
@@ -273,6 +285,7 @@ public class OpProps {
     return new OpProps(
         operatorId,
         userName,
+        userId,
         memReserve,
         memLimit,
         memLowLimit,
@@ -290,6 +303,7 @@ public class OpProps {
     return new OpProps(
         operatorId,
         userName,
+        userId,
         memReserve,
         memLimit,
         memLowLimit,
@@ -307,6 +321,7 @@ public class OpProps {
     return new OpProps(
         operatorId,
         userName,
+        userId,
         memReserve,
         memLimit,
         memLowLimit,
@@ -324,6 +339,7 @@ public class OpProps {
     return new OpProps(
         id,
         userName,
+        userId,
         memReserve,
         memLimit,
         memLowLimit,
@@ -341,8 +357,10 @@ public class OpProps {
     return new OpProps(
         operatorId,
         SystemUser.SYSTEM_USERNAME,
+        null, // Initialize userId to null
         reserve,
         limit,
+        0,
         0,
         1,
         false,

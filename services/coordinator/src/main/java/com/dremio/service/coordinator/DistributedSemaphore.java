@@ -86,5 +86,9 @@ public interface DistributedSemaphore {
   }
 
   /** The semaphore lease */
-  interface DistributedLease extends AutoCloseable {}
+  interface DistributedLease extends AutoCloseable {
+    default String formatAsString() {
+      return "";
+    }
+  }
 }

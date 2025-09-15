@@ -22,6 +22,7 @@ import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.expression.SupportedEngines;
 import com.dremio.common.expression.visitors.ExpressionValidationException;
 import com.dremio.common.logical.data.NamedExpression;
+import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.ExecConstants;
 import com.dremio.exec.exception.friendly.ExceptionHandlers;
 import com.dremio.exec.record.TypedFieldId;
@@ -29,6 +30,7 @@ import com.dremio.exec.record.VectorAccessible;
 import com.dremio.exec.record.VectorAccessibleComplexWriter;
 import com.dremio.exec.record.VectorContainer;
 import com.dremio.sabot.exec.context.OperatorContext;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.op.filter.Filterer;
 import com.dremio.sabot.op.llvm.NativeFilter;
 import com.dremio.sabot.op.llvm.NativeProjectEvaluator;
@@ -108,7 +110,10 @@ class SplitStageExecutor implements AutoCloseable {
 
   private String gandivaFunctionNames;
 
+  private final FragmentExecutionContext fec;
+
   SplitStageExecutor(
+      FragmentExecutionContext fec,
       OperatorContext context,
       VectorAccessible incoming,
       SupportedEngines.Engine preferredExecType) {
@@ -129,6 +134,7 @@ class SplitStageExecutor implements AutoCloseable {
     this.splitsForNonPreferredCodeGen =
         this.preferredEngine == SupportedEngines.Engine.GANDIVA ? javaSplits : gandivaSplits;
     this.intermediateOutputs = context.createOutputVectorContainer();
+    this.fec = fec;
   }
 
   // Adds a split to be executed as part of this
@@ -285,6 +291,13 @@ class SplitStageExecutor implements AutoCloseable {
       ExpressionEvaluationOptions options)
       throws Exception {
     for (ExpressionSplit split : Iterables.concat(javaSplits, gandivaSplits)) {
+      if (fec != null && fec.isCancelled()) {
+        throw new Exception(
+            String.format(
+                "Project operator %s setup for query fragment %s aborted due to cancellation",
+                context.getStats().getOperatorId(),
+                QueryIdHelper.getExecutorThreadName(context.getFragmentHandle())));
+      }
       if (split.isOriginalExpression()) {
         setupSplit(split, outgoing, gandivaSplits.contains(split));
       } else {

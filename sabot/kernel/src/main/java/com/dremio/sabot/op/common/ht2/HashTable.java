@@ -41,6 +41,7 @@ public interface HashTable extends AutoCloseable {
   public static final int MIN_RESERVATION_BATCH_SIZE = 128;
   public static final int PAGE_BITS = 17;
   public static final int PAGE_SIZE = 1 << PAGE_BITS;
+  public static final int DEFAULT_HASH_TABLE_TYPE = 0;
 
   String FACTORY_KEY =
       "dremio.ht2.implementation.factory"; // Replacing class with factory to keep with our current
@@ -196,6 +197,8 @@ public interface HashTable extends AutoCloseable {
   public long getUnusedForVarBlocks();
 
   public int getMaxHashTableBatchSize();
+
+  public int getHashTableType();
 
   static int getMaxVariableBlockSize(int pivotKeyLength) {
     return HashTable.PAGE_SIZE - pivotKeyLength;

@@ -301,6 +301,11 @@ class FragmentTracker implements AutoCloseable {
   @VisibleForTesting
   void cancelExecutingFragmentsInternalHelper(QueryId queryId, Set<NodeEndpoint> pendingNodes) {
     CancelFragments fragments = CancelFragments.newBuilder().setQueryId(queryId).build();
+    String nodes =
+        pendingNodes.stream()
+            .map(NodeEndpoint::getAddress)
+            .collect(Collectors.joining(",", "[", "]"));
+    logger.info("Sending cancellation to nodes: {}", nodes);
     for (NodeEndpoint endpoint : pendingNodes) {
       logger.debug(
           "sending cancellation for query {} to node {}:{}",
@@ -325,14 +330,13 @@ class FragmentTracker implements AutoCloseable {
       cancelled. which leads to active query sync removing it from any executor tht missed the
       cancel request.*/
       logger.error(
-          "Retrying cancelling fragments failed for queryId:{}. Max retries reached. No more retry done.",
-          queryId);
+          "Retrying cancelling fragments failed for queryId: {}. Max retries reached. No more retry done.",
+          QueryIdHelper.getQueryId(queryId));
       markNodeDone(endpoint);
     } else if (!pendingNodes.contains(endpoint)) {
       logger.info(
-          "Retrying cancelling fragments for queryId{} endpoint {} not required. Endpoint"
-              + " is not active",
-          queryId,
+          "Skipping cancel retry for fragments of queryId {} and endpoint {}. Endpoint is no longer active",
+          QueryIdHelper.getQueryId(queryId),
           endpoint);
     } else {
       CompletableFuture.runAsync(

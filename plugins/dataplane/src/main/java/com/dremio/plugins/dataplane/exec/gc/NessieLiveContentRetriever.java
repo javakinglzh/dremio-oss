@@ -15,6 +15,10 @@
  */
 package com.dremio.plugins.dataplane.exec.gc;
 
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.createVacuumCatalogInfoLog;
+import static com.dremio.exec.store.iceberg.logging.VacuumLoggingUtil.getVacuumLogger;
+
+import com.dremio.common.logging.StructuredLogger;
 import java.util.Set;
 import java.util.UUID;
 import org.projectnessie.gc.contents.LiveContentSet;
@@ -30,6 +34,8 @@ import org.projectnessie.gc.repository.RepositoryConnector;
 import org.projectnessie.model.Content;
 
 public class NessieLiveContentRetriever {
+  private static final StructuredLogger vacuumLogger = getVacuumLogger();
+
   private final PersistenceSpi persistenceSpi;
   private final RepositoryConnector repositoryConnector;
 
@@ -57,7 +63,7 @@ public class NessieLiveContentRetriever {
    * @return The retrieved live content set.
    * @throws LiveContentSetNotFoundException If the live content set is not found.
    */
-  public LiveContentSet getLiveContentSet(CutoffPolicy cutoffPolicy)
+  public LiveContentSet getLiveContentSet(CutoffPolicy cutoffPolicy, String queryId)
       throws LiveContentSetNotFoundException {
     UUID uuid =
         IdentifyLiveContents.builder()
@@ -69,6 +75,9 @@ public class NessieLiveContentRetriever {
             .build()
             .identifyLiveContents();
 
+    vacuumLogger.info(
+        createVacuumCatalogInfoLog(queryId, "Live content set created with ID: " + uuid.toString()),
+        "");
     return getRepository().getLiveContentSet(uuid);
   }
 

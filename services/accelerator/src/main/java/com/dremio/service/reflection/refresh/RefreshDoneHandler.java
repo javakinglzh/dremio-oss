@@ -157,10 +157,6 @@ public class RefreshDoneHandler {
 
     final RefreshDecision decision = getRefreshDecision(lastAttempt);
 
-    Catalog catalog = CatalogUtil.getSystemCatalogForMaterializationCache(catalogService);
-    // Grab descriptor which will save the materialization plan to the KV store
-    descriptorHelper.getDescriptor(materialization, catalog);
-
     updateDependencies(reflection, lastAttempt.getInfo(), decision, dependencyManager);
 
     failIfNotEnoughRefreshesAvailable(decision);
@@ -186,6 +182,7 @@ public class RefreshDoneHandler {
         dependencyManager.getOldestDependentMaterialization(reflection.getId());
     final long lastRefreshFromTable =
         oldestDependentMaterialization.orElse(materialization.getInitRefreshSubmit());
+    Catalog catalog = CatalogUtil.getSystemCatalogForMaterializationCache(catalogService);
     if (!dataWritten && !decision.getInitialRefresh()) {
       populateMaterializationForNoopRefresh(decision, details, lastRefreshFromTable, catalog);
     } else {

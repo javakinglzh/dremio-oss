@@ -133,6 +133,7 @@ public class TestIcebergCommitterBase extends BaseTestQuery
 
     IcebergOpCommitter fullRefreshCommitter =
         icebergModel.getFullMetadataRefreshCommitter(
+            operatorContext.getOptions(),
             tableName,
             datasetPath,
             tableFolder.toPath().toString(),

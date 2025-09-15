@@ -44,6 +44,7 @@ import com.dremio.exec.catalog.TableMutationOptions;
 import com.dremio.exec.catalog.conf.DefaultCtasFormatSelection;
 import com.dremio.exec.catalog.conf.Property;
 import com.dremio.exec.dotfile.View;
+import com.dremio.exec.ops.IcebergMetrics;
 import com.dremio.exec.physical.base.ViewOptions;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.logical.CreateTableEntry;
@@ -53,6 +54,7 @@ import com.dremio.exec.store.ReferenceNotFoundException;
 import com.dremio.exec.store.SchemaConfig;
 import com.dremio.exec.store.dfs.CreateParquetTableEntry;
 import com.dremio.exec.store.dfs.IcebergTableProps;
+import com.dremio.exec.store.iceberg.IcebergFeatureManager;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.SchemaConverter;
 import com.dremio.exec.store.iceberg.SupportsFsCreation;
@@ -99,6 +101,7 @@ import org.apache.iceberg.exceptions.AlreadyExistsException;
 import org.apache.iceberg.exceptions.ForbiddenException;
 import org.apache.iceberg.exceptions.NamespaceNotEmptyException;
 import org.apache.iceberg.exceptions.NoSuchNamespaceException;
+import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.exceptions.NoSuchViewException;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.rest.RESTCatalog;
@@ -299,9 +302,6 @@ public class RestIcebergCatalogPlugin extends IcebergCatalogPlugin {
 
     config.set(IcebergUtils.ENABLE_AZURE_ABFSS_SCHEME, "true");
     properties.put(IcebergUtils.ENABLE_AZURE_ABFSS_SCHEME, "true");
-    if (viewsEnabled()) {
-      properties.put("view-endpoints-supported", "true");
-    }
 
     for (Property p : configPropertyList) {
       config.set(p.name, p.value);
@@ -412,6 +412,10 @@ public class RestIcebergCatalogPlugin extends IcebergCatalogPlugin {
     getCatalogAccessor()
         .createTable(
             tablePathComponents, schema, partitionSpec, sortOrder, tableLocation, tableProperties);
+
+    IcebergMetrics.countFormatVersion(
+        IcebergFeatureManager.getIcebergFormatVersion(tableProperties).getValue(),
+        IcebergMetrics.OperationType.CREATE);
   }
 
   @Override
@@ -426,6 +430,14 @@ public class RestIcebergCatalogPlugin extends IcebergCatalogPlugin {
     if (!optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)) {
       throw new UnsupportedOperationException(
           "This operation is unsupported for Iceberg Catalog sources.");
+    }
+
+    if (icebergTableProps == null
+        || storageOptions != null
+            && storageOptions.containsKey("type")
+            && !storageOptions.get("type").equals("iceberg")) {
+      throw new UnsupportedOperationException(
+          "Iceberg Catalog sources can only be used to manage Iceberg tables.");
     }
 
     final boolean isCTAS = icebergTableProps.getIcebergOpType().equals(IcebergCommandType.CREATE);
@@ -479,13 +491,19 @@ public class RestIcebergCatalogPlugin extends IcebergCatalogPlugin {
   public void dropTable(
       NamespaceKey tableSchemaPath,
       SchemaConfig schemaConfig,
-      TableMutationOptions tableMutationOptions) {
+      TableMutationOptions tableMutationOptions)
+      throws CatalogEntityNotFoundException {
     if (!optionManager.getOption(RESTCATALOG_PLUGIN_MUTABLE_ENABLED)) {
       throw new UnsupportedOperationException(
           "This operation is unsupported for Iceberg Catalog sources.");
     }
 
-    getCatalogAccessor().dropTable(tableSchemaPath.getPathComponents());
+    try {
+      getCatalogAccessor().dropTable(tableSchemaPath.getPathComponents());
+    } catch (NoSuchTableException e) {
+      throw new CatalogEntityNotFoundException(
+          String.format("Table %s not found", tableSchemaPath.getName()));
+    }
   }
 
   @Override

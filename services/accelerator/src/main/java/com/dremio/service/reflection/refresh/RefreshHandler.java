@@ -30,6 +30,7 @@ import com.dremio.common.config.SabotConfig;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.logical.PlanProperties.Generator.ResultMode;
 import com.dremio.common.util.Closeable;
+import com.dremio.common.util.DremioVersionInfo;
 import com.dremio.common.utils.protos.AttemptId;
 import com.dremio.datastore.ProtostuffSerializer;
 import com.dremio.datastore.Serializer;
@@ -64,6 +65,7 @@ import com.dremio.exec.planner.sql.handlers.PrelTransformer;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.handlers.query.SqlToPlanHandler;
+import com.dremio.exec.planner.sql.parser.DremioHint;
 import com.dremio.exec.planner.sql.parser.SqlRefreshReflection;
 import com.dremio.exec.planner.types.JavaTypeFactoryImpl;
 import com.dremio.exec.proto.UserBitShared;
@@ -91,6 +93,8 @@ import com.dremio.service.reflection.ReflectionUtils;
 import com.dremio.service.reflection.WriterOptionManager;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
+import com.dremio.service.reflection.proto.MaterializationPlan;
+import com.dremio.service.reflection.proto.MaterializationPlanId;
 import com.dremio.service.reflection.proto.MaterializationState;
 import com.dremio.service.reflection.proto.ReflectionDetails;
 import com.dremio.service.reflection.proto.ReflectionEntry;
@@ -99,7 +103,9 @@ import com.dremio.service.reflection.proto.ReflectionId;
 import com.dremio.service.reflection.proto.Refresh;
 import com.dremio.service.reflection.proto.RefreshDecision;
 import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.RefreshDecisionWrapper;
+import com.dremio.service.reflection.refresh.ReflectionPlanGenerator.SerializedMatchingInfo;
 import com.dremio.service.reflection.store.DependenciesStore;
+import com.dremio.service.reflection.store.MaterializationPlanStore;
 import com.dremio.service.reflection.store.MaterializationStore;
 import com.dremio.service.users.SystemUser;
 import com.google.common.base.Preconditions;
@@ -234,6 +240,7 @@ public class RefreshHandler implements SqlToPlanHandler {
               config.getContext().getConfig(),
               reflectionSettings,
               materializationStore,
+              helper.getMaterializationPlanStore(),
               dependenciesStore,
               refreshDecisions,
               snapshotDiffContextPointer);
@@ -853,6 +860,7 @@ public class RefreshHandler implements SqlToPlanHandler {
       SabotConfig config,
       ReflectionSettings reflectionSettings,
       MaterializationStore materializationStore,
+      MaterializationPlanStore materializationPlanStore,
       DependenciesStore dependenciesStore,
       RefreshDecision[] refreshDecisions,
       SnapshotDiffContext[] snapshotDiffContextPointer) {
@@ -868,10 +876,13 @@ public class RefreshHandler implements SqlToPlanHandler {
               .add(goal.getId().getId())
               .build();
       sqlHandlerConfig
-          .getConverter()
-          .getSession()
-          .getSubstitutionSettings()
-          .setExclusions(exclusions);
+          .getContext()
+          .getOptions()
+          .setOption(
+              OptionValue.createString(
+                  OptionValue.OptionType.QUERY,
+                  DremioHint.EXCLUDE_REFLECTIONS.getOption().getOptionName(),
+                  String.join(",", exclusions)));
 
       // First, generate the plan with no DRRs to determine if the refresh method is incremental or
       // full.
@@ -903,6 +914,8 @@ public class RefreshHandler implements SqlToPlanHandler {
         recordingObserver.replay(sqlHandlerConfig.getObserver());
         throw e;
       }
+      final SerializedMatchingInfo serializedMatchingInfo =
+          planGenerator.getSerializedMatchingInfo();
       final RefreshDecisionWrapper noDefaultReflectionDecisionWrapper =
           planGenerator.getRefreshDecisionWrapper();
 
@@ -951,19 +964,32 @@ public class RefreshHandler implements SqlToPlanHandler {
           noDefaultReflectionDecision.setDisableDefaultReflection(handler.eventReceived);
 
       if (noDefaultReflectionDecision.getAccelerationSettings().getMethod()
-          == RefreshMethod.INCREMENTAL) {
-        sqlHandlerConfig
-            .getConverter()
-            .getSession()
-            .getSubstitutionSettings()
-            .setIncrementalRefresh(true);
+              == RefreshMethod.INCREMENTAL
+          && sqlHandlerConfig.getMaterializations().isPresent()) {
+        sqlHandlerConfig.getMaterializations().get().notifyIncrementalRefresh();
       }
 
-      // Save the materialization plan without default raw reflections for reflection matching.
       sqlHandlerConfig
           .getObserver()
           .recordExtraInfo(
               DECISION_NAME, ABSTRACT_SERIALIZER.serialize(noDefaultReflectionDecision));
+      // Save the materialization plan without default raw reflections for reflection matching.
+      // If planning the refresh job is re-attempted due to schema learning, we need to update the
+      // existing materialization plan.
+      final MaterializationPlanId planId =
+          MaterializationPlanStore.createMaterializationPlanId(materialization.getId());
+      MaterializationPlan plan = materializationPlanStore.get(planId);
+      if (plan == null) {
+        plan = new MaterializationPlan();
+        plan.setId(planId);
+        plan.setMaterializationId(materialization.getId());
+        plan.setReflectionId(materialization.getReflectionId());
+        plan.setVersion(DremioVersionInfo.getVersion());
+      }
+      plan.setLogicalPlan(serializedMatchingInfo.getMatchingPlanBytes());
+      plan.setMatchingHash(serializedMatchingInfo.getMatchingHash());
+      plan.setHashFragment(serializedMatchingInfo.getHashFragment());
+      materializationPlanStore.save(plan);
 
       logger.trace("Refresh decision: {}", noDefaultReflectionDecision);
       if (logger.isTraceEnabled()) {

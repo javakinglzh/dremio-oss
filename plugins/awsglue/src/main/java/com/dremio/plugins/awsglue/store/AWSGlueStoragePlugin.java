@@ -19,6 +19,7 @@ import static com.dremio.exec.store.metadatarefresh.MetadataRefreshExecConstants
 import static com.dremio.hadoop.security.alias.DremioCredentialProvider.DREMIO_SCHEME_PREFIX;
 
 import com.amazonaws.glue.catalog.util.AWSGlueConfig;
+import com.dremio.catalog.exception.CatalogEntityNotFoundException;
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.common.FSConstants;
 import com.dremio.common.exceptions.UserException;
@@ -680,7 +681,8 @@ public class AWSGlueStoragePlugin
   public void dropTable(
       NamespaceKey tableSchemaPath,
       SchemaConfig schemaConfig,
-      TableMutationOptions tableMutationOptions) {
+      TableMutationOptions tableMutationOptions)
+      throws CatalogEntityNotFoundException {
     ((MutablePlugin) hiveStoragePlugin)
         .dropTable(tableSchemaPath, schemaConfig, tableMutationOptions);
   }

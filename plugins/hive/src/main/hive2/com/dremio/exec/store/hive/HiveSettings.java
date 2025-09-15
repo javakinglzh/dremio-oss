@@ -84,4 +84,9 @@ public final class HiveSettings {
   public String getPropertyExclusionRegex() {
     return options.getOption(HivePluginOptions.HIVE_PROPERTY_EXCLUSION_REGEX);
   }
+
+  public boolean enableRecursivePartialMetadataRefresh() {
+    // this is a hive3 only feature
+    return false;
+  }
 }

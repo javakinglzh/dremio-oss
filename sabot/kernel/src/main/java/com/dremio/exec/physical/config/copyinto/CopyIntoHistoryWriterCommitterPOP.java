@@ -92,7 +92,7 @@ public class CopyIntoHistoryWriterCommitterPOP extends WriterCommitterPOP {
         sourceTablePluginId,
         tableFormatOptions,
         storagePluginResolver,
-        null); // TODO:  Revisit if there are issues with Lakehouse Catalog and CopyInto
+        props.getUserId());
     this.systemIcebergTablesStoragePlugin =
         systemIcebergTablesStoragePluginId != null
             ? storagePluginResolver.getSource(systemIcebergTablesStoragePluginId)
@@ -128,7 +128,7 @@ public class CopyIntoHistoryWriterCommitterPOP extends WriterCommitterPOP {
         isReadSignatureEnabled,
         tableFormatOptions,
         sourceTablePluginId,
-        null); // TODO:  Revisit if there are issues with Lakehouse Catalog and CopyInto
+        props.getUserId());
     this.systemIcebergTablesStoragePlugin = errorPlugin;
   }
 

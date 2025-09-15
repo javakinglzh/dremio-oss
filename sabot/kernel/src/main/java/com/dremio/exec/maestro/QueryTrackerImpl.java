@@ -46,7 +46,9 @@ import com.dremio.service.jobtelemetry.JobTelemetryClient;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 public class QueryTrackerImpl implements QueryTracker {
   @VisibleForTesting
@@ -73,6 +75,7 @@ public class QueryTrackerImpl implements QueryTracker {
   private final JobTelemetryClient jobTelemetryClient;
 
   private final FragmentTracker fragmentTracker;
+  private final long originTime;
   private volatile PhysicalPlan physicalPlan;
   private volatile ExecutionPlan executionPlan;
   private volatile ResourceTracker resourceTracker;
@@ -102,6 +105,7 @@ public class QueryTrackerImpl implements QueryTracker {
     this.executorServiceClientFactory = executorServiceClientFactory;
     this.jobTelemetryClient = jobTelemetryClient;
     this.observer = observer;
+    this.originTime = Instant.now().toEpochMilli();
 
     this.fragmentTracker =
         new FragmentTracker(
@@ -320,6 +324,33 @@ public class QueryTrackerImpl implements QueryTracker {
   @Override
   public void removeExecutorProfile(String nodeEndpoint) {
     fragmentTracker.removeExecutorProfile(nodeEndpoint);
+  }
+
+  @Override
+  public long getActiveTimeMillis() {
+    return Instant.now().minusMillis(originTime).toEpochMilli();
+  }
+
+  @Override
+  public boolean resourcesAllocated() {
+    return Optional.ofNullable(resourceTracker).map(ResourceTracker::getResources).isPresent();
+  }
+
+  @Override
+  public long getResourceAllocationTimeMillis() {
+    return Optional.of(this)
+        .filter(QueryTrackerImpl::resourcesAllocated)
+        .map(it -> it.resourceTracker.getResourceSchedulingDecisionInfo())
+        .map(it -> it.getSchedulingEndTimeMs() - it.getSchedulingStartTimeMs())
+        .orElse(0L);
+  }
+
+  @Override
+  public String getAllocatedResourceIdentifier() {
+    return Optional.ofNullable(resourceTracker)
+        .map(ResourceTracker::getResources)
+        .map(ResourceSet::getAllocatedResourceIdentifier)
+        .orElse("");
   }
 
   @VisibleForTesting

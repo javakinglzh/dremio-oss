@@ -167,6 +167,7 @@ public class IcebergTableCreationCommitter implements IcebergOpCommitter {
 
   @Override
   public boolean isIcebergTableUpdated() {
-    return icebergCommand.getRootPointer() != null;
+    return icebergCommand.getTableOps().current() != null
+        && icebergCommand.getRootPointer() != null;
   }
 }

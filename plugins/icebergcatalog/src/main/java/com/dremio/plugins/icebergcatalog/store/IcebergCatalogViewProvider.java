@@ -61,8 +61,9 @@ public class IcebergCatalogViewProvider implements ViewDatasetHandle, IcebergVie
   }
 
   public BaseView getView() {
-    Preconditions.checkArgument(viewSupplier.get() instanceof BaseView);
-    return (BaseView) viewSupplier.get();
+    View view = viewSupplier.get();
+    Preconditions.checkArgument(view instanceof BaseView);
+    return (BaseView) view;
   }
 
   public ViewMetadata getViewMetadata() {

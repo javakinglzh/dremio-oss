@@ -24,6 +24,7 @@ import com.dremio.exec.planner.sql.handlers.direct.SqlNodeUtil;
 import com.dremio.exec.planner.sql.parser.DmlUtils;
 import com.dremio.exec.planner.sql.parser.SqlDmlOperator;
 import com.dremio.exec.planner.sql.parser.SqlUpdateTable;
+import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.dataset.proto.TableProperties;
 import java.util.List;
@@ -55,7 +56,8 @@ public class UpdateHandler extends DmlHandler {
   @Override
   protected RowLevelOperationMode getRowLevelOperationMode(DremioTable table) {
     TableProperties updateDmlWriteMode =
-        DmlUtils.getDmlWriteProp(table, org.apache.iceberg.TableProperties.UPDATE_MODE);
+        IcebergUtils.getSpecifiedIcebergTableProperty(
+            table, org.apache.iceberg.TableProperties.UPDATE_MODE);
     return DmlUtils.getDmlWriteMode(updateDmlWriteMode);
   }
 

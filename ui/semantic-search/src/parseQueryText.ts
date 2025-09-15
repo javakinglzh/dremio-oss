@@ -14,18 +14,17 @@
  * limitations under the License.
  */
 import { parser } from "./parser/index.js";
+import invariant from "tiny-invariant";
 
 export type ParsedQuery = {
   searchText: string;
   filters: { keyword: string; value: string }[];
 };
+type InternalParsedQuery = { keyword: string; value: string }[];
 
 export const parseQueryText = (queryText: string): ParsedQuery => {
   const tree = parser.parse(queryText);
-  const parsedQuery: ParsedQuery = {
-    searchText: "",
-    filters: [],
-  };
+  const parsedQuery: InternalParsedQuery = [];
   let currentString: string | undefined;
   let currentFilter: { keyword: string; value: string } | undefined;
   tree.iterate({
@@ -34,42 +33,71 @@ export const parseQueryText = (queryText: string): ParsedQuery => {
         case "QuotedString":
           currentString = queryText.slice(node.from + 1, node.to - 1);
           break;
-        case "UnquotedString":
+        case "Word":
           currentString = queryText.slice(node.from, node.to);
           break;
         case "Filter":
           currentFilter = {} as any;
           break;
-        case "FilterKeyword":
-          currentFilter!["keyword"] = queryText.slice(node.from, node.to - 1);
-          break;
-        case "FilterValue":
-          currentFilter!["value"] = queryText.slice(node.from, node.to);
-          break;
       }
     },
     leave: (node) => {
       switch (node.name) {
-        case "SearchText":
-          if (!currentString) {
-            throw new Error(
-              "Expected currentString to be defined when leaving `SearchText` node"
-            );
-          }
-          parsedQuery.searchText = currentString;
+        case "SearchText": {
+          invariant(
+            currentString,
+            "Expected currentString to be defined when leaving `SearchText` node"
+          );
+          parsedQuery.push({ keyword: "searchText", value: currentString });
+          currentString = undefined;
           break;
+        }
         case "Filter": {
-          if (!currentFilter) {
-            throw new Error(
-              "Expected a filter object to be defined when leaving `Filter` node"
-            );
-          }
-          parsedQuery.filters.push(currentFilter);
+          invariant(
+            currentFilter,
+            "Expected a filter object to be defined when leaving `Filter` node"
+          );
+          parsedQuery.push(currentFilter);
           currentFilter = undefined;
+          break;
+        }
+        case "FilterKeyword": {
+          invariant(
+            currentFilter,
+            "Expected a filter object to be defined when leaving `FilterKeyword` node"
+          );
+          invariant(
+            currentString,
+            "Expected currentString to be defined when leaving `FilterKeyword` node"
+          );
+          currentFilter.keyword = currentString;
+          currentString = undefined;
+          break;
+        }
+        case "FilterValue": {
+          invariant(
+            currentFilter,
+            "Expected a filter object to be defined when leaving `FilterValue` node"
+          );
+          invariant(
+            currentString,
+            "Expected currentString to be defined when leaving `FilterValue` node"
+          );
+          currentFilter.value = currentString;
+          currentString = undefined;
           break;
         }
       }
     },
   });
-  return parsedQuery;
+  const searchTextFilters = parsedQuery.filter(
+    (filter) => filter.keyword === "searchText"
+  );
+  const otherFilters = parsedQuery.filter(
+    (filter) => filter.keyword !== "searchText"
+  );
+  return {
+    searchText: searchTextFilters.map((filter) => filter.value).join(" "),
+    filters: otherFilters,
+  } as const satisfies ParsedQuery;
 };

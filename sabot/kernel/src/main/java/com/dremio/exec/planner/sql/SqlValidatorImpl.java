@@ -293,9 +293,10 @@ public class SqlValidatorImpl extends org.apache.calcite.sql.validate.SqlValidat
     final SqlNodeList selectList = new SqlNodeList(pos);
     selectList.add(SqlIdentifier.star(pos));
 
-    final SqlNodeList tableList = call.getExcludeTableList();
+    final SqlNodeList tableList = call.getTableList();
     if (tableList.size() > 0) {
-      SqlNode fromClause = tableList.get(0);
+      // Force unique aliases to avoid a duplicate for table name during validation
+      SqlNode fromClause = SqlValidatorUtil.addAlias(tableList.get(0), tableList.get(0).toString());
       for (int i = 1; i < tableList.size(); i++) {
         SqlNode nextTable = tableList.get(i);
         fromClause =
@@ -304,7 +305,7 @@ public class SqlValidatorImpl extends org.apache.calcite.sql.validate.SqlValidat
                 fromClause,
                 SqlLiteral.createBoolean(false, pos),
                 JoinType.CROSS.symbol(pos),
-                nextTable,
+                SqlValidatorUtil.addAlias(nextTable, nextTable.toString()),
                 JoinConditionType.NONE.symbol(SqlParserPos.ZERO),
                 null);
       }

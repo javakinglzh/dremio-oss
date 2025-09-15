@@ -153,11 +153,11 @@ public interface Schedule extends Iterable<Instant> {
     }
 
     /**
-     * Create a schedule builder where events are triggered every {@code seconds}
+     * Create a schedule builder where events are triggered every {@code millis}
      *
      * @param millis the number of milliseconds between events
-     * @return a schedule builder generating events every {@code seconds}
-     * @throws IllegalArgumentException if {@code minutes} is negative
+     * @return a schedule builder generating events every {@code millis}
+     * @throws IllegalArgumentException if {@code millis} is negative
      */
     static Builder everyMillis(long millis) {
       return new ScheduleBuilderImpl(Duration.ofMillis(millis));
@@ -168,7 +168,7 @@ public interface Schedule extends Iterable<Instant> {
      *
      * @param seconds the number of seconds between events
      * @return a schedule builder generating events every {@code seconds}
-     * @throws IllegalArgumentException if {@code minutes} is negative
+     * @throws IllegalArgumentException if {@code seconds} is negative
      */
     static Builder everySeconds(long seconds) {
       return new ScheduleBuilderImpl(Duration.ofSeconds(seconds));

@@ -59,6 +59,7 @@ import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.folder.FolderNamespaceService;
+import com.dremio.service.namespace.proto.NameSpaceContainer;
 import com.dremio.service.namespace.source.proto.MetadataPolicy;
 import com.dremio.service.namespace.source.proto.UpdateMode;
 import com.dremio.service.namespace.space.proto.FolderConfig;
@@ -179,7 +180,9 @@ public class MetadataSynchronizer {
     boolean retrievedFolderMetadataSuccessfully =
         updateNamespaceServiceWithFolderMetadataFromSource(
             optionManager, sourceMetadata, sourceKey, ancestorsToKeep, systemNamespaceService);
-    removeNamespaceServiceFoldersThatContainNoDatasets(retrievedFolderMetadataSuccessfully);
+    if (retrievedFolderMetadataSuccessfully) {
+      removeNamespaceServiceFoldersThatContainNoDatasets();
+    }
     deleteNamespaceServiceDatasetsNoLongerInSource();
     if (optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)
         && optionManager.getOption(RESTCATALOG_LINEAGE_CALCULATION)) {
@@ -504,11 +507,15 @@ public class MetadataSynchronizer {
     }
   }
 
-  private void removeNamespaceServiceFoldersThatContainNoDatasets(
-      boolean retrievedFolderMetadataSuccessfully) {
-    if (!retrievedFolderMetadataSuccessfully) {
+  private void removeNamespaceServiceFoldersThatContainNoDatasets() {
+    if (!datasetRetrievalOptions.deleteUnavailableDatasets()) {
+      logger.debug(
+          "Source '{}' in state {} may have orphaned folders, not deleting them as orphaned datasets are not deleted.",
+          sourceKey,
+          bridge.getState());
       return;
     }
+
     logger.debug("Source '{}' recursively deleting orphan folders", sourceKey);
     for (NamespaceKey toBeDeleted : orphanedDatasets) {
 
@@ -516,12 +523,20 @@ public class MetadataSynchronizer {
 
       while (ancestors.hasNext()) {
         final NamespaceKey ancestorKey = ancestors.next();
-        if (ancestorsToKeep.contains(ancestorKey)) {
+        if (ancestorsToKeep.contains(ancestorKey) || !ancestorKey.hasParent()) {
           continue;
         }
 
         try {
-          final FolderConfig folderConfig = systemNamespaceService.getFolder(ancestorKey);
+          final NameSpaceContainer container = systemNamespaceService.getEntityByPath(ancestorKey);
+          if (container == null || container.getType() != NameSpaceContainer.Type.FOLDER) {
+            throw new NamespaceNotFoundException(ancestorKey, "not found");
+          }
+          // If a folder is shared, it shouldn't be deleted. Neither its parent(s).
+          if (isFolderShared(container)) {
+            break;
+          }
+          final FolderConfig folderConfig = container.getFolder();
           systemNamespaceService.deleteFolder(ancestorKey, folderConfig.getTag());
           logger.trace("Folder '{}' deleted", ancestorKey);
           metadataSynchronizerStatus.setWasSuccessfullyRefreshed();
@@ -533,6 +548,10 @@ public class MetadataSynchronizer {
         }
       }
     }
+  }
+
+  protected boolean isFolderShared(NameSpaceContainer container) {
+    return false;
   }
 
   /** Deleted orphan datasets. These are datasets that are no longer present in the source. */

@@ -241,7 +241,7 @@ public class GoogleBucketFileSystem extends ContainerFileSystem implements MayPr
           return GoogleCredentials.fromStream(is);
 
         case OAUTH2_TOKEN:
-          return GoogleCredentials.create(
+          return GCSCredentials.create(
               AccessToken.newBuilder()
                   .setTokenValue(getConf().get(DREMIO_OAUTH2_TOKEN))
                   .setExpirationTime(

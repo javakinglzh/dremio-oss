@@ -653,7 +653,7 @@ public class TestVectorizedHashAggPartitionSerializable extends BaseTestOperator
                 estimatedVariableWidthKeySize * records)) {
 
       /* pivot the data into temporary space */
-      Pivots.pivot(pivot, records, fbv, var);
+      Pivots.pivot(pivot, records, fbv, var, true);
 
       /* mock a single partition */
       final VectorizedHashAggPartition[] hashAggPartitions = new VectorizedHashAggPartition[1];

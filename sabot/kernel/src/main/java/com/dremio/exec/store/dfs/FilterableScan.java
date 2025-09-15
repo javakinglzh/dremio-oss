@@ -88,6 +88,8 @@ public abstract class FilterableScan extends ScanRelBase {
 
   public abstract ParquetScanRowGroupFilter getRowGroupFilter();
 
+  public abstract boolean hasFilter();
+
   public abstract FilterableScan applyRowGroupFilter(ParquetScanRowGroupFilter rowGroupFilter);
 
   public abstract FilterableScan applyFilter(ScanFilter scanFilter);

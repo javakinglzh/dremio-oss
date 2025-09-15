@@ -177,6 +177,13 @@ public abstract class DelegatingCatalog implements Catalog {
   }
 
   @Override
+  public void deleteEntity(
+      CatalogEntityKey catalogEntityKey, String version, NamespaceAttribute... attributes)
+      throws NamespaceException, IOException, CatalogException {
+    delegate.deleteEntity(catalogEntityKey, version, attributes);
+  }
+
+  @Override
   public BulkResponse<NamespaceKey, Optional<DremioTable>> bulkGetTablesForQuery(
       BulkRequest<NamespaceKey> keys) {
     return delegate.bulkGetTablesForQuery(keys);
@@ -413,7 +420,7 @@ public abstract class DelegatingCatalog implements Catalog {
   }
 
   @Override
-  public SourceState refreshSourceStatus(NamespaceKey key) throws Exception {
+  public SourceState refreshSourceStatus(NamespaceKey key) {
     return delegate.refreshSourceStatus(key);
   }
 
@@ -963,5 +970,11 @@ public abstract class DelegatingCatalog implements Catalog {
   public List<String> getUpstreamSources(NamespaceKey path) {
     return delegate.getUpstreamSources(path);
   }
+
   //// End: NamespacePassthrough Methods
+
+  @Override
+  public Optional<CatalogIdentity> getCatalogEntityOwner(CatalogEntityKey catalogEntityKey) {
+    return delegate.getCatalogEntityOwner(catalogEntityKey);
+  }
 }

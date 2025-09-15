@@ -144,9 +144,14 @@ public class EasyScanOperatorCreator implements ProducerOperator.Creator<EasySub
     final List<SplitAndExtended> workList =
         sortReaders ? unorderedWork.toSortedList(SPLIT_COMPARATOR) : unorderedWork.toList();
     final boolean selectAllColumns = selectsAllColumns(config.getFullSchema(), config.getColumns());
+    // Query results are stored in ArrowFileFormat.
+    // If an arrow file is being read and belongs to an internal storage,
+    // then skip preparing implicit columns for the composite reader.
     final CompositeReaderConfig readerConfig =
-        CompositeReaderConfig.getCompound(
-            context, config.getFullSchema(), config.getColumns(), config.getPartitionColumns());
+        formatPlugin.canSkipAddingImplicitColumns()
+            ? CompositeReaderConfig.getCompound(context, config.getColumns())
+            : CompositeReaderConfig.getCompound(
+                context, config.getFullSchema(), config.getColumns(), config.getPartitionColumns());
     final List<SchemaPath> innerFields =
         selectAllColumns
             ? ImmutableList.of(ColumnUtils.STAR_COLUMN)

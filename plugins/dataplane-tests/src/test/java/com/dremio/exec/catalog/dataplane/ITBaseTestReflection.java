@@ -97,6 +97,9 @@ public abstract class ITBaseTestReflection extends ITBaseTestVersioned {
 
   private static MaterializationStore materializationStore;
 
+  @SuppressWarnings("checkstyle:VisibilityModifier")
+  protected static ReflectionMonitor monitor;
+
   @BeforeAll
   public static void reflectionSetup() throws Exception {
     BaseTestServerJunit5.getPopulator().populateTestUsers();
@@ -106,6 +109,8 @@ public abstract class ITBaseTestReflection extends ITBaseTestVersioned {
     nsService.addOrUpdateSpace(new SpacePath(config.getName()).toNamespaceKey(), config);
 
     materializationStore = new MaterializationStore(p(LegacyKVStoreProvider.class));
+    monitor = newReflectionMonitor();
+
     setSystemOption(PlannerSettings.QUERY_PLAN_CACHE_ENABLED, false);
     setMaterializationCacheSettings(false);
   }
@@ -120,15 +125,18 @@ public abstract class ITBaseTestReflection extends ITBaseTestVersioned {
     clearReflections();
   }
 
-  private static void clearReflections() {
+  protected static void clearReflections() {
     final ReflectionService reflectionService = getReflectionService();
-    final ReflectionMonitor reflectionMonitor = newReflectionMonitor();
     reflectionService.clearAll();
-    reflectionMonitor.waitUntilNoMaterializationsAvailable();
+    monitor.waitUntilNoMaterializationsAvailable();
   }
 
   protected static MaterializationStore getMaterializationStore() {
     return materializationStore;
+  }
+
+  protected static ReflectionMonitor getMonitor() {
+    return monitor;
   }
 
   protected static ReflectionServiceImpl getReflectionService() {
@@ -151,14 +159,12 @@ public abstract class ITBaseTestReflection extends ITBaseTestVersioned {
   }
 
   protected static ReflectionMonitor newReflectionMonitor() {
-    final MaterializationStore materializationStore =
-        new MaterializationStore(p(LegacyKVStoreProvider.class));
     return new ReflectionMonitor(
         getReflectionService(),
         getReflectionStatusService(),
         getMaterializationDescriptorProvider(),
         getJobsService(),
-        materializationStore,
+        getMaterializationStore(),
         getOptionManager(),
         500,
         SECONDS.toMillis(60));

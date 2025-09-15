@@ -15,8 +15,12 @@
  */
 package com.dremio.exec.planner.sql.handlers;
 
+import static com.dremio.exec.store.iceberg.IcebergUtils.isSupportedIcebergFormatVersion;
+
 import com.dremio.catalog.model.dataset.TableVersionContext;
 import com.dremio.catalog.model.dataset.TableVersionType;
+import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.acceleration.MaterializationList;
@@ -35,6 +39,7 @@ import com.dremio.exec.planner.sql.parser.DremioHint;
 import com.dremio.exec.planner.sql.parser.SqlDmlOperator;
 import com.dremio.exec.planner.sql.parser.UnsupportedOperatorsVisitor;
 import com.dremio.exec.proto.UserBitShared;
+import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.work.foreman.ForemanSetupException;
 import com.dremio.exec.work.foreman.SqlUnsupportedException;
 import com.dremio.options.OptionResolver;
@@ -133,8 +138,7 @@ public class SqlToRelTransformer {
         validateThenSqlToRel(config, sqlNode, sqlValidatorAndToRelContext);
 
     final RelNode rel =
-        relNormalizerTransformer.transformForReflection(
-            convertedRelNode.getConvertedNode(), relTransformer, observer);
+        relNormalizerTransformer.transformForReflection(convertedRelNode, relTransformer, observer);
 
     return new ConvertedRelNode.Builder()
         .withRelNode(rel)
@@ -157,6 +161,19 @@ public class SqlToRelTransformer {
 
     final RelNode relNode =
         convertSqlToRel(config, sqlValidatorAndToRelContext, validatedTypedSqlNode.getKey());
+
+    Iterable<DremioTable> tables =
+        config.getConverter().getPlannerCatalog().getAllRequestedTables();
+    for (DremioTable table : tables) {
+      if (IcebergUtils.isIcebergTable(table) && !isSupportedIcebergFormatVersion(table)) {
+        throw UserException.unsupportedError()
+            .message(
+                IcebergUtils.UNSUPPORTED_ICEBERG_FORMAT_VERSION_MSG,
+                table.getDatasetConfig().getName())
+            .buildSilently();
+      }
+    }
+
     UnsupportedQueryPlanVisitor.checkForUnsupportedQueryPlan(relNode);
     List<NamespaceKey> viewIdentifiers = collectViewIdentifiers(relNode);
     processReflectionHints(config, relNode);
@@ -179,8 +196,7 @@ public class SqlToRelTransformer {
     ConvertedRelNode convertedRelNode =
         validateThenSqlToRel(config, sqlNode, sqlValidatorAndToRelContext);
 
-    final RelNode rel =
-        relNormalizerTransformer.transform(convertedRelNode.getConvertedNode(), observer);
+    final RelNode rel = relNormalizerTransformer.transform(convertedRelNode, observer);
 
     return new ConvertedRelNode.Builder()
         .withRelNode(rel)

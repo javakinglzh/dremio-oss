@@ -17,11 +17,8 @@ package com.dremio.exec.dotfile;
 
 import static com.dremio.exec.store.Views.isComplexType;
 
-import com.dremio.common.types.Types;
-import com.dremio.common.util.MajorTypeHelper;
 import com.dremio.exec.planner.StarColumnHelper;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
-import com.dremio.exec.planner.sql.TypeInferenceUtils;
 import com.dremio.exec.record.BatchSchema;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -32,9 +29,10 @@ import com.fasterxml.jackson.annotation.JsonTypeName;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import org.apache.arrow.vector.complex.ListVector;
+import org.apache.arrow.vector.complex.MapVector;
 import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.calcite.avatica.util.TimeUnit;
@@ -159,26 +157,30 @@ public class View {
             new org.apache.arrow.vector.types.pojo.FieldType(true, new ArrowType.Struct(), null),
             schema.getFields());
       } else if (dataType.getSqlTypeName().equals(SqlTypeName.ARRAY)) {
-        RelDataType componentType = dataType.getComponentType();
-        if (componentType.isStruct() || componentType.getSqlTypeName() == SqlTypeName.ARRAY) {
-          return new Field(
-              name,
-              new org.apache.arrow.vector.types.pojo.FieldType(true, new ArrowType.List(), null),
-              Collections.singletonList(getField("$data$", componentType)));
-        } else {
-          ArrowType type =
-              MajorTypeHelper.getArrowTypeForMajorType(
-                  Types.optional(TypeInferenceUtils.getMinorTypeFromCalciteType(componentType)));
-          return new Field(
-              name,
-              new org.apache.arrow.vector.types.pojo.FieldType(true, new ArrowType.List(), null),
-              Collections.singletonList(
-                  new Field(
-                      "$data$",
-                      new org.apache.arrow.vector.types.pojo.FieldType(
-                          componentType.isNullable(), type, null),
-                      null)));
-        }
+        return CalciteArrowHelper.fieldFromCalciteRowType(
+                ListVector.DATA_VECTOR_NAME, dataType.getComponentType())
+            .map(
+                element ->
+                    new Field(
+                        name,
+                        new org.apache.arrow.vector.types.pojo.FieldType(
+                            true, new ArrowType.List(), null),
+                        List.of(element)))
+            .orElse(null);
+      } else if (dataType.getSqlTypeName().equals(SqlTypeName.MAP)) {
+        return CalciteArrowHelper.fieldFromCalciteRowType(MapVector.KEY_NAME, dataType.getKeyType())
+            .flatMap(
+                key ->
+                    CalciteArrowHelper.fieldFromCalciteRowType(
+                            MapVector.VALUE_NAME, dataType.getValueType())
+                        .map(
+                            value ->
+                                new Field(
+                                    name,
+                                    new org.apache.arrow.vector.types.pojo.FieldType(
+                                        true, new ArrowType.Map(false), null),
+                                    List.of(key, value))))
+            .orElse(null);
       }
       return null;
     }

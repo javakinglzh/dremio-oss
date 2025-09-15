@@ -533,12 +533,18 @@ public class PseudoDistributedFileSystem extends FileSystem implements PathCanon
 
     if (!isRemoteFile(f)) {
       // In our remote view, there might be a directory, so delete task should handle this case
+      if (logger.isDebugEnabled()) {
+        logger.debug("Delete without remotePath {}", absolutePath.getName());
+      }
       return new DeleteTask(absolutePath, recursive).get();
     }
 
     try {
       RemotePath remotePath = getRemotePath(absolutePath);
 
+      if (logger.isDebugEnabled()) {
+        logger.debug("Delete with remotePath {}", absolutePath.getName());
+      }
       FileSystem delegate = getDelegateFileSystem(remotePath.address);
       return delegate.delete(remotePath.path, recursive);
     } catch (IllegalArgumentException e) {
@@ -657,13 +663,18 @@ public class PseudoDistributedFileSystem extends FileSystem implements PathCanon
 
     // if the path is not a remote file path
     if (!isRemoteFile(absolutePath)) {
+      if (logger.isDebugEnabled()) {
+        logger.debug("getFileStatus without remotePath {}", absolutePath.getName());
+      }
       return new GetFileStatusTask(absolutePath).get();
     }
 
     // Parse top level directory
     try {
       RemotePath remotePath = getRemotePath(absolutePath);
-
+      if (logger.isDebugEnabled()) {
+        logger.debug("getFileStatus with remotePath {}", absolutePath.getName());
+      }
       FileSystem delegate = getDelegateFileSystem(remotePath.address);
       FileStatus status = delegate.getFileStatus(remotePath.path);
 

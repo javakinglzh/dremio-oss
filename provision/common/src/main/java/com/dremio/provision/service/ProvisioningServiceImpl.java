@@ -645,6 +645,7 @@ public class ProvisioningServiceImpl implements ProvisioningService, Provisionin
     } else {
       logger.info("Cluster {} current state is: {}", cluster.getId(), cluster.getState());
       ClusterState desiredState = storedCluster.getDesiredState();
+      storedCluster.setPreviousState(cluster.getPreviousState());
       storedCluster.setState(cluster.getState());
       storedCluster.setStateChangeTime(cluster.getStateChangeTime());
       storedCluster.setError(cluster.getError());

@@ -933,6 +933,68 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
   }
 
   public int outputPartitions(Stopwatch unpivotWatch) throws Exception {
+    if (currentOutputBlockIndex == -1) {
+      blockRowCounts = hashTable.getRecordsInBlocks();
+      if (blockRowCounts == null) {
+        return -1;
+      }
+      currentOutputBlockIndex = 0;
+      setNextBatchToOutput(currentOutputBlockIndex);
+    }
+    if (currentOutputBlockIndex == blockRowCounts.length) {
+      return -1;
+    }
+
+    int blockIndex = currentOutputBlockIndex;
+    int outputRecordsToPump = 0;
+    int blockStartRow = 0;
+    outputRecordsToPump = blockRowCounts[blockIndex];
+    if (outputRecordsToPump == 0) {
+      return -1;
+    }
+    unpivotWatch.start();
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Output partition name: {} Block: {} of {} Requested records: {}",
+          getIdentifier(),
+          currentOutputBlockIndex,
+          blockRowCounts.length,
+          outputRecordsToPump);
+    }
+
+    /* unpivot GROUP BY key columns for one or more batches into corresponding vectors in outgoing container */
+    int numRecords = unpivot(blockIndex, blockStartRow, outputRecordsToPump);
+    unpivotWatch.stop();
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Output partition name: {} Block: {} of {}  Requested records: {} OutputRecords : {}",
+          getIdentifier(),
+          blockIndex,
+          blockRowCounts.length,
+          outputRecordsToPump,
+          numRecords);
+    }
+    int[] outputRecordsInBatches = new int[1];
+    outputRecordsInBatches[0] = numRecords;
+    if (logger.isDebugEnabled()) {
+      logger.debug(
+          "Output accumulator using BatchIndex {} and outputRecordsIn size {}",
+          getNextBatchToOutput(),
+          outputRecordsInBatches.length);
+    }
+    Preconditions.checkState(
+        numRecords == outputRecordsToPump,
+        "Unpivot returned %s records, but expected to return %s for partition %s",
+        numRecords,
+        outputRecordsToPump,
+        getIdentifier());
+    accumulator.output(getNextBatchToOutput(), outputRecordsInBatches);
+    currentOutputBlockIndex = ++blockIndex;
+    setNextBatchToOutput(currentOutputBlockIndex);
+    return numRecords;
+  }
+
+  /*public int outputPartitions(Stopwatch unpivotWatch) throws Exception {
     if (eod) {
       return -1;
     }
@@ -959,7 +1021,7 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
     }
 
     unpivotWatch.start();
-    /* unpivot GROUP BY key columns for one or more batches into corresponding vectors in outgoing container */
+    // unpivot GROUP BY key columns for one or more batches into corresponding vectors in outgoing container
     int recordsToOutput =
         unpivot(currentOutputBlockIndex, currentBlockStartRow, outputRecordsToPump);
     unpivotWatch.stop();
@@ -997,6 +1059,7 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
     }
     return recordsToOutput;
   }
+  */
 
   public int unpivot(int startBatchIndex, int startRow, int outputRecordsToPump) throws Exception {
     int numRecords = 0;
@@ -1020,8 +1083,8 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
           blockRowCounts[startBatchIndex]);
     }
     Preconditions.checkState(
-        numRecords >= outputRecordsToPump,
-        "Returned less records than requested, Requested records %s, Returned Records %s",
+        numRecords <= outputRecordsToPump,
+        "Returned more records than requested, Requested records %s, Returned Records %s",
         outputRecordsToPump,
         numRecords);
     // Unpivot the keys for build side into output
@@ -1030,8 +1093,7 @@ public class VectorizedHashAggPartition implements SpaceCheckListener, AutoClose
     if (variableKeyBufferLength > 0) {
       vbv = new VariableBlockVector(variableKeyBuffer, pivot.getVariableCount());
     }
-
-    Unpivots.unpivot(pivot, fbv, vbv, startRow, outputRecordsToPump);
-    return outputRecordsToPump;
+    Unpivots.unpivot(pivot, fbv, vbv, startRow, numRecords);
+    return numRecords;
   }
 }

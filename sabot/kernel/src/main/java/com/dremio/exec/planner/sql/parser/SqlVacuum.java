@@ -15,11 +15,7 @@
  */
 package com.dremio.exec.planner.sql.parser;
 
-import static org.apache.iceberg.TableProperties.MAX_SNAPSHOT_AGE_MS_DEFAULT;
-import static org.apache.iceberg.TableProperties.MIN_SNAPSHOTS_TO_KEEP_DEFAULT;
-
 import com.dremio.common.exceptions.UserException;
-import com.dremio.exec.catalog.VacuumOptions;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.planner.sql.handlers.query.SqlToPlanHandler;
 import com.dremio.service.namespace.NamespaceKey;
@@ -82,46 +78,25 @@ public abstract class SqlVacuum extends SqlCall implements SqlToPlanHandler.Crea
     return Optional.ofNullable(optionsConsumer.get(optionName));
   }
 
-  public VacuumOptions getVacuumOptions() {
-    long olderThanInMillis;
-    if (expireSnapshots.booleanValue()) {
-      if (olderThanTimestamp != null) {
-        olderThanInMillis = SqlHandlerUtil.convertToTimeInMillis(olderThanTimestamp, pos);
-      } else {
-        long currentTime = System.currentTimeMillis();
-        olderThanInMillis = currentTime - MAX_SNAPSHOT_AGE_MS_DEFAULT;
-      }
-      int retainLast =
-          retainLastSnapshots != null ? retainLastSnapshots : MIN_SNAPSHOTS_TO_KEEP_DEFAULT;
-      return new VacuumOptions(
-          expireSnapshots.booleanValue(),
-          removeOrphans.booleanValue(),
-          olderThanInMillis,
-          retainLast,
-          null,
-          null);
-    }
+  public boolean isExpireSnapshots() {
+    return expireSnapshots.booleanValue();
+  }
 
-    if (removeOrphans.booleanValue()) {
-      if (olderThanTimestamp != null) {
-        olderThanInMillis = SqlHandlerUtil.convertToTimeInMillis(olderThanTimestamp, pos);
-      } else {
-        long currentTime = System.currentTimeMillis();
-        // By default, try to clean orphan files which are at least 5 days old.
-        olderThanInMillis = currentTime - MIN_FILE_AGE_MS_DEFAULT;
-      }
+  public boolean isRemoveOrphans() {
+    return removeOrphans.booleanValue();
+  }
 
-      return new VacuumOptions(
-          expireSnapshots.booleanValue(),
-          removeOrphans.booleanValue(),
-          olderThanInMillis,
-          1,
-          location,
-          null);
-    }
+  public Optional<Long> getOlderThanInMillis() {
+    return Optional.ofNullable(olderThanTimestamp)
+        .map(timestamp -> SqlHandlerUtil.convertToTimeInMillis(timestamp, pos));
+  }
 
-    return new VacuumOptions(
-        expireSnapshots.booleanValue(), removeOrphans.booleanValue(), null, null, null, null);
+  public Optional<Integer> getRetainLast() {
+    return Optional.ofNullable(retainLastSnapshots);
+  }
+
+  public String getLocation() {
+    return location;
   }
 
   protected void populateOptions(SqlNodeList optionsList, SqlNodeList optionsValueList) {

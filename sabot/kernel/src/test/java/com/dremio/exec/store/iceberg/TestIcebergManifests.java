@@ -23,6 +23,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.dremio.BaseTestQuery;
+import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.iceberg.hadoop.IcebergHadoopModel;
 import com.dremio.exec.store.iceberg.model.IcebergCatalogType;
@@ -50,6 +51,7 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.io.OutputFile;
 import org.apache.iceberg.types.Types;
+import org.assertj.core.api.Assertions;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -131,6 +133,42 @@ public class TestIcebergManifests extends BaseTestQuery {
               .build());
     }
     return dataFiles;
+  }
+
+  /**
+   * Create iceberg table, then hand-select delete the manifest files (not manifest lists) in name
+   * to mimic the error of a fileNotFound exception thrown by {@link
+   * org.apache.iceberg.avro.AvroIterable}, then subsequently caught by {@link
+   * ManifestFileProcessor#setupManifestFile}.
+   *
+   * <p>Purpose: to ensure that the error is caught by Dremio's {@link UserException} handling, so
+   * that we can contextualize the error with more than a generic 'SYSTEM ERROR'.
+   */
+  @Test
+  public void testManifestCountLost() throws Exception {
+
+    String table = "icebergTableWithMissingManifests";
+
+    // get path to table
+    String tablePath = getDfsTestTmpSchemaLocation() + "/" + table;
+
+    // create table
+    String createTable = String.format("CREATE TABLE %s.\"%s\" (id INT)", TEMP_SCHEMA, table);
+    runSQL(createTable);
+
+    // insert data
+    String insertData =
+        String.format("INSERT INTO %s.\"%s\" VALUES (5), (10), (20)", TEMP_SCHEMA, table);
+    runSQL(insertData);
+
+    // delete manifest file from table (not manifest list)
+    deleteManifestFiles(new File(tablePath));
+
+    // read table ... expect UserError.IOException...
+    String queryFolder = String.format("SELECT * FROM %s.\"%s\"", TEMP_SCHEMA, table);
+    Assertions.assertThatThrownBy(() -> runSQL(queryFolder))
+        .hasCause(UserException.ioExceptionError().buildSilently().getCause())
+        .hasMessageContaining("IO_EXCEPTION ERROR");
   }
 
   public int getManifestFileCount(
@@ -250,5 +288,36 @@ public class TestIcebergManifests extends BaseTestQuery {
       writer.close();
     }
     return writer.toManifestFile();
+  }
+
+  /**
+   * deletes manifest files from given table
+   *
+   * @param tableName the absolute file path of the table. It's subdirectories are the metadata
+   *     folder and the DataFile folders.
+   */
+  private void deleteManifestFiles(File tableName) {
+    // get folders inside table
+    File[] foldersInTable = tableName.listFiles();
+    if (foldersInTable != null) {
+      for (File folder : foldersInTable) {
+        if (folder.isDirectory() && folder.getName().equals("metadata")) { // metadata folder
+          File[] metadataFiles = folder.listFiles(); // get files from metadata folder
+          if (metadataFiles != null) {
+            for (File avroFile : metadataFiles) {
+              boolean isManifestFile =
+                  avroFile.getName().endsWith(".avro") && (!avroFile.getName().startsWith("snap"));
+              boolean isHiddenManifestFile =
+                  avroFile.getName().endsWith(".avro.crc")
+                      && (!avroFile.getName().startsWith(".snap"));
+              if (isManifestFile || isHiddenManifestFile) {
+                // avro files without 'snap' in the name (i.e. do not delete manifest lists)
+                avroFile.delete();
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }

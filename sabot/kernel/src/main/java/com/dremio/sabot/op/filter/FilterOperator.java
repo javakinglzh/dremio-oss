@@ -31,6 +31,7 @@ import com.dremio.exec.record.VectorContainer;
 import com.dremio.exec.record.VectorWrapper;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
+import com.dremio.sabot.exec.fragment.FragmentExecutionContext;
 import com.dremio.sabot.op.filter.FilterStats.Metric;
 import com.dremio.sabot.op.spi.SingleInputOperator;
 import com.google.common.base.Stopwatch;
@@ -56,8 +57,10 @@ public class FilterOperator implements SingleInputOperator {
   private Stopwatch javaCodeGenWatch = Stopwatch.createUnstarted();
   private Stopwatch gandivaCodeGenWatch = Stopwatch.createUnstarted();
   private ExpressionSplitter splitter;
+  private final FragmentExecutionContext fec;
 
-  public FilterOperator(Filter pop, OperatorContext context) throws OutOfMemoryException {
+  public FilterOperator(FragmentExecutionContext fec, Filter pop, OperatorContext context)
+      throws OutOfMemoryException {
     this.config = pop;
     this.context = context;
     this.filterOptions = new ExpressionEvaluationOptions(context.getOptions());
@@ -67,6 +70,7 @@ public class FilterOperator implements SingleInputOperator {
             .getOption(ExecConstants.QUERY_EXEC_OPTION.getOptionName())
             .getStringVal());
     this.output = context.createOutputVectorContainerWithSV();
+    this.fec = fec;
   }
 
   @Override
@@ -180,6 +184,7 @@ public class FilterOperator implements SingleInputOperator {
         context.getClassProducer().materializeAndAllowComplex(config.getExpr(), input, true);
     splitter =
         new ExpressionSplitter(
+            fec,
             context,
             accessible,
             filterOptions,
@@ -202,7 +207,14 @@ public class FilterOperator implements SingleInputOperator {
     @Override
     public SingleInputOperator create(OperatorContext context, Filter operator)
         throws ExecutionSetupException {
-      return new FilterOperator(operator, context);
+      return new FilterOperator(null, operator, context);
+    }
+
+    @Override
+    public SingleInputOperator create(
+        FragmentExecutionContext fec, OperatorContext context, Filter operator)
+        throws ExecutionSetupException {
+      return new FilterOperator(fec, operator, context);
     }
   }
 

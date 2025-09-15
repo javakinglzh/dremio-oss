@@ -28,6 +28,7 @@ import com.dremio.exec.planner.sql.PartitionTransform;
 import com.dremio.exec.planner.sql.SqlValidatorImpl;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.Operations;
 import com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler;
 import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
 import com.dremio.options.OptionManager;
@@ -61,7 +62,6 @@ public class AlterTablePartitionSpecHandler extends SimpleDirectHandler {
             .getTableVersionSpec()
             .getTableVersionContext()
             .asVersionContext();
-
     NamespaceKey path =
         CatalogUtil.getResolvePathForTableManagement(catalog, sqlPartitionSpecChanges.getTable());
 
@@ -86,6 +86,9 @@ public class AlterTablePartitionSpecHandler extends SimpleDirectHandler {
     }
 
     PartitionTransform partitionTransform = sqlPartitionSpecChanges.getPartitionTransform();
+    SqlHandlerUtil.validateColumnExistsAndIsPrimitiveType(
+        table.getSchema(), partitionTransform.getColumnName(), Operations.PARTITION);
+
     SqlAlterTablePartitionColumns.Mode mode = sqlPartitionSpecChanges.getMode();
     PartitionSpecAlterOption partitionSpecAlterOption =
         new PartitionSpecAlterOption(partitionTransform, mode);

@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.Optional;
 import javax.annotation.Nonnull;
 
-/** Interface used to read datasets and containers. */
+/** Interface used to read catalog entities. */
 public interface EntityExplorer {
 
   /**
@@ -148,4 +148,6 @@ public interface EntityExplorer {
       CatalogEntityKey catalogEntityKey, TableMetadataVerifyRequest metadataVerifyRequest);
 
   DremioTable getTable(CatalogEntityKey catalogEntityKey);
+
+  Optional<CatalogIdentity> getCatalogEntityOwner(CatalogEntityKey catalogEntityKey);
 }

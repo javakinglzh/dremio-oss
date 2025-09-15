@@ -21,11 +21,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.dremio.context.RequestContext;
@@ -40,11 +36,13 @@ import com.dremio.services.pubsub.MessageSubscriber;
 import com.dremio.services.pubsub.Subscription;
 import com.dremio.services.pubsub.TestMessageConsumer;
 import com.dremio.services.pubsub.Topic;
+import com.dremio.telemetry.api.metrics.Metrics;
 import com.google.protobuf.Parser;
 import com.google.protobuf.Timestamp;
 import com.google.protobuf.util.Timestamps;
 import io.opentelemetry.api.OpenTelemetry;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -69,7 +67,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 public class TestInProcessPubSubClient {
   @Mock private Provider<RequestContext> requestContextProvider;
   @Mock private OptionManager optionManager;
-  @Mock private InProcessPubSubEventListener eventListener;
 
   private InProcessPubSubClient client;
   private MessagePublisher<Timestamp> publisher;
@@ -105,9 +102,7 @@ public class TestInProcessPubSubClient {
   }
 
   private void startClient(@Nullable Function<Timestamp, String> parallelizationKeyProvider) {
-    client =
-        new InProcessPubSubClient(
-            requestContextProvider, optionManager, OpenTelemetry.noop(), eventListener);
+    client = new InProcessPubSubClient(requestContextProvider, optionManager, OpenTelemetry.noop());
     publisher =
         client.getPublisher(
             TestTopic.class, new ImmutableMessagePublisherOptions.Builder().build());
@@ -178,14 +173,37 @@ public class TestInProcessPubSubClient {
     assertThat(messageContainer.getMessage()).isEqualTo(timestamp);
     messageContainer.ack();
 
-    verify(eventListener, times(1))
-        .onPublish(eq(new TestTopic().getName()), anyInt(), eq(true), eq(null));
-    verify(eventListener, times(1))
-        .onMessageReceived(
-            eq(new TestTopic().getName()),
-            eq(new TestSubscription().getName()),
-            eq(true),
-            eq(null));
+    // Verify metrics.
+    String[] metrics =
+        Arrays.stream(Metrics.scrape().split("\n", -1))
+            .filter(s -> s.contains("pubsub_inprocess"))
+            .toArray(String[]::new);
+    //noinspection OptionalGetWithoutIsPresent
+    assertThat(
+            Arrays.stream(metrics)
+                .filter(metric -> metric.startsWith("pubsub_inprocess_message_received_total"))
+                .findFirst()
+                .get())
+        .isEqualTo(
+            String.format(
+                "pubsub_inprocess_message_received_total{subscription=\"%s\",topic=\"%s\",} 0.0",
+                new TestSubscription().getName(), new TestTopic().getName()));
+    assertThat(
+            Arrays.stream(metrics)
+                .filter(metric -> metric.startsWith("pubsub_inprocess_queue_size"))
+                .findFirst()
+                .get())
+        .isEqualTo(
+            String.format(
+                "pubsub_inprocess_queue_size{topic=\"%s\",} 0.0", new TestTopic().getName()));
+    assertThat(
+            Arrays.stream(metrics)
+                .filter(metric -> metric.startsWith("pubsub_inprocess_queue_saturation"))
+                .findFirst()
+                .get())
+        .isEqualTo(
+            String.format(
+                "pubsub_inprocess_queue_saturation{topic=\"%s\",} 0.0", new TestTopic().getName()));
   }
 
   /** Test that nack results in delayed re-delivery. */
@@ -442,8 +460,7 @@ public class TestInProcessPubSubClient {
     CountDownLatch latch = new CountDownLatch(1);
     //noinspection resource
     InProcessPubSubClient client =
-        new InProcessPubSubClient(
-            requestContextProvider, optionManager, OpenTelemetry.noop(), eventListener);
+        new InProcessPubSubClient(requestContextProvider, optionManager, OpenTelemetry.noop());
     client
         .getSubscriber(
             TestSubscription.class,

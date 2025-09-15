@@ -103,6 +103,31 @@ public class PhysicalPlanCreator {
     return props(
         operatorId,
         username,
+        null,
+        schema,
+        reserveOption == null
+            ? Prel.DEFAULT_RESERVE
+            : context.getOptions().getOption(reserveOption),
+        limitOption,
+        Prel.DEFAULT_LOW_LIMIT,
+        0,
+        cost,
+        prel.getTraitSet().getTrait(DistributionTraitDef.INSTANCE) == DistributionTrait.SINGLETON);
+  }
+
+  public OpProps props(
+      int operatorId,
+      Prel prel,
+      String username,
+      String userId,
+      BatchSchema schema,
+      LongValidator reserveOption,
+      LongValidator limitOption,
+      double cost) {
+    return props(
+        operatorId,
+        username,
+        userId,
         schema,
         reserveOption == null
             ? Prel.DEFAULT_RESERVE
@@ -143,6 +168,26 @@ public class PhysicalPlanCreator {
     return props(
         prel,
         username,
+        null,
+        schema,
+        reserveOption == null
+            ? Prel.DEFAULT_RESERVE
+            : context.getOptions().getOption(reserveOption),
+        limitOption,
+        Prel.DEFAULT_LOW_LIMIT);
+  }
+
+  public OpProps props(
+      Prel prel,
+      String username,
+      String userId,
+      BatchSchema schema,
+      LongValidator reserveOption,
+      LongValidator limitOption) {
+    return props(
+        prel,
+        username,
+        userId,
         schema,
         reserveOption == null
             ? Prel.DEFAULT_RESERVE
@@ -158,7 +203,18 @@ public class PhysicalPlanCreator {
       long reservation,
       LongValidator limitOption,
       long lowLimit) {
-    return props(prel, username, schema, reservation, limitOption, lowLimit, 0);
+    return props(prel, username, null, schema, reservation, limitOption, lowLimit, 0);
+  }
+
+  public OpProps props(
+      Prel prel,
+      String username,
+      String userId,
+      BatchSchema schema,
+      long reservation,
+      LongValidator limitOption,
+      long lowLimit) {
+    return props(prel, username, userId, schema, reservation, limitOption, lowLimit, 0);
   }
 
   public OpProps props(
@@ -172,6 +228,28 @@ public class PhysicalPlanCreator {
     return props(
         prel,
         username,
+        null,
+        schema,
+        reservation,
+        limitOption,
+        lowLimit,
+        forcedMemLimit,
+        prel.getCostForParallelization());
+  }
+
+  public OpProps props(
+      Prel prel,
+      String username,
+      String userId,
+      BatchSchema schema,
+      long reservation,
+      LongValidator limitOption,
+      long lowLimit,
+      long forcedMemLimit) {
+    return props(
+        prel,
+        username,
+        userId,
         schema,
         reservation,
         limitOption,
@@ -192,6 +270,30 @@ public class PhysicalPlanCreator {
     return props(
         getId(prel),
         username,
+        null,
+        schema,
+        reservation,
+        limitOption,
+        lowLimit,
+        forcedMemLimit,
+        cost,
+        prel.getTraitSet().getTrait(DistributionTraitDef.INSTANCE) == DistributionTrait.SINGLETON);
+  }
+
+  private OpProps props(
+      Prel prel,
+      String username,
+      String userId,
+      BatchSchema schema,
+      long reservation,
+      LongValidator limitOption,
+      long lowLimit,
+      long forcedMemLimit,
+      double cost) {
+    return props(
+        getId(prel),
+        username,
+        userId,
         schema,
         reservation,
         limitOption,
@@ -204,6 +306,7 @@ public class PhysicalPlanCreator {
   private OpProps props(
       int operatorId,
       String username,
+      String userId,
       BatchSchema schema,
       long reservation,
       LongValidator limitOption,
@@ -214,6 +317,7 @@ public class PhysicalPlanCreator {
     return new OpProps(
         operatorId,
         username,
+        userId,
         reservation,
         limitOption == null ? Prel.DEFAULT_LIMIT : context.getOptions().getOption(limitOption),
         lowLimit,
@@ -228,7 +332,11 @@ public class PhysicalPlanCreator {
   }
 
   public OpProps props(Prel prel, String username, BatchSchema schema) {
-    return props(prel, username, schema, null, null);
+    return props(prel, username, null, schema, null, null);
+  }
+
+  public OpProps props(Prel prel, String username, String userId, BatchSchema schema) {
+    return props(prel, username, userId, schema, null, null);
   }
 
   public PhysicalPlan build(Prel rootPrel, boolean forceRebuild) {
@@ -265,8 +373,9 @@ public class PhysicalPlanCreator {
     final int listSizeEstimate = (int) options.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE);
     final int varFieldSizeEstimate =
         (int) options.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
+    final int mapSizeEstimate = (int) options.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE);
     final int estimatedRecordSize =
-        schema.estimateRecordSize(listSizeEstimate, varFieldSizeEstimate);
+        schema.estimateRecordSize(listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
     return estimatedRecordSize;
   }
 

@@ -21,6 +21,7 @@ import com.dremio.connector.metadata.GetMetadataOption;
 import com.dremio.connector.metadata.ListPartitionChunkOption;
 import com.dremio.connector.metadata.MetadataOption;
 import com.dremio.connector.metadata.options.DirListInputSplitType;
+import com.dremio.connector.metadata.options.ForceUpdateOption;
 import com.dremio.connector.metadata.options.IgnoreAuthzErrors;
 import com.dremio.connector.metadata.options.InternalMetadataTableOption;
 import com.dremio.connector.metadata.options.MaxLeafFieldCount;
@@ -351,6 +352,10 @@ public class DatasetRetrievalOptions {
 
     if (internalMetadataTableOption != null) {
       options.add(internalMetadataTableOption);
+    }
+
+    if (forceUpdate()) {
+      options.add(new ForceUpdateOption(ForceUpdateOption.Mode.ONCE));
     }
 
     addDatasetOptions(GetDatasetOption.class, datasetConfig, options);

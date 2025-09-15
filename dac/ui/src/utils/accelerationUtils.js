@@ -36,6 +36,7 @@ export const createReflectionFormValues = (opts, siblingNames = []) => {
     sortFields: [],
     partitionDistributionStrategy: "CONSOLIDATED",
     shouldDelete: false,
+    reflectionMode: "",
   };
 
   if (opts.type === "RAW") {
@@ -113,6 +114,7 @@ export const areReflectionFormValuesBasic = (
     tag: reflectionFormValues.tag,
     name: reflectionFormValues.name,
     enabled: reflectionFormValues.enabled,
+    reflectionMode: reflectionFormValues.reflectionMode,
   });
 
   if (reflectionFormValues.type === "RAW") {

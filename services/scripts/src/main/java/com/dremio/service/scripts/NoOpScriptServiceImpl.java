@@ -35,7 +35,7 @@ public class NoOpScriptServiceImpl implements ScriptService {
 
   @Override
   public List<ScriptProto.Script> getScripts(
-      int offset, int limit, String search, String orderBy, String filter, String createdBy) {
+      int offset, int limit, String search, String orderBy, String createdBy) {
     throw new UnsupportedOperationException("getScripts not implemented in NoOpScriptServiceImpl");
   }
 
@@ -74,7 +74,7 @@ public class NoOpScriptServiceImpl implements ScriptService {
   }
 
   @Override
-  public Long getCountOfMatchingScripts(String search, String filter, String createdBy) {
+  public Long getCountOfMatchingScripts(String search, String createdBy) {
     throw new UnsupportedOperationException(
         "getCountOfMatchingScripts not implemented in NoOpScriptServiceImpl");
   }

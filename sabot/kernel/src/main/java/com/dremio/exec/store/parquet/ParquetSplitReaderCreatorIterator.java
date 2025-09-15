@@ -33,6 +33,7 @@ import com.dremio.exec.store.RuntimeFilterEvaluator;
 import com.dremio.exec.store.ScanFilter;
 import com.dremio.exec.store.SplitAndPartitionInfo;
 import com.dremio.exec.store.dfs.EmptySplitReaderCreator;
+import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.PrefetchingIterator;
 import com.dremio.exec.store.dfs.SplitReaderCreator;
 import com.dremio.exec.store.dfs.implicit.CompositeReaderConfig;
@@ -198,6 +199,7 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
           plugin.createFS(
               SupportsFsCreation.builder()
                   .userName(config.getProps().getUserName())
+                  .userId(config.getProps().getUserId())
                   .operatorContext(context)
                   .datasetFromTablePaths(tablePath));
     } catch (IOException e) {
@@ -295,6 +297,7 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
                   .withAsyncOptions(isAsync)
                   .filePath(config.getFunctionContext().getFormatSettings().getLocation())
                   .userName(props.getUserName())
+                  .userId(props.getUserId())
                   .operatorContext(context)
                   .datasetFromTablePaths(tablePath));
     } catch (IOException e) {
@@ -918,7 +921,8 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
         equalityIds.isEmpty()
             ? realFields
             : Stream.concat(
-                    ParquetReaderUtility.getColumnsFromEqualityIds(equalityIds, icebergSchemaFields)
+                    ParquetReaderUtility.getColumnsFromEqualityIds(
+                        equalityIds, icebergSchemaFields, fullSchema)
                         .stream(),
                     realFields.stream())
                 .collect(Collectors.toList());
@@ -1016,6 +1020,16 @@ public class ParquetSplitReaderCreatorIterator implements SplitReaderCreatorIter
 
   public void setIgnoreSchemaLearning(boolean ignoreSchemaLearning) {
     this.ignoreSchemaLearning = ignoreSchemaLearning;
+  }
+
+  public List<String> getResolvedTablePath() throws IOException {
+    List<String> fullTablePath = new ArrayList<>();
+    if (plugin instanceof FileSystemPlugin) {
+      fullTablePath =
+          ((FileSystemPlugin) plugin)
+              .resolveTableNameToValidPath(Iterables.getFirst(tablePath, null));
+    }
+    return fullTablePath;
   }
 
   @Override

@@ -20,7 +20,6 @@ import com.dremio.common.map.CaseInsensitiveMap;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.proto.UserProtos;
 import com.dremio.exec.server.options.SessionOptionManager;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
 import com.google.common.base.Strings;
@@ -244,11 +243,6 @@ public class ChangeTrackingUserSession extends UserSession {
   @Override
   public boolean isTracingEnabled() {
     return delegate.isTracingEnabled();
-  }
-
-  @Override
-  public SubstitutionSettings getSubstitutionSettings() {
-    return delegate.getSubstitutionSettings();
   }
 
   @Override

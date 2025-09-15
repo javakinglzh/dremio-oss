@@ -45,6 +45,7 @@ import org.apache.arrow.vector.types.pojo.Field;
 public class MapFunctions {
 
   public static final String LAST_MATCHING_ENTRY_FUNC = "last_matching_map_entry_for_key";
+  public static final String FIRST_MATCHING_ENTRY_FUNC = "first_matching_map_entry_for_key";
 
   @FunctionTemplate(
       names = {"map_keys"},
@@ -128,6 +129,14 @@ public class MapFunctions {
     @Override
     public CompleteType getOutputType(CompleteType baseReturn, List<LogicalExpression> args) {
       Field entryStruct = getEntryStruct(args, "GetLastMatchingMapEntryForKey");
+      return CompleteType.fromField(entryStruct);
+    }
+  }
+
+  public static class KeyValueOutputFirstMatching implements OutputDerivation {
+    @Override
+    public CompleteType getOutputType(CompleteType baseReturn, List<LogicalExpression> args) {
+      Field entryStruct = getEntryStruct(args, "GetFirstMatchingMapEntryForKey");
       return CompleteType.fromField(entryStruct);
     }
   }

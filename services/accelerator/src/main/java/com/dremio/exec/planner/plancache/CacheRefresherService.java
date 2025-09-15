@@ -17,6 +17,4 @@ package com.dremio.exec.planner.plancache;
 
 import com.dremio.service.Service;
 
-public interface CacheRefresherService extends Service {
-  void wakeupCacheRefresher(String reason);
-}
+public interface CacheRefresherService extends Service {}

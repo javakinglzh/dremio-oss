@@ -82,6 +82,7 @@ public class TestTableLocationWithUnlimitedSplits extends BaseTestServer {
         null,
         null,
         null,
+        null,
         format,
         null,
         false);

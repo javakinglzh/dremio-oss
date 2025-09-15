@@ -37,6 +37,7 @@ public class AvroRowCountEstimater implements FooterReader {
     estimatedRecordSize =
         tableSchema.estimateRecordSize(
             (int) context.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+            (int) context.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
             (int) context.getOptions().getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
     this.tableSchema = tableSchema;
     this.compressionFactor = 10;

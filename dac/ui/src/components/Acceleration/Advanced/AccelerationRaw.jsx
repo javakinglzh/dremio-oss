@@ -48,6 +48,7 @@ export default class AccelerationRaw extends Component {
       "rawReflections[].displayFields[].name",
       "rawReflections[].distributionFields[].name",
       "rawReflections[].shouldDelete",
+      "rawReflections[].reflectionMode",
     ];
   }
 

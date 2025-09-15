@@ -211,7 +211,7 @@ public class NonVarcharCoercionReader implements AutoCloseable {
       ExpressionEvaluationOptions projectorOptions,
       VectorContainer projectorOutput)
       throws Exception {
-    return ProjectOperator.createSplitterWithExpressions(
+    return ProjectOperator.createSplitterWithExpressionsStatic(
         incoming,
         exprs,
         transfers,

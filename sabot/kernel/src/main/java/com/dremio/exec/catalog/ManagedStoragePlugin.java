@@ -132,6 +132,8 @@ import java.util.stream.Collectors;
 import javax.annotation.Nullable;
 import javax.inject.Provider;
 import org.apache.commons.lang3.reflect.FieldUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Manages the Dremio system state related to a StoragePlugin.
@@ -140,8 +142,7 @@ import org.apache.commons.lang3.reflect.FieldUtils;
  * freshness for this source.
  */
 public class ManagedStoragePlugin implements AutoCloseable {
-  private static final org.slf4j.Logger logger =
-      org.slf4j.LoggerFactory.getLogger(ManagedStoragePlugin.class);
+  private static final Logger logger = LoggerFactory.getLogger(ManagedStoragePlugin.class);
   private final String name;
   private final CatalogSabotContext context;
   private final NamespaceService.Factory namespaceServiceFactory;
@@ -606,7 +607,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         } catch (AccessControlException | ConcurrentModificationException | DatastoreException e) {
           logger.trace(
               "Saving to namespace store failed, reverting the in-memory source config to the original version...");
-          setLocals(originalConfigCopy, true);
+          setLocals(originalConfigCopy);
           throw e;
         }
       }
@@ -696,7 +697,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         } catch (AccessControlException | ConcurrentModificationException | DatastoreException e) {
           logger.trace(
               "Saving to namespace store failed, reverting the in-memory source config to the original version...");
-          setLocals(originalConfigCopy, true);
+          setLocals(originalConfigCopy);
           throw e;
         }
       }
@@ -919,6 +920,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
             logger.debug("Refresh all entities names in source [{}]", name);
             refresh(SourceUpdateType.NAMES, null);
             break;
+          default:
+            throw new IllegalStateException("Unexpected value: " + action.getAction());
         }
       }
     } catch (NamespaceException e) {
@@ -1160,7 +1163,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
               } else {
                 throw new SourceMalfunctionException(this.name);
               }
-              setLocals(config, false);
+              setLocals(config);
               startup.stop();
               if (state.getStatus() == SourceStatus.bad) {
                 // Check the state here and throw exception so that we close the partially started
@@ -1413,7 +1416,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
               }
 
               try {
-                refreshState().get();
+                refreshState();
                 if (state.getStatus() != SourceState.SourceStatus.bad) {
                   logger.info(successMessage);
                   return;
@@ -1762,13 +1765,12 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * Call after plugin start to register local variables.
    *
    * @param config new {@link SourceConfig} to store in this instance
-   * @param runAsync whether to run parts of initPlugin asynchronously
    */
-  private void setLocals(SourceConfig config, boolean runAsync) throws SourceMalfunctionException {
+  private void setLocals(SourceConfig config) throws SourceMalfunctionException {
     if (getPlugin().isEmpty()) {
       return;
     }
-    initPlugin(config, runAsync);
+    initPlugin(config);
     this.pluginId =
         new StoragePluginId(sourceConfig, conf, getPlugin().get().getSourceCapabilities());
   }
@@ -1784,7 +1786,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
     if (getPlugin().isEmpty()) {
       return;
     }
-    initPlugin(config, true);
+    initPlugin(config);
     this.pluginId = pluginId;
   }
 
@@ -1792,11 +1794,8 @@ public class ManagedStoragePlugin implements AutoCloseable {
    * Helper function to set the plugin locals.
    *
    * @param config source config, must be not null
-   * @param runAsync whether to run parts of the method asynchronously, if it's called from an async
-   *     call already then this is expected to be false not to consume another thread from the pool
-   *     or to create a race.
    */
-  private void initPlugin(SourceConfig config, boolean runAsync) throws SourceMalfunctionException {
+  private void initPlugin(SourceConfig config) throws SourceMalfunctionException {
     this.sourceConfig = config;
     this.metadataPolicy =
         config.getMetadataPolicy() == null
@@ -1809,102 +1808,117 @@ public class ManagedStoragePlugin implements AutoCloseable {
       throw new SourceMalfunctionException(this.name);
     }
 
-    if (runAsync && options.getOption(CatalogOptions.ENABLE_ASYNC_GET_STATE)) {
-      // StoragePlugin.getState may not resolve quickly due to long connection
-      // timeouts, limit the call time.
-      long timeoutSeconds = options.getOption(CatalogOptions.GET_STATE_TIMEOUT_SECONDS);
-      CompletableFuture<SourceState> stateFuture =
-          CompletableFuture.supplyAsync(() -> getPlugin().get().getState(), executor);
-      try {
-        this.state = stateFuture.get(timeoutSeconds, TimeUnit.SECONDS);
-      } catch (ExecutionException | InterruptedException | TimeoutException e) {
-        this.state =
-            SourceState.badState(
-                SourceState.NOT_AVAILABLE.getSuggestedUserAction(), e.getCause().getMessage());
-        logger.error("Failed to obtain plugin's state in {}s: {}", timeoutSeconds, name, e);
-        throw new RuntimeException(e);
-      }
+    if (options.getOption(CatalogOptions.ENABLE_ASYNC_GET_STATE)) {
+      this.state = tryGetState();
     } else {
+      // Legacy behavior. It is not recommended to disable this option. Enforcing
+      // a timeout on calls to getState() helps to alleviate deadlocks around source locking.
       this.state = getPlugin().get().getState();
     }
   }
 
   /** Update the cached state of the plugin. */
-  @SuppressWarnings(
-      "resource") // We are using AutoCloseableLock in try-with-resources, we're just testing it in
-  // a guard clause first
-  public CompletableFuture<SourceState> refreshState() throws Exception {
-    return CompletableFuture.supplyAsync(
-        () -> {
-          try {
-            Optional<AutoCloseableLock> localRefreshStateLock =
-                AutoCloseableLock.of(this.refreshStateLock, true).tryOpen(0, TimeUnit.SECONDS);
-            if (localRefreshStateLock.isEmpty()) {
+  public SourceState refreshState() {
+    long timeoutSeconds = options.getOption(CatalogOptions.REFRESH_STATE_TIMEOUT_SECONDS);
+    try {
+      return CompletableFuture.supplyAsync(this::tryRefreshState, executor)
+          .get(timeoutSeconds, TimeUnit.SECONDS);
+    } catch (InterruptedException | ExecutionException | TimeoutException e) {
+      final SourceState newBadState =
+          SourceState.badState(
+              SourceState.NOT_AVAILABLE.getSuggestedUserAction(), e.getCause().getMessage());
+      logger.warn("Failed to refresh plugin's state in {}s: {}", timeoutSeconds, name, e);
+      this.state = newBadState;
+      return newBadState;
+    }
+  }
+
+  // We are using AutoCloseableLock in try-with-resources, we're just testing it in a guard clause
+  // first
+  @SuppressWarnings("resource")
+  private SourceState tryRefreshState() {
+    try {
+      Optional<AutoCloseableLock> localRefreshStateLock =
+          AutoCloseableLock.of(this.refreshStateLock, true).tryOpen(0, TimeUnit.SECONDS);
+      if (localRefreshStateLock.isEmpty()) {
+        logger.debug(
+            "Source [{}] state is not refreshed. Refresh state lock status: {}",
+            name,
+            this.refreshStateLock);
+        return state;
+      }
+      try (AutoCloseableLock refL = localRefreshStateLock.get()) {
+        while (true) {
+          if (getPlugin().isEmpty()) {
+            Optional<AutoCloseableLock> localWriteLock =
+                AutoCloseableLock.of(this.writeLock, true).tryOpen(5, TimeUnit.SECONDS);
+            if (localWriteLock.isEmpty()) {
               logger.debug(
-                  "Source [{}] state is not refreshed. Refresh state lock status: {}",
+                  "Source [{}] state is not refreshed. Write lock status: {}",
                   name,
-                  ((ReentrantLock) this.refreshStateLock).toString());
+                  this.writeLock.toString());
               return state;
             }
-            try (AutoCloseableLock refL = localRefreshStateLock.get()) {
-              while (true) {
-                if (getPlugin().isEmpty()) {
-                  Optional<AutoCloseableLock> localWriteLock =
-                      AutoCloseableLock.of(this.writeLock, true).tryOpen(5, TimeUnit.SECONDS);
-                  if (localWriteLock.isEmpty()) {
-                    logger.debug(
-                        "Source [{}] state is not refreshed. Write lock status: {}",
-                        name,
-                        this.writeLock.toString());
-                    return state;
-                  }
 
-                  try (AutoCloseableLock wL = localWriteLock.get()) {
-                    if (getPlugin().isPresent()) {
-                      // while waiting for write lock, someone else started things, start this loop
-                      // over.
-                      continue;
-                    }
-                    this.plugin =
-                        resolveConnectionConf(conf)
-                            .newPlugin(context, sourceConfig.getName(), this::getId);
-                    return newStartSupplier(sourceConfig, false).get();
-                  }
-                }
-
-                // the plugin is not null.
-                Optional<AutoCloseableLock> localReadLock =
-                    AutoCloseableLock.of(this.readLock, true).tryOpen(1, TimeUnit.SECONDS);
-                if (localReadLock.isEmpty()) {
-                  logger.debug(
-                      name,
-                      "Source [{}] state is not refreshed. Read lock status: {}",
-                      this.readLock.toString());
-                  return state;
-                }
-
-                try (Closeable rL = localReadLock.get()) {
-                  final SourceState newState = getPlugin().get().getState();
-                  this.state = newState;
-                  return newState;
-                }
+            try (AutoCloseableLock wL = localWriteLock.get()) {
+              if (getPlugin().isPresent()) {
+                // while waiting for write lock, someone else started things, start this loop
+                // over.
+                continue;
               }
+              this.plugin =
+                  resolveConnectionConf(conf)
+                      .newPlugin(context, sourceConfig.getName(), this::getId);
+              return newStartSupplier(sourceConfig, false).get();
             }
-          } catch (Exception ex) {
-            logger.debug("Failed to start plugin while trying to refresh state, error:", ex);
-            if (ex.getCause() instanceof DeletedException) {
-              logger.debug(String.format("[%s] is deleted", name), ex.getCause());
-              SourceState newBadState =
-                  SourceState.badState(
-                      SourceState.DELETED.getSuggestedUserAction(), ex.getCause().getMessage());
-              this.state = newBadState;
-              return newBadState;
-            }
-            this.state = SourceState.NOT_AVAILABLE;
-            return SourceState.NOT_AVAILABLE;
           }
-        },
-        executor);
+
+          // the plugin is not null.
+          Optional<AutoCloseableLock> localReadLock =
+              AutoCloseableLock.of(this.readLock, true).tryOpen(1, TimeUnit.SECONDS);
+          if (localReadLock.isEmpty()) {
+            logger.debug(
+                "Source [{}] state is not refreshed. Read lock status: {}",
+                name,
+                this.readLock.toString());
+            return state;
+          }
+
+          try (Closeable rL = localReadLock.get()) {
+            // Always already in an async thread, stay in same async thread
+            final SourceState newState = tryGetState();
+            this.state = newState;
+            return newState;
+          }
+        }
+      }
+    } catch (Exception ex) {
+      logger.debug("Failed to start plugin while trying to refresh state, error:", ex);
+      if (ex.getCause() instanceof DeletedException) {
+        logger.debug("[{}] is deleted. {}", name, ex.getCause().toString());
+        SourceState newBadState =
+            SourceState.badState(
+                SourceState.DELETED.getSuggestedUserAction(), ex.getCause().getMessage());
+        this.state = newBadState;
+        return newBadState;
+      }
+      this.state = SourceState.NOT_AVAILABLE;
+      return SourceState.NOT_AVAILABLE;
+    }
+  }
+
+  private SourceState tryGetState() {
+    // StoragePlugin.getState may not resolve quickly due to long connection timeouts,
+    // limit the call time.
+    final long timeoutSeconds = options.getOption(CatalogOptions.GET_STATE_TIMEOUT_SECONDS);
+    try {
+      return CompletableFuture.supplyAsync(() -> getPlugin().get().getState(), executor)
+          .get(timeoutSeconds, TimeUnit.SECONDS);
+    } catch (ExecutionException | InterruptedException | TimeoutException e) {
+      logger.warn("Failed to obtain plugin's state in {}s: {}", timeoutSeconds, name, e);
+      return SourceState.badState(
+          SourceState.NOT_AVAILABLE.getSuggestedUserAction(), e.getCause().getMessage());
+    }
   }
 
   /**
@@ -1968,7 +1982,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         && existingConnectionConf.equals(newConnectionConf)
         && getPlugin().isPresent()) {
       // we just need to update external settings.
-      setLocals(config, true);
+      setLocals(config);
       return true;
     }
 
@@ -2040,7 +2054,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
         && existingConnectionConf.equals(newConnectionConf)
         && getPlugin().isPresent()) {
       // we just need to update external settings.
-      setLocals(config, true);
+      setLocals(config);
       return Lists.newArrayList();
     }
 
@@ -2393,7 +2407,7 @@ public class ManagedStoragePlugin implements AutoCloseable {
     }
 
     public void refreshState() throws Exception {
-      ManagedStoragePlugin.this.refreshState().get(30, TimeUnit.SECONDS);
+      ManagedStoragePlugin.this.refreshState();
     }
 
     SourceState getState() {

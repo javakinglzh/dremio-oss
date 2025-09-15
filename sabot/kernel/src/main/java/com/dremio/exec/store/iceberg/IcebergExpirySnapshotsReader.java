@@ -257,17 +257,17 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
     context.getStats().addLongStat(metric, val);
   }
 
-  protected void setupFsIfNecessary(String path, List<String> dataset) {
+  protected void setupFsIfNecessary(String filePath, List<String> dataset) {
     if (this.fs != null) {
       return; // Already initialized
     }
 
-    setupFs(path, dataset);
+    setupFs(filePath, dataset);
   }
 
-  protected synchronized void setupFs(String path, List<String> dataset) {
+  protected synchronized void setupFs(String filePath, List<String> dataset) {
     try {
-      this.fs = getFsFromPlugin(path, dataset);
+      this.fs = getFsFromPlugin(filePath, dataset);
       this.io = icebergMutablePlugin.createIcebergFileIO(this.fs, context, dataset, null, null);
     } catch (Exception e) {
       LOGGER.error("Failed to initialize the file system with error message {}.", e.getMessage());
@@ -280,6 +280,7 @@ public abstract class IcebergExpirySnapshotsReader implements RecordReader {
         SupportsFsCreation.builder()
             .filePath(filePath)
             .userName(props.getUserName())
+            .userId(props.getUserId())
             .operatorContext(context)
             .dataset(dataset));
   }

@@ -35,6 +35,7 @@ import com.dremio.service.reflection.DependencyEntry.DatasetDependency;
 import com.dremio.service.reflection.DependencyEntry.ReflectionDependency;
 import com.dremio.service.reflection.DependencyEntry.TableFunctionDependency;
 import com.dremio.service.reflection.DependencyGraph.DependencyException;
+import com.dremio.service.reflection.ImmutableMaterializationInfo.Builder;
 import com.dremio.service.reflection.proto.DependencyType;
 import com.dremio.service.reflection.proto.Materialization;
 import com.dremio.service.reflection.proto.MaterializationId;
@@ -65,6 +66,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -601,6 +603,16 @@ public class DependencyManager {
                   public Long apply(DatasetDependency entry) {
                     final AccelerationSettings settings =
                         getSettingsForDependency(dependencyResolutionContext, entry);
+                    if (!settings.getNeverRefresh()) {
+                      logger.debug(
+                          "Dataset {} refresh period={}",
+                          entry.getPath(),
+                          settings.getRefreshPeriod());
+                    }
+                    if (!settings.getNeverExpire()) {
+                      logger.debug(
+                          "Dataset {} grace period={}", entry.getPath(), settings.getGracePeriod());
+                    }
                     // for reflections that never expire, use a grace period of 1000 years from now
                     return Boolean.TRUE.equals(settings.getNeverExpire())
                         ? (TimeUnit.DAYS.toMillis(365) * 1000)
@@ -840,12 +852,21 @@ public class DependencyManager {
     materializationInfoCache.put(reflectionId, builder.build());
   }
 
-  void updateLastRefreshDuration(ReflectionId reflectionId, long lastRefreshDurationMillis) {
-    ImmutableMaterializationInfo.Builder builder = MaterializationInfo.builder();
+  /**
+   * Updates MaterializationInfo cache entry with an updater function.
+   *
+   * @param reflectionId The ID of the reflection whose MaterializationInfo needs to be updated
+   * @param updater A Consumer that accepts a MaterializationInfo.Builder to apply the customized
+   *     updates
+   * @return MaterializationInfo.
+   */
+  MaterializationInfo updateMaterializationInfo(
+      ReflectionId reflectionId, Consumer<Builder> updater) {
     MaterializationInfo previous = getMaterializationInfo(reflectionId);
-    builder.from(previous);
-    builder.setLastRefreshDuration(lastRefreshDurationMillis);
+    ImmutableMaterializationInfo.Builder builder = MaterializationInfo.builder().from(previous);
+    updater.accept(builder);
     materializationInfoCache.put(reflectionId, builder.build());
+    return materializationInfoCache.get(reflectionId);
   }
 
   /** Deletes MaterializationInfo cache entry for given reflectionId. */

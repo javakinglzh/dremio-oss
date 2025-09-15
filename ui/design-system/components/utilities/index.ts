@@ -14,5 +14,6 @@
  * limitations under the License.
  */
 
+export * from "./getCategoricalBg.js";
 export * from "./useIsScrolled.js";
 export * from "./useTooltip.js";

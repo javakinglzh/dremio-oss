@@ -20,6 +20,7 @@ import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 
+import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.api.Dataset;
 import com.dremio.dac.explore.model.DatasetPath;
 import com.dremio.dac.explore.model.DatasetUI;
@@ -37,6 +38,8 @@ import com.dremio.dac.proto.model.dataset.VersionContextType;
 import com.dremio.dac.proto.model.dataset.VirtualDatasetUI;
 import com.dremio.dac.server.ApiErrorModel;
 import com.dremio.dac.server.BaseTestServer;
+import com.dremio.dac.server.FamilyExpectation;
+import com.dremio.dac.server.UserExceptionMapper;
 import com.dremio.dac.service.datasets.DatasetVersionMutator;
 import com.dremio.dac.service.errors.InvalidQueryException;
 import com.dremio.service.jobs.JobRequest;
@@ -695,6 +698,7 @@ public class TestDatasetVersionResource extends BaseTestServer {
             parentVDS.getPath(),
             null,
             null,
+            null,
             parentVDS.getTag(),
             parentVDS.getAccelerationRefreshPolicy(),
             "select commit_id from sys.version",
@@ -1004,11 +1008,44 @@ public class TestDatasetVersionResource extends BaseTestServer {
     }
   }
 
+  @Test
+  public void testCyclicViews() {
+    BufferAllocator allocator =
+        getRootAllocator().newChildAllocator(getClass().getName(), 0, Long.MAX_VALUE);
+    Dataset vdsOne = createVDS(Arrays.asList("dsvTest", "testVdsOne"), "select 1");
+    expectSuccess(
+        getBuilder(getHttpClient().getAPIv3().path("catalog")).buildPost(Entity.json(vdsOne)),
+        new GenericType<>() {});
+
+    Dataset vdsTwo =
+        createVDS(
+            Arrays.asList("dsvTest", "testVdsTwo"),
+            String.format("select * from %s", PathUtils.constructFullPath(vdsOne.getPath())));
+    expectSuccess(
+        getBuilder(getHttpClient().getAPIv3().path("catalog")).buildPost(Entity.json(vdsTwo)),
+        new GenericType<>() {});
+
+    Dataset cyclicVdsOne =
+        createVDS(
+            vdsOne.getPath(),
+            String.format("select * from %s", PathUtils.constructFullPath(vdsTwo.getPath())));
+    UserExceptionMapper.ErrorMessageWithContext errorMessageWithContext =
+        expectError(
+            FamilyExpectation.CLIENT_ERROR,
+            getBuilder(getHttpClient().getAPIv3().path("catalog"))
+                .buildPost(Entity.json(cyclicVdsOne)),
+            UserExceptionMapper.ErrorMessageWithContext.class);
+    assertThat(errorMessageWithContext.getErrorMessage())
+        .isEqualTo(
+            "Cannot save the view 'testVdsOne' because of a cyclical dependency. Please review and remove the cyclical reference and try again.");
+  }
+
   private Dataset createVDS(List<String> path, String sql) {
     return new Dataset(
         null,
         Dataset.DatasetType.VIRTUAL_DATASET,
         path,
+        null,
         null,
         null,
         null,

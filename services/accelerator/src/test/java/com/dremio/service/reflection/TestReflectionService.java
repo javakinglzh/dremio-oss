@@ -182,8 +182,7 @@ public class TestReflectionService {
             DirectProvider.wrap(reflectionStatusService),
             Mockito.mock(ExecutorService.class),
             false,
-            allocator,
-            DirectProvider.wrap(cacheRefresherService));
+            allocator);
 
     // Test KV store objects
     ReflectionId rId = new ReflectionId("r1");
@@ -361,8 +360,7 @@ public class TestReflectionService {
         Provider<ReflectionStatusService> reflectionStatusService,
         ExecutorService executorService,
         boolean isMaster,
-        BufferAllocator allocator,
-        Provider<CacheRefresherService> cacheRefresherService) {
+        BufferAllocator allocator) {
       super(
           config,
           storeProvider,
@@ -376,7 +374,6 @@ public class TestReflectionService {
           allocator,
           null,
           new DatasetEventHub(),
-          cacheRefresherService,
           () -> ReflectionChangeNotificationHandler.NO_OP);
     }
 

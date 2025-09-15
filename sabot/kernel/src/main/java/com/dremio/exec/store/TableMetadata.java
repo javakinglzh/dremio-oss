@@ -67,6 +67,8 @@ public interface TableMetadata {
 
   String getUser();
 
+  String getUserId();
+
   TableMetadata prune(SearchTypes.SearchQuery partitionFilterQuery);
 
   TableMetadata prune(Predicate<PartitionChunkMetadata> partitionPredicate);

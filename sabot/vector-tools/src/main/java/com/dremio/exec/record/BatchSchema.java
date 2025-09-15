@@ -739,11 +739,15 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
    * columns.
    */
   public static int estimateRecordSize(
-      Map<String, ValueVector> vectorMap, int listSizeEstimate, int varFieldSizeEstimate) {
+      Map<String, ValueVector> vectorMap,
+      int listSizeEstimate,
+      int mapSizeEstimate,
+      int varFieldSizeEstimate) {
     int estimatedRecordSize = 0;
     for (final ValueVector v : vectorMap.values()) {
       estimatedRecordSize +=
-          BatchSchema.estimateFieldSize(v.getField(), listSizeEstimate, varFieldSizeEstimate);
+          BatchSchema.estimateFieldSize(
+              v.getField(), listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
     }
     return estimatedRecordSize;
   }
@@ -754,18 +758,20 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
    *
    * @return
    */
-  public int estimateRecordSize(int listSizeEstimate, int varFieldSizeEstimate) {
+  public int estimateRecordSize(
+      int listSizeEstimate, int mapSizeEstimate, int varFieldSizeEstimate) {
     // calculate the target record size
     int estimatedRecordSize = 0;
     for (Field column : this) {
-      estimatedRecordSize += estimateFieldSize(column, listSizeEstimate, varFieldSizeEstimate);
+      estimatedRecordSize +=
+          estimateFieldSize(column, listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
     }
 
     return estimatedRecordSize;
   }
 
   private static int estimateFieldSize(
-      Field field, int listSizeEstimate, int varFieldSizeEstimate) {
+      Field field, int listSizeEstimate, int mapSizeEstimate, int varFieldSizeEstimate) {
     ArrowTypeID typeID = field.getType().getTypeID();
     final int estimatedFieldSize, elemSize;
     switch (typeID) {
@@ -783,7 +789,8 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
         int childrenSize = 0;
         if (!field.getChildren().isEmpty()) {
           for (Field child : field.getChildren()) {
-            childrenSize += estimateFieldSize(child, listSizeEstimate, varFieldSizeEstimate);
+            childrenSize +=
+                estimateFieldSize(child, listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
           }
           estimatedFieldSize = childrenSize;
         } else {
@@ -794,7 +801,11 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
         if (!field.getChildren().isEmpty()) {
           // assume an average of 5 elements in a list.
           elemSize =
-              estimateFieldSize(field.getChildren().get(0), listSizeEstimate, varFieldSizeEstimate);
+              estimateFieldSize(
+                  field.getChildren().get(0),
+                  listSizeEstimate,
+                  mapSizeEstimate,
+                  varFieldSizeEstimate);
           estimatedFieldSize = elemSize * listSizeEstimate;
         } else {
           estimatedFieldSize = varFieldSizeEstimate;
@@ -803,7 +814,11 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
       case FixedSizeList:
         final int fixedListSize = ((FixedSizeList) field.getType()).getListSize();
         elemSize =
-            estimateFieldSize(field.getChildren().get(0), listSizeEstimate, varFieldSizeEstimate);
+            estimateFieldSize(
+                field.getChildren().get(0),
+                listSizeEstimate,
+                mapSizeEstimate,
+                varFieldSizeEstimate);
         estimatedFieldSize = elemSize * fixedListSize;
         break;
       case Union:
@@ -811,11 +826,26 @@ public class BatchSchema extends org.apache.arrow.vector.types.pojo.Schema
         if (!field.getChildren().isEmpty()) {
           int size = 0;
           for (Field child : field.getChildren()) {
-            size += estimateFieldSize(child, listSizeEstimate, varFieldSizeEstimate);
+            size +=
+                estimateFieldSize(child, listSizeEstimate, mapSizeEstimate, varFieldSizeEstimate);
           }
           estimatedFieldSize = size / field.getChildren().size();
         } else {
           estimatedFieldSize = 0;
+        }
+        break;
+      case Map:
+        if (!field.getChildren().isEmpty()) {
+          // assume an average of 5 elements in a map.
+          elemSize =
+              estimateFieldSize(
+                  field.getChildren().get(0),
+                  listSizeEstimate,
+                  mapSizeEstimate,
+                  varFieldSizeEstimate);
+          estimatedFieldSize = elemSize * mapSizeEstimate;
+        } else {
+          estimatedFieldSize = varFieldSizeEstimate;
         }
         break;
       case Utf8:

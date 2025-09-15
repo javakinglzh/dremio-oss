@@ -58,7 +58,7 @@ public class TestSQLRunnerSessionServiceImpl {
     sqlRunnerSessionStore.start();
 
     ScriptService scriptService = mock(ScriptService.class);
-    when(scriptService.getScripts(anyInt(), anyInt(), anyString(), anyString(), anyString(), any()))
+    when(scriptService.getScripts(anyInt(), anyInt(), anyString(), anyString(), any()))
         .thenReturn(
             Lists.newArrayList(
                 ScriptProto.Script.newBuilder().setScriptId("script_id1").build(),

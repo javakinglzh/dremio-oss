@@ -123,7 +123,6 @@ public class SqlConverter {
     this.materializations =
         new MaterializationList(
             this,
-            session,
             materializationProvider,
             observer == null ? AbstractAttemptObserver.NOOP : observer,
             config);
@@ -178,9 +177,7 @@ public class SqlConverter {
     this.viewExpander =
         new ViewExpander(
             this.expansionSqlValidatorAndToRelContextBuilderFactory,
-            this.functionContext.getContextInformation(),
             this.viewExpansionContext,
-            this.substitutions,
             autoVDSFixer);
     this.toRelContext =
         DremioToRelContext.createQueryContext(

@@ -17,7 +17,6 @@ package com.dremio.exec.planner.sql.handlers.direct;
 
 import com.dremio.catalog.model.ResolvedVersionContext;
 import com.dremio.catalog.model.VersionContext;
-import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.exec.catalog.Catalog;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.DremioTable;
@@ -26,8 +25,10 @@ import com.dremio.exec.ops.QueryContext;
 import com.dremio.exec.planner.sql.SqlValidatorImpl;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerConfig;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
+import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.Operations;
 import com.dremio.exec.planner.sql.handlers.query.DataAdditionCmdHandler;
 import com.dremio.exec.planner.sql.parser.SqlAlterTableSortOrder;
+import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceKey;
@@ -84,34 +85,24 @@ public class AlterTableSortOrderHandler extends SimpleDirectHandlerWithValidator
 
     List<String> sortOrderColumns = sqlAlterTableSortOrder.getSortList();
     String message = "";
+    BatchSchema schema = table.getSchema();
+
     if (sortOrderColumns.isEmpty()) {
       // Drop Sort Order
       catalog.alterSortOrder(
-          path,
-          table.getDatasetConfig(),
-          table.getSchema(),
-          Collections.emptyList(),
-          tableMutationOptions);
+          path, table.getDatasetConfig(), schema, Collections.emptyList(), tableMutationOptions);
       message = String.format("Sort order has been removed from Table: [%S]", path.getRoot());
     } else {
       // Update Sort Order
       handleCommandOptionConflicts(table, path);
       Set<String> fieldSet =
-          table.getSchema().getFields().stream().map(Field::getName).collect(Collectors.toSet());
+          schema.getFields().stream().map(Field::getName).collect(Collectors.toSet());
 
       for (String col : sortOrderColumns) {
-        if (!fieldSet.contains(col)) {
-          throw UserRemoteException.validationError()
-              .message(String.format("Column '%s' does not exist in the table.", col))
-              .buildSilently();
-        }
+        SqlHandlerUtil.validateColumnExistsAndIsPrimitiveType(schema, col, Operations.LOCALSORT);
       }
       catalog.alterSortOrder(
-          path,
-          table.getDatasetConfig(),
-          table.getSchema(),
-          sortOrderColumns,
-          tableMutationOptions);
+          path, table.getDatasetConfig(), schema, sortOrderColumns, tableMutationOptions);
       message = String.format("Sort order on table %s successfully updated", path);
     }
     DataAdditionCmdHandler.refreshDataset(catalog, path, false);

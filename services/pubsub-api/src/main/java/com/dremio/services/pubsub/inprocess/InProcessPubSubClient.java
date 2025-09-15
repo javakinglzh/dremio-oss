@@ -26,13 +26,19 @@ import com.dremio.services.pubsub.MessagePublisherOptions;
 import com.dremio.services.pubsub.MessageSubscriber;
 import com.dremio.services.pubsub.MessageSubscriberOptions;
 import com.dremio.services.pubsub.PubSubClient;
+import com.dremio.services.pubsub.PubSubCommonTags;
 import com.dremio.services.pubsub.PubSubTracerDecorator;
 import com.dremio.services.pubsub.Subscription;
 import com.dremio.services.pubsub.Topic;
+import com.dremio.telemetry.api.metrics.MeterProviders;
 import com.google.common.collect.ArrayListMultimap;
 import com.google.common.collect.Multimap;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import com.google.protobuf.Message;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Meter;
+import io.micrometer.core.instrument.Tag;
+import io.micrometer.core.instrument.Tags;
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.trace.Tracer;
 import io.opentelemetry.context.Context;
@@ -43,7 +49,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -87,7 +92,6 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
   private final Provider<RequestContext> requestContextProvider;
   private final OptionManager optionManager;
   private final Tracer tracer;
-  private final InProcessPubSubEventListener eventListener;
 
   private final CountDownLatch shutdownLatch = new CountDownLatch(1);
   private final ExecutorService executorService;
@@ -105,12 +109,10 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
   public InProcessPubSubClient(
       Provider<RequestContext> requestContextProvider,
       OptionManager optionManager,
-      OpenTelemetry openTelemetry,
-      InProcessPubSubEventListener eventListener) {
+      OpenTelemetry openTelemetry) {
     this.requestContextProvider = requestContextProvider;
     this.optionManager = optionManager;
     this.tracer = openTelemetry.getTracer(INSTRUMENTATION_SCOPE_NAME);
-    this.eventListener = eventListener;
 
     // Resource usage would be better with virtual threads as there is no heavy work done here.
     // TODO: once Java 21 is enabled switch to Executors.newVirtualThreadPerTaskExecutor().
@@ -216,16 +218,6 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
     }
   }
 
-  private void onPublish(
-      String topicName, int queueLength, boolean success, @Nullable String exceptionName) {
-    eventListener.onPublish(topicName, queueLength, success, exceptionName);
-  }
-
-  private void onMessageReceived(
-      String topicName, String subscriptionName, boolean success, @Nullable String exceptionName) {
-    eventListener.onMessageReceived(topicName, subscriptionName, success, exceptionName);
-  }
-
   /** Iterates over messages in the message queues and processes them on the executor. */
   private void processQueues() {
     try {
@@ -309,6 +301,16 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
    * of message publish.
    */
   private final class Publisher<M extends Message> implements MessagePublisher<M> {
+
+    private static final String PUBSUB_INPROCESS_QUEUE_SIZE_GAUGE_NAME =
+        "pubsub.inprocess.queue.size";
+    private static final String PUBSUB_INPROCESS_QUEUE_SIZE_GAUGE_DESCRIPTION =
+        "PubSub in-process queue size gauge.";
+    private static final String PUBSUB_INPROCESS_QUEUE_SATURATION_GAUGE_NAME =
+        "pubsub.inprocess.queue.saturation";
+    private static final String PUBSUB_INPROCESS_QUEUE_SATURATION_GAUGE_DESCRIPTION =
+        "PubSub in-process queue saturation gauge.";
+
     private final String topicName;
 
     private Publisher(String topicName) {
@@ -329,69 +331,62 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
               throw new RuntimeException(e);
             }
 
-            try {
-              // Build messages per subscription.
-              String messageId = UUID.randomUUID().toString();
-              RequestContext requestContext = RequestContext.current();
-              List<MessageContainer<M>> messageContainersToAdd = new ArrayList<>();
-              synchronized (subscriptionNamesByTopicName) {
-                for (String subscriptionName : subscriptionNamesByTopicName.get(topicName)) {
-                  messageContainersToAdd.add(
-                      new MessageContainer<>(
-                          topicName, subscriptionName, messageId, message, requestContext));
-                }
+            // Build messages per subscription.
+            String messageId = UUID.randomUUID().toString();
+            RequestContext requestContext = RequestContext.current();
+            List<MessageContainer<M>> messageContainersToAdd = new ArrayList<>();
+            synchronized (subscriptionNamesByTopicName) {
+              for (String subscriptionName : subscriptionNamesByTopicName.get(topicName)) {
+                messageContainersToAdd.add(
+                    new MessageContainer<>(
+                        topicName, subscriptionName, messageId, message, requestContext));
               }
-
-              // Add messages to the processing queue.
-              if (!messageContainersToAdd.isEmpty()) {
-                // Use a blocking queue to guard against OOM.
-                int maxMessagesInQueue =
-                    (int)
-                        optionManager.getOption(InProcessPubSubClientOptions.MAX_MESSAGES_IN_QUEUE);
-                ArrayBlockingQueue<MessageContainer<?>> queue =
-                    queuesByTopicName.computeIfAbsent(
-                        topicName, (key) -> new ArrayBlockingQueue<>(maxMessagesInQueue));
-                span.setAttribute(
-                    InProcessPubSubClientSpanAttribute.PUBSUB_INPROCESS_QUEUE_SIZE, queue.size());
-                span.setAttribute(
-                    InProcessPubSubClientSpanAttribute.PUBSUB_INPROCESS_QUEUE_SATURATION,
-                    queue.size() / (double) maxMessagesInQueue);
-                int timeoutMilliseconds =
-                    (int)
-                        optionManager.getOption(
-                            InProcessPubSubClientOptions.PUBLISH_TIMEOUT_MILLISECONDS);
-                for (MessageContainer<M> container : messageContainersToAdd) {
-                  try {
-                    if (!queue.offer(container, timeoutMilliseconds, TimeUnit.MILLISECONDS)) {
-                      logger.error(
-                          "Timeout while waiting to put message {} into topic {} for subscription {}."
-                              + " Silently, returning from the publish call.",
-                          message,
-                          topicName,
-                          container.getSubscriptionName());
-                      return CompletableFuture.completedFuture("");
-                    }
-                  } catch (InterruptedException e) {
-                    logger.error("Interrupted while waiting to put message in queue", e);
-                    throw new RuntimeException(e);
-                  }
-                }
-
-                // Notify queue processing thread that new messages are available.
-                startProcessingEvent.set();
-
-                // Notify listener.
-                onPublish(topicName, queue.size(), true, null);
-              }
-
-              return CompletableFuture.completedFuture(messageId);
-            } catch (Exception e) {
-              // Notify listener.
-              Queue<MessageContainer<?>> queue = queuesByTopicName.get(topicName);
-              onPublish(
-                  topicName, queue != null ? queue.size() : 0, false, e.getClass().getSimpleName());
-              throw e;
             }
+
+            // Add messages to the processing queue.
+            if (!messageContainersToAdd.isEmpty()) {
+              // Use a blocking queue to guard against OOM.
+              int maxMessagesInQueue =
+                  (int) optionManager.getOption(InProcessPubSubClientOptions.MAX_MESSAGES_IN_QUEUE);
+              ArrayBlockingQueue<MessageContainer<?>> queue =
+                  queuesByTopicName.computeIfAbsent(
+                      topicName,
+                      (key) -> {
+                        final ArrayBlockingQueue<MessageContainer<?>> newQueue =
+                            new ArrayBlockingQueue<>(maxMessagesInQueue);
+                        setQueueGauges(newQueue, maxMessagesInQueue);
+                        return newQueue;
+                      });
+              span.setAttribute(PUBSUB_INPROCESS_QUEUE_SIZE_GAUGE_NAME, queue.size());
+              span.setAttribute(
+                  PUBSUB_INPROCESS_QUEUE_SATURATION_GAUGE_NAME,
+                  queue.size() / (double) maxMessagesInQueue);
+              int timeoutMilliseconds =
+                  (int)
+                      optionManager.getOption(
+                          InProcessPubSubClientOptions.PUBLISH_TIMEOUT_MILLISECONDS);
+              for (MessageContainer<M> container : messageContainersToAdd) {
+                try {
+                  if (!queue.offer(container, timeoutMilliseconds, TimeUnit.MILLISECONDS)) {
+                    logger.error(
+                        "Timeout while waiting to put message {} into topic {} for subscription {}."
+                            + " Silently, returning from the publish call.",
+                        message,
+                        topicName,
+                        container.getSubscriptionName());
+                    return CompletableFuture.completedFuture("");
+                  }
+                } catch (InterruptedException e) {
+                  logger.error("Interrupted while waiting to put message in queue", e);
+                  throw new RuntimeException(e);
+                }
+              }
+
+              // Notify queue processing thread that new messages are available.
+              startProcessingEvent.set();
+            }
+
+            return CompletableFuture.completedFuture(messageId);
           });
     }
 
@@ -401,10 +396,29 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
         publisherByTopicName.remove(topicName);
       }
     }
+
+    private void setQueueGauges(
+        ArrayBlockingQueue<MessageContainer<?>> newQueue, int maxMessagesInQueue) {
+      Tags gaugeTags = Tags.of(Tag.of(PubSubCommonTags.TAG_TOPIC_KEY, topicName));
+      MeterProviders.newGauge(
+          PUBSUB_INPROCESS_QUEUE_SIZE_GAUGE_NAME,
+          PUBSUB_INPROCESS_QUEUE_SIZE_GAUGE_DESCRIPTION,
+          gaugeTags,
+          newQueue::size);
+      MeterProviders.newGauge(
+          PUBSUB_INPROCESS_QUEUE_SATURATION_GAUGE_NAME,
+          PUBSUB_INPROCESS_QUEUE_SATURATION_GAUGE_DESCRIPTION,
+          gaugeTags,
+          () -> newQueue.size() / (double) maxMessagesInQueue);
+    }
   }
 
   /** Subscriber adds/removes itself in start/close and processes incoming messages. */
   private final class Subscriber<M extends Message> implements MessageSubscriber<M> {
+
+    private final Meter.MeterProvider<Counter> messageReceivedCounter =
+        MeterProviders.newCounterProvider(
+            "pubsub.inprocess.message_received", "PubSub in-process message-received counter.");
 
     private final String topicName;
     private final String subscriptionName;
@@ -437,19 +451,20 @@ public class InProcessPubSubClient implements PubSubClient, Closeable {
                 requestContextProvider
                     .get()
                     .run(() -> messageConsumer.process((MessageContainer<M>) messageContainer));
-
-                // Notify listener.
-                onMessageReceived(topicName, subscriptionName, true, null);
               } catch (Exception e) {
                 span.recordException(e);
-
-                // Notify listener.
-                onMessageReceived(topicName, subscriptionName, false, e.getClass().getSimpleName());
 
                 // All uncaught exceptions result in an ack, the message consumer must decide how
                 // to handle exceptions otherwise.
                 messageContainer.ack();
               } finally {
+                messageReceivedCounter
+                    .withTags(
+                        Tags.of(
+                            Tag.of(PubSubCommonTags.TAG_TOPIC_KEY, topicName),
+                            Tag.of(PubSubCommonTags.TAG_SUBSCRIPTION_KEY, subscriptionName)))
+                    .increment();
+
                 // Release the permit.
                 messagesInProcessingSemaphore.release();
               }

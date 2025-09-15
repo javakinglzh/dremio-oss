@@ -306,6 +306,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
   private final LogicalPlanPersistence lpPersistance;
   private final C config;
   private final PluginSabotContext context;
+  private final OptionManager optionManager;
   private final Path basePath;
 
   private final Provider<StoragePluginId> idProvider;
@@ -327,6 +328,7 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     this.config = config;
     this.idProvider = idProvider;
     this.context = pluginSabotContext;
+    this.optionManager = pluginSabotContext.getOptionManager();
     this.fsConf = FileSystemConfigurationUtils.getNewFsConf(pluginSabotContext.getOptionManager());
     this.lpPersistance = pluginSabotContext.getLpPersistence();
     this.basePath = config.getPath();
@@ -891,8 +893,11 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     return Optional.empty();
   }
 
-  @Override
-  public void start() throws IOException {
+  private void initializeFsConf() {
+    fsConf.set(
+        ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(),
+        Boolean.toString(optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT)));
+
     List<Property> properties = getProperties();
     if (properties != null) {
       for (Property prop : properties) {
@@ -911,6 +916,11 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     for (Entry<String, String> prop : map.entrySet()) {
       fsConf.set(prop.getKey(), prop.getValue());
     }
+  }
+
+  @Override
+  public void start() throws IOException {
+    initializeFsConf();
 
     this.optionExtractor = new FormatPluginOptionExtractor(context.getClasspathScan());
     this.matchers = Lists.newArrayList();
@@ -1370,6 +1380,10 @@ public class FileSystemPlugin<C extends FileSystemConf<C, ?>>
     }
 
     if (fileSelection == null) {
+      if (tableMutationOptions != null
+          && !tableMutationOptions.throwExceptionWhenTableNotFoundInPlugin()) {
+        return;
+      }
       throw UserException.validationError()
           .message(
               String.format(

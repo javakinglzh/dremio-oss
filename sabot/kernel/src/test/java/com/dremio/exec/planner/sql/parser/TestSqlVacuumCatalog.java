@@ -18,6 +18,7 @@ package com.dremio.exec.planner.sql.parser;
 import static com.dremio.exec.calcite.SqlNodes.DREMIO_DIALECT;
 import static com.dremio.exec.planner.sql.parser.TestParserUtil.parse;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
@@ -38,6 +39,19 @@ public class TestSqlVacuumCatalog {
   }
 
   @Test
+  public void testIncludeTables() throws SqlParseException {
+    SqlNode parsed = parse("VACUUM CATALOG src INCLUDE (t1, src.fldr1.t2, t3 AT BRANCH dev)");
+    assertThat(parsed).isInstanceOf(SqlVacuumCatalog.class);
+
+    SqlVacuumCatalog sqlVacuumCatalog = (SqlVacuumCatalog) parsed;
+    assertThat(sqlVacuumCatalog.getCatalogSource().getSimple()).isEqualTo("src");
+    sqlVacuumCatalog.unparse(writer, 0, 0);
+    assertThat(writer.toString())
+        .isEqualTo(
+            "VACUUM CATALOG \"src\" INCLUDE (\"t1\", \"src\".\"fldr1\".\"t2\", \"t3\" AT BRANCH dev)");
+  }
+
+  @Test
   public void testExcludeTables() throws SqlParseException {
     SqlNode parsed = parse("VACUUM CATALOG src EXCLUDE (t1, src.fldr1.t2, t3 AT BRANCH dev)");
     assertThat(parsed).isInstanceOf(SqlVacuumCatalog.class);
@@ -48,5 +62,18 @@ public class TestSqlVacuumCatalog {
     assertThat(writer.toString())
         .isEqualTo(
             "VACUUM CATALOG \"src\" EXCLUDE (\"t1\", \"src\".\"fldr1\".\"t2\", \"t3\" AT BRANCH dev)");
+  }
+
+  @Test
+  public void testBothInclueAndExcludeTables() throws SqlParseException {
+    String vacuumBasicSyntax = "VACUUM CATALOG src";
+    String tableList = "(t1, src.fldr1.t2, t3 AT BRANCH dev)";
+
+    String query = vacuumBasicSyntax + " EXCLUDE " + tableList + " INCLUDE " + tableList;
+    String queryWithInvertedLists =
+        vacuumBasicSyntax + " INCLUDE " + tableList + " EXCLUDE " + tableList;
+
+    assertThatThrownBy(() -> parse(query)).isInstanceOf(SqlParseException.class);
+    assertThatThrownBy(() -> parse(queryWithInvertedLists)).isInstanceOf(SqlParseException.class);
   }
 }

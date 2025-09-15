@@ -32,14 +32,19 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.MethodOrderer.OrderAnnotation;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestMethodOrder;
 
+@TestMethodOrder(OrderAnnotation.class)
 public class TestMetrics extends TestMetricsBase {
   /**
    * Tests if standard (JVM, prometheus) metrics provided by {@link Metrics} show up in metrics end
    * point
    */
   @Test
+  @Order(1)
   public void testStandardAndSysExports() throws Exception {
     Map<String, Set<String>> metrics = getMetrics();
     Map<String, Set<String>> expMap = new HashMap<>();

@@ -103,6 +103,7 @@ public class DirListingTableFunction extends AbstractTableFunction {
               SupportsFsCreation.builder()
                   .filePath(pathWithScheme)
                   .userName(props.getUserName())
+                  .userId(props.getUserId())
                   .operatorContext(context)
                   .withAsyncOptions(true));
     } catch (IOException e) {

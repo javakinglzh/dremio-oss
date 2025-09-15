@@ -189,12 +189,6 @@ public class TestUserSessionServiceImpl {
     assertEquals(session1.getRoutingEngine(), session2.getRoutingEngine());
     assertEquals(session1.getRoutingQueue(), session2.getRoutingQueue());
     assertEquals(session1.getRoutingTag(), session2.getRoutingTag());
-    assertEquals(
-        session1.getSubstitutionSettings().getExclusions(),
-        session2.getSubstitutionSettings().getExclusions());
-    assertEquals(
-        session1.getSubstitutionSettings().getInclusions(),
-        session2.getSubstitutionSettings().getInclusions());
     assertEquals(session1.getTargetUserName(), session2.getTargetUserName());
     assertEquals(session1.exposeInternalSources(), session2.exposeInternalSources());
     assertEquals(session1.isSupportComplexTypes(), session2.isSupportComplexTypes());

@@ -39,7 +39,9 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
   private final String sourceName;
   private final String fsScheme;
   private final String schemeVariate;
-  private final List<String> excludedContentIDs;
+  private final boolean excludeMode;
+  private final List<String> listedContentIDs;
+  private final boolean dryRun;
 
   protected VacuumCatalogRelBase(
       Convention convention,
@@ -52,7 +54,9 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
       VacuumOptions vacuumOptions,
       String fsScheme,
       String schemeVariate,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(cluster, traitSet);
     assert getConvention() == convention;
     this.storagePluginId = storagePluginId;
@@ -62,12 +66,14 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
     this.costEstimates = costEstimates;
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
-    this.excludedContentIDs = excludedContentIDs;
+    this.excludeMode = excludeMode;
+    this.listedContentIDs = listedContentIDs;
+    this.dryRun = dryRun;
   }
 
   @Override
   protected RelDataType deriveRowType() {
-    return VacuumOutputSchema.getCatalogOutputRelDataType(getCluster().getTypeFactory());
+    return VacuumOutputSchema.getCatalogOutputRelDataType(getCluster().getTypeFactory(), dryRun);
   }
 
   @Override
@@ -110,7 +116,15 @@ public class VacuumCatalogRelBase extends AbstractRelNode {
     return fsScheme;
   }
 
-  public List<String> getExcludedContentIDs() {
-    return excludedContentIDs;
+  public boolean isExcludeMode() {
+    return excludeMode;
+  }
+
+  public List<String> getListedContentIDs() {
+    return listedContentIDs;
+  }
+
+  public boolean isDryRun() {
+    return dryRun;
   }
 }

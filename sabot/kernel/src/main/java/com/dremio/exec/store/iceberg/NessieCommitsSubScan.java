@@ -46,7 +46,9 @@ public class NessieCommitsSubScan extends SubScanWithProjection {
   private final SnapshotsScanOptions snapshotsScanOptions;
   private final String fsScheme;
   private final String schemeVariate;
-  private final List<String> excludedContentIDs;
+  private final boolean excludeMode;
+  private final List<String> listedContentIDs;
+  private final boolean dryRun;
 
   @JsonIgnore private List<SplitAndPartitionInfo> splits;
   private static final Collection<List<String>> NO_REFERENCED_TABLES = Collections.emptyList();
@@ -60,7 +62,9 @@ public class NessieCommitsSubScan extends SubScanWithProjection {
       @JsonProperty("splitWorks") List<SplitWork> splitWorks,
       @JsonProperty("fsScheme") String fsScheme,
       @JsonProperty("schemeVariate") String schemeVariate,
-      @JsonProperty("excludedContentIDs") List<String> excludedContentIDs) {
+      @JsonProperty("excludeMode") boolean excludeMode,
+      @JsonProperty("listedContentIDs") List<String> listedContentIDs,
+      @JsonProperty("dryRun") boolean dryRun) {
     super(props, fullSchema, NO_REFERENCED_TABLES, columns);
     this.pluginId = pluginId;
     this.snapshotsScanOptions = snapshotsScanOptions;
@@ -70,7 +74,9 @@ public class NessieCommitsSubScan extends SubScanWithProjection {
     }
     this.fsScheme = fsScheme;
     this.schemeVariate = schemeVariate;
-    this.excludedContentIDs = excludedContentIDs;
+    this.excludeMode = excludeMode;
+    this.listedContentIDs = listedContentIDs;
+    this.dryRun = dryRun;
   }
 
   public StoragePluginId getPluginId() {
@@ -93,8 +99,16 @@ public class NessieCommitsSubScan extends SubScanWithProjection {
     return snapshotsScanOptions;
   }
 
-  public List<String> getExcludedContentIDs() {
-    return excludedContentIDs;
+  public boolean isExcludeMode() {
+    return excludeMode;
+  }
+
+  public List<String> getListedContentIDs() {
+    return listedContentIDs;
+  }
+
+  public boolean isDryRun() {
+    return dryRun;
   }
 
   @JsonIgnore

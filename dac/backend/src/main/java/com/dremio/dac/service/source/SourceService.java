@@ -579,7 +579,7 @@ public class SourceService {
               catalogService.getSource(sourceName.getName()),
               "storage plugin %s not found",
               sourceName);
-      checkPluginState(sourceName.getName(), plugin);
+      checkPluginState(sourceName.getName());
       if (plugin.isWrapperFor(VersionedPlugin.class)) {
         ExternalListResponse response =
             versionedPluginListEntriesHelper(
@@ -635,35 +635,43 @@ public class SourceService {
           NamespaceException,
           PhysicalDatasetNotFoundException,
           IOException {
-    final StoragePlugin plugin = catalogService.getSource(sourceName.getName());
-    if (plugin == null) {
-      throw new SourceFolderNotFoundException(sourceName, folderPath, null);
+    try {
+      final StoragePlugin plugin = catalogService.getSource(sourceName.getName());
+      if (plugin == null) {
+        throw new SourceFolderNotFoundException(sourceName, folderPath, null);
+      }
+      final boolean isFileSystemPlugin = (plugin instanceof FileSystemPlugin);
+      Span.current().setAttribute(IS_FILE_SYSTEM_PLUGIN_SPAN_ATTRIBUTE_NAME, isFileSystemPlugin);
+
+      NamespaceTree contents =
+          includeContents
+              ? listFolder(
+                  sourceName,
+                  folderPath,
+                  userName,
+                  refType,
+                  refValue,
+                  null,
+                  Integer.MAX_VALUE,
+                  includeUDFChildren)
+              : null;
+
+      return newFolder(
+          folderPath,
+          getFolderConfig(sourceName, folderPath, refType, refValue),
+          contents,
+          isPhysicalDataset(sourceName, folderPath),
+          isFileSystemPlugin,
+          plugin,
+          refType,
+          refValue);
+    } catch (NamespaceNotFoundException e) {
+      String errorMessage =
+          Strings.isNullOrEmpty(e.getMessage())
+              ? String.format("Folder [%s] not found", folderPath)
+              : e.getMessage();
+      throw new NotFoundException(errorMessage, e);
     }
-    final boolean isFileSystemPlugin = (plugin instanceof FileSystemPlugin);
-    Span.current().setAttribute(IS_FILE_SYSTEM_PLUGIN_SPAN_ATTRIBUTE_NAME, isFileSystemPlugin);
-
-    NamespaceTree contents =
-        includeContents
-            ? listFolder(
-                sourceName,
-                folderPath,
-                userName,
-                refType,
-                refValue,
-                null,
-                Integer.MAX_VALUE,
-                includeUDFChildren)
-            : null;
-
-    return newFolder(
-        folderPath,
-        getFolderConfig(sourceName, folderPath, refType, refValue),
-        contents,
-        isPhysicalDataset(sourceName, folderPath),
-        isFileSystemPlugin,
-        plugin,
-        refType,
-        refValue);
   }
 
   private FolderConfig getFolderConfig(
@@ -681,7 +689,7 @@ public class SourceService {
     } else {
       folderConfig = getFolderConfigForFileSystemPlugin(sourceName, folderPath);
     }
-    checkPluginState(sourceName.getName(), plugin);
+    checkPluginState(sourceName.getName());
     if (!plugin.isWrapperFor(VersionedPlugin.class)) {
       return folderConfig;
     }
@@ -1277,11 +1285,12 @@ public class SourceService {
     }
   }
 
-  protected void checkPluginState(String name, StoragePlugin plugin) {
-    if (plugin.getState().getStatus() == SourceState.SourceStatus.bad) {
+  protected void checkPluginState(String name) {
+    SourceState state =
+        catalogService.getSystemUserCatalog().refreshSourceStatus(new NamespaceKey(name));
+    if (state.getStatus() == SourceState.SourceStatus.bad) {
       String message =
-          String.format(
-              "Cannot connect to [%s]. %s", name, plugin.getState().getSuggestedUserAction());
+          String.format("Cannot connect to [%s]. %s", name, state.getSuggestedUserAction());
       logger.error(message);
       throw UserException.connectionError().message(message).buildSilently();
     }

@@ -24,7 +24,7 @@ import MenuItem from "@mui/material/MenuItem";
 import { CopyButton } from "dremio-ui-lib/components";
 //@ts-ignore
 import { IconButton, Tooltip } from "dremio-ui-lib";
-import { splitFullPath } from "utils/pathUtils";
+import { constructFullPath, splitFullPath } from "#oss/utils/pathUtils";
 
 import {
   rmProjectBase,
@@ -40,7 +40,6 @@ type BreadCrumbsTypes = {
   longCrumbs: boolean;
   hideLastItem?: boolean;
   showCopyButton?: boolean;
-  includeQuotes?: boolean;
   extraContent?: ReactNode;
 };
 
@@ -87,7 +86,6 @@ const BreadCrumbs = ({
   hideLastItem = false,
   linkStyle,
   showCopyButton = false,
-  includeQuotes = false,
   extraContent,
 }: BreadCrumbsTypes) => {
   const [anchorEl, setAnchorEl] = useState(null);
@@ -208,11 +206,7 @@ const BreadCrumbs = ({
       {fullPath && showCopyButton && (
         <CopyButton
           className="copy-button"
-          contents={
-            includeQuotes
-              ? formatFullPath(fullPath).join(".")
-              : fullPath.join(".")
-          }
+          contents={constructFullPath(fullPath)}
           size="L"
         />
       )}

@@ -85,8 +85,6 @@ public final class MetadataObjectsUtils {
     if (handle instanceof DatasetTypeHandle) {
       shallowConfig.setType(((DatasetTypeHandle) handle).getDatasetType());
     } else {
-      // TODO(DX-99178): See if there is a better way to figure the type of Dataset - eg reintroduce
-      // DatasetTypeHandle which is deprecated
       if (handle instanceof ViewDatasetHandle) {
         shallowConfig.setType(DatasetType.VIRTUAL_DATASET);
         VirtualDataset shallowVirtualDataset = new VirtualDataset();

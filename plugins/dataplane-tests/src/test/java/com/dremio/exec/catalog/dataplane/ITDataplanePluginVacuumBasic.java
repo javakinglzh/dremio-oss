@@ -23,6 +23,7 @@ import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.DEFAUL
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createBranchAtBranchQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createEmptyTableQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.createTagQuery;
+import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueFolderName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.generateUniqueTableName;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.insertTableQuery;
 import static com.dremio.exec.catalog.dataplane.test.DataplaneTestDefines.joinedTableKey;
@@ -60,6 +61,7 @@ import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.server.options.SessionOptionManagerImpl;
 import com.dremio.sabot.rpc.user.UserSession;
 import com.dremio.test.UserExceptionAssert;
+import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import java.time.Instant;
 import java.util.List;
@@ -778,6 +780,12 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
                     "VACUUM CATALOG %s EXCLUDE (%s.%s)",
                     DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
     assertThatThrownBy(() -> runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME));
+    assertThatThrownBy(
+        () ->
+            runSQL(
+                String.format(
+                    "VACUUM CATALOG %s INCLUDE (%s.%s)",
+                    DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
 
     cleanupSilently(table);
   }
@@ -799,6 +807,12 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
                     "VACUUM CATALOG %s EXCLUDE (%s.%s)",
                     DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
     assertThatThrownBy(() -> runSQL("VACUUM CATALOG " + DATAPLANE_PLUGIN_NAME));
+    assertThatThrownBy(
+        () ->
+            runSQL(
+                String.format(
+                    "VACUUM CATALOG %s INCLUDE (%s.%s)",
+                    DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(table))));
   }
 
   @Test
@@ -817,6 +831,41 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
     tables.forEach(t -> assertThat(snapshots(t, "main")).hasSize(1));
 
     tables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testIncludeTables() throws Exception {
+    final int numOfTables = 5;
+    final int numOfSnapshots = 5;
+    final List<String> includedTable = createTable();
+    Map<List<String>, List<String>> tables =
+        IntStream.range(0, numOfTables)
+            .mapToObj(
+                i -> {
+                  final List<String> table = createTable();
+                  IntStream.range(0, numOfSnapshots).forEach(j -> newSnapshot(table));
+                  return table;
+                })
+            .collect(Collectors.toMap(t -> t, t -> snapshots(t, "main")));
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshot(includedTable);
+            });
+
+    runSQL(
+        String.format(
+            "VACUUM CATALOG %s INCLUDE (%s.%s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(includedTable)));
+
+    assertDoesNotThrow(() -> selectQuery(includedTable, "BRANCH main"));
+    tables
+        .keySet()
+        .forEach(t -> assertThat(snapshots(t, "main")).containsExactlyElementsOf(tables.get(t)));
+    assertThat(snapshots(includedTable, "main")).hasSize(1);
+
+    tables.keySet().forEach(super::cleanupSilently);
+    cleanupSilently(includedTable);
   }
 
   @Test
@@ -845,6 +894,112 @@ public class ITDataplanePluginVacuumBasic extends ITDataplanePluginVacuumTestSet
     tables.forEach(t -> assertThat(snapshots(t, "main")).hasSize(1));
 
     tables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testExcludeTablesDuplicateName() throws Exception {
+    // Setup - create tables with same name in different folders
+    String folderName1 = generateUniqueFolderName();
+    String folderName2 = generateUniqueFolderName();
+    String tableName = generateUniqueTableName();
+    List<String> excludedTablePath1 = ImmutableList.of(folderName1, tableName);
+    List<String> excludedTablePath2 = ImmutableList.of(folderName2, tableName);
+    runSQL(createEmptyTableQuery(excludedTablePath1));
+    runSQL(createEmptyTableQuery(excludedTablePath2));
+
+    // Verify setup
+    assertThat(excludedTablePath1.size()).isEqualTo(2);
+    assertThat(excludedTablePath1.get(1)).isEqualTo(excludedTablePath2.get(1));
+
+    // Create additional tables and snapshots
+    final int numOfTables = 5;
+    final int numOfSnapshots = 5;
+    List<List<String>> regularTables =
+        IntStream.range(0, numOfTables).mapToObj(i -> createTable()).collect(Collectors.toList());
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshot(excludedTablePath1);
+              newSnapshot(excludedTablePath2);
+              regularTables.forEach(this::newSnapshot);
+            });
+    final List<String> excludedTableSnapshots = snapshots(excludedTablePath1, "main");
+
+    runSQL(
+        String.format(
+            "VACUUM CATALOG %s EXCLUDE (%s.%s, %s.%s)",
+            DATAPLANE_PLUGIN_NAME,
+            DATAPLANE_PLUGIN_NAME,
+            joinedTableKey(excludedTablePath1),
+            DATAPLANE_PLUGIN_NAME,
+            joinedTableKey(excludedTablePath2)));
+
+    regularTables.forEach(
+        t -> {
+          assertDoesNotThrow(() -> selectQuery(t, "BRANCH main"));
+          assertThat(snapshots(t, "main")).hasSize(1);
+        });
+    assertDoesNotThrow(() -> selectQuery(excludedTablePath1, "BRANCH main"));
+    assertDoesNotThrow(() -> selectQuery(excludedTablePath2, "BRANCH main"));
+    assertThat(snapshots(excludedTablePath1, "main")).isEqualTo(excludedTableSnapshots);
+
+    cleanupSilently(excludedTablePath1);
+    cleanupSilently(excludedTablePath2);
+    regularTables.forEach(super::cleanupSilently);
+  }
+
+  @Test
+  public void testExcludeTablesDuplicateNameSingleExclusion() throws Exception {
+    // Setup - create tables with same name in different folders
+    String folderName1 = generateUniqueFolderName();
+    String folderName2 = generateUniqueFolderName();
+    String tableName = generateUniqueTableName();
+    List<String> excludedTablePath1 = ImmutableList.of(folderName1, tableName);
+    List<String> excludedTablePath2 = ImmutableList.of(folderName2, tableName);
+
+    runSQL(createEmptyTableQuery(excludedTablePath1));
+    runSQL(createEmptyTableQuery(excludedTablePath2));
+
+    // Verify setup
+    assertThat(excludedTablePath1.size()).isEqualTo(2);
+    assertThat(excludedTablePath1.get(1)).isEqualTo(excludedTablePath2.get(1));
+
+    // Create additional tables and snapshots
+    final int numOfTables = 5;
+    final int numOfSnapshots = 5;
+    List<List<String>> regularTables =
+        IntStream.range(0, numOfTables).mapToObj(i -> createTable()).collect(Collectors.toList());
+    IntStream.range(0, numOfSnapshots)
+        .forEach(
+            i -> {
+              newSnapshot(excludedTablePath1);
+              newSnapshot(excludedTablePath2);
+              regularTables.forEach(this::newSnapshot);
+            });
+    final List<String> excludedTableSnapshots = snapshots(excludedTablePath1, "main");
+
+    runSQL(
+        String.format(
+            "VACUUM CATALOG %s EXCLUDE (%s.%s)",
+            DATAPLANE_PLUGIN_NAME, DATAPLANE_PLUGIN_NAME, joinedTableKey(excludedTablePath1)));
+
+    regularTables.forEach(
+        t -> {
+          assertDoesNotThrow(() -> selectQuery(t, "BRANCH main"));
+          assertThat(snapshots(t, "main")).hasSize(1);
+        });
+
+    // First excluded table should have all snapshots preserved
+    assertDoesNotThrow(() -> selectQuery(excludedTablePath1, "BRANCH main"));
+    assertThat(snapshots(excludedTablePath1, "main")).isEqualTo(excludedTableSnapshots);
+
+    // Second table with same name but different path should be vacuumed
+    assertDoesNotThrow(() -> selectQuery(excludedTablePath2, "BRANCH main"));
+    assertThat(snapshots(excludedTablePath2, "main")).hasSize(1);
+
+    cleanupSilently(excludedTablePath1);
+    cleanupSilently(excludedTablePath2);
+    regularTables.forEach(super::cleanupSilently);
   }
 
   @Test

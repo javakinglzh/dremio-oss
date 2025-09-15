@@ -22,6 +22,7 @@ import com.dremio.PlanTestBase;
 import com.dremio.TestBuilder;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.common.util.TestTools;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.server.SabotContext;
@@ -138,6 +139,12 @@ public class TestDeltaScan extends PlanTestBase {
     copyFromJar(
         "deltalake/test_v3_checkpoint",
         java.nio.file.Paths.get(testRootPath + "/test_v3_checkpoint"));
+    copyFromJar(
+        "deltalake/simpleSchemaEvolution",
+        java.nio.file.Paths.get(testRootPath + "/simpleSchemaEvolution"));
+    copyFromJar(
+        "deltalake/complexSchemaEvolution",
+        java.nio.file.Paths.get(testRootPath + "/complexSchemaEvolution"));
   }
 
   @AfterClass
@@ -762,6 +769,136 @@ public class TestDeltaScan extends PlanTestBase {
         .go();
   }
 
+  /**
+   * Tests that the delta table without column mappings can be read without any issues even when
+   * there are schema changes.
+   *
+   * <pre>
+   * Table Schema Evolution:
+   * Version 0:
+   * ROW(
+   *   system_id: int,
+   *   system_info: struct<
+   *     cpu_type: string
+   *   >
+   * )
+   *
+   * Version 1:
+   * ROW(
+   *   system_id: int,
+   *   system_info: struct<
+   *     cpu_type: string,
+   *     environment: list<string>  // NEW FIELD
+   *   >
+   * )
+   * </pre>
+   */
+  @Test
+  public void testSimpleSchemaEvolution() throws Exception {
+    // Schema evolution: system_info.environment array was added in version 1
+    // Test accessing array elements with [0] and [1] indices
+    final String sql =
+        "SELECT data.system_id, "
+            + "data.system_info.cpu_type, "
+            + "data.system_info.environment[0] as env_0, "
+            + "data.system_info.environment[1] as env_1 "
+            + "FROM dfs.tmp.deltalake.simpleSchemaEvolution as data ORDER BY data.system_id";
+    testBuilder()
+        .sqlQuery(sql)
+        .ordered()
+        .baselineColumns("system_id", "cpu_type", "env_0", "env_1")
+        // Version 0 records: Only have system_info.cpu_type, no environment array (nulls)
+        .baselineValues(1, "Intel i7", null, null)
+        .baselineValues(2, "AMD Ryzen", null, null)
+        .baselineValues(3, "Apple M1", null, null)
+        // Version 1 records: Have both system_info.cpu_type and system_info.environment array
+        .baselineValues(4, "Intel i9", "production", "kubernetes")
+        .baselineValues(5, "AMD EPYC", "staging", "docker")
+        .baselineValues(6, "ARM Cortex", "edge", "embedded")
+        .baselineValues(7, "Intel Xeon", "datacenter", "virtualization")
+        .baselineValues(8, "Apple M2", "development", "macos")
+        .baselineValues(9, "AMD Threadripper", "workstation", "rendering")
+        .go();
+  }
+
+  /**
+   * Tests that the delta table without column mappings can be read without any issues even when
+   * there are more involved schema changes.
+   *
+   * <pre>
+   * Table Schema Evolution:
+   * Version 0:
+   * ROW(
+   *   transaction_id: string,
+   *   business_data: struct<
+   *     organization: struct<
+   *       departments: struct<
+   *         engineering: struct<
+   *           technologies: list<string>
+   *         >>>>
+   * )
+   *
+   * Version 1:
+   * ROW(
+   *   transaction_id: string,
+   *   business_data: struct<
+   *     organization: struct<
+   *       departments: struct<
+   *         engineering: struct<
+   *           technologies: list<string>,
+   *           team_members: list<struct<name: string>>  // NEW FIELD
+   *         >,
+   *         operations: struct<  // NEW FIELD
+   *           resource_allocation: struct<
+   *             cloud_services: list<string>
+   *           >>>>
+   * )
+   * </pre>
+   */
+  @Test
+  public void testComplexSchemaEvolution() throws Exception {
+    // Test accessing nested array elements with [0] and [1] indices across complex schema versions
+    final String sql =
+        "SELECT data.transaction_id, "
+            + "data.business_data.organization.departments.engineering.technologies[0] as tech_0, "
+            + "data.business_data.organization.departments.engineering.technologies[1] as tech_1, "
+            + "data.business_data.organization.departments.engineering.team_members[0].name as member_0_name, "
+            + "data.business_data.organization.departments.engineering.team_members[1].name as member_1_name, "
+            + "data.business_data.organization.departments.operations.resource_allocation.cloud_services[0] as cloud_0, "
+            + "data.business_data.organization.departments.operations.resource_allocation.cloud_services[1] as cloud_1 "
+            + "FROM dfs.tmp.deltalake.complexSchemaEvolution as data";
+    testBuilder()
+        .sqlQuery(sql)
+        .unOrdered()
+        .baselineColumns(
+            "transaction_id",
+            "tech_0",
+            "tech_1",
+            "member_0_name",
+            "member_1_name",
+            "cloud_0",
+            "cloud_1")
+        // Version 0 records: Basic structure with technologies array, but no team_members or
+        // cloud_services
+        .baselineValues("txn001", "Python", "Spark", null, null, null, null)
+        .baselineValues("txn002", "Java", "Kafka", null, null, null, null)
+        .baselineValues("txn006", "JavaScript", "React", null, null, null, null)
+        .baselineValues("txn007", "C#", ".NET Core", null, null, null, null)
+        // Version 1 records: Enhanced structure with team_members and cloud_services arrays
+        .baselineValues("txn003", "Scala", "Flink", "Frank Chen", "Grace Kim", "AWS EC2", "S3")
+        .baselineValues(
+            "txn004",
+            "Python",
+            "TensorFlow",
+            "Jack Thompson",
+            "Kate Wilson",
+            "GCP Compute",
+            "BigQuery")
+        .baselineValues(
+            "txn005", "Go", "Rust", "Olivia Martinez", "Paul Johnson", "Azure AKS", "Service Mesh")
+        .go();
+  }
+
   @Test
   public void testColumnMappingWithPartitions() throws Exception {
     final String sql = "SELECT * FROM dfs.tmp.deltalake.columnMappingPartitions";
@@ -806,5 +943,16 @@ public class TestDeltaScan extends PlanTestBase {
     assertThatThrownBy(() -> test("SELECT count(*) FROM dfs.tmp.deltalake.test_v3_checkpoint"))
         .isInstanceOf(UserRemoteException.class)
         .hasMessageContaining("Deltalake format version 3 is not supported. Please use version 2.");
+  }
+
+  @Test
+  public void testUnsupportedProtocolVersionWhenFullRowCountDisabled() throws Exception {
+    try (AutoCloseable ignored =
+        withSystemOption(ExecConstants.DELTA_LAKE_ENABLE_FULL_ROWCOUNT, false)) {
+      assertThatThrownBy(() -> test("SELECT count(*) FROM dfs.tmp.deltalake.test_v3"))
+          .isInstanceOf(UserRemoteException.class)
+          .hasMessageContaining(
+              "Deltalake format version 3 is not supported. Please use version 2.");
+    }
   }
 }

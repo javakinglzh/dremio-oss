@@ -22,6 +22,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
+import com.dremio.exec.store.hive.HiveSettings;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -93,9 +94,28 @@ public class HiveIncrementalRefreshDatasetPlanBuilder extends HiveFullRefreshDat
     final FileSystemPlugin<?> metaStoragePlugin = config.getContext().getCatalogService().getSource(METADATA_STORAGE_PLUGIN_NAME);
     List<String> paths = isPartialRefresh ? generatePathsForPartialRefresh() : Collections.emptyList();
 
-    return new DirListingInvocationPrel(cluster, cluster.getPlanner().emptyTraitSet().plus(Prel.PHYSICAL),
-      table, storagePluginId, refreshExecTableMetadata,
-      1.0d, ImmutableList.of(), metaStoragePlugin, metadataProvider.getTableUUId(), isPartialRefresh, metadataProvider, paths, x -> getRowCountEstimates("DirList"), ImmutableList.of());
+    boolean recursivePartialRefresh =
+        new HiveSettings(
+          config.getContext().getOptions(),
+          false)
+        .enableRecursivePartialMetadataRefresh();
+
+    return new DirListingInvocationPrel(
+        cluster,
+        cluster.getPlanner().emptyTraitSet().plus(Prel.PHYSICAL),
+        table,
+        storagePluginId,
+        refreshExecTableMetadata,
+        1.0d,
+        ImmutableList.of(),
+        metaStoragePlugin,
+        metadataProvider.getTableUUId(),
+        isPartialRefresh,
+        metadataProvider,
+        paths,
+        x -> getRowCountEstimates("DirList"),
+        ImmutableList.of(),
+        recursivePartialRefresh);
   }
 
   private void validateMetadata() {

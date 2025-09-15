@@ -98,4 +98,9 @@ public final class HiveSettings {
         ? options.getOption(HivePluginOptions.HIVE_PROPERTY_EXCLUSION_REGEX)
         : options.getOption(Hive3PluginOptions.HIVE_PROPERTY_EXCLUSION_REGEX);
   }
+
+  public boolean enableRecursivePartialMetadataRefresh() {
+    // this is a hive3 only feature
+    return options.getOption(Hive3PluginOptions.HIVE_RECURSIVE_PARTIAL_METADATA_REFRESH);
+  }
 }

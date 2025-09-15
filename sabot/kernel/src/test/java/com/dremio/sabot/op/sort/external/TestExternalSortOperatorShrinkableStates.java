@@ -99,6 +99,10 @@ public class TestExternalSortOperatorShrinkableStates extends BaseTestOperator {
         // state
         assertTrue(shrinkableMemory > 0L);
 
+        sortOperator.setStates(SingleInputOperator.State.CAN_PRODUCE, SortState.BLOCK_SPILL);
+        shrinkableMemory = sortOperator.shrinkableMemory();
+        assertTrue(shrinkableMemory == 0L);
+
         // Ask operator to shrink
         sortOperator.setStateToCanConsume();
         sortOperator.shrinkMemory(count);
@@ -222,14 +226,19 @@ public class TestExternalSortOperatorShrinkableStates extends BaseTestOperator {
           data.add(new RecordBatchData(output, getTestAllocator()));
         }
 
-        // shrink memory in the middle, this will trigger spill from copier to disk
+        // shrink memory in the middle, this will be blocked since the downstream still needs to
+        // consume data.
         sorter.shrinkMemory(memoryToShrink);
-        if (actualRecordCount < total) {
+        if (actualRecordCount == 0) {
+          // There are no records that can be used currently by the downstream operator
+          // So the spill can proceed in the interim.
+          assertEquals(sorter.getOperatorStateToPrint(), "CAN_PRODUCE COPIER_SPILL_IN_PROGRESS");
+        } else if (actualRecordCount < total) {
           // if all records are already output, then 0 record left in copier.
           // shrinkMemory at this moment will actually let sorter stay in current state, never enter
           // COPIER_SPILL_IN_PROGRESS state.
           // so below assert only check 'actualRecordCount < total' case.
-          assertEquals(sorter.getOperatorStateToPrint(), "CAN_PRODUCE COPIER_SPILL_IN_PROGRESS");
+          assertEquals(sorter.getOperatorStateToPrint(), "CAN_PRODUCE BLOCK_SPILL");
         }
 
         while (sorter.getState() == State.CAN_PRODUCE) {

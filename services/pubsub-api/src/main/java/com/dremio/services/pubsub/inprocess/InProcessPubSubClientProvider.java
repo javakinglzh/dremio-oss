@@ -29,7 +29,6 @@ public class InProcessPubSubClientProvider implements Closeable {
   private final Provider<RequestContext> requestContextProvider;
   private final Provider<OptionManager> optionManagerProvider;
   private final Provider<OpenTelemetry> openTelemetry;
-  private final Provider<InProcessPubSubEventListener> eventListenerProvider;
 
   private InProcessPubSubClient pubSubClient;
 
@@ -37,22 +36,17 @@ public class InProcessPubSubClientProvider implements Closeable {
   public InProcessPubSubClientProvider(
       Provider<RequestContext> requestContextProvider,
       Provider<OptionManager> optionManagerProvider,
-      Provider<OpenTelemetry> openTelemetry,
-      Provider<InProcessPubSubEventListener> eventListenerProvider) {
+      Provider<OpenTelemetry> openTelemetry) {
     this.requestContextProvider = requestContextProvider;
     this.optionManagerProvider = optionManagerProvider;
     this.openTelemetry = openTelemetry;
-    this.eventListenerProvider = eventListenerProvider;
   }
 
   public synchronized PubSubClient get() {
     if (pubSubClient == null) {
       pubSubClient =
           new InProcessPubSubClient(
-              requestContextProvider,
-              optionManagerProvider.get(),
-              openTelemetry.get(),
-              eventListenerProvider.get());
+              requestContextProvider, optionManagerProvider.get(), openTelemetry.get());
     }
     return pubSubClient;
   }

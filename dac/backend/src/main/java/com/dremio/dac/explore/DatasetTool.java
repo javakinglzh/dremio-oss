@@ -1264,11 +1264,8 @@ public class DatasetTool {
 
   /**
    * When we save a version that previously lacked a name, or we are changing the name of a dataset,
-   * we go back and update the data path for all untitled versions stored throughout the history.
-   *
-   * <p>In the case of a version that did have a name other than untitled, the most recent history
-   * item will be saved again with the requested name because finding a history item currently
-   * requires a version number and dataset path.
+   * we go back and update the data path for all previous versions stored throughout the history to
+   * use that new name.
    *
    * @param versionToSave the dataset path of the version at the tip of the history
    * @param newPath the new path to copy throughout the history
@@ -1286,28 +1283,31 @@ public class DatasetTool {
     boolean previousVersionRequiresRename;
     // Rename the last history item, and all previous history items that are unnamed or with
     // different path.
-    // The loop terminates when hitting the end of the history or a named history item, this
-    // means that the history for one dataset can contain history items that are stored
-    // with a name it had previously.
     do {
       previousVersion = currentDataset.getPreviousVersion();
       // change the path in this history item to the new one, will be persisted below
       // after possibly changing the link to the previous version if it will also be renamed
       currentDataset.setFullPathList(newPath.toPathList());
+      currentDataset.setName(newPath.getDataset().getName());
       if (previousVersion != null) {
         previousPath = new DatasetPath(previousVersion.getDatasetPath());
         previousDatasetVersion = new DatasetVersion(previousVersion.getDatasetVersion());
         previousVersionRequiresRename = !previousPath.equals(newPath);
-        VirtualDatasetUI previousDataset =
-            datasetService.getVersion(previousPath, previousDatasetVersion);
-        // If the previous VDS version is incomplete, ignore that version.  This could happen when
-        // the user click on a
-        // PDS, an incomplete VDS version is created to show the PDS in UI.  If the user modify the
-        // SQL and save the
-        // VDS, the previous VDS version is incomplete since it never run and doesn't have metadata.
+        VirtualDatasetUI previousDataset = null;
         try {
-          DatasetVersionMutator.validate(previousPath, previousDataset);
-        } catch (Exception e) {
+          previousDataset = datasetService.getVersion(previousPath, previousDatasetVersion);
+          if (!DatasetVersionMutator.isValid(previousPath, previousDataset)) {
+            // If the previous VDS version is incomplete, ignore that version. This could happen
+            // when the user clicks on a PDS as an incomplete VDS version is created to show the PDS
+            // in the UI. If the user modifies the SQL and saves the VDS, the previous VDS version
+            // is incomplete since it never ran and doesn't have metadata.
+            previousVersionRequiresRename = false;
+          }
+        } catch (DatasetNotFoundException | DatasetVersionNotFoundException e) {
+          // If for some reason the history chain is broken/corrupt, we will get a
+          // DatasetNotFoundException or DatasetVersionNotFoundException. Ensure the version history
+          // is truncated at that version to fix the chain in the rewritten history.
+          currentDataset.setPreviousVersion(null);
           previousVersionRequiresRename = false;
         }
 
@@ -1318,7 +1318,6 @@ public class DatasetTool {
                   .setDatasetPath(newPath.toPathString())
                   .setDatasetVersion(previousVersion.getDatasetVersion());
           currentDataset.setPreviousVersion(prev);
-          currentDataset.setName(newPath.getDataset().getName());
           datasetService.putVersion(currentDataset);
           currentDataset = previousDataset;
         } else {

@@ -34,6 +34,11 @@ export default function () {
         url: adminPaths.support.link(),
       },
       {
+        icon: "settings/preferences",
+        title: "Admin.Preferences.Title",
+        url: adminPaths.preferences.link(),
+      },
+      {
         icon: "settings/queue-control",
         title: "Admin.Engines.QueueControl",
         url: adminPaths.advanced.link(),

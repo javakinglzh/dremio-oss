@@ -51,6 +51,7 @@ import org.apache.iceberg.ManifestFile;
 import org.apache.iceberg.ManifestFiles;
 import org.apache.iceberg.ManifestReader;
 import org.apache.iceberg.PartitionSpec;
+import org.apache.iceberg.exceptions.NotFoundException;
 import org.apache.iceberg.io.CloseableIterator;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.FilterIterator;
@@ -115,25 +116,30 @@ public class ManifestFileProcessor implements AutoCloseable {
 
   public void setupManifestFile(
       ManifestFile manifestFile, int row, Optional<List<String>> dataset) {
-    FileSystem fs =
-        createFs(
-            manifestFile.path(),
-            context,
-            opProps,
-            icebergRootPointerPlugin,
-            dataset.orElse(datasetFromFunctionConfig));
-    Preconditions.checkState(fs != null, "Unexpected state");
+    try {
+      FileSystem fs =
+          createFs(
+              manifestFile.path(),
+              context,
+              opProps,
+              icebergRootPointerPlugin,
+              dataset.orElse(datasetFromFunctionConfig));
+      Preconditions.checkState(fs != null, "Unexpected state");
 
-    manifestReader = getManifestReader(manifestFile, fs, dataset.orElse(datasetFromFunctionConfig));
-    if (manifestScanFilters.doesIcebergAnyColExpressionExists()) {
-      manifestReader.filterRows(manifestScanFilters.getIcebergAnyColExpressionDeserialized());
+      manifestReader =
+          getManifestReader(manifestFile, fs, dataset.orElse(datasetFromFunctionConfig));
+      if (manifestScanFilters.doesIcebergAnyColExpressionExists()) {
+        manifestReader.filterRows(manifestScanFilters.getIcebergAnyColExpressionDeserialized());
+      }
+
+      iterator = DremioManifestReaderUtils.liveManifestEntriesIterator(manifestReader).iterator();
+      applyManifestScanFilters(manifestFile);
+
+      manifestEntryProcessor.initialise(
+          manifestReader.spec(), row, conf, fs.getScheme(), schemeVariate);
+    } catch (IOException | NotFoundException e) {
+      throw UserException.ioExceptionError(e).buildSilently();
     }
-
-    iterator = DremioManifestReaderUtils.liveManifestEntriesIterator(manifestReader).iterator();
-    applyManifestScanFilters(manifestFile);
-
-    manifestEntryProcessor.initialise(
-        manifestReader.spec(), row, conf, fs.getScheme(), schemeVariate);
   }
 
   private void applyManifestScanFilters(ManifestFile manifestFile) {
@@ -268,18 +274,16 @@ public class ManifestFileProcessor implements AutoCloseable {
       OperatorContext context,
       OpProps props,
       SupportsIcebergRootPointer icebergRootPointerPlugin,
-      List<String> dataset) {
-    try {
-      return icebergRootPointerPlugin.createFS(
-          SupportsFsCreation.builder()
-              .withAsyncOptions(true)
-              .filePath(path)
-              .userName(props.getUserName())
-              .operatorContext(context)
-              .dataset(dataset));
-    } catch (IOException e) {
-      throw UserException.ioExceptionError(e).buildSilently();
-    }
+      List<String> dataset)
+      throws IOException {
+    return icebergRootPointerPlugin.createFS(
+        SupportsFsCreation.builder()
+            .withAsyncOptions(true)
+            .filePath(path)
+            .userName(props.getUserName())
+            .userId(props.getUserId())
+            .operatorContext(context)
+            .dataset(dataset));
   }
 
   private static List<String> getDataset(TableFunctionConfig functionConfig) {

@@ -28,6 +28,7 @@ import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.exceptions.UserRemoteException;
 import com.dremio.common.utils.PathUtils;
+import com.dremio.exec.ops.IcebergMetrics;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.planner.sql.handlers.SqlHandlerUtil;
 import com.dremio.exec.record.BatchSchema;
@@ -200,6 +201,10 @@ public class IcebergManifestListRecordReader implements RecordReader {
     FileIO io = createIO(metadataLocation);
     TableMetadata tableMetadata =
         pluginForIceberg.loadTableMetadata(io, context, dataset, metadataLocation);
+
+    IcebergMetrics.countFormatVersion(
+        tableMetadata.formatVersion(), IcebergMetrics.OperationType.READ);
+
     initializeFileSystemScheme(io);
     partitionSpecMap = tableMetadata.specsById();
     final long snapshotId = icebergExtendedProp.getSnapshotId();

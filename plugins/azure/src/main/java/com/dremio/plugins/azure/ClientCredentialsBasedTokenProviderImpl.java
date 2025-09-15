@@ -16,6 +16,7 @@
 package com.dremio.plugins.azure;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.exec.catalog.conf.AzureStorageConfProperties;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import java.net.URL;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.azurebfs.AbfsConfiguration;
 import org.apache.hadoop.fs.azurebfs.extensions.CustomTokenProviderAdaptee;
 import org.apache.hadoop.fs.azurebfs.oauth2.AzureADAuthenticator;
 import org.apache.hadoop.fs.azurebfs.oauth2.AzureADToken;
@@ -52,10 +54,18 @@ public final class ClientCredentialsBasedTokenProviderImpl
   @Override
   public void initialize(Configuration configuration, String accountName) throws IOException {
     this.configuration = configuration;
-
-    validateOAuthURL(configuration.get(AzureStorageFileSystem.TOKEN_ENDPOINT));
-    Preconditions.checkNotNull(configuration.get(AzureStorageFileSystem.CLIENT_ID));
-    Preconditions.checkNotNull(configuration.getPassword(AzureStorageFileSystem.CLIENT_SECRET));
+    validateOAuthURL(configuration.get(AzureStorageConfProperties.TOKEN_ENDPOINT));
+    Preconditions.checkNotNull(configuration.get(AzureStorageConfProperties.CLIENT_ID));
+    Preconditions.checkNotNull(configuration.getPassword(AzureStorageConfProperties.CLIENT_SECRET));
+    try {
+      // It is necessary to initialize the AzureADAuthenticator to ensure that tokenFetchRetryPolicy
+      // is defined
+      // so that when AzureADAuthenticator.getTokenCall does not throw an NullPointerException
+      AbfsConfiguration abfsConfiguration = new AbfsConfiguration(configuration, accountName);
+      AzureADAuthenticator.init(abfsConfiguration);
+    } catch (IllegalAccessException e) {
+      throw new IOException(e);
+    }
   }
 
   private void renewToken() throws IOException {

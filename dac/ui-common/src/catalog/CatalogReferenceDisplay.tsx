@@ -65,6 +65,7 @@ export const CatalogReferenceDisplay: FC<{
         >
           {props.searchWords ? (
             <Highlighter
+              autoEscape
               searchWords={props.searchWords}
               textToHighlight={props.catalogReference.name}
             />
@@ -79,6 +80,7 @@ export const CatalogReferenceDisplay: FC<{
           >
             {modifiedSearchWords ? (
               <Highlighter
+                autoEscape
                 searchWords={modifiedSearchWords}
                 textToHighlight={props.catalogReference.pathString(".")}
               />

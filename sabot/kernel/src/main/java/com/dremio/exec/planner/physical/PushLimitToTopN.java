@@ -17,6 +17,7 @@
 package com.dremio.exec.planner.physical;
 
 import com.dremio.exec.planner.logical.RelOptHelper;
+import java.math.BigInteger;
 import org.apache.calcite.plan.RelOptRule;
 import org.apache.calcite.plan.RelOptRuleCall;
 import org.apache.calcite.rex.RexLiteral;
@@ -46,6 +47,15 @@ public class PushLimitToTopN extends Prule {
     int offset =
         limit.getOffset() != null ? Math.max(0, RexLiteral.intValue(limit.getOffset())) : 0;
     int fetch = Math.max(0, RexLiteral.intValue(limit.getFetch()));
+
+    long threshold = PrelUtil.getSettings(limit.getCluster()).getLimitToTopNThreshold();
+    // Casting to BigInteger in order to avoid integer overflows.
+    if (BigInteger.valueOf(offset)
+            .add(BigInteger.valueOf(fetch))
+            .compareTo(BigInteger.valueOf(threshold))
+        > 0) {
+      return;
+    }
 
     final TopNPrel topN =
         new TopNPrel(

@@ -172,8 +172,9 @@ public abstract class ReconnectingConnection<
     public void operationComplete(ChannelFuture future) throws Exception {
       final boolean wasSet = connectionHolder.compareAndSet(connection, null);
       parent.operationComplete(future);
-      if (wasSet) {
-        scheduleNotifyHandler(connection, 0);
+      scheduleNotifyHandler(connection, 0);
+      if (!wasSet) {
+        logger.info("Old connection is already replaced with new connection");
       }
     }
   }

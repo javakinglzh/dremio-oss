@@ -24,7 +24,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.spy;
 
-import com.dremio.common.exceptions.ExecutionSetupException;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.dac.homefiles.HomeFileConf;
 import com.dremio.dac.model.sources.SourcePath;
@@ -48,6 +47,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 /** Tests {@link SourceResource} API */
+@SuppressWarnings("resource")
 public class TestSourceResource extends BaseTestServer {
 
   @Rule public final TemporaryFolder folder = new TemporaryFolder();
@@ -306,7 +306,7 @@ public class TestSourceResource extends BaseTestServer {
                     + "testCanNotCreateSourcesWithInternalConnectionConfTypes/")
             .toString();
     Set<ConnectionConf<?, ?>> internalConnectionConfs =
-        new HashSet<ConnectionConf<?, ?>>() {
+        new HashSet<>() {
           {
             add(new PDFSConf(location));
             add(new HomeFileConf(location, "localhost"));
@@ -375,13 +375,7 @@ public class TestSourceResource extends BaseTestServer {
     }
   }
 
-  private void updateSource(SourceUI source) throws ExecutionSetupException, NamespaceException {
-    getSourceService()
-        .updateSource(source.getId(), source.asSourceConfig(), source.getNamespaceAttributes());
-  }
-
-  private void updateSourceWithoutValidation(SourceUI source)
-      throws ExecutionSetupException, NamespaceException {
+  private void updateSourceWithoutValidation(SourceUI source) throws NamespaceException {
     SourceService sourceService = spy(getSourceService());
     doNothing().when(sourceService).validateConnectionConf(any());
     sourceService.updateSource(

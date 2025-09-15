@@ -45,6 +45,8 @@ public class ExpansionLeafNode extends AbstractRelNode implements CopyToCluster 
   private final ViewTable viewTable;
   private final List<RexNode> pushedDownFilters;
 
+  public static final int EXPANSION_MAX_DEPTH = 2;
+
   public ExpansionLeafNode(
       NamespaceKey path,
       RelOptCluster cluster,
@@ -132,6 +134,15 @@ public class ExpansionLeafNode extends AbstractRelNode implements CopyToCluster 
             new RelShuttleImpl() {
               @Override
               public RelNode visit(RelNode other) {
+                if (other instanceof ExpansionLeafNode) {
+                  terminationCount.value = 1L;
+                  ExpansionLeafNode leaf = (ExpansionLeafNode) other;
+                  firstPath.value =
+                      SubstitutionUtils.VersionedPath.of(
+                          leaf.getPath().getPathComponents(), leaf.getVersionContext());
+                  return other;
+                }
+
                 if (other instanceof ExpansionNode) {
                   if (skip.value > 0) {
                     skip.value--;
@@ -148,10 +159,10 @@ public class ExpansionLeafNode extends AbstractRelNode implements CopyToCluster 
                       node.getCluster(),
                       node.getTraitSet(),
                       e.getRowType(),
-                      e.getInput(),
+                      null,
                       e.isDefault(),
                       e.getVersionContext(),
-                      e.getViewTable(),
+                      null,
                       e.getPushedDownFilters());
                 }
                 return super.visit(other);

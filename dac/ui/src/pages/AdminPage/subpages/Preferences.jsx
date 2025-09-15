@@ -160,18 +160,23 @@ const Preferences = (props) => {
   };
 
   return (
-    <div className="admin-preferences-settings-main">
+    <div className="admin-preferences-settings-main h-full flex flex-col">
       <SettingHeader icon="settings/preferences">
         <FormattedMessage id="Admin.Preferences.Title" />
       </SettingHeader>
-      <div className="gutter-left--double">
+      <div
+        className="flex flex-col flex-1 pl-2"
+        style={{
+          minHeight: 0,
+        }}
+      >
         <div className="preferences-settings-page-description">
           <FormattedMessage id="Admin.Preferences.PageDescription" />
         </div>
         <ViewStateWrapper
           viewState={viewStateWithoutError}
           hideChildrenWhenFailed={false}
-          style={{ overflow: "auto", height: "100%", flex: "1 1 auto" }}
+          className="flex-1 overflow-auto pb-2"
         >
           <div className="preferences-settings-button-section">
             <div className="preferences-settings-button-name">

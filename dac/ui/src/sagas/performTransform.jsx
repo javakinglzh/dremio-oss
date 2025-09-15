@@ -204,7 +204,11 @@ export function* performTransform(payload) {
 
       const activeScript = yield select(selectActiveScript) || {};
 
-      if (activeScript.id) {
+      if (
+        activeScript.id &&
+        (!activeScript.permissions ||
+          activeScript.permissions.includes("MODIFY"))
+      ) {
         yield replaceScript(activeScript.id, {
           ...activeScript,
           jobIds: [], // reset the script jobs when submitting new jobs

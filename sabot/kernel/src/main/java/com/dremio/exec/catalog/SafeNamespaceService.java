@@ -283,7 +283,7 @@ class SafeNamespaceService implements NamespaceService {
   @Override
   @WithSpan
   public DatasetMetadata getDatasetMetadata(NamespaceKey arg0) throws NamespaceException {
-    return runner.doSafe(() -> DatasetMetadata.from(delegate.getDataset(arg0)));
+    return runner.doSafe(() -> delegate.getDatasetMetadata(arg0));
   }
 
   @Override
@@ -353,7 +353,7 @@ class SafeNamespaceService implements NamespaceService {
   @Override
   @WithSpan
   public SourceMetadata getSourceMetadata(NamespaceKey arg0) throws NamespaceException {
-    return runner.doSafe(() -> SourceMetadata.from(delegate.getSource(arg0)));
+    return runner.doSafe(() -> delegate.getSourceMetadata(arg0));
   }
 
   @Override

@@ -95,7 +95,9 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
   private final String schemeVariate;
   private final String fsScheme;
   private final String queryId;
-  private final List<String> excludedContentIDs;
+  private final boolean excludeMode;
+  private final List<String> listedContentIDs;
+  private final boolean dryRun;
 
   public NessieIcebergExpirySnapshotsReader(
       OperatorContext context,
@@ -104,7 +106,9 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
       SnapshotsScanOptions snapshotsScanOptions,
       String schemeVariate,
       String fsScheme,
-      List<String> excludedContentIDs) {
+      boolean excludeMode,
+      List<String> listedContentIDs,
+      boolean dryRun) {
     super(context, icebergMutablePlugin, props, snapshotsScanOptions);
     DataplanePlugin plugin = (DataplanePlugin) icebergMutablePlugin;
     this.nessieApi = plugin.getNessieApi();
@@ -122,8 +126,9 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     this.schemeVariate = schemeVariate;
     this.fsScheme = fsScheme;
     this.queryId = QueryIdHelper.getQueryId(context.getFragmentHandle().getQueryId());
-
-    this.excludedContentIDs = excludedContentIDs;
+    this.excludeMode = excludeMode;
+    this.listedContentIDs = listedContentIDs;
+    this.dryRun = dryRun;
   }
 
   @Override
@@ -174,7 +179,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
             context.getExecutor());
   }
 
-  private Optional<IcebergExpiryAction> prepareExpiryAction(IcebergTableInfo tableHolder) {
+  private Optional<IcebergExpiryAction> prepareExpiryAction(NessieIcebergTableInfo tableHolder) {
     String tableId =
         String.format(
             "%s AT %s",
@@ -200,9 +205,9 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
         return Optional.empty();
       }
       VacuumOptions options =
-          new VacuumOptions(
+          VacuumOptions.createInstance(
               true,
-              false,
+              !dryRun,
               snapshotsScanOptions.getOlderThanInMillis(),
               snapshotsScanOptions.getRetainLast(),
               null,
@@ -220,7 +225,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
                   namespace,
                   tableVersionContext,
                   io,
-                  true,
+                  !dryRun,
                   schemeVariate,
                   fsScheme));
       status = true;
@@ -340,7 +345,7 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     }
   }
 
-  private Stream<IcebergTableInfo> listTables(Reference branch) {
+  private Stream<NessieIcebergTableInfo> listTables(Reference branch) {
     NessieIcebergClient nessieIcebergClient =
         new NessieIcebergClient(
             nessieApi, branch.getName(), branch.getHash(), Collections.emptyMap());
@@ -349,8 +354,10 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
           .filter(
               e -> {
                 final String contentId = e.getContentId();
-                boolean isTable = Content.Type.ICEBERG_TABLE == e.getType();
-                boolean isTableExcluded = excludedContentIDs.contains(contentId);
+                boolean isTable = (Content.Type.ICEBERG_TABLE == e.getType());
+                boolean isTableExcluded =
+                    (excludeMode && listedContentIDs.contains(contentId))
+                        || (!excludeMode && !listedContentIDs.contains(contentId));
                 if (isTableExcluded) {
                   vacuumLogger.warn(
                       createTableSkipLog(
@@ -358,14 +365,18 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
                           contentId,
                           ErrorType.VACUUM_EXCEPTION,
                           String.format(
-                              "Skipping commit scan on contentID %s because it was excluded through SQL.",
-                              contentId)),
+                              "Skipping commit scan on table %s with contentID %s because it was excluded through SQL.",
+                              e.getName().toString(), contentId)),
                       "");
                 }
                 return isTable && !isTableExcluded;
               })
-          .map(this::toIdentifier)
-          .map(id -> new IcebergTableInfo(branch, id, nessieIcebergClient.table(id)));
+          .map(
+              entry -> {
+                TableIdentifier id = toIdentifier(entry);
+                return new NessieIcebergTableInfo(
+                    branch, id, nessieIcebergClient.table(id), entry.getContentId());
+              });
     } catch (NessieNotFoundException e) {
       throw UserException.dataReadError(e)
           .message(
@@ -380,17 +391,20 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
     return TableIdentifier.of(elements.toArray(new String[elements.size()]));
   }
 
-  private static final class IcebergTableInfo {
+  private static final class NessieIcebergTableInfo {
 
     private final ResolvedVersionContext versionContext;
     private final IcebergTable table;
     private final TableIdentifier tableId;
+    private final String contentId;
 
-    private IcebergTableInfo(Reference reference, TableIdentifier tableId, IcebergTable table) {
+    public NessieIcebergTableInfo(
+        Reference reference, TableIdentifier tableId, IcebergTable table, String contentId) {
       this.versionContext =
           ResolvedVersionContext.ofBranch(reference.getName(), reference.getHash());
       this.tableId = tableId;
       this.table = table;
+      this.contentId = contentId;
     }
 
     public ResolvedVersionContext getVersionContext() {
@@ -403,6 +417,10 @@ public class NessieIcebergExpirySnapshotsReader extends IcebergExpirySnapshotsRe
 
     public TableIdentifier getTableId() {
       return tableId;
+    }
+
+    public String getContentId() {
+      return contentId;
     }
   }
 }

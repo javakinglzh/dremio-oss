@@ -43,6 +43,11 @@ public class IcebergDmlMergeDuplicateCheckTableFunction extends AbstractTableFun
 
   private final List<TransferPair> transfers = new ArrayList<>();
 
+  // the index of the TF's input row.
+  // ...Not to be confused with the system column 'ROW_INDEX_COLUMN_NAME'
+  private int currentInputRow;
+  private int lastProcessedRow;
+
   private VarCharVector filePathVector;
   private BigIntVector rowIndexVector;
 
@@ -72,75 +77,90 @@ public class IcebergDmlMergeDuplicateCheckTableFunction extends AbstractTableFun
     // Since we will transfer all data immediately, we'll get data from the outgoing vectors.
     filePathVector =
         (VarCharVector)
-            VectorUtil.getVectorFromSchemaPath(outgoing, ColumnUtils.FILE_PATH_COLUMN_NAME);
+            VectorUtil.getVectorFromSchemaPath(incoming, ColumnUtils.FILE_PATH_COLUMN_NAME);
     rowIndexVector =
         (BigIntVector)
-            VectorUtil.getVectorFromSchemaPath(outgoing, ColumnUtils.ROW_INDEX_COLUMN_NAME);
+            VectorUtil.getVectorFromSchemaPath(incoming, ColumnUtils.ROW_INDEX_COLUMN_NAME);
 
     return outgoing;
   }
 
   @Override
   public void startBatch(int records) {
-    // We immediately transfer all the input vectors to the output vectors because this table
-    // function is basically
-    // a pass-through table function where we do a check amongst the consecutive rows.
-    transfers.forEach(TransferPair::transfer);
-    outgoing.setAllCount(records);
+    // Allocate space for output vectors - we'll transfer row by row in processRow
+    outgoing.allocateNew();
   }
 
   @Override
   public void startRow(int row) throws Exception {
-    doneWithRow = false;
+    currentInputRow = row;
+    // current row index is 0 means there is new incoming batch,
+    // reset lastProcessedRow
+    if (currentInputRow == 0) {
+      lastProcessedRow = -1;
+    }
   }
 
   @Override
   public int processRow(int startOutIndex, int maxRecords) throws Exception {
-    if (doneWithRow) {
+    if ((lastProcessedRow != -1 && currentInputRow <= lastProcessedRow)) {
       return 0;
     } else {
-      // We only need to check the previous file path and the row index because everything is
-      // sequential!
-      Long currentRowIndex = rowIndexVector.getObject(startOutIndex);
-      NullableVarCharHolder currentFilePathVectorHolder =
-          (NullableVarCharHolder) BasicTypeHelper.getValue(filePathVector, startOutIndex);
-      int currentFilePathBufLength =
-          currentFilePathVectorHolder.end - currentFilePathVectorHolder.start;
 
-      if (previousRowIndex != null
-          && previousRowIndex.equals(currentRowIndex)
-          && previousFilePathBufLength > 0
-          && currentFilePathVectorHolder.isSet == 1
-          && previousFilePathBufLength == currentFilePathBufLength
-          && ByteFunctionHelpers.compare(
-                  currentFilePathVectorHolder.buffer,
-                  currentFilePathVectorHolder.start,
-                  currentFilePathVectorHolder.end,
-                  previousFilePathBuf,
-                  0,
-                  previousFilePathBufLength)
-              == 0) {
-        throw UserException.validationError()
-            .message("A target row matched more than once. Please update your query.")
-            .buildSilently();
+      // the incoming batch size could be larger than the outgoing batch size, a single incoming
+      // batch
+      // may be consumed by multiple outgoing batches.
+      // use "incoming.getRecordCount() - currentRow" to calculate remaining rows
+      int recordCount = Math.min(maxRecords, incoming.getRecordCount() - currentInputRow);
+
+      for (int row = 0; row < recordCount; row++) {
+        // We only need to check the previous file path and the row index because everything is
+        // sequential!
+        Long currentRowIndex = rowIndexVector.getObject(currentInputRow + row);
+        NullableVarCharHolder currentFilePathVectorHolder =
+            (NullableVarCharHolder) BasicTypeHelper.getValue(filePathVector, currentInputRow + row);
+        int currentFilePathBufLength =
+            currentFilePathVectorHolder.end - currentFilePathVectorHolder.start;
+
+        if (previousRowIndex != null
+            && previousRowIndex.equals(currentRowIndex)
+            && previousFilePathBufLength > 0
+            && currentFilePathVectorHolder.isSet == 1
+            && previousFilePathBufLength == currentFilePathBufLength
+            && ByteFunctionHelpers.compare(
+                    currentFilePathVectorHolder.buffer,
+                    currentFilePathVectorHolder.start,
+                    currentFilePathVectorHolder.end,
+                    previousFilePathBuf,
+                    0,
+                    previousFilePathBufLength)
+                == 0) {
+          throw UserException.validationError()
+              .message("A target row matched more than once. Please update your query.")
+              .buildSilently();
+        }
+
+        if (currentFilePathVectorHolder.isSet == 1) {
+          previousFilePathBufLength = currentFilePathBufLength;
+          previousFilePathBuf = previousFilePathBuf.reallocIfNeeded(currentFilePathBufLength);
+          previousFilePathBuf.setBytes(
+              0,
+              currentFilePathVectorHolder.buffer,
+              currentFilePathVectorHolder.start,
+              previousFilePathBufLength);
+        } else {
+          previousFilePathBufLength = 0;
+        }
+
+        previousRowIndex = currentRowIndex;
       }
 
-      if (currentFilePathVectorHolder.isSet == 1) {
-        previousFilePathBufLength = currentFilePathBufLength;
-        previousFilePathBuf = previousFilePathBuf.reallocIfNeeded(currentFilePathBufLength);
-        previousFilePathBuf.setBytes(
-            0,
-            currentFilePathVectorHolder.buffer,
-            currentFilePathVectorHolder.start,
-            previousFilePathBufLength);
-      } else {
-        previousFilePathBufLength = 0;
-      }
+      // transfer subset of rows in case incoming batch is larger than outgoing batch
+      transfers.forEach(transfer -> transfer.splitAndTransfer(currentInputRow, recordCount));
+      outgoing.setAllCount(startOutIndex + recordCount);
+      lastProcessedRow = currentInputRow + recordCount - 1;
 
-      previousRowIndex = currentRowIndex;
-
-      doneWithRow = true;
-      return 1;
+      return recordCount;
     }
   }
 

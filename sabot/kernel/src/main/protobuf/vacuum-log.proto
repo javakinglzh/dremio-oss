@@ -37,6 +37,7 @@ message ActionTarget {
     TableSkipInfo tableSkipInfo = 13;
     NessieCommitScanInfo commitScanInfo = 14;
     SnapshotInfo snapshotInfo = 15;
+    VacuumCatalogInfo vacuumCatalogInfo = 17;
   }
 }
 
@@ -56,6 +57,7 @@ message TableSkipInfo {
   string table = 41;
   int64 olderThanMillis = 42;
   int32 retainLast = 43;
+  string dirListingLocation = 44;
 }
 
 message NessieCommitScanInfo {
@@ -70,6 +72,10 @@ message SnapshotInfo {
   int64 olderThanMillis = 63;
   int32 retainLast = 64;
   repeated string snapshotId = 65;
+}
+
+message VacuumCatalogInfo {
+  string info = 81;
 }
 
 enum ErrorType {

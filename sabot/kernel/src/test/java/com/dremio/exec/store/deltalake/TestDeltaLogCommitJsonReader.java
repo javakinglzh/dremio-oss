@@ -17,10 +17,12 @@ package com.dremio.exec.store.deltalake;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import com.dremio.BaseTestQuery;
 import com.dremio.common.util.FileUtils;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.hadoop.HadoopFileSystem;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.io.file.FileSystem;
@@ -265,5 +267,37 @@ public class TestDeltaLogCommitJsonReader extends BaseTestQuery {
     assertEquals(0L, snapshot.getNetFilesAdded());
     assertEquals(4L, snapshot.getNetOutputRows());
     assertEquals(1699368782067L, snapshot.getTimestamp());
+  }
+
+  @Test
+  public void testMinReaderVersionNotSupported() throws Exception {
+    try (AutoCloseable ignored =
+        withSystemOption(ExecConstants.DELTA_LAKE_ENABLE_FULL_ROWCOUNT, false)) {
+      assertThrows(
+          IOException.class,
+          () -> parseCommitJson("/deltalake/invalidMinReaderProtocolMiddle.json"));
+    }
+    try (AutoCloseable ignored =
+        withSystemOption(ExecConstants.DELTA_LAKE_ENABLE_FULL_ROWCOUNT, true)) {
+      assertThrows(
+          IOException.class,
+          () -> parseCommitJson("/deltalake/invalidMinReaderProtocolMiddle.json"));
+    }
+  }
+
+  @Test
+  public void testMinReaderVersionNotSupportedWhenProtocolAtLast() throws Exception {
+    try (AutoCloseable ignored =
+        withSystemOption(ExecConstants.DELTA_LAKE_ENABLE_FULL_ROWCOUNT, false)) {
+      assertThrows(
+          IOException.class,
+          () -> parseCommitJson("/deltalake/invalidMinReaderProtocolAtLast.json"));
+    }
+    try (AutoCloseable ignored =
+        withSystemOption(ExecConstants.DELTA_LAKE_ENABLE_FULL_ROWCOUNT, true)) {
+      assertThrows(
+          IOException.class,
+          () -> parseCommitJson("/deltalake/invalidMinReaderProtocolAtLast.json"));
+    }
   }
 }

@@ -21,6 +21,7 @@ import static com.dremio.exec.util.VectorUtil.getVectorFromSchemaPath;
 import com.dremio.common.concurrent.NamedThreadFactory;
 import com.dremio.common.map.CaseInsensitiveImmutableBiMap;
 import com.dremio.datastore.LegacyProtobufSerializer;
+import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.base.WriterOptions;
 import com.dremio.exec.planner.sql.parser.DmlUtils;
 import com.dremio.exec.record.BatchSchema;
@@ -169,7 +170,9 @@ public class ManifestWritesHelper {
     this.schema = tableProps.getFullSchema().serialize();
     this.listOfFilesCreated = Lists.newArrayList();
     try {
-      // TODO(DX-96947): specify dataset for createFS
+      OpProps props = writer.getProps();
+      String userName = props != null ? props.getUserName() : null;
+      String userId = props != null ? props.getUserId() : null;
       fs =
           writer
               .getPlugin()
@@ -177,7 +180,8 @@ public class ManifestWritesHelper {
                   SupportsFsCreation.builder()
                       .filePath(tableProps.getTableLocation())
                       .datasetFromIcebergTableProps(tableProps)
-                      .withSystemUserName());
+                      .userName(userName)
+                      .userId(userId));
     } catch (IOException e) {
       throw new RuntimeException("Unable to create File System", e);
     }

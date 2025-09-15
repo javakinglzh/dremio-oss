@@ -27,6 +27,7 @@ import com.dremio.exec.store.dfs.IcebergTableProps;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
 import com.dremio.io.file.FileSystem;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.writer.WriterCommitterOperator;
@@ -146,6 +147,7 @@ public abstract class IcebergBaseModel implements IcebergModel {
 
   @Override
   public IcebergOpCommitter getFullMetadataRefreshCommitter(
+      OptionManager optionManager,
       String tableName,
       List<String> datasetPath,
       String tableLocation,
@@ -160,6 +162,7 @@ public abstract class IcebergBaseModel implements IcebergModel {
     IcebergCommand icebergCommand =
         getIcebergCommandWithMetricStat(tableIdentifier, IcebergCommitOrigin.FULL_METADATA_REFRESH);
     return new FullMetadataRefreshCommitter(
+        optionManager,
         tableName,
         datasetPath,
         tableLocation,

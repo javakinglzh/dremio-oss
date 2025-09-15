@@ -153,7 +153,7 @@ public class IcebergExpiryAction {
                   .filter(s -> idsToRetain.contains(s.snapshotId()))
                   .map(s -> buildSnapshotEntry(tableMetadata.metadataFileLocation(), s))
                   .collect(Collectors.toList());
-          this.metadataPathsToRetain = Collections.emptyList();
+          this.metadataPathsToRetain = computeMetadataPathsToRetain(idsToRetain);
         }
       } else {
         // Perform expiry on table and calculate live and expired snapshots
@@ -326,7 +326,7 @@ public class IcebergExpiryAction {
     return IcebergUtils.getIcebergPathAndValidateScheme(path, conf, fsScheme, schemeVariate);
   }
 
-  private SnapshotEntry buildSnapshotEntry(String metadataFileLocation, Snapshot s) {
+  protected SnapshotEntry buildSnapshotEntry(String metadataFileLocation, Snapshot s) {
     return new SnapshotEntry(
         getIcebergPath(metadataFileLocation),
         s.snapshotId(),

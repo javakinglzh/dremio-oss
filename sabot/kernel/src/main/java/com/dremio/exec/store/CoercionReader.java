@@ -166,7 +166,7 @@ public class CoercionReader extends AbstractRecordReader {
 
     try {
       splitter =
-          ProjectOperator.createSplitterWithExpressions(
+          ProjectOperator.createSplitterWithExpressionsStatic(
               incoming,
               exprs,
               transfers,

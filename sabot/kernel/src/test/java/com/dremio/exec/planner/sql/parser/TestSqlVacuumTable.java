@@ -16,18 +16,14 @@
 package com.dremio.exec.planner.sql.parser;
 
 import static com.dremio.exec.calcite.SqlNodes.DREMIO_DIALECT;
-import static com.dremio.exec.planner.sql.parser.SqlVacuum.MIN_FILE_AGE_MS_DEFAULT;
 import static com.dremio.exec.planner.sql.parser.TestParserUtil.parse;
-import static org.apache.iceberg.TableProperties.MAX_SNAPSHOT_AGE_MS_DEFAULT;
-import static org.apache.iceberg.TableProperties.MIN_SNAPSHOTS_TO_KEEP_DEFAULT;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.dremio.exec.catalog.VacuumOptions;
 import com.google.common.collect.ImmutableList;
+import java.util.Optional;
 import org.apache.calcite.sql.SqlNode;
 import org.apache.calcite.sql.parser.SqlParseException;
 import org.apache.calcite.sql.pretty.SqlPrettyWriter;
-import org.assertj.core.data.Percentage;
 import org.junit.Test;
 
 /** Validates VACUUM TABLE sql syntax */
@@ -40,15 +36,12 @@ public class TestSqlVacuumTable {
     assertThat(parsed).isInstanceOf(SqlVacuumTable.class);
 
     SqlVacuumTable sqlVacuumTable = (SqlVacuumTable) parsed;
-    VacuumOptions vacuumOptions = sqlVacuumTable.getVacuumOptions();
 
-    long expectedSnapshotCutoff = System.currentTimeMillis() - MAX_SNAPSHOT_AGE_MS_DEFAULT;
-    assertThat(vacuumOptions.getOlderThanInMillis())
-        .isCloseTo(expectedSnapshotCutoff, Percentage.withPercentage(0.1));
-    assertThat(vacuumOptions.getRetainLast()).isEqualTo(MIN_SNAPSHOTS_TO_KEEP_DEFAULT);
+    assertThat(sqlVacuumTable.getOlderThanInMillis()).isEmpty();
+    assertThat(sqlVacuumTable.getRetainLast()).isEmpty();
 
-    assertThat(vacuumOptions.isExpireSnapshots()).isTrue();
-    assertThat(vacuumOptions.isRemoveOrphans()).isFalse();
+    assertThat(sqlVacuumTable.isExpireSnapshots()).isTrue();
+    assertThat(sqlVacuumTable.isRemoveOrphans()).isFalse();
   }
 
   @Test
@@ -59,14 +52,13 @@ public class TestSqlVacuumTable {
     assertThat(parsed).isInstanceOf(SqlVacuumTable.class);
 
     SqlVacuumTable sqlVacuumTable = (SqlVacuumTable) parsed;
-    VacuumOptions vacuumOptions = sqlVacuumTable.getVacuumOptions();
 
     assertThat(sqlVacuumTable.getTable().names).isEqualTo(ImmutableList.of("a", "b", "c"));
-    assertThat(vacuumOptions.getOlderThanInMillis()).isEqualTo(1672531200000L);
-    assertThat(vacuumOptions.getRetainLast()).isEqualTo(5);
+    assertThat(sqlVacuumTable.getOlderThanInMillis()).isEqualTo(Optional.of(1672531200000L));
+    assertThat(sqlVacuumTable.getRetainLast()).isEqualTo(Optional.of(5));
 
-    assertThat(vacuumOptions.isExpireSnapshots()).isTrue();
-    assertThat(vacuumOptions.isRemoveOrphans()).isFalse();
+    assertThat(sqlVacuumTable.isExpireSnapshots()).isTrue();
+    assertThat(sqlVacuumTable.isRemoveOrphans()).isFalse();
   }
 
   @Test
@@ -87,13 +79,10 @@ public class TestSqlVacuumTable {
     assertThat(parsed).isInstanceOf(SqlVacuumTable.class);
 
     SqlVacuumTable sqlVacuumTable = (SqlVacuumTable) parsed;
-    VacuumOptions vacuumOptions = sqlVacuumTable.getVacuumOptions();
 
-    long expectedSnapshotCutoff = System.currentTimeMillis() - MIN_FILE_AGE_MS_DEFAULT;
-    assertThat(vacuumOptions.getOlderThanInMillis())
-        .isCloseTo(expectedSnapshotCutoff, Percentage.withPercentage(0.1));
+    assertThat(sqlVacuumTable.getOlderThanInMillis()).isEmpty();
 
-    assertThat(vacuumOptions.isExpireSnapshots()).isFalse();
-    assertThat(vacuumOptions.isRemoveOrphans()).isTrue();
+    assertThat(sqlVacuumTable.isExpireSnapshots()).isFalse();
+    assertThat(sqlVacuumTable.isRemoveOrphans()).isTrue();
   }
 }

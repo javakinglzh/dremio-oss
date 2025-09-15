@@ -94,7 +94,7 @@ class RelDeserializer implements RelFromProto {
   @Override
   public RexWindowBound toRex(PRexWindowBound pRexWindowBound) {
     Preconditions.checkNotNull(pRexWindowBound);
-    return rexDeserializer.convert(pRexWindowBound);
+    return rexDeserializer.convertWindowBound(pRexWindowBound);
   }
 
   @Override

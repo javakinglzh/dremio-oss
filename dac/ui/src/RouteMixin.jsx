@@ -25,6 +25,7 @@ import Advanced from "#oss/pages/AdminPage/subpages/Advanced";
 import Provisioning from "#oss/pages/AdminPage/subpages/Provisioning";
 import Activation from "@inject/pages/AdminPage/subpages/Activation";
 import Support from "#oss/pages/AdminPage/subpages/Support";
+import Preferences from "#oss/pages/AdminPage/subpages/Preferences";
 import Queues from "@inject/pages/AdminPage/subpages/WLM/Queues";
 import QAssignments from "@inject/pages/AdminPage/subpages/WLM/QAssignments";
 import * as adminPaths from "dremio-ui-common/paths/admin.js";
@@ -57,6 +58,10 @@ export const AdminPageRouting = () => (
         <Route
           path={adminPaths.engineRouting.fullRoute()}
           component={QAssignments}
+        />
+        <Route
+          path={adminPaths.preferences.fullRoute()}
+          component={Preferences}
         />
       </Route>
     </Route>

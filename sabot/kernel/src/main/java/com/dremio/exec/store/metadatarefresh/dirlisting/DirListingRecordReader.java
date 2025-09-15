@@ -396,7 +396,7 @@ public class DirListingRecordReader implements RecordReader {
       shouldRateLimit = false;
     }
 
-    logger.info(
+    logger.error(
         "Rate limit flag is {} for cause {} and message {} ",
         shouldRateLimit,
         e.getCause(),

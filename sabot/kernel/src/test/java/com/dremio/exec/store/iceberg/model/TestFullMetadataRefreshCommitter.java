@@ -15,10 +15,13 @@
  */
 package com.dremio.exec.store.iceberg.model;
 
+import static org.mockito.Mockito.mock;
+
 import com.dremio.common.exceptions.UserException;
 import com.dremio.exec.proto.UserBitShared;
 import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
+import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
 import com.dremio.service.namespace.dataset.proto.DatasetType;
 import com.dremio.service.namespace.dataset.proto.PhysicalDataset;
@@ -79,9 +82,11 @@ public class TestFullMetadataRefreshCommitter {
     datasetConfig.setType(DatasetType.PHYSICAL_DATASET);
     datasetConfig.setPhysicalDataset(new PhysicalDataset());
     datasetConfig.setReadDefinition(new ReadDefinition());
+    OptionManager optionManager = mock(OptionManager.class);
     fullMetadataRefreshCommitter =
         Mockito.spy(
             new FullMetadataRefreshCommitter(
+                optionManager,
                 "test",
                 new ArrayList<>(),
                 null,

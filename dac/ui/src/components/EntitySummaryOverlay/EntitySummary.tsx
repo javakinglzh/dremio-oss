@@ -53,7 +53,10 @@ const EntitySummary = ({
 }: EntitySummaryProps) => {
   const { formatMessage } = useIntl();
   return (
-    <div className={summaryClasses["dataset-summary-container"]}>
+    <div
+      className={summaryClasses["dataset-summary-container"]}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div
         className={clsx(
           summaryClasses["dataset-summary-top-section"],

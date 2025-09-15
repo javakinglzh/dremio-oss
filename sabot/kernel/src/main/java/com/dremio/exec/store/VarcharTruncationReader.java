@@ -75,7 +75,7 @@ public class VarcharTruncationReader implements AutoCloseable {
       BatchSchema targetSchema = BatchSchema.newBuilder().addField(field).build();
 
       ExpressionSplitter varcharSplitter =
-          ProjectOperator.createSplitterWithExpressions(
+          ProjectOperator.createSplitterWithExpressionsStatic(
               incoming,
               Collections.singletonList(castExpr),
               null,
@@ -90,7 +90,7 @@ public class VarcharTruncationReader implements AutoCloseable {
 
       IntHashSet transferFieldIds = new IntHashSet();
       List<TransferPair> transfers = Lists.newArrayList();
-      ProjectOperator.createSplitterWithExpressions(
+      ProjectOperator.createSplitterWithExpressionsStatic(
           incoming,
           Collections.singletonList(noCastExpr),
           transfers,

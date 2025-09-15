@@ -580,6 +580,37 @@ public class TestPhysicalDatasets extends BaseTestServer {
   }
 
   @Test
+  public void testParquetFileWithNestedTypes() throws Exception {
+    String fileName = "nested_types.parquet";
+    String parentPath = "/parquet_with_nested_types/";
+    String filePath = parentPath + fileName;
+    String fileParentUrlPath = getUrlPath(parentPath);
+
+    // TODO: The preview is failing for this dataset. Add the related test with the fix of DX-69538.
+
+    try (final JobDataFragment jobData =
+        submitJobAndGetData(
+            l(JobsService.class), sqlQueryRequestFromFile(filePath), 0, 500, allocator)) {
+      assertEquals(7, jobData.getReturnedRowCount());
+      assertEquals(6, jobData.getColumns().size());
+
+      // Check some actual values
+      assertEquals("[null,1,2,null,3,null]", jobData.extractString("int_array", 1));
+      assertEquals("[[1,2],[3,4]]", jobData.extractString("int_array_Array", 0));
+      assertEquals(
+          "[{\"key\":\"k1\",\"value\":1},{\"key\":\"k2\",\"value\":100}]",
+          jobData.extractString("int_map", 0));
+      assertEquals(
+          "[[{\"key\":\"k3\"},{\"key\":\"k1\",\"value\":1}],null,[]]",
+          jobData.extractString("int_Map_Array", 1));
+      assertEquals(
+          "{\"A\":1,\"b\":[1],\"C\":{\"d\":[[{\"E\":10,\"F\":\"aaa\"},{\"E\":-10,\"F\":\"bbb\"}],[{\"E\":11,\"F\":\"c\"}]]},\"g\":[{\"key\":\"foo\",\"value\":{\"H\":{\"i\":[1.1]}}}]}",
+          jobData.extractString("nested_struct", 0));
+    }
+    checkCounts(fileParentUrlPath, fileName, true, 1, 0, 0);
+  }
+
+  @Test
   public void testZeroRowParquetFile() throws Exception {
     String fileUrlPath = getUrlPath("/zero-rows/zero-rows.parquet");
 

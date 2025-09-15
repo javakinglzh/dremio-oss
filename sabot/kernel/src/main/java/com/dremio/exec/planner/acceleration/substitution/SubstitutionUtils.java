@@ -20,6 +20,7 @@ import com.dremio.exec.calcite.logical.ScanCrel;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.planner.RoutingShuttle;
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
+import com.dremio.exec.planner.acceleration.ExpansionLeafNode;
 import com.dremio.exec.planner.acceleration.ExpansionNode;
 import com.dremio.exec.planner.logical.PushProjectIntoScanRule;
 import com.dremio.exec.tablefunctions.ExternalQueryScanCrel;
@@ -171,6 +172,16 @@ public final class SubstitutionUtils {
             }
             if (other instanceof ExpansionNode) {
               ExpansionNode expansionNode = (ExpansionNode) other;
+              if (vdsPaths.contains(
+                  VersionedPath.of(
+                      expansionNode.getPath().getPathComponents(),
+                      expansionNode.getVersionContext()))) {
+                used.value = true;
+                return other;
+              }
+            }
+            if (other instanceof ExpansionLeafNode) {
+              ExpansionLeafNode expansionNode = (ExpansionLeafNode) other;
               if (vdsPaths.contains(
                   VersionedPath.of(
                       expansionNode.getPath().getPathComponents(),

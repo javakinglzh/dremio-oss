@@ -47,6 +47,8 @@ public interface MaterializationInfo {
 
   Long getLastRefreshDuration();
 
+  Long getInitRefreshRetry();
+
   Integer getNumFailures();
 
   String reflectionMode();

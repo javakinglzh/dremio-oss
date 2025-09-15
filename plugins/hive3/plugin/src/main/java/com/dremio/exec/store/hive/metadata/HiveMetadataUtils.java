@@ -1018,7 +1018,9 @@ public class HiveMetadataUtils {
         tableMetadata
             .getBatchSchema()
             .estimateRecordSize(
-                statsParams.getListSizeEstimate(), statsParams.getVarFieldSizeEstimate());
+                statsParams.getListSizeEstimate(),
+                statsParams.getMapSizeEstimate(),
+                statsParams.getVarFieldSizeEstimate());
 
     for (int i = 0; i < inputSplits.size(); i++) {
       final InputSplit inputSplit = inputSplits.get(i);

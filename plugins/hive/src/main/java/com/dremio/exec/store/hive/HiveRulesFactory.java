@@ -185,17 +185,23 @@ public class HiveRulesFactory implements StoragePluginRulesFactory {
 
     // Clone with partition filter
     private HiveScanDrel(HiveScanDrel that, PruneFilterCondition partitionFilter, Long survivingRowCount, Long survivingFileCount) {
-      super(that.getCluster(), that.getTraitSet(), that.getTable(), that.getPluginId(),
-          that.getTableMetadata(), that.getProjectedColumns(), that.getObservedRowcountAdjustment(),
-          that.getHintsAsList(), that.getSnapshotDiffContext(), that.getPartitionStatsStatus());
-      assert traitSet.getTrait(ConventionTraitDef.INSTANCE) == Rel.LOGICAL;
-      this.filter = that.getFilter();
-      this.rowGroupFilter = that.getRowGroupFilter();
-      this.readerType = that.readerType;
-      this.partitionFilter = partitionFilter;
-      this.survivingRowCount = survivingRowCount;
-      this.survivingFileCount = survivingFileCount;
-      this.partitionValuesEnabled = that.isPartitionValuesEnabled();
+      this(
+          that.getCluster(),
+          that.getTraitSet(),
+          that.getTable(),
+          that.getPluginId(),
+          that.getTableMetadata(),
+          that.getProjectedColumns(),
+          that.getObservedRowcountAdjustment(),
+          that.getHintsAsList(),
+          that.getFilter(),
+          that.getRowGroupFilter(),
+          that.getReaderType(),
+          partitionFilter,
+          survivingRowCount,
+          survivingFileCount,
+          that.getSnapshotDiffContext(),
+          that.isPartitionValuesEnabled());
     }
 
     @Override
@@ -221,6 +227,11 @@ public class HiveRulesFactory implements StoragePluginRulesFactory {
     @Override
     public ParquetScanRowGroupFilter getRowGroupFilter() {
       return rowGroupFilter;
+    }
+
+    @Override
+    public boolean hasFilter() {
+      return filter != null || rowGroupFilter != null || partitionFilter != null;
     }
 
     public HiveReaderProto.ReaderType getReaderType() {

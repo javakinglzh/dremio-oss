@@ -82,7 +82,6 @@ public final class DRRMatcher extends StatelessRelShuttleImpl {
     Optional<RelNode> relNode =
         substitutionProvider.wrapDefaultExpansionNode(
             expansionNode.getPath(),
-            expansionNode,
             dremioMaterialization,
             expansionNode.getRowType(),
             expansionNode.getVersionContext(),

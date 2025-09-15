@@ -17,6 +17,7 @@ package com.dremio.exec.planner.sql;
 
 import com.dremio.catalog.model.CatalogEntityKey;
 import com.dremio.catalog.model.VersionContext;
+import com.dremio.exec.catalog.CatalogIdentity;
 import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.SimpleCatalog;
 import com.dremio.exec.catalog.TableMetadataVerifyRequest;
@@ -95,6 +96,11 @@ public class MockCatalog implements SimpleCatalog<MockCatalog> {
   @Override
   public DremioTable getTable(CatalogEntityKey catalogEntityKey) {
     throw new UnsupportedOperationException();
+  }
+
+  @Override
+  public Optional<CatalogIdentity> getCatalogEntityOwner(CatalogEntityKey catalogEntityKey) {
+    return Optional.empty();
   }
 
   @Override

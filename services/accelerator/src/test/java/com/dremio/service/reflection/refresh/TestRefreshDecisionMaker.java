@@ -16,6 +16,7 @@
 package com.dremio.service.reflection.refresh;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -85,11 +86,11 @@ public class TestRefreshDecisionMaker {
   }
 
   @Test
-  public void testDatasetDependencySnapshotIdRetrievalFailed() {
+  public void testNullSnapshotId() {
     ReflectionEntry entry = new ReflectionEntry();
     EntityExplorer catalog = mock(EntityExplorer.class);
     List<String> datasetPath = Arrays.asList("path", "to", "dataset");
-    DatasetDependency dependency = DependencyEntry.of("dataset", datasetPath, 0L, null);
+    DatasetDependency dependency = DependencyEntry.of("dataset", datasetPath, -1L, null);
     List<DependencyEntry> dependencies = Arrays.asList(dependency);
     MaterializationStore store = mock(MaterializationStore.class);
     DremioTable table = mock(DremioTable.class);
@@ -101,14 +102,10 @@ public class TestRefreshDecisionMaker {
     when(datasetConfig.getPhysicalDataset()).thenReturn(physicalDataset);
     when(physicalDataset.getIcebergMetadata()).thenReturn(metadata);
     when(metadata.getFileType()).thenReturn(FileType.ICEBERG);
-    when(metadata.getSnapshotId()).thenReturn(0L);
+    when(metadata.getSnapshotId()).thenReturn(null);
 
     String result =
         RefreshDecisionMaker.hasNewSnapshotsForRefresh(entry, catalog, dependencies, store);
-    assertEquals(
-        String.format(
-            "Refresh couldn't be skipped because retrieving current snapshot ID for dataset dependency %s failed.",
-            dependency.getNamespaceKey()),
-        result);
+    assertTrue(result.isEmpty());
   }
 }

@@ -204,7 +204,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
 
     OutputMutator outputMutator = outputMutator();
     reader.setup(outputMutator);
@@ -232,7 +234,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
 
     Results results = getResults(reader);
 
@@ -282,7 +286,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
 
     List<String> expectedMeta = new ArrayList<>();
     Results results = getResults(reader);
@@ -344,7 +350,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
     tables.forEach(Table::refresh);
 
     Results results = getResults(reader);
@@ -395,7 +403,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
     tables.forEach(Table::refresh);
 
     List<String> expectedMeta =
@@ -465,7 +475,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
     tables.forEach(Table::refresh);
 
     List<String> expectedMeta =
@@ -549,7 +561,9 @@ public class TestNessieIcebergExpirySnapshotsReader {
             scanOptions,
             scheme,
             scheme,
-            Collections.emptyList());
+            true,
+            Collections.emptyList(),
+            false);
     final Results results = getResults(reader);
 
     verify(exceptionalIO, times(1)).newInputFile(contains(noContainer));

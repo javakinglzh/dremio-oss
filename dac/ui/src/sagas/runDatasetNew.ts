@@ -183,14 +183,7 @@ export function* handlePendingMetadataFetch(
       }
 
       // if a job fails, throw an error to avoid calling the /preview endpoint
-      const updatedJob = jobDone.payload?.update;
-      const attempts = updatedJob?.attemptDetails || [];
-      if (
-        updatedJob.state === "FAILED" &&
-        ((attempts.length &&
-          attempts[attempts.length - 1].result === "FAILED") ||
-          callback)
-      ) {
+      if (jobDone.payload?.update.state === "FAILED") {
         const failureInfo = jobDone.payload.update.failureInfo;
         throw new JobFailedError(
           failureInfo?.errors?.[0]?.message || failureInfo?.message,
@@ -266,7 +259,12 @@ export function* handlePendingMetadataFetch(
     // save the job's id in the script after it completes
     const activeScript = yield select(selectActiveScript) || {};
 
-    if (activeScript.id && !callback) {
+    if (
+      activeScript.id &&
+      (!activeScript.permissions ||
+        activeScript.permissions.includes("MODIFY")) &&
+      !callback
+    ) {
       const exploreState = yield select(getExploreState);
       const queryStatuses: Record<string, any>[] =
         exploreState?.view?.queryStatuses ?? [];

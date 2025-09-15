@@ -111,7 +111,8 @@ public class HashAggStats {
     OOB_DROP_ALREADY_SPILLING, // Number of times operator dropped spilling notification as it was
     // already spilling
     SETUP_MILLIS,
-    CAN_PRODUCE_MILLIS;
+    CAN_PRODUCE_MILLIS,
+    HASHTABLE_TYPE;
 
     private final DisplayType displayType;
     private final AggregationType aggregationType;

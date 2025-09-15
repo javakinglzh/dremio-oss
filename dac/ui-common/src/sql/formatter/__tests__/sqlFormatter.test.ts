@@ -709,7 +709,17 @@ VACUUM CATALOG cat1`,
       ],
       [
         `
-VACUUM CATALOG cat1 EXCLUDE (tbl1, folder1.tbl2, folder1.tbl3 AT BRANCH dev)`,
+VACUUM CATALOG cat1
+INCLUDE        (tbl1,
+                folder1.tbl2,
+                folder1.tbl3 AT BRANCH dev)`
+      ],
+      [
+        `
+VACUUM CATALOG cat1
+EXCLUDE        (tbl1,
+                folder1.tbl2,
+                folder1.tbl3 AT BRANCH dev)`
       ],
     ],
     sqlOptimize: [

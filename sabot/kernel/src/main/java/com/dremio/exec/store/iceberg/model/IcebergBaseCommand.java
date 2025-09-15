@@ -17,6 +17,7 @@ package com.dremio.exec.store.iceberg.model;
 
 import static com.dremio.exec.planner.VacuumCatalogUtil.isGCEnabledForIcebergTable;
 import static com.dremio.exec.planner.sql.handlers.SqlHandlerUtil.getTimestampFromMillis;
+import static com.dremio.exec.store.iceberg.IcebergFeatureManager.getIcebergFormatVersion;
 import static com.dremio.exec.store.iceberg.IcebergUtils.CLUSTERING_INFO;
 import static com.dremio.exec.store.iceberg.IcebergUtils.PARTITION_DROPPED_SEQUENCE_NUMBER_PROPERTY;
 import static com.dremio.exec.store.iceberg.model.IcebergOpCommitter.CONCURRENT_OPERATION_ERROR;
@@ -29,6 +30,7 @@ import com.dremio.common.expression.CompleteType;
 import com.dremio.common.utils.protos.QueryIdHelper;
 import com.dremio.exec.catalog.PartitionSpecAlterOption;
 import com.dremio.exec.catalog.RollbackOption;
+import com.dremio.exec.ops.IcebergMetrics;
 import com.dremio.exec.planner.sql.CalciteArrowHelper;
 import com.dremio.exec.planner.sql.PartitionTransform;
 import com.dremio.exec.planner.sql.parser.SqlAlterTablePartitionColumns;
@@ -38,6 +40,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.DremioFileIO;
 import com.dremio.exec.store.iceberg.FieldIdBroker;
 import com.dremio.exec.store.iceberg.IcebergExpiryAction;
+import com.dremio.exec.store.iceberg.IcebergFeatureManager;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.SchemaConverter;
 import com.dremio.exec.store.iceberg.SnapshotEntry;
@@ -164,6 +167,12 @@ public class IcebergBaseCommand implements IcebergCommand {
     TableMetadata metadata =
         TableMetadata.newTableMetadata(
             schema, partitionSpec, sortOrder, getTableLocation(), tableProp);
+
+    IcebergFeatureManager.IcebergFormatVersion icebergFormatVersion =
+        getIcebergFormatVersion(tableProp);
+
+    IcebergMetrics.countFormatVersion(
+        icebergFormatVersion.getValue(), IcebergMetrics.OperationType.CREATE);
 
     if (tableOperations.current() != null) {
       throw UserException.validationError()

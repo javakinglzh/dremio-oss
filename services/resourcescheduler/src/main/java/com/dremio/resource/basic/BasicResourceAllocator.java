@@ -304,6 +304,11 @@ public class BasicResourceAllocator implements ResourceAllocator {
     public void close() throws IOException {
       releaseLease(lease);
     }
+
+    @Override
+    public String getAllocatedResourceIdentifier() {
+      return lease.formatAsString();
+    }
   }
 
   private static void releaseLease(DistributedSemaphore.DistributedLease lease) {

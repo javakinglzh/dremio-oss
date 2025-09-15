@@ -428,8 +428,9 @@ public class HashAggMemoryEstimator {
     final int listSizeEstimate = (int) options.getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE);
     final int estimatedVariableWidthKeySize =
         (int) options.getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE);
+    final int mapSizeEstimate = (int) options.getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE);
     final int estimatedRecordSize =
-        schema.estimateRecordSize(listSizeEstimate, estimatedVariableWidthKeySize);
+        schema.estimateRecordSize(listSizeEstimate, mapSizeEstimate, estimatedVariableWidthKeySize);
 
     /*
      * Compute the max hash table batch size, based on the estimated record size.

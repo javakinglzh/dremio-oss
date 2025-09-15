@@ -16,6 +16,7 @@
 package com.dremio.plugins.icebergcatalog.dfs;
 
 import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_FILE_SYSTEM_EXPIRE_AFTER_WRITE_MINUTES;
+import static com.dremio.exec.store.IcebergCatalogPluginOptions.RESTCATALOG_PLUGIN_FILE_SYSTEM_OPTIMISTIC_LOCKING;
 import static com.dremio.exec.store.hive.exec.FileSystemConfUtil.AZURE_FILE_SYSTEM;
 import static com.dremio.exec.store.hive.exec.FileSystemConfUtil.GCS_FILE_SYSTEM;
 import static com.dremio.exec.store.hive.exec.FileSystemConfUtil.S3_FILE_SYSTEM;
@@ -33,6 +34,7 @@ import com.dremio.sabot.exec.context.OperatorStats;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.LoadingCache;
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -52,8 +54,11 @@ import org.slf4j.LoggerFactory;
 /** This class is wrapper for the cache which holds the FileSystem objects */
 public class DatasetFileSystemCache implements AutoCloseable {
   private static final Logger logger = LoggerFactory.getLogger(DatasetFileSystemCache.class);
+  private static final int MAX_HOURS_WAIT_FOR_FS_WRITE_LOCK = 4;
 
-  @VisibleForTesting LoadingCache<DatasetFileSystemCacheKey, FileSystem> cache;
+  @VisibleForTesting
+  protected LoadingCache<DatasetFileSystemCacheKey, LockableHadoopFileSystem> cache;
+
   private final Function<List<String>, Configuration> fsConfProvider;
   private final OptionManager optionManager;
 
@@ -71,14 +76,23 @@ public class DatasetFileSystemCache implements AutoCloseable {
     this.cache =
         buildCacheExpiration(Caffeine.newBuilder(), optionManager)
             .removalListener(
-                (key, value, cause) -> {
-                  try {
-                    if (value != null) {
-                      value.close();
+                (key, lockableFs, cause) -> {
+                  if (lockableFs != null) {
+                    try {
+                      if (lockableFs.waitForClose(
+                          TimeUnit.HOURS.toMillis(MAX_HOURS_WAIT_FOR_FS_WRITE_LOCK))) {
+                        logger.warn("Timed out waiting for FS closure on {}", lockableFs);
+                      }
+                      logger.debug("Closing FS instance {} on cache removal.", lockableFs.getFs());
+                      lockableFs.getFs().close();
+                    } catch (IOException e) {
+                      // Ignore
+                      logger.error("Unable to clean FS from HadoopFileSystemCache", e);
+                    } catch (InterruptedException e) {
+                      // Ignore
+                      logger.error(
+                          "Interrupted while waiting for FS to be de-referenced for closure.", e);
                     }
-                  } catch (IOException e) {
-                    // Ignore
-                    logger.error("Unable to clean FS from HadoopFileSystemCache", e);
                   }
                 })
             .build(
@@ -96,7 +110,7 @@ public class DatasetFileSystemCache implements AutoCloseable {
                   URI uri = injectDremioFsImpl(key.getUri(), fsConf);
                   String scheme = Optional.ofNullable(uri.getScheme()).orElse("");
 
-                  final PrivilegedExceptionAction<FileSystem> fsFactory =
+                  final PrivilegedExceptionAction<LockableHadoopFileSystem> fsFactory =
                       () -> {
                         // Do not use FileSystem#newInstance(Configuration) as it adds filesystem
                         // into the Hadoop cache :(
@@ -105,7 +119,7 @@ public class DatasetFileSystemCache implements AutoCloseable {
                             FileSystem.getFileSystemClass(scheme, fsConf);
                         final FileSystem fs = ReflectionUtils.newInstance(fsClass, fsConf);
                         fs.initialize(uri, fsConf);
-                        return fs;
+                        return new LockableHadoopFileSystem(fs);
                       };
 
                   try {
@@ -131,11 +145,13 @@ public class DatasetFileSystemCache implements AutoCloseable {
                 });
   }
 
-  protected Caffeine<DatasetFileSystemCacheKey, FileSystem> buildCacheExpiration(
+  protected Caffeine<DatasetFileSystemCacheKey, LockableHadoopFileSystem> buildCacheExpiration(
       Caffeine builder, OptionManager optionManager) {
-    return builder.expireAfterWrite(
-        optionManager.getOption(RESTCATALOG_PLUGIN_FILE_SYSTEM_EXPIRE_AFTER_WRITE_MINUTES),
-        TimeUnit.MINUTES);
+    long expirationMinutes =
+        optionManager.getOption(RESTCATALOG_PLUGIN_FILE_SYSTEM_EXPIRE_AFTER_WRITE_MINUTES);
+    Preconditions.checkState(expirationMinutes > 0, "FS cache expiration must not be 0");
+
+    return builder.expireAfterWrite(expirationMinutes, TimeUnit.MINUTES);
   }
 
   private static URI injectDremioFsImpl(URI uri, Configuration conf) {
@@ -186,24 +202,24 @@ public class DatasetFileSystemCache implements AutoCloseable {
   public com.dremio.io.file.FileSystem load(
       String filePath,
       String userName,
+      String userId,
       List<String> dataset,
       OperatorStats stats,
       boolean isAsyncEnabled) {
-    DatasetFileSystemCacheKey key = makeCacheKey(filePath, userName, dataset);
-    return HadoopFileSystem.get(cache.get(key), stats, isAsyncEnabled);
-  }
-
-  protected DatasetFileSystemCacheKey makeCacheKey(
-      String filePath, String userName, List<String> dataset) {
     if (cache == null) {
       initCache();
     }
 
     Path path = Path.of(filePath);
     URI originalUri = path.toURI();
+    DatasetFileSystemCacheKey key =
+        new DatasetFileSystemCacheKey(
+            originalUri, userName, isCachingPerDataset() ? dataset : null);
 
-    return new DatasetFileSystemCacheKey(
-        originalUri, userName, isCachingPerDataset() ? dataset : null);
+    boolean optimisticLocking =
+        optionManager.getOption(RESTCATALOG_PLUGIN_FILE_SYSTEM_OPTIMISTIC_LOCKING);
+
+    return new SelfManagingCachedFileSystem(key, cache, stats, isAsyncEnabled, optimisticLocking);
   }
 
   /**

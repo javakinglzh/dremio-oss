@@ -164,6 +164,23 @@ public final class DmlUtils {
         == IcebergCommandType.INSERT; // TODO: Add CREATE for CTAS with DX-48616
   }
 
+  public static boolean isStorageFormatParquet(final WriterOptions writerOptions) {
+    IcebergTableProps icebergProps =
+        writerOptions.getTableFormatOptions().getIcebergSpecificOptions().getIcebergTableProps();
+
+    if (icebergProps == null) {
+      return true;
+    }
+
+    Map<String, String> tableProps = icebergProps.getTableProperties();
+    if (tableProps.containsKey(org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT)) {
+      return tableProps
+          .get(org.apache.iceberg.TableProperties.DEFAULT_FILE_FORMAT)
+          .equalsIgnoreCase("parquet");
+    }
+    return true;
+  }
+
   /** Check if Delete operation is set to Merge-On-Read based on the iceberg table's table-props */
   public static boolean isMergeOnReadDelete(IcebergTableProps icebergTableProps) {
     return Optional.of(icebergTableProps)
@@ -237,33 +254,6 @@ public final class DmlUtils {
     } else {
       return RowLevelOperationMode.COPY_ON_WRITE;
     }
-  }
-
-  /**
-   * Get the TableProperties for the given propertyName
-   *
-   * @param table the table to get the property from
-   * @param propertyName the property name to get
-   * @return the TableProperties for the given propertyName
-   */
-  public static TableProperties getDmlWriteProp(DremioTable table, String propertyName) {
-
-    TableProperties writeProp = null;
-
-    List<TableProperties> icebergTableProperties =
-        Optional.ofNullable(table)
-            .map(DremioTable::getDatasetConfig)
-            .map(DatasetConfig::getPhysicalDataset)
-            .map(PhysicalDataset::getIcebergMetadata)
-            .map(IcebergMetadata::getTablePropertiesList)
-            .orElse(Collections.emptyList());
-
-    for (TableProperties prop : icebergTableProperties) {
-      if (prop.getTablePropertyName().equalsIgnoreCase(propertyName)) {
-        writeProp = prop;
-      }
-    }
-    return writeProp;
   }
 
   /** Tries to use version specification from the SQL. Otherwise use session's version spec. */

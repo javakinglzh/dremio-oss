@@ -352,6 +352,8 @@ public class ExternalSortOperator implements SingleInputOperator, ShrinkableOper
   public int outputData() throws Exception {
     produceDataWatch.start();
 
+    vectorSorter.unblockSpill();
+
     if (vectorSorter.handleIfSpillInProgress()) {
       produceDataWatch.stop();
       return 0;

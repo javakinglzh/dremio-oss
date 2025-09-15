@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner.sql.convertlet;
 
+import static com.dremio.exec.planner.sql.DremioSqlOperatorTable.FIRST_MATCHING_MAP_ENTRY_FOR_KEY;
 import static com.dremio.exec.planner.sql.DremioSqlOperatorTable.LAST_MATCHING_MAP_ENTRY_FOR_KEY;
 import static org.apache.calcite.sql.fun.SqlStdOperatorTable.ITEM;
 
@@ -24,9 +25,11 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.sql.type.SqlTypeName;
 
 public final class IndexingOnMapConvertlet extends RexCallConvertlet {
-  public static final IndexingOnMapConvertlet INSTANCE = new IndexingOnMapConvertlet();
+  boolean useFirstValueMapLookup;
 
-  private IndexingOnMapConvertlet() {}
+  public IndexingOnMapConvertlet(boolean useFirstValueMapLookup) {
+    this.useFirstValueMapLookup = useFirstValueMapLookup;
+  }
 
   @Override
   public boolean matchesCall(RexCall call) {
@@ -46,8 +49,13 @@ public final class IndexingOnMapConvertlet extends RexCallConvertlet {
     RexBuilder rexBuilder = cx.getRexBuilder();
     RexNode map = call.getOperands().get(0);
     RexNode index = call.getOperands().get(1);
-    RexNode lastMatchingMapEntryCall =
-        rexBuilder.makeCall(LAST_MATCHING_MAP_ENTRY_FOR_KEY, map, index);
+    RexNode lastMatchingMapEntryCall;
+    if (useFirstValueMapLookup) {
+      lastMatchingMapEntryCall = rexBuilder.makeCall(FIRST_MATCHING_MAP_ENTRY_FOR_KEY, map, index);
+    } else {
+      lastMatchingMapEntryCall = rexBuilder.makeCall(LAST_MATCHING_MAP_ENTRY_FOR_KEY, map, index);
+    }
+
     RexNode valueStringLiteral = rexBuilder.makeLiteral("value");
     RexNode itemCall = rexBuilder.makeCall(ITEM, lastMatchingMapEntryCall, valueStringLiteral);
     return (RexCall) itemCall;

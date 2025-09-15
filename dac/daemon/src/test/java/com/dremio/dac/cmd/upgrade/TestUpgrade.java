@@ -342,7 +342,7 @@ public class TestUpgrade extends DremioTest {
    */
   @Test
   public void testMaxTaskVersion() {
-    DACConfig dacConfig = DACConfig.newConfig();
+    DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     Upgrade upgrade = new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false);
     final Optional<Version> tasksGreatestMaxVersion =
         upgrade.getUpgradeTasks().stream()
@@ -362,7 +362,7 @@ public class TestUpgrade extends DremioTest {
   /** Verify that tasks are discovered properly and are correctly ordered */
   @Test
   public void testTasksOrder() {
-    DACConfig dacConfig = DACConfig.newConfig();
+    DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     Upgrade upgrade = new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false);
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
@@ -392,6 +392,8 @@ public class TestUpgrade extends DremioTest {
             DeleteSysMaterializationsMetadata.class,
             SetTableauDefaults.class,
             SetExportType.class,
+            AddUserDefinedFunctionFullPathTask.class,
+            ReIndexScriptStore.class,
             DeleteGen1AzureUpgradeTask.class,
             DeleteSnowflakeCommunitySource.class,
             ReindexDatasets.class,
@@ -401,7 +403,7 @@ public class TestUpgrade extends DremioTest {
 
   @Test
   public void testTasksWithoutUUID() throws Exception {
-    DACConfig dacConfig = DACConfig.newConfig();
+    DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     Upgrade upgrade = new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false);
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
@@ -416,7 +418,7 @@ public class TestUpgrade extends DremioTest {
 
   @Test
   public void testNoDuplicateUUID() {
-    DACConfig dacConfig = DACConfig.newConfig();
+    DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     Upgrade upgrade = new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false);
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
@@ -425,8 +427,8 @@ public class TestUpgrade extends DremioTest {
   }
 
   @Test
-  public void testDependenciesResolver() throws Exception {
-    DACConfig dacConfig = DACConfig.newConfig();
+  public void testDependenciesResolver() {
+    DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     Upgrade upgrade = new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false);
 
     List<? extends UpgradeTask> tasks = upgrade.getUpgradeTasks();
@@ -461,6 +463,8 @@ public class TestUpgrade extends DremioTest {
             DeleteSysMaterializationsMetadata.class,
             SetTableauDefaults.class,
             SetExportType.class,
+            AddUserDefinedFunctionFullPathTask.class,
+            ReIndexScriptStore.class,
             DeleteGen1AzureUpgradeTask.class,
             DeleteSnowflakeCommunitySource.class,
             ReindexDatasets.class,
@@ -471,6 +475,7 @@ public class TestUpgrade extends DremioTest {
   /** Tests illegal upgrade from OSS to EE */
   @Test
   public void testIllegalUpgrade() throws Exception {
+    final DACConfig dacConfig = new DACConfig(DEFAULT_DREMIO_CONFIG);
     final ByteString prevEdition = ByteString.copyFrom("OSS".getBytes());
     final ConfigurationEntry configurationEntry = new ConfigurationEntry();
     configurationEntry.setValue(prevEdition);
@@ -481,7 +486,7 @@ public class TestUpgrade extends DremioTest {
     configurationStore.put(SupportService.DREMIO_EDITION, configurationEntry);
     assertThatThrownBy(
             () ->
-                new Upgrade(DACConfig.newConfig(), CLASSPATH_SCAN_RESULT, false)
+                new Upgrade(dacConfig, CLASSPATH_SCAN_RESULT, false)
                     .validateUpgrade(kvStoreProvider, "EE"))
         .isInstanceOf(Exception.class)
         .hasMessageContaining("Illegal upgrade from OSS to EE");
@@ -497,10 +502,11 @@ public class TestUpgrade extends DremioTest {
         LegacyKVStoreProviderAdapter.inMemory(CLASSPATH_SCAN_RESULT);
     kvStoreProvider.start();
     final ConfigurationStore configurationStore = new ConfigurationStore(kvStoreProvider);
-    new Upgrade(DACConfig.newConfig(), CLASSPATH_SCAN_RESULT, false)
+    new Upgrade(new DACConfig(DEFAULT_DREMIO_CONFIG), CLASSPATH_SCAN_RESULT, false)
         .validateUpgrade(kvStoreProvider, "OSS");
+
     configurationStore.put(SupportService.DREMIO_EDITION, configurationEntry);
-    new Upgrade(DACConfig.newConfig(), CLASSPATH_SCAN_RESULT, false)
+    new Upgrade(new DACConfig(DEFAULT_DREMIO_CONFIG), CLASSPATH_SCAN_RESULT, false)
         .validateUpgrade(kvStoreProvider, "OSS");
   }
 }

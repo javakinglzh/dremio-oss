@@ -182,15 +182,20 @@ public class FragmentWorkManager implements Service, SafeExit {
       return pool.get().getSlicingThreads();
     }
 
+    @Override
+    public float getClusterLoad(long maxWidthPerNode) {
+      Preconditions.checkState(
+          maxWidthPerNode > 0, "No executors are available. Unable to determine cluster load");
+      return fragmentExecutors.size() / (maxWidthPerNode * 1.0f);
+    }
+
     /**
      * @return number of running fragments / max width per node
      */
     private float getClusterLoadImpl(GroupResourceInformation groupResourceInformation) {
       final long maxWidthPerNode =
           groupResourceInformation.getAverageExecutorCores(bitContext.getOptionManager());
-      Preconditions.checkState(
-          maxWidthPerNode > 0, "No executors are available. Unable to determine cluster load");
-      return fragmentExecutors.size() / (maxWidthPerNode * 1.0f);
+      return getClusterLoad(maxWidthPerNode);
     }
 
     @Override

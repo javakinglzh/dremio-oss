@@ -34,7 +34,9 @@ public class HiveParquetFooterReader extends ParquetFooterReader {
 
     public static FooterReader getInstance(OperatorContext context, BatchSchema tableSchema, FileSystem fs) {
         Preconditions.checkArgument(tableSchema != null, "Unexpected state");
-        final long estimatedRecordSize = tableSchema.estimateRecordSize((int) context.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+        final long estimatedRecordSize = tableSchema.estimateRecordSize(
+                (int) context.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+                (int) context.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
                 (int) context.getOptions().getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
         final double compressionFactor = 30f;
         final boolean readFooter = HiveFooterReaderTableFunction.isAccuratePartitionStatsNeeded(context);

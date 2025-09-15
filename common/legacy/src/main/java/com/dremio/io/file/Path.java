@@ -37,8 +37,8 @@ import java.util.stream.Collectors;
 /**
  * Filesystem path
  *
- * <p>A path is equivalent to a URI with a optional schema and authority and a path component. Other
- * URI components might be ignored.
+ * <p>A path is equivalent to a URI with an optional schema and authority and a path component.
+ * Other URI components might be ignored.
  *
  * <p>Paths can be compared. The comparison is equivalent to their URI representation.
  */
@@ -449,22 +449,24 @@ public final class Path implements Comparable<Path> {
 
   /*
   Current container file system accepts path in a format container_Name/PathToObject
-  This function is to convert container file path to relative path that ContainerFile System under stands
+  This function is to convert container file path to relative path that ContainerFile System understands
    */
   public static String getContainerSpecificRelativePath(Path path) {
     URI pathUri = path.uri;
     if (pathUri.getScheme() == null) {
       return path.toString();
     }
+
     String scheme = pathUri.getScheme().toLowerCase(Locale.ROOT);
     if (S3_FILE_SYSTEM.contains(scheme)) {
-      String authority = (pathUri.getAuthority() != null) ? pathUri.getAuthority() : "";
-      return SEPARATOR + authority + pathUri.getPath();
+      String bucketName = (pathUri.getAuthority() != null) ? pathUri.getAuthority() : "";
+      return SEPARATOR + bucketName + pathUri.getPath();
     } else if (AZURE_FILE_SYSTEM.contains(scheme)) {
-      return SEPARATOR + pathUri.getUserInfo() + pathUri.getPath();
+      String containerName = pathUri.getUserInfo();
+      return SEPARATOR + containerName + pathUri.getPath();
     } else if (GCS_FILE_SYSTEM.contains(scheme)) {
-      String authority = (pathUri.getAuthority() != null) ? pathUri.getAuthority() : "";
-      return SEPARATOR + authority + pathUri.getPath();
+      String bucketName = (pathUri.getAuthority() != null) ? pathUri.getAuthority() : "";
+      return SEPARATOR + bucketName + pathUri.getPath();
     } else if (FILE_SCHEME.equals(scheme)) {
       return pathUri.getPath();
     } else {

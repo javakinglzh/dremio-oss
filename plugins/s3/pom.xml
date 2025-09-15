@@ -113,5 +113,9 @@
       <artifactId>hadoop-azure-datalake</artifactId>
       <version>${hadoop.version}</version>
     </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>netty-nio-client</artifactId>
+    </dependency>
   </dependencies>
 </project>

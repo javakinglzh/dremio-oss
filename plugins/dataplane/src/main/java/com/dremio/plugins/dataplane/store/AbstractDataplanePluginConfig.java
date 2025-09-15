@@ -300,11 +300,12 @@ public abstract class AbstractDataplanePluginConfig
             properties, S3FileSystem.class.getName());
         break;
       case AZURE:
+        String azureMode = getAzureMode(properties);
         PluginCloudStorageProviderUtil.validateAndSetPropertiesForAzure(
             properties,
             AzureStorageFileSystem.class.getName(),
             getRootPath(),
-            STORAGE_V2.name(),
+            azureMode,
             azureStorageAccount,
             azureAuthenticationType,
             azureAccessKey,
@@ -331,6 +332,11 @@ public abstract class AbstractDataplanePluginConfig
     }
 
     return properties;
+  }
+
+  /** gets the azure mode property. If the property is not present, returns the default value. */
+  protected String getAzureMode(List<Property> properties) {
+    return STORAGE_V2.name();
   }
 
   @Override

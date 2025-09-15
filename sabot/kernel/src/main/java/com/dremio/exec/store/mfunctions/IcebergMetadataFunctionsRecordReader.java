@@ -127,6 +127,7 @@ final class IcebergMetadataFunctionsRecordReader implements RecordReader {
               SupportsFsCreation.builder()
                   .filePath(metadataLocation)
                   .userName(props.getUserName())
+                  .userId(props.getUserId())
                   .operatorContext(context)
                   .withAsyncOptions(true)
                   .dataset(dataset));

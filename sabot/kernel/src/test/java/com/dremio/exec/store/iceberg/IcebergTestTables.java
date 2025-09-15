@@ -147,6 +147,13 @@ public final class IcebergTestTables {
               "dfs_static_test_hadoop",
               ICEBERG_TEST_TABLES_ROOT_PATH,
               "/v2/products_with_eq_deletes");
+  public static final Supplier<Table> PRODUCTS_WITH_EQ_DELETES_UPPER_CASE_COLUMNS =
+      () ->
+          getTable(
+              "iceberg/v2/products_with_eq_deletes_upper_case_columns",
+              "dfs_static_test_hadoop",
+              ICEBERG_TEST_TABLES_ROOT_PATH,
+              "/v2/products_with_eq_deletes_upper_case_columns");
 
   public static final BatchSchema V2_ORDERS_SCHEMA =
       new BatchSchema(
@@ -163,6 +170,17 @@ public final class IcebergTestTables {
           ImmutableList.of(
               Field.nullable("product_id", Types.MinorType.INT.getType()),
               Field.nullable("name", Types.MinorType.VARCHAR.getType()),
+              Field.nullable("category", Types.MinorType.VARCHAR.getType()),
+              Field.nullable("color", Types.MinorType.VARCHAR.getType()),
+              Field.nullable("created_date", Types.MinorType.DATEMILLI.getType()),
+              Field.nullable("weight", Types.MinorType.FLOAT8.getType()),
+              Field.nullable("quantity", Types.MinorType.INT.getType())));
+
+  public static final BatchSchema PRODUCTS_UPPER_CASE_COLUMNS_SCHEMA =
+      new BatchSchema(
+          ImmutableList.of(
+              Field.nullable("PRODUCT_ID", Types.MinorType.INT.getType()),
+              Field.nullable("NAME", Types.MinorType.VARCHAR.getType()),
               Field.nullable("category", Types.MinorType.VARCHAR.getType()),
               Field.nullable("color", Types.MinorType.VARCHAR.getType()),
               Field.nullable("created_date", Types.MinorType.DATEMILLI.getType()),

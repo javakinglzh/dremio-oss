@@ -101,6 +101,7 @@ import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.orphanage.OrphanageImpl;
 import com.dremio.service.scheduler.LocalSchedulerService;
 import com.dremio.service.scheduler.ModifiableLocalSchedulerService;
+import com.dremio.service.users.UserService;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.services.fabric.FabricServiceImpl;
@@ -325,7 +326,8 @@ public class TestCatalogServiceImpl {
                 () -> new VersionedDatasetAdapterFactory(),
                 () -> new CatalogStatusEventsImpl(),
                 () -> pool,
-                () -> namespaceServiceFactory));
+                () -> namespaceServiceFactory,
+                () -> mock(UserService.class)));
     catalogService.start();
 
     mockUpPlugin = new MockUpPlugin();
@@ -769,7 +771,7 @@ public class TestCatalogServiceImpl {
     OptimizerRulesContext mock = mock(OptimizerRulesContext.class);
 
     ManagedStoragePlugin managedStoragePlugin = catalogService.getPluginsManager().get(MOCK_UP_BAD);
-    managedStoragePlugin.refreshState().get();
+    managedStoragePlugin.refreshState();
 
     AtomicBoolean test = new AtomicBoolean(false);
 

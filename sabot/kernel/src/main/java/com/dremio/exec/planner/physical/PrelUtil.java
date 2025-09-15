@@ -25,6 +25,8 @@ import com.dremio.common.logical.data.Order.Ordering;
 import com.dremio.exec.planner.physical.visitor.BasePrelVisitor;
 import com.dremio.exec.planner.physical.visitor.ExcessiveExchangeIdentifier;
 import com.dremio.exec.record.BatchSchema.SelectionVectorMode;
+import com.dremio.exec.store.iceberg.IcebergManifestListPrel;
+import com.dremio.exec.store.iceberg.IcebergManifestScanPrel;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import io.opentelemetry.instrumentation.annotations.WithSpan;
@@ -526,6 +528,82 @@ public class PrelUtil {
         }
       }
       return false;
+    }
+  }
+
+  /*
+   Visitor to look for count star optimization in the given Prel.
+   If present, replaces the optimized part of the plan with the record count from table metadata.
+  */
+  public static class CntStrOptimization extends BasePrelVisitor<Prel, Void, RuntimeException> {
+
+    RelOptCluster cluster;
+
+    public CntStrOptimization(RelOptCluster cluster) {
+      this.cluster = cluster;
+    }
+
+    @Override
+    public Prel visitTableFunction(TableFunctionPrel prel, Void value) throws RuntimeException {
+      if (prel instanceof IcebergManifestScanPrel) {
+        boolean countStrOptimizationApplied =
+            prel.getRowType().getFieldList().stream().anyMatch(f -> f.getName().endsWith("_str"));
+        if (countStrOptimizationApplied) {
+          List<RexLiteral> recordCountTuple = new ArrayList<>();
+          prel.getRowType().getFieldList().stream()
+              .filter(f -> !f.getName().endsWith("_str"))
+              .forEach(
+                  f -> recordCountTuple.add(cluster.getRexBuilder().makeNullLiteral(f.getType())));
+          prel.accept(
+              new BasePrelVisitor<Void, Void, RuntimeException>() {
+                @Override
+                public Void visitLeaf(LeafPrel prel, Void value) throws RuntimeException {
+                  if (prel instanceof IcebergManifestListPrel) {
+                    Long recordCount =
+                        ((IcebergManifestListPrel) prel)
+                            .getTableMetadata()
+                            .getReadDefinition()
+                            .getScanStats()
+                            .getRecordCount();
+                    recordCountTuple.add(
+                        cluster.getRexBuilder().makeBigintLiteral(BigDecimal.valueOf(recordCount)));
+                  }
+                  return null;
+                }
+
+                @Override
+                public Void visitPrel(Prel prel, Void value) throws RuntimeException {
+                  prel.forEach(input -> input.accept(this, null));
+                  return null;
+                }
+              },
+              null);
+          return new ValuesPrel(
+              cluster,
+              prel.getTraitSet().plus(DistributionTrait.SINGLETON),
+              prel.getRowType(),
+              ImmutableList.of(recordCountTuple));
+        }
+      }
+      return prel;
+    }
+
+    @Override
+    public Prel visitPrel(Prel prel, Void value) throws RuntimeException {
+      List<RelNode> children = new ArrayList<>();
+      boolean[] update = new boolean[1];
+      prel.forEach(
+          input -> {
+            Prel newInput = input.accept(this, null);
+            if (newInput != input) {
+              update[0] = true;
+            }
+            children.add(newInput);
+          });
+      if (!update[0]) {
+        return prel;
+      }
+      return (Prel) prel.copy(prel.getTraitSet(), children);
     }
   }
 }

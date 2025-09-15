@@ -544,6 +544,8 @@ public class TestCreateOrUpdateViewHandler extends DremioTest {
     when(context.getPlannerSettings()).thenReturn(settings);
     when(context.getSession()).thenReturn(userSession);
     when(context.getSubstitutionProviderFactory()).thenReturn(factory);
+    when(context.getOptions()).thenReturn(optionManager);
+    when(optionManager.getOption(PlannerSettings.VERBOSE_ACCELERATION_PROFILE)).thenReturn(false);
     when(factory.getSubstitutionProvider(
             any(SabotConfig.class),
             any(MaterializationList.class),

@@ -30,14 +30,17 @@ import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.PathUtils;
 import com.dremio.exec.catalog.CatalogUtil;
 import com.dremio.exec.catalog.EntityExplorer;
+import com.dremio.exec.planner.acceleration.DremioMaterialization;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateSettings;
 import com.dremio.exec.planner.acceleration.JoinDependencyProperties;
+import com.dremio.exec.planner.acceleration.MaterializationTarget;
 import com.dremio.exec.planner.acceleration.descriptor.ExternalMaterializationDescriptor;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
 import com.dremio.exec.planner.acceleration.descriptor.ReflectionInfo;
 import com.dremio.exec.planner.acceleration.descriptor.UnexpandedMaterializationDescriptor;
 import com.dremio.exec.planner.sql.PartitionTransform;
 import com.dremio.exec.proto.UserBitShared;
+import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
 import com.dremio.exec.proto.UserBitShared.ReflectionType;
 import com.dremio.exec.store.CatalogService;
 import com.dremio.exec.store.OperationType;
@@ -56,7 +59,6 @@ import com.dremio.service.job.JobSummary;
 import com.dremio.service.job.MaterializationSettings;
 import com.dremio.service.job.SqlQuery;
 import com.dremio.service.job.SubmitJobRequest;
-import com.dremio.service.job.SubstitutionSettings;
 import com.dremio.service.job.VersionedDatasetPath;
 import com.dremio.service.job.proto.JobAttempt;
 import com.dremio.service.job.proto.JobId;
@@ -101,6 +103,7 @@ import com.dremio.service.reflection.proto.ReflectionPartitionField;
 import com.dremio.service.reflection.proto.Refresh;
 import com.dremio.service.reflection.proto.RefreshId;
 import com.dremio.service.reflection.proto.Transform;
+import com.dremio.service.reflection.proto.Transform.Type;
 import com.dremio.service.reflection.store.MaterializationStore;
 import com.dremio.service.reflection.store.ReflectionGoalsStore;
 import com.google.common.base.Preconditions;
@@ -197,10 +200,6 @@ public class ReflectionUtils {
                     .setMaterializationSettings(
                         MaterializationSettings.newBuilder()
                             .setMaterializationSummary(materializationSummary)
-                            .setSubstitutionSettings(
-                                SubstitutionSettings.newBuilder()
-                                    .addAllExclusions(ImmutableList.of())
-                                    .build())
                             .build())
                     .setSqlQuery(query)
                     .setQueryType(JobsProtoUtil.toBuf(queryType))
@@ -276,6 +275,20 @@ public class ReflectionUtils {
   public static String getId(ReflectionEntry entry, Materialization m) {
     return String.format(
         "materialization %s/%s[%s]", entry.getId().getId(), m.getId().getId(), entry.getName());
+  }
+
+  public static String getId(MaterializationTarget target) {
+    LayoutMaterializedViewProfile m =
+        target.getMaterialization().getLayoutMaterializedViewProfile(false);
+    return String.format(
+        "materialization %s/%s[%s]:%s",
+        m.getLayoutId(), m.getMaterializationId(), m.getName(), target.getInfo());
+  }
+
+  public static String getId(DremioMaterialization m) {
+    return String.format(
+        "materialization %s/%s[%s]",
+        m.getReflectionId(), m.getMaterializationId(), m.getLayoutInfo().getName());
   }
 
   /** computes a log-friendly materialization id */
@@ -487,11 +500,19 @@ public class ReflectionUtils {
               displayFieldList != null && displayFieldList.contains(field),
               String.format("sort field [%s] must also be a display field", field.getName()));
 
-          // A field cannot be both a sort and partition field.
-          if (CollectionUtils.isNotEmpty(partitionFieldListWithoutPartitionTransforms)) {
+          // A field cannot be both a sort and identity partition field.
+          if (details.getPartitionFieldList() != null) {
             Preconditions.checkArgument(
-                !partitionFieldListWithoutPartitionTransforms.contains(field),
-                String.format("field [%s] cannot be both a sort and a partition", field.getName()));
+                details.getPartitionFieldList().stream()
+                    .filter(
+                        f ->
+                            f.getName().equals(field.getName())
+                                && (f.getTransform() == null
+                                    || f.getTransform().getType() == Type.IDENTITY))
+                    .findAny()
+                    .isEmpty(),
+                String.format(
+                    "field [%s] cannot be both a sort and an identity partition", field.getName()));
           }
         }
       }
@@ -535,11 +556,19 @@ public class ReflectionUtils {
                   && doesPartitionFieldListContainField(dimensionFieldList, field),
               String.format("sort field [%s] must also be a dimension field", field.getName()));
 
-          // A field cannot be both a sort and partition field.
-          if (partitionFieldListWithoutPartitionTransforms != null) {
+          // A field cannot be both a sort and identity partition field.
+          if (details.getPartitionFieldList() != null) {
             Preconditions.checkArgument(
-                !partitionFieldListWithoutPartitionTransforms.contains(field),
-                String.format("field [%s] cannot be both a sort and a partition", field.getName()));
+                details.getPartitionFieldList().stream()
+                    .filter(
+                        f ->
+                            f.getName().equals(field.getName())
+                                && (f.getTransform() == null
+                                    || f.getTransform().getType() == Type.IDENTITY))
+                    .findAny()
+                    .isEmpty(),
+                String.format(
+                    "field [%s] cannot be both a sort and an identity partition", field.getName()));
           }
         }
       }

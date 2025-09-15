@@ -17,6 +17,7 @@
 package com.dremio.exec.store.iceberg;
 
 import com.dremio.common.logical.FormatPluginConfig;
+import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.exec.physical.base.OpProps;
 import com.dremio.exec.physical.config.TableFunctionConfig;
 import com.dremio.exec.store.BlockBasedSplitGenerator;
@@ -34,7 +35,9 @@ import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableOperations;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.view.View;
 
 /** Interface for plugins that support reading of iceberg root pointers. */
 public interface SupportsIcebergRootPointer extends SupportsFsCreation {
@@ -95,5 +98,9 @@ public interface SupportsIcebergRootPointer extends SupportsFsCreation {
   default TableMetadata loadTableMetadata(
       FileIO io, OperatorContext context, List<String> dataset, String metadataLocation) {
     return IcebergUtils.loadTableMetadata(io, context, metadataLocation);
+  }
+
+  default View loadViewMetadata(TableIdentifier viewIdentifier, GetDatasetOption... options) {
+    throw new UnsupportedOperationException("Loading view metadata is not supported");
   }
 }

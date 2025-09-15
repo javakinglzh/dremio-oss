@@ -276,6 +276,8 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
                           .getOptions()
                           .getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
                   (int)
+                      operatorContext.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
+                  (int)
                       operatorContext
                           .getOptions()
                           .getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
@@ -296,9 +298,9 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
 
       logger.debug("Total rows read for combined multi-part checkpoint files: {}", numRowsRead);
       long estimatedNetBytesAdded =
-          Math.round((netBytesAdded * netFilesAdded * 1.0) / numFilesReadToEstimateRowCount);
+          Math.round((1.0d * netBytesAdded * netFilesAdded) / numFilesReadToEstimateRowCount);
       long estimatedNetRecordsAdded =
-          Math.round((netRecordsAdded * netFilesAdded * 1.0) / numFilesReadToEstimateRowCount);
+          Math.round((1.0d * netRecordsAdded * netFilesAdded) / numFilesReadToEstimateRowCount);
 
       logger.debug(
           "Stat Estimations: netFilesAdded {}, estimatedNetBytesAdded {}, estimatedNetRecordsAdded {}",
@@ -367,7 +369,7 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
           numFilesReadToEstimateRowCount == 0
               ? 0
               : Math.round(
-                  (netRecordsAdded * netFilesAdded * 1.0) / numFilesReadToEstimateRowCount);
+                  (1.0d * netRecordsAdded * netFilesAdded) / numFilesReadToEstimateRowCount);
       isRowCountEstimateConverged =
           prevRecordCntEstimate == 0
               ? false
@@ -774,6 +776,6 @@ public class DeltaLogCheckpointParquetReader implements DeltaLogReader {
       long prevRecordCntEstimate, long newRecordCntEstimate) {
     long diff = Math.abs(newRecordCntEstimate - prevRecordCntEstimate);
     int deltaPercentage = 30;
-    return diff * 100 * 1.0 / prevRecordCntEstimate < deltaPercentage;
+    return (1.0f * diff * 100 / prevRecordCntEstimate) < deltaPercentage;
   }
 }

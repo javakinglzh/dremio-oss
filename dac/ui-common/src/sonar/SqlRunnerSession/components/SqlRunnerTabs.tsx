@@ -33,6 +33,7 @@ import {
   isTemporaryScript,
   stripTemporaryPrefix,
 } from "../utilities/temporaryTabs";
+import { Script } from "../../scripts/Script.type";
 
 type SqlRunnerTabsProps = {
   canClose?: () => boolean;
@@ -41,6 +42,7 @@ type SqlRunnerTabsProps = {
   onTabSelected?: (tabId: string) => void;
   onTabClosed?: (tabId: string) => void;
   tabActions: (tabId: string) => JSX.Element | JSX.Element[];
+  handleTabsCleanup?: (scripts: Script[], sessionScriptsIds: string[]) => void;
 };
 
 const SqlRunnerTab = (props: {
@@ -82,10 +84,18 @@ const SqlRunnerTab = (props: {
 
 export const SqlRunnerTabs = (props: SqlRunnerTabsProps) => {
   const sqlRunnerSession = useSqlRunnerSession();
+  const { handleTabsCleanup } = props;
 
   useEffect(() => {
     ScriptsResource.fetch();
   }, []);
+
+  const sessionScriptIds = sqlRunnerSession.scriptIds;
+  const scripts = ScriptsResource.getResource().value;
+  useEffect(() => {
+    if (sessionScriptIds && scripts)
+      handleTabsCleanup?.(scripts || [], sessionScriptIds);
+  }, [handleTabsCleanup, sessionScriptIds, scripts]);
 
   const canCloseTabs =
     typeof props.canClose === "function" ? props.canClose() : true;

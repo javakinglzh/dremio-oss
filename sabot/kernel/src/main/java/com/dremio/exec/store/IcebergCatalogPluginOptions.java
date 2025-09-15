@@ -51,6 +51,11 @@ public final class IcebergCatalogPluginOptions {
           new TypeValidators.PositiveLongValidator(
               "plugins.restcatalog.file_system.expire_after_write_minutes", 20 /* 20 mins */, 5);
 
+  public static final TypeValidators.BooleanValidator
+      RESTCATALOG_PLUGIN_FILE_SYSTEM_OPTIMISTIC_LOCKING =
+          new TypeValidators.BooleanValidator(
+              "plugins.restcatalog.file_system.optimistic_locking", false);
+
   public static final TypeValidators.PositiveLongValidator
       RESTCATALOG_PLUGIN_CATALOG_EXPIRE_SECONDS =
           new TypeValidators.PositiveLongValidator(

@@ -27,6 +27,7 @@ import com.dremio.dac.server.DACConfig;
 import com.dremio.hadoop.security.alias.DremioCredentialProviderFactory;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.CredentialsServiceImpl;
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Throwables;
 import java.io.PrintStream;
@@ -38,6 +39,8 @@ import java.util.stream.Collectors;
 
 /** Runs an admin command. */
 public final class AdminCommandRunner {
+
+  private AdminCommandRunner() {}
 
   public static void main(String[] args) throws Exception {
     final DACConfig dacConfig = DACConfig.newConfig();
@@ -71,6 +74,7 @@ public final class AdminCommandRunner {
     Class<?> command = null;
     for (Class<?> clazz : adminCommands) {
       final AdminCommand adminCommand = clazz.getAnnotation(AdminCommand.class);
+      //noinspection DataFlowIssue already filtered
       if (adminCommand.value().equals(commandName)) {
         command = clazz;
         break;
@@ -97,6 +101,7 @@ public final class AdminCommandRunner {
     System.exit(0);
   }
 
+  @VisibleForTesting
   public static void runCommand(String commandName, Class<?> command, String[] commandArgs)
       throws Exception {
     final Method mainMethod = command.getMethod("main", String[].class);
@@ -108,7 +113,6 @@ public final class AdminCommandRunner {
     final Object[] objects = new Object[1];
     objects[0] = commandArgs;
     try {
-      //noinspection JavaReflectionInvocation
       mainMethod.invoke(null, objects);
     } catch (final ReflectiveOperationException e) {
       final Throwable cause = e.getCause() != null ? e.getCause() : e;
@@ -122,6 +126,7 @@ public final class AdminCommandRunner {
       stream.println(reason);
     }
 
+    //noinspection DataFlowIssue already filtered
     final String commandNames =
         adminCommands.stream()
             .map(aClass -> aClass.getAnnotation(AdminCommand.class))
@@ -133,6 +138,9 @@ public final class AdminCommandRunner {
     adminCommands.forEach(
         clazz -> {
           final AdminCommand adminCommand = clazz.getAnnotation(AdminCommand.class);
+          if (adminCommand == null || adminCommand.hideHelp()) {
+            return;
+          }
           stream.println("  " + adminCommand.value() + ": " + adminCommand.description());
         });
 

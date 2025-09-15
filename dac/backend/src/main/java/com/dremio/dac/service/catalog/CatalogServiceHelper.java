@@ -1686,7 +1686,7 @@ public class CatalogServiceHelper {
   }
 
   private void deleteDataset(DatasetConfig config, String tag)
-      throws NamespaceException, UnsupportedOperationException, IOException {
+      throws NamespaceException, UnsupportedOperationException, IOException, CatalogException {
     // if no tag is passed in, use the latest version
     String version = config.getTag();
 
@@ -2242,11 +2242,15 @@ public class CatalogServiceHelper {
     if (config.getType() == VIRTUAL_DATASET) {
       String sql = null;
       List<String> sqlContext = null;
+      String datasetVersion = null;
 
       VirtualDataset virtualDataset = config.getVirtualDataset();
       if (virtualDataset != null) {
         sql = virtualDataset.getSql();
         sqlContext = virtualDataset.getContextList();
+        if (virtualDataset.getVersion() != null) {
+          datasetVersion = virtualDataset.getVersion().getVersion();
+        }
       }
 
       dataset =
@@ -2254,6 +2258,7 @@ public class CatalogServiceHelper {
               config.getId().getId(),
               Dataset.DatasetType.VIRTUAL_DATASET,
               config.getFullPathList(),
+              datasetVersion,
               fields,
               config.getCreatedAt(),
               config.getTag(),
@@ -2271,6 +2276,7 @@ public class CatalogServiceHelper {
               config.getId().getId(),
               Dataset.DatasetType.PHYSICAL_DATASET,
               config.getFullPathList(),
+              null,
               fields,
               config.getCreatedAt(),
               String.valueOf(config.getTag()),

@@ -165,7 +165,7 @@ public class SQLRunnerSessionServiceImpl implements SQLRunnerSessionService {
   }
 
   protected Set<String> getAccessibleScriptIds() {
-    return scriptService.get().getScripts(0, Integer.MAX_VALUE, "", "", "", null).parallelStream()
+    return scriptService.get().getScripts(0, Integer.MAX_VALUE, "", "", null).parallelStream()
         .map(
             script -> {
               return script.getScriptId();

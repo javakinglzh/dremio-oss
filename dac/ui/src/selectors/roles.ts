@@ -18,4 +18,5 @@ export const getFilteredRolesAndUsers = (
   state: any,
   allowPublicRole?: boolean,
   singleUserOrRole?: [],
+  allowPartialSearch?: boolean,
 ) => {};

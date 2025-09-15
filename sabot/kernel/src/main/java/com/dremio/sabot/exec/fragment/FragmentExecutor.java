@@ -838,6 +838,12 @@ public class FragmentExecutor implements MemoryArbiterTask {
     Preconditions.checkArgument(!retired, "Fragment executor already retired.");
 
     if (!flushable.flushMessages()) {
+      synchronized (allocatorLock) {
+        // we are hanging around only to make sure that pending messages are flushed
+        // so let us prematurely retire the work queue, in case it takes some time to complete the
+        // flushing
+        workQueue.retire();
+      }
       State prevTaskState = taskState;
       // rerun retire if we have messages still pending send completion.
       taskState = State.BLOCKED_ON_DOWNSTREAM;

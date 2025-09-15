@@ -35,6 +35,7 @@ import com.dremio.catalog.exception.CatalogEntityForbiddenException;
 import com.dremio.catalog.exception.CatalogEntityNotFoundException;
 import com.dremio.catalog.exception.CatalogException;
 import com.dremio.catalog.exception.CatalogExceptionUtils;
+import com.dremio.catalog.exception.CatalogInvalidVersionException;
 import com.dremio.catalog.exception.CatalogNoDefaultBranchException;
 import com.dremio.catalog.exception.CatalogUnsupportedOperationException;
 import com.dremio.catalog.exception.SourceMalfunctionException;
@@ -203,15 +204,17 @@ public class CatalogImpl implements Catalog {
   private final Orphanage orphanage;
   private final DatasetListingService datasetListingService;
   private final ViewCreatorFactory viewCreatorFactory;
-  private final IdentityResolver identityResolver;
+  private final CatalogIdentityResolver identityResolver;
 
   private final NamespaceService userNamespaceService;
-  private final DatasetManager datasets;
+  private final DatasetManager datasetManager;
   private final InformationSchemaCatalog iscDelegate;
   private final VersionContextResolverImpl versionContextResolverImpl;
   private final CatalogStatusEvents catalogStatusEvents;
   private final VersionedDatasetAdapterFactory versionedDatasetAdapterFactory;
   private final MetadataIOPool metadataIOPool;
+  private final CatalogEntityOwnership catalogEntityOwnership;
+  private final UserOrRoleResolver userOrRoleResolver;
 
   CatalogImpl(
       MetadataRequestOptions options,
@@ -223,11 +226,13 @@ public class CatalogImpl implements Catalog {
       Orphanage orphanage,
       DatasetListingService datasetListingService,
       ViewCreatorFactory viewCreatorFactory,
-      IdentityResolver identityResolver,
+      CatalogIdentityResolver identityResolver,
       VersionContextResolverImpl versionContextResolverImpl,
       CatalogStatusEvents catalogStatusEvents,
       VersionedDatasetAdapterFactory versionedDatasetAdapterFactory,
-      MetadataIOPool metadataIOPool) {
+      MetadataIOPool metadataIOPool,
+      CatalogEntityOwnership catalogEntityOwnership,
+      UserOrRoleResolver userOrRoleResolver) {
     this.options = options;
     this.pluginRetriever = pluginRetriever;
     this.sourceModifier = sourceModifier;
@@ -243,35 +248,41 @@ public class CatalogImpl implements Catalog {
     this.versionedDatasetAdapterFactory = versionedDatasetAdapterFactory;
 
     final CatalogIdentity identity = options.getSchemaConfig().getAuthContext().getSubject();
-    final NamespaceIdentity namespaceIdentity = identityResolver.toNamespaceIdentity(identity);
+    @Nullable NamespaceIdentity namespaceIdentity = identityResolver.toNamespaceIdentity(identity);
     this.userNamespaceService = namespaceFactory.get(namespaceIdentity);
 
     this.versionContextResolverImpl = versionContextResolverImpl;
     this.metadataIOPool = metadataIOPool;
-    this.datasets =
+    this.catalogEntityOwnership = catalogEntityOwnership;
+    this.userOrRoleResolver = userOrRoleResolver;
+    this.datasetManager =
         new DatasetManager(
             pluginRetriever,
             userNamespaceService,
             optionManager,
             userName,
-            identityResolver,
             versionContextResolverImpl,
             versionedDatasetAdapterFactory,
-            metadataIOPool);
+            metadataIOPool,
+            catalogEntityOwnership,
+            userOrRoleResolver);
     this.iscDelegate =
         new InformationSchemaCatalogImpl(
-            userNamespaceService, pluginRetriever, optionManager, namespaceIdentity);
+            userNamespaceService,
+            pluginRetriever,
+            optionManager,
+            namespaceIdentity != null ? namespaceIdentity.getId() : null);
     this.catalogStatusEvents = catalogStatusEvents;
   }
 
   @Override
   public DremioTable getTableNoResolve(NamespaceKey key) {
-    return datasets.getTable(key, options, false);
+    return datasetManager.getTable(key, options, false);
   }
 
   @Override
   public DremioTable getTableNoColumnCount(NamespaceKey key) {
-    return datasets.getTable(key, options, true);
+    return datasetManager.getTable(key, options, true);
   }
 
   @Override
@@ -308,7 +319,7 @@ public class CatalogImpl implements Catalog {
 
     // issue a bulk request for the keys as provided
     BulkResponse<NamespaceKey, Optional<DremioTable>> unresolvedKeyResponses =
-        datasets.bulkGetTables(keys, options, false);
+        datasetManager.bulkGetTables(keys, options, false);
 
     // if there is a default schema provided, perform a concurrent lookup with keys resolved
     // to that default schema
@@ -318,7 +329,8 @@ public class CatalogImpl implements Catalog {
       // issue a bulk request for the keys resolved to the default schema
       BulkResponse<NamespaceKey, Optional<DremioTable>> resolvedKeyResponses =
           keys.bulkTransformAndHandleRequests(
-              requests -> datasets.bulkGetTables(requests, options, false), this::resolveToDefault);
+              requests -> datasetManager.bulkGetTables(requests, options, false),
+              this::resolveToDefault);
 
       // combine with unresolved key responses - resolved key responses will be preferred over
       // unresolved
@@ -1091,7 +1103,7 @@ public class CatalogImpl implements Catalog {
 
   private DremioTable getTableHelper(NamespaceKey key) {
     Span.current().setAttribute("dremio.namespace.key.schemapath", key.getSchemaPath());
-    final DremioTable table = datasets.getTable(key, options, false);
+    final DremioTable table = datasetManager.getTable(key, options, false);
     if (table != null) {
       return updateTableIfNeeded(key, table);
     }
@@ -1107,7 +1119,7 @@ public class CatalogImpl implements Catalog {
           // TODO: DX-44984
           updateView(viewPath, view, null);
           // Since view got updated, we need the latest version.
-          return datasets.getTable(key, options, false);
+          return datasetManager.getTable(key, options, false);
         }
       } catch (Exception ex) {
         logger.warn("Failed to update view with updated nested schema: ", ex);
@@ -1153,7 +1165,7 @@ public class CatalogImpl implements Catalog {
     if (isTimeTravelDataset) {
       return getTableForTimeTravel(versionedDatasetId);
     }
-    return datasets.getTable(datasetId, options);
+    return datasetManager.getTable(datasetId, options);
   }
 
   @Override
@@ -1398,20 +1410,14 @@ public class CatalogImpl implements Catalog {
         && plugin.getPlugin().get().isWrapperFor(VersionedPlugin.class)) {
       return new CatalogUser(SYSTEM_USERNAME);
     }
-    try {
-      CatalogIdentity owner = identityResolver.getOwner(path.getKeyComponents());
-      if (owner == null) {
-        owner = new CatalogUser(userName);
-      }
-      return owner;
-    } catch (NamespaceException e) {
-      throw new RuntimeException(e.getMessage(), e);
-    }
+    Optional<CatalogIdentity> owner =
+        getCatalogEntityOwner(CatalogEntityKey.of(path.getKeyComponents()));
+    return owner.orElseGet(() -> new CatalogUser(userName));
   }
 
   private Collection<Function> getUserDefinedScalarFunctions(CatalogEntityKey path) {
     Optional<UserDefinedFunction> optionalUserDefinedFunction = getUserDefinedFunction(path);
-    if (!optionalUserDefinedFunction.isPresent()) {
+    if (optionalUserDefinedFunction.isEmpty()) {
       return ImmutableList.of();
     }
 
@@ -1563,7 +1569,9 @@ public class CatalogImpl implements Catalog {
         versionContextResolverImpl,
         catalogStatusEvents,
         versionedDatasetAdapterFactory,
-        metadataIOPool);
+        metadataIOPool,
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   @Override
@@ -1584,7 +1592,9 @@ public class CatalogImpl implements Catalog {
         versionContextResolverImpl,
         catalogStatusEvents,
         versionedDatasetAdapterFactory,
-        metadataIOPool);
+        metadataIOPool,
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   @Override
@@ -1604,7 +1614,9 @@ public class CatalogImpl implements Catalog {
         versionContextResolverImpl,
         catalogStatusEvents,
         versionedDatasetAdapterFactory,
-        metadataIOPool);
+        metadataIOPool,
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   @Override
@@ -1626,7 +1638,9 @@ public class CatalogImpl implements Catalog {
         versionContextResolverImpl,
         catalogStatusEvents,
         versionedDatasetAdapterFactory,
-        metadataIOPool);
+        metadataIOPool,
+        catalogEntityOwnership,
+        userOrRoleResolver);
   }
 
   private FileSystemPlugin getHomeFilesPlugin() throws ExecutionSetupException {
@@ -1690,7 +1704,8 @@ public class CatalogImpl implements Catalog {
               .createOrUpdateView(key, options.getSchemaConfig(), view, viewOptions, attributes);
           if (optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)
               && getSource(key.getRoot()).isWrapperFor(SupportsRefreshViews.class)) {
-            refreshDataset(key, DatasetRetrievalOptions.DEFAULT);
+            refreshDataset(
+                key, DatasetRetrievalOptions.DEFAULT.toBuilder().setForceUpdate(true).build());
           }
           return;
         }
@@ -1737,7 +1752,8 @@ public class CatalogImpl implements Catalog {
           plugin.get().createOrUpdateView(key, options.getSchemaConfig(), view, viewOptions);
           if (optionManager.getOption(RESTCATALOG_VIEWS_SUPPORTED)
               && getSource(key.getRoot()).isWrapperFor(SupportsRefreshViews.class)) {
-            refreshDataset(key, DatasetRetrievalOptions.DEFAULT);
+            refreshDataset(
+                key, DatasetRetrievalOptions.DEFAULT.toBuilder().setForceUpdate(true).build());
           }
           return;
         }
@@ -1927,7 +1943,11 @@ public class CatalogImpl implements Catalog {
                 .withShouldDeleteCatalogEntry(isLayered)
             : null;
 
-    plugin.get().dropTable(key, options.getSchemaConfig(), localTableMutationOptions);
+    try {
+      plugin.get().dropTable(key, options.getSchemaConfig(), localTableMutationOptions);
+    } catch (CatalogEntityNotFoundException e) {
+      throw UserException.validationError().message(e.getMessage()).build(logger);
+    }
 
     if (existsInNamespace) {
       try {
@@ -2026,7 +2046,8 @@ public class CatalogImpl implements Catalog {
     if (CatalogUtil.requestedPluginSupportsVersionedTables(key, this)) {
       throw new UnsupportedForgetTableException(
           String.format(
-              "Forget table is not a valid operation for objects in '%s' which is a versioned source.",
+              "Forget table is not a valid operation for objects in '%s' which is a versioned"
+                  + " source.",
               key.getRoot()));
     }
 
@@ -2506,7 +2527,7 @@ public class CatalogImpl implements Catalog {
           .buildSilently();
     }
 
-    datasets.createDataset(key, plugin, datasetMutator);
+    datasetManager.createDataset(key, plugin, datasetMutator);
   }
 
   @Override
@@ -2547,14 +2568,14 @@ public class CatalogImpl implements Catalog {
   }
 
   @Override
-  public SourceState refreshSourceStatus(NamespaceKey key) throws Exception {
+  public SourceState refreshSourceStatus(NamespaceKey key) {
     final ManagedStoragePlugin plugin = pluginRetriever.getPlugin(key.getRoot(), true);
     if (plugin == null) {
       throw UserException.validationError()
           .message("Unknown source %s", key.getRoot())
           .buildSilently();
     }
-    return plugin.refreshState().get();
+    return plugin.refreshState();
   }
 
   @Override
@@ -2595,7 +2616,7 @@ public class CatalogImpl implements Catalog {
           .buildSilently();
     }
 
-    return datasets.createOrUpdateDataset(plugin, datasetPath, datasetConfig, attributes);
+    return datasetManager.createOrUpdateDataset(plugin, datasetPath, datasetConfig, attributes);
   }
 
   @Override
@@ -2787,12 +2808,6 @@ public class CatalogImpl implements Catalog {
   @Override
   public Catalog visit(java.util.function.Function<Catalog, Catalog> catalogRewrite) {
     return catalogRewrite.apply(this);
-  }
-
-  public interface IdentityResolver {
-    CatalogIdentity getOwner(List<String> path) throws NamespaceException;
-
-    NamespaceIdentity toNamespaceIdentity(CatalogIdentity identity);
   }
 
   private DremioTable getTableForTimeTravel(VersionedDatasetId versionedDatasetId) {
@@ -3211,6 +3226,71 @@ public class CatalogImpl implements Catalog {
     userNamespaceService.deleteDataset(datasetPath, version, attributes);
   }
 
+  private void dropVersionedTable(CatalogEntityKey catalogEntityKey) {
+    ResolvedVersionContext resolvedVersionContext =
+        resolveVersionContext(
+            catalogEntityKey.getRootEntity(),
+            catalogEntityKey.getTableVersionContext().asVersionContext());
+    TableMutationOptions tableMutationOptions =
+        TableMutationOptions.newBuilder().setResolvedVersionContext(resolvedVersionContext).build();
+    dropTable(catalogEntityKey.toNamespaceKey(), tableMutationOptions);
+  }
+
+  private void validateEntityKeyForVersionedPlugin(CatalogEntityKey key)
+      throws CatalogInvalidVersionException {
+    if (key.getTableVersionContext() == null) {
+      throw new CatalogInvalidVersionException(
+          "To delete a versioned dataset the refType must be a branch");
+    }
+    if (!key.getTableVersionContext().asVersionContext().isBranch()) {
+      throw new CatalogInvalidVersionException(
+          "To delete a versioned dataset the refType must be a branch");
+    }
+  }
+
+  @Override
+  public void deleteEntity(
+      CatalogEntityKey catalogEntityKey, String version, NamespaceAttribute... attributes)
+      throws NamespaceException, IOException, CatalogException {
+    // TODO DX-103164: Further refactor to remove versioned information and use deleteEntity in
+    // NamespacePassthrough
+    switch (getRootType(catalogEntityKey.toNamespaceKey())) {
+      case SOURCE:
+        try {
+          if (CatalogUtil.supportsInterface(
+              catalogEntityKey.toNamespaceKey(), this, VersionedPlugin.class)) {
+            validateEntityKeyForVersionedPlugin(catalogEntityKey);
+            dropVersionedTable(catalogEntityKey);
+          } else {
+            dropTable(catalogEntityKey.toNamespaceKey(), null);
+          }
+        } catch (UserException e) {
+          // try drop view
+          if (CatalogUtil.supportsInterface(
+              catalogEntityKey.toNamespaceKey(), this, VersionedPlugin.class)) {
+            validateEntityKeyForVersionedPlugin(catalogEntityKey);
+            ResolvedVersionContext resolvedVersionContext =
+                resolveVersionContext(
+                    catalogEntityKey.getRootEntity(),
+                    catalogEntityKey.getTableVersionContext().asVersionContext());
+            ViewOptions viewOptions =
+                new ViewOptions.ViewOptionsBuilder().version(resolvedVersionContext).build();
+            dropView(catalogEntityKey.toNamespaceKey(), viewOptions);
+          } else {
+            dropView(catalogEntityKey.toNamespaceKey(), null);
+          }
+        }
+        break;
+      case SPACE:
+      case HOME:
+        userNamespaceService.deleteDataset(catalogEntityKey.toNamespaceKey(), version, attributes);
+        break;
+      default:
+        throw new UnsupportedOperationException(
+            String.format("Cannot delete dataset %s", catalogEntityKey));
+    }
+  }
+
   @Override
   public int getDownstreamsCount(NamespaceKey path) {
     return userNamespaceService.getDownstreamsCount(path);
@@ -3464,4 +3544,9 @@ public class CatalogImpl implements Catalog {
   }
 
   //// End: NamespacePassthrough Methods
+
+  @Override
+  public Optional<CatalogIdentity> getCatalogEntityOwner(CatalogEntityKey catalogEntityKey) {
+    return catalogEntityOwnership.getCatalogEntityOwner(catalogEntityKey);
+  }
 }

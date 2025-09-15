@@ -33,6 +33,7 @@ import com.dremio.connector.metadata.ViewDatasetHandle;
 import com.dremio.connector.metadata.extensions.SupportsListingDatasets;
 import com.dremio.connector.metadata.extensions.SupportsMetadataVerify;
 import com.dremio.connector.metadata.options.MetadataVerifyRequest;
+import com.dremio.exec.ExecConstants;
 import com.dremio.exec.catalog.PluginSabotContext;
 import com.dremio.exec.catalog.SupportsFolderIngestion;
 import com.dremio.exec.catalog.SupportsMutatingFolders;
@@ -86,9 +87,11 @@ import javax.annotation.Nullable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.TableOperations;
+import org.apache.iceberg.catalog.TableIdentifier;
 import org.apache.iceberg.exceptions.BadRequestException;
 import org.apache.iceberg.exceptions.NoSuchTableException;
 import org.apache.iceberg.io.FileIO;
+import org.apache.iceberg.view.View;
 
 public abstract class IcebergCatalogPlugin
     implements StoragePlugin,
@@ -132,17 +135,21 @@ public abstract class IcebergCatalogPlugin
   private static IcebergCatalogFileSystemConfigurationAdapter
       initializeFileSystemConfigurationAdapter(OptionManager optionManager) {
     Configuration fsConf = FileSystemConfigurationUtils.getNewFsConf(optionManager);
-    initializeHadoopConf(fsConf);
+    initializeHadoopConf(fsConf, optionManager);
     return new IcebergCatalogFileSystemConfigurationAdapter(fsConf);
   }
 
-  private static void initializeHadoopConf(Configuration hadoopConf) {
+  private static void initializeHadoopConf(Configuration hadoopConf, OptionManager optionManager) {
     hadoopConf.set("fs.classpath.impl", ClassPathFileSystem.class.getName());
     hadoopConf.set("fs.dremio-local.impl", LocalSyncableFileSystem.class.getName());
     FileSystemConfUtil.FS_CACHE_DISABLES.forEach(hadoopConf::set);
     FileSystemConfUtil.S3_PROPS.forEach(hadoopConf::set);
     FileSystemConfUtil.WASB_PROPS.forEach(hadoopConf::set);
     FileSystemConfUtil.ABFS_PROPS.forEach(hadoopConf::set);
+
+    hadoopConf.set(
+        ExecConstants.ENABLE_S3_V2_CLIENT.getOptionName(),
+        Boolean.toString(optionManager.getOption(ExecConstants.ENABLE_S3_V2_CLIENT)));
   }
 
   protected DatasetFileSystemCache createFSCache() {
@@ -176,7 +183,7 @@ public abstract class IcebergCatalogPlugin
       return Optional.empty();
     }
 
-    return Optional.ofNullable(getCatalogAccessor().getDatasetHandle(components, this, options));
+    return getCatalogAccessor().getDatasetHandle(components, this, options);
   }
 
   @Override
@@ -315,20 +322,26 @@ public abstract class IcebergCatalogPlugin
   }
 
   private FileSystem newFileSystem(
-      String filePath, String userName, OperatorContext operatorContext, List<String> dataset) {
-    return getHadoopFileSystemCache()
-        .load(
-            filePath,
-            userName,
-            dataset,
-            operatorContext == null ? null : operatorContext.getStats(),
-            config.isAsyncEnabled());
+      String filePath,
+      String userName,
+      String userId,
+      OperatorContext operatorContext,
+      List<String> dataset) {
+    return new IcebergCatalogFileSystem(
+        getHadoopFileSystemCache()
+            .load(
+                filePath,
+                userName,
+                userId,
+                dataset,
+                operatorContext == null ? null : operatorContext.getStats(),
+                config.isAsyncEnabled()));
   }
 
   @Override
   public FileSystem createFS(Builder b) throws IOException {
     return fileSystemWrapper.wrap(
-        newFileSystem(b.filePath(), b.userName(), b.operatorContext(), b.dataset()),
+        newFileSystem(b.filePath(), b.userName(), b.userId(), b.operatorContext(), b.dataset()),
         getName(),
         config,
         b.operatorContext(),
@@ -501,6 +514,11 @@ public abstract class IcebergCatalogPlugin
       return datasetHandle.unwrap(MetadataVerifyHandle.class).verifyMetadata(metadataVerifyRequest);
     }
     return Optional.empty();
+  }
+
+  @Override
+  public View loadViewMetadata(TableIdentifier viewIdentifier, GetDatasetOption... options) {
+    return getCatalogAccessor().loadView(viewIdentifier, options);
   }
 
   public abstract CatalogAccessor createCatalog(Configuration fsConf);

@@ -20,6 +20,7 @@ import com.dremio.common.expression.PathSegment;
 import com.dremio.common.expression.SchemaPath;
 import com.dremio.common.util.DateTimes;
 import com.dremio.exec.planner.physical.PlannerSettings;
+import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.parquet2.LogicalListL1Converter;
 import com.dremio.exec.util.ColumnUtils;
 import com.dremio.exec.work.ExecErrorConstants;
@@ -34,6 +35,7 @@ import java.util.NavigableMap;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
+import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.parquet.SemanticVersion;
 import org.apache.parquet.VersionParser;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -444,12 +446,27 @@ public final class ParquetReaderUtility {
   }
 
   public static List<SchemaPath> getColumnsFromEqualityIds(
-      List<Integer> equalityIds, List<IcebergProtobuf.IcebergSchemaField> icebergColumnIds) {
+      List<Integer> equalityIds,
+      List<IcebergProtobuf.IcebergSchemaField> icebergColumnIds,
+      BatchSchema tableSchema) {
     return equalityIds.stream()
         .map(id -> icebergColumnIds.stream().filter(col -> col.getId() == id).findFirst())
         .filter(Optional::isPresent)
-        .map(col -> SchemaPath.getSimplePath(col.get().getSchemaPath()))
+        .map(
+            col ->
+                SchemaPath.getSimplePath(
+                    getOriginalColumnName(col.get().getSchemaPath(), tableSchema.getFields())))
         .collect(Collectors.toList());
+  }
+
+  private static String getOriginalColumnName(
+      String caseInsensitiveColumnName, List<Field> originalColumnList) {
+    Field originalField =
+        originalColumnList.stream()
+            .filter(x -> x.getName().equalsIgnoreCase(caseInsensitiveColumnName))
+            .findFirst()
+            .orElse(null);
+    return originalField == null ? caseInsensitiveColumnName : originalField.getName();
   }
 
   private ParquetReaderUtility() {

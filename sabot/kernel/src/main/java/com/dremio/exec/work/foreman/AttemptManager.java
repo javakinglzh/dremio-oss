@@ -1341,18 +1341,7 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
                       Exception.class);
                   // The commit handler can internally invoke other grpcs. So, forking the context
                   // here.
-                  Context.current()
-                      .fork()
-                      .run(
-                          () ->
-                              committer.ifPresent(
-                                  (it) -> {
-                                    logger.debug("{}: Committer about to be called", queryIdString);
-                                    it.run();
-                                    logger.debug(
-                                        "{}: Committer called successfully", queryIdString);
-                                  }));
-
+                  Context.current().fork().run(this::executeCommitter);
                 } catch (Throwable throwable) {
                   logger.error(
                       "{}: Exception occurred moving job state from RUNNING to COMPLETED",
@@ -1435,6 +1424,16 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
     throw illegalStateException;
   }
 
+  @WithSpan
+  private void executeCommitter() {
+    committer.ifPresent(
+        (it) -> {
+          logger.debug("{}: Committer about to be called", queryIdString);
+          it.run();
+          logger.debug("{}: Committer called successfully", queryIdString);
+        });
+  }
+
   private class StateSwitch extends EventProcessor<StateEvent> {
 
     void addEvent(final QueryState newState, final Exception exception) {
@@ -1453,11 +1452,13 @@ public class AttemptManager implements Runnable, MaestroObserver.ExecutionStageC
 
   @WithSpan("record-query-state-transition")
   private void recordNewState(final QueryState newState) {
-    state = newState;
     Span.current()
         .setAttribute("dremio.attempt_manager.query_id", queryIdString)
-        .setAttribute("dremio.attempt_manager.current_query_state", state.toString())
+        .setAttribute(
+            "dremio.attempt_manager.current_query_state",
+            state == null ? "NOT_INITIALIZED" : state.toString())
         .setAttribute("dremio.attempt_manager.new_query_state", newState.toString());
+    state = newState;
     logger.debug("{}: AttemptManager local state updated to {}", queryIdString, state);
   }
 

@@ -68,6 +68,7 @@ import com.dremio.service.namespace.space.proto.SpaceConfig;
 import com.dremio.service.scheduler.ModifiableSchedulerService;
 import com.dremio.service.scheduler.SchedulerService;
 import com.dremio.service.users.SystemUser;
+import com.dremio.service.users.UserService;
 import com.dremio.services.fabric.api.FabricService;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -230,7 +231,8 @@ public abstract class ITDataplanePluginTestSetup extends DataplaneTestHelper {
                         getProvider(VersionedDatasetAdapterFactory.class),
                         getProvider(CatalogStatusEvents.class),
                         getProvider(ExecutorService.class),
-                        getProvider(NamespaceService.Factory.class)));
+                        getProvider(NamespaceService.Factory.class),
+                        getProvider(UserService.class)));
           }
         });
     setupDefaultTestCluster();

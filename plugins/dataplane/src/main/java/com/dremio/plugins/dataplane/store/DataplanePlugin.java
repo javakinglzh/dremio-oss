@@ -15,6 +15,7 @@
  */
 package com.dremio.plugins.dataplane.store;
 
+import static com.dremio.exec.catalog.CatalogOptions.VERSIONED_SOURCE_UDF_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AWS_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_AZURE_STORAGE_ENABLED;
 import static com.dremio.exec.store.DataplanePluginOptions.DATAPLANE_GCS_STORAGE_ENABLED;
@@ -2622,6 +2623,13 @@ public abstract class DataplanePlugin extends FileSystemPlugin<AbstractDataplane
   }
 
   private Optional<FunctionConfig> getFunctionHelper(CatalogEntityKey functionKey) {
+    if (!context.getOptionManager().getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
+      throw UserException.unsupportedError()
+          .message(
+              "User-defined functions are not supported in source '%s'.",
+              functionKey.getRootEntity())
+          .buildSilently();
+    }
     ResolvedVersionContext resolvedVersionContext =
         resolveVersionContext(
             Objects.requireNonNull(functionKey.getTableVersionContext()).asVersionContext());
@@ -2717,6 +2725,11 @@ public abstract class DataplanePlugin extends FileSystemPlugin<AbstractDataplane
   }
 
   private List<FunctionConfig> getFunctionsHelper(VersionContext versionContext) {
+    if (!context.getOptionManager().getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
+      throw UserException.unsupportedError()
+          .message("User-defined functions are not supported in this source")
+          .buildSilently();
+    }
     try {
       ResolvedVersionContext resolvedVersionContext =
           getNessieClient().resolveVersionContext(versionContext);
@@ -2785,6 +2798,11 @@ public abstract class DataplanePlugin extends FileSystemPlugin<AbstractDataplane
       SchemaConfig schemaConfig,
       UserDefinedFunction userDefinedFunction,
       boolean isReplace) {
+    if (!context.getOptionManager().getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
+      throw UserException.unsupportedError()
+          .message("User-defined functions are not supported in source '%s'.", key.getRootEntity())
+          .buildSilently();
+    }
     Preconditions.checkNotNull(key.getTableVersionContext());
     if (key.getTableVersionContext().asVersionContext().isSpecified()
         && !key.getTableVersionContext().asVersionContext().isBranch()) {
@@ -2792,7 +2810,6 @@ public abstract class DataplanePlugin extends FileSystemPlugin<AbstractDataplane
           .message("Cannot create a function on a tag or bareCommit")
           .buildSilently();
     }
-
     List<String> udfKey = schemaComponentsWithoutPluginName(key.toNamespaceKey());
     ResolvedVersionContext versionContext =
         resolveVersionContext(key.getTableVersionContext().asVersionContext());
@@ -2847,6 +2864,11 @@ public abstract class DataplanePlugin extends FileSystemPlugin<AbstractDataplane
   }
 
   private void dropFunctionHelper(CatalogEntityKey key, SchemaConfig schemaConfig) {
+    if (!context.getOptionManager().getOption(VERSIONED_SOURCE_UDF_ENABLED)) {
+      throw UserException.unsupportedError()
+          .message("User-defined functions are not supported in source '%s'.", key.getRootEntity())
+          .buildSilently();
+    }
     Preconditions.checkNotNull(key.getTableVersionContext());
     VersionContext versionContext = key.getTableVersionContext().asVersionContext();
     final ResolvedVersionContext resolvedVersionContext = resolveVersionContext(versionContext);

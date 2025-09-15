@@ -26,15 +26,12 @@ import HomePage from "#oss/pages/HomePage/HomePage";
 import { getEntityType, getSourceNameFromUrl } from "#oss/utils/pathUtils";
 import { getUserName } from "#oss/selectors/account";
 import { getRefQueryParams } from "#oss/utils/nessieUtils";
-import { getViewState } from "#oss/selectors/resources";
-import ViewStateWrapper from "#oss/components/ViewStateWrapper";
 import HomeContentsWrapper from "@inject/pages/HomePage/subpages/HomeContentsWrapper";
 
 type HomeProps = {
   style: CSS.Properties;
   router: WithRouterProps;
   location: WithRouterProps["location"];
-  allSourcesViewState: Immutable.Map<string, any>;
   homeContentsProps: {
     sources: Immutable.Map<string, unknown>;
     sourceName: string;
@@ -45,21 +42,11 @@ type HomeProps = {
   };
 };
 
-const Home = ({
-  style,
-  location,
-  homeContentsProps,
-  allSourcesViewState,
-}: HomeProps) => {
+const Home = ({ style, location, homeContentsProps }: HomeProps) => {
   return (
     //@ts-ignore
     <HomePage style={style} location={location}>
-      <ViewStateWrapper
-        style={{ display: "flex", flex: 1 }}
-        viewState={allSourcesViewState}
-      >
-        <HomeContentsWrapper location={location} {...homeContentsProps} />
-      </ViewStateWrapper>
+      <HomeContentsWrapper location={location} {...homeContentsProps} />
     </HomePage>
   );
 };
@@ -90,7 +77,6 @@ const mapStateToProps = (state: Record<string, any>, props: HomeProps) => {
       : null;
 
   return {
-    allSourcesViewState: getViewState(state, "AllSources"),
     homeContentsProps: {
       sources,
       sourceName,

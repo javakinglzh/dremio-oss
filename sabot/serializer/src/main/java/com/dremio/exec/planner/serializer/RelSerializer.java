@@ -79,7 +79,7 @@ class RelSerializer implements RelToProto {
 
   @Override
   public PRexNode toProto(RexNode node) {
-    return node.accept(rex);
+    return rex.toProto(node);
   }
 
   @Override
@@ -89,7 +89,7 @@ class RelSerializer implements RelToProto {
 
   @Override
   public PRexLiteral toProtoLiteral(RexLiteral rexLiteral) {
-    return rex.toProto(rexLiteral);
+    return rex.toProto(rexLiteral).getRexLiteral();
   }
 
   @Override

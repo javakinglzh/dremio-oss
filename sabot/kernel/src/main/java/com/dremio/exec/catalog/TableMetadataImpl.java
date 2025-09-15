@@ -41,6 +41,7 @@ public class TableMetadataImpl implements TableMetadata {
   private final DatasetConfig config;
   private final SplitsPointer splits;
   private final String user;
+  private final String userId;
   private final List<String> primaryKey;
   private final TableVersionContext tableVersionContext;
 
@@ -52,7 +53,7 @@ public class TableMetadataImpl implements TableMetadata {
       String user,
       SplitsPointer splits,
       List<String> primaryKey) {
-    this(pluginId, config, user, splits, primaryKey, null);
+    this(pluginId, config, user, splits, primaryKey, null, null);
   }
 
   public TableMetadataImpl(
@@ -62,12 +63,24 @@ public class TableMetadataImpl implements TableMetadata {
       SplitsPointer splits,
       List<String> primaryKey,
       TableVersionContext tableVersionContext) {
+    this(pluginId, config, user, splits, primaryKey, tableVersionContext, null);
+  }
+
+  public TableMetadataImpl(
+      StoragePluginId pluginId,
+      DatasetConfig config,
+      String user,
+      SplitsPointer splits,
+      List<String> primaryKey,
+      TableVersionContext tableVersionContext,
+      String userId) {
     this.config = config;
     this.pluginId = Preconditions.checkNotNull(pluginId);
     this.splits = splits;
     this.user = user;
     this.primaryKey = primaryKey;
     this.tableVersionContext = tableVersionContext;
+    this.userId = userId;
   }
 
   @Override
@@ -134,6 +147,11 @@ public class TableMetadataImpl implements TableMetadata {
   @Override
   public String getUser() {
     return user;
+  }
+
+  @Override
+  public String getUserId() {
+    return userId;
   }
 
   @Override

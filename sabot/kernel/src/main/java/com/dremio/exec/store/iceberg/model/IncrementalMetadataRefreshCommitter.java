@@ -24,6 +24,7 @@ import com.dremio.exec.exception.NoSupportedUpPromotionOrCoercionException;
 import com.dremio.exec.planner.acceleration.IncrementalUpdateUtils;
 import com.dremio.exec.planner.common.ImmutableDremioFileAttrs;
 import com.dremio.exec.record.BatchSchema;
+import com.dremio.exec.store.dfs.implicit.ImplicitFilesystemColumnFinder;
 import com.dremio.exec.store.iceberg.IcebergExpirySnapshotsCollector;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.iceberg.SchemaConverter;
@@ -34,6 +35,7 @@ import com.dremio.exec.testing.ControlsInjector;
 import com.dremio.exec.testing.ControlsInjectorFactory;
 import com.dremio.exec.testing.ExecutionControls;
 import com.dremio.io.file.FileSystem;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorContext;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.sabot.op.writer.WriterCommitterOperator;
@@ -64,7 +66,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.Field;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.iceberg.DataFile;
@@ -133,6 +134,7 @@ public class IncrementalMetadataRefreshCommitter
   private final ExecutionControls executionControls;
   private final DatasetConfig datasetConfig;
   private Table table;
+  private OptionManager optionManager;
   private final boolean isMapDataTypeEnabled;
   private final FileSystem fs;
   private final Long metadataExpireAfterMs;
@@ -195,6 +197,7 @@ public class IncrementalMetadataRefreshCommitter
     this.tableLocation = tableLocation;
     this.datasetPath = datasetPath;
     this.executionControls = operatorContext.getExecutionControls();
+    this.optionManager = operatorContext.getOptions();
     this.isMapDataTypeEnabled =
         operatorContext.getOptions().getOption(ExecConstants.ENABLE_MAP_DATA_TYPE);
     this.fs = fs;
@@ -388,13 +391,14 @@ public class IncrementalMetadataRefreshCommitter
             .setMapTypeEnabled(isMapDataTypeEnabled)
             .build()
             .fromIceberg(table.schema());
-    newSchemaFromIceberg =
+    List<Field> implicitFields =
+        ImplicitFilesystemColumnFinder.getEnabledNonPartitionFields(optionManager, true);
+    BatchSchema schemaForKVStore =
         BatchSchema.newBuilder()
             .addFields(newSchemaFromIceberg.getFields())
-            .addField(
-                Field.nullable(IncrementalUpdateUtils.UPDATE_COLUMN, new ArrowType.Int(64, true)))
+            .addFields(implicitFields)
             .build();
-    datasetBuilder.overrideSchema(newSchemaFromIceberg);
+    datasetBuilder.overrideSchema(schemaForKVStore);
   }
 
   private void cleanSnapshotsAndMetadataFiles(Table targetTable) {

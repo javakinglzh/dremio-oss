@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import org.apache.arrow.memory.BufferAllocator;
+import org.apache.arrow.vector.types.pojo.ArrowType;
 import org.apache.arrow.vector.types.pojo.ArrowType.ArrowTypeID;
 import org.apache.commons.lang3.RandomStringUtils;
 
@@ -70,7 +71,34 @@ public class BatchDataGenerator implements Generator {
     this.maxRandomInt = maxRandomInt;
     typeIDRandomGeneratorMap = getTypeIDRandomGeneratorMap(this.varcharLen);
     createVectorContainer();
-    dataGenerators.addAll(getDataGenerators(fields, container, numOfBatches, numOfRows, batchSize));
+    dataGenerators.addAll(
+        getDataGenerators(fields, container, numOfBatches, numOfRows, batchSize, false));
+  }
+
+  /**
+   * Constructor with deterministic option for guaranteed uniqueness. When deterministic=true, uses
+   * sequential generators instead of random ones.
+   */
+  public BatchDataGenerator(
+      List<FieldInfo> fields,
+      BufferAllocator allocator,
+      int numOfRows,
+      int batchSize,
+      int varcharLen,
+      int maxRandomInt,
+      boolean deterministic)
+      throws Exception {
+    this.fields = fields;
+    this.allocator = allocator;
+    this.numOfRows = numOfRows;
+    this.varcharLen = varcharLen;
+    this.batchSize = Math.min(numOfRows, batchSize);
+    this.numOfBatches = numOfRows / this.batchSize;
+    this.maxRandomInt = maxRandomInt;
+    typeIDRandomGeneratorMap = getTypeIDRandomGeneratorMap(this.varcharLen);
+    createVectorContainer();
+    dataGenerators.addAll(
+        getDataGenerators(fields, container, numOfBatches, numOfRows, batchSize, deterministic));
   }
 
   @Override
@@ -117,15 +145,27 @@ public class BatchDataGenerator implements Generator {
       VectorContainer container,
       int numOfBatches,
       int numOfRows,
-      int batchSize)
+      int batchSize,
+      boolean deterministic)
       throws Exception {
     List<TypeDataGenerator<?>> typeDataGenerators = new ArrayList<>();
     for (FieldInfo info : fields) {
+      RandomGenerator generator;
+      if (deterministic) {
+        generator =
+            getDeterministicGenerator(
+                info.getField().getType(),
+                info.getNumOfUniqueValuesInBatch(),
+                info.getField().getName());
+      } else {
+        generator = getGenerator(info.getField().getType());
+      }
+
       typeDataGenerators.add(
           new TypeDataGenerator<>(
               numOfBatches,
               numOfRows,
-              getGenerator(info.getField().getType().getTypeID()),
+              generator,
               info,
               batchSize,
               container.addOrGet(info.getField())));
@@ -171,11 +211,110 @@ public class BatchDataGenerator implements Generator {
     return generators;
   }
 
-  private static RandomGenerator getGenerator(ArrowTypeID typeId) throws Exception {
+  private static RandomGenerator getGenerator(ArrowType arrowType) throws Exception {
+    ArrowTypeID typeId = arrowType.getTypeID();
+
+    // Handle Int types with different bit widths
+    if (typeId == ArrowTypeID.Int) {
+      ArrowType.Int intType = (ArrowType.Int) arrowType;
+      if (intType.getBitWidth() == 32) {
+        return () -> {
+          Random rand = new Random();
+          return rand.nextInt(Integer.MAX_VALUE);
+        };
+      } else if (intType.getBitWidth() == 64) {
+        return () -> {
+          Random rand = new Random();
+          return rand.nextLong();
+        };
+      } else {
+        throw new Exception("Unsupported int bit width: " + intType.getBitWidth());
+      }
+    }
+
     if (!typeIDRandomGeneratorMap.containsKey(typeId)) {
       throw new Exception(
           String.format("Data generation for sort doesn't support type %s", typeId));
     }
     return typeIDRandomGeneratorMap.get(typeId);
+  }
+
+  /**
+   * Creates a deterministic generator that produces sequential values to guarantee uniqueness. This
+   * is essential for test stability - no random collisions!
+   */
+  private static RandomGenerator getDeterministicGenerator(
+      ArrowType arrowType, int maxCardinality, String fieldName) throws Exception {
+    ArrowTypeID typeId = arrowType.getTypeID();
+
+    if (typeId == ArrowTypeID.Int) {
+      ArrowType.Int intType = (ArrowType.Int) arrowType;
+      if (intType.getBitWidth() == 32) {
+        return new SequentialIntGenerator(maxCardinality);
+      } else if (intType.getBitWidth() == 64) {
+        return new SequentialLongGenerator(maxCardinality);
+      } else {
+        throw new Exception("Unsupported int bit width: " + intType.getBitWidth());
+      }
+    } else if (typeId == ArrowTypeID.Utf8) {
+      return new SequentialStringGenerator(maxCardinality, fieldName);
+    }
+
+    // Fall back to random for other types
+    return getGenerator(arrowType);
+  }
+
+  /** Sequential integer generator that cycles through 0, 1, 2, ..., maxCardinality-1 */
+  private static class SequentialIntGenerator implements RandomGenerator<Integer> {
+    private final int maxCardinality;
+    private int current = 0;
+
+    public SequentialIntGenerator(int maxCardinality) {
+      this.maxCardinality = maxCardinality;
+    }
+
+    @Override
+    public Integer getRandomValue() {
+      int value = current;
+      current = (current + 1) % maxCardinality;
+      return value;
+    }
+  }
+
+  /** Sequential long generator that cycles through 0, 1, 2, ..., maxCardinality-1 */
+  private static class SequentialLongGenerator implements RandomGenerator<Long> {
+    private final long maxCardinality;
+    private long current = 0;
+
+    public SequentialLongGenerator(long maxCardinality) {
+      this.maxCardinality = maxCardinality;
+    }
+
+    @Override
+    public Long getRandomValue() {
+      long value = current;
+      current = (current + 1) % maxCardinality;
+      return value;
+    }
+  }
+
+  /** Sequential string generator that creates predictable strings like "file_0", "file_1", etc. */
+  private static class SequentialStringGenerator implements RandomGenerator<String> {
+    private final int maxCardinality;
+    private final String prefix;
+    private int current = 0;
+
+    public SequentialStringGenerator(int maxCardinality, String fieldName) {
+      this.maxCardinality = maxCardinality;
+      // Create a meaningful prefix based on field name
+      this.prefix = fieldName.toLowerCase().replaceAll("[^a-z0-9]", "_") + "_";
+    }
+
+    @Override
+    public String getRandomValue() {
+      String value = prefix + current;
+      current = (current + 1) % maxCardinality;
+      return value;
+    }
   }
 }

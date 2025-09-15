@@ -73,6 +73,7 @@ public class TestHiveOrcFooterReader extends BaseTestQuery {
       int recordSize =
           tableSchema.estimateRecordSize(
               (int) opCtx.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+              (int) opCtx.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
               (int) opCtx.getOptions().getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
       HiveOrcFooterReader reader = new HiveOrcFooterReader(tableSchema, fs, opCtx);
       Path fileRoot = Path.of(Resources.getResource("orc/").toURI());
@@ -90,6 +91,7 @@ public class TestHiveOrcFooterReader extends BaseTestQuery {
       recordSize =
           tableSchema.estimateRecordSize(
               (int) opCtx.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+              (int) opCtx.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
               (int) opCtx.getOptions().getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
       String file2 = fileRoot.resolve("testsample2.orc").toString();
       reader = new HiveOrcFooterReader(tableSchema, fs, opCtx);

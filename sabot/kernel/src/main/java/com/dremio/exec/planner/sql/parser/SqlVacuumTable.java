@@ -71,14 +71,7 @@ public class SqlVacuumTable extends SqlVacuum
           final RelDataTypeFactory typeFactory = validator.getTypeFactory();
           SqlVacuumTable sqlVacuumTable = (SqlVacuumTable) call;
           return getTableOutputRelDataType(
-              typeFactory,
-              new VacuumOptions(
-                  sqlVacuumTable.expireSnapshots.booleanValue(),
-                  sqlVacuumTable.removeOrphans.booleanValue(),
-                  null,
-                  null,
-                  null,
-                  null));
+              typeFactory, VacuumOptions.createInstance(sqlVacuumTable));
         }
       };
 
@@ -161,6 +154,6 @@ public class SqlVacuumTable extends SqlVacuum
         nsTable.toRel(relContext),
         nsTable,
         null,
-        getVacuumOptions());
+        VacuumOptions.createInstance(this));
   }
 }

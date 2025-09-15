@@ -691,9 +691,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
             .setQueryResultsStorePath(storageName)
             .setAllowPartitionPruning(queryType != QueryType.ACCELERATOR_EXPLAIN)
             .setExposeInternalSources(QueryTypeUtils.isInternal(queryType))
-            .setSubstitutionSettings(
-                JobsProtoUtil.toPojo(
-                    jobRequest.getMaterializationSettings().getSubstitutionSettings()))
             .setReflectionMode(
                 jobRequest
                     .getMaterializationSettings()
@@ -864,9 +861,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
       Preconditions.checkArgument(
           submitJobRequest.getMaterializationSettings().hasMaterializationSummary(),
           "materialization summary not provided");
-      Preconditions.checkArgument(
-          submitJobRequest.getMaterializationSettings().hasSubstitutionSettings(),
-          "substitution settings not provided");
       submitJobRequestBuilder.setMaterializationSettings(
           submitJobRequest.getMaterializationSettings());
     }
@@ -1042,9 +1036,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
                       .build())
               .exposeInternalSources(QueryTypeUtils.isInternal(queryType))
               .withDefaultSchema(jobRequest.getSqlQuery().getContextList())
-              .withSubstitutionSettings(
-                  JobsProtoUtil.toPojo(
-                      jobRequest.getMaterializationSettings().getSubstitutionSettings()))
               .withClientInfos(UserRpcUtils.getRpcEndpointInfos("Dremio Java local client"))
               .withEngineName(jobRequest.getSqlQuery().getEngineName())
               .withSourceVersionMapping(
@@ -1365,6 +1356,7 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
           .map(JobsServiceUtil::getDatasetFilter)
           .forEach(searchQuery -> conditions.add(searchQuery));
     } else if (!request.getReflections().getReflectionIdsList().isEmpty()) {
+
       if (optionManagerProvider.get().getOption(ExecConstants.JOBS_COUNT_FAST_ENABLED)) {
         GetJobCountsRequest getJobCountsRequest =
             GetJobCountsRequest.newBuilder()
@@ -1445,8 +1437,7 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
       Job job,
       List<Pair<NamespaceKey, IcebergTableChecker>> topViews,
       SqlKind sqlKind,
-      QueryProfile profile,
-      RelNode converted) {}
+      QueryProfile profile) {}
 
   private int getSqlTruncateLenFromOptionMgr() {
     int sqlTruncateLen =
@@ -1952,11 +1943,7 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
             updateJoinAnalysis(optionManager);
           }
           LocalJobsService.this.onJobExecCompletion(
-              job,
-              attemptObserver.topViews,
-              attemptObserver.sqlKind,
-              profile,
-              attemptObserver.converted);
+              job, attemptObserver.topViews, attemptObserver.sqlKind, profile);
         }
         injector.injectChecked(
             executionControls, INJECTOR_ATTEMPT_COMPLETION_ERROR, IOException.class);
@@ -2241,7 +2228,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
     private List<Pair<NamespaceKey, IcebergTableChecker>> topViews = List.of();
     private SqlKind sqlKind = SqlKind.OTHER;
     private Map<String, Long> executorOutputRecordMap;
-    private RelNode converted;
 
     JobResultListener(
         AttemptId attemptId,
@@ -2790,7 +2776,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
     @Override
     public void planConvertedToRel(RelNode converted, long millisTaken) {
       detailsPopulator.planConvertedToRel(converted);
-      this.converted = converted;
       findTopViews(converted);
     }
 
@@ -3544,6 +3529,11 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
 
   JobAndUserStats getJobAndUserStats(JobAndUserStatsRequest jobAndUserStatsRequest)
       throws Exception {
+    if (jobAndUserStatsCache.isCacheBuildInProgress()) {
+      throw new StatusRuntimeException(
+          Status.INTERNAL.withDescription(
+              "The requested data is being prepared. Please try again after 30 minutes."));
+    }
     final LocalDate today = LocalDate.now();
     List<JobAndUserStat> stats = new ArrayList<>();
     for (LocalDate date = today.minusDays(jobAndUserStatsRequest.getNumDaysBack() - 1);
@@ -3558,89 +3548,6 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
     JobAndUserStats.Builder jobAndUserStatsResponse = JobAndUserStats.newBuilder();
     jobAndUserStatsResponse.addAllStats(stats);
     return jobAndUserStatsResponse.build();
-  }
-
-  JobAndUserStat getDailyJobAndUserStatsForADay(LocalDate day) {
-    final SearchJobsRequest searchJobsRequest =
-        SearchJobsRequest.newBuilder()
-            .setFilterString(
-                String.format(
-                    FILTER,
-                    getEpochMillisFromLocalDate(day),
-                    getEpochMillisFromLocalDate(day.plusDays(1))))
-            .build();
-    Map<QueryType, Long> jobCountByQueryType = new HashMap<>();
-    Map<QueryType, Set<String>> uniqueUsersByQueryType = new HashMap<>();
-    long totalJobs = 0;
-    Set<String> totalUniqueUsers = new HashSet<>();
-    for (Entry<JobId, JobResult> entry : store.find(createCondition(searchJobsRequest))) {
-      totalJobs++;
-      String user = entry.getValue().getAttemptsList().get(0).getInfo().getUser();
-      totalUniqueUsers.add(user);
-      QueryType queryType = entry.getValue().getAttemptsList().get(0).getInfo().getQueryType();
-      jobCountByQueryType.putIfAbsent(queryType, 0L);
-      jobCountByQueryType.put(queryType, jobCountByQueryType.get(queryType) + 1);
-      uniqueUsersByQueryType.putIfAbsent(queryType, new HashSet<>());
-      uniqueUsersByQueryType.get(queryType).add(user);
-    }
-    List<JobCountByQueryType> jobCounts =
-        jobCountByQueryType.entrySet().stream()
-            .map(
-                (entry) ->
-                    JobCountByQueryType.newBuilder()
-                        .setQueryType(
-                            com.dremio.service.job.QueryType.valueOf(entry.getKey().toString()))
-                        .setJobCount(entry.getValue())
-                        .build())
-            .collect(Collectors.toList());
-    List<UniqueUsersCountByQueryType> uniqueUsers =
-        uniqueUsersByQueryType.entrySet().stream()
-            .map(
-                (entry) ->
-                    UniqueUsersCountByQueryType.newBuilder()
-                        .setQueryType(
-                            com.dremio.service.job.QueryType.valueOf(entry.getKey().toString()))
-                        .addAllUniqueUsers(entry.getValue())
-                        .build())
-            .collect(Collectors.toList());
-    return JobAndUserStat.newBuilder()
-        .setDate(day.toString())
-        .setTotalJobs(totalJobs)
-        .setTotalUniqueUsers(totalUniqueUsers.size())
-        .addAllJobCountByQueryType(jobCounts)
-        .addAllUniqueUsersCountByQueryType(uniqueUsers)
-        .build();
-  }
-
-  List<JobAndUserStat> getDailyJobAndUserStats(int days) throws Exception {
-    final LocalDate today = LocalDate.now();
-    final String dailyQuerySubmittedTimeGreaterThan =
-        "SELECT\n"
-            + "TO_CHAR(submitted_ts, 'YYYY-MM-DD') AS \"date\",\n"
-            + "query_type,\n"
-            + "LISTAGG(DISTINCT user_name, ';') AS \"Unique Users\",\n"
-            + "COUNT(*) AS \"Jobs Executed\"\n"
-            + "FROM sys.jobs_recent\n"
-            + "WHERE submitted_epoch_millis > %s\n"
-            + "GROUP BY ROLLUP(\"date\", query_type)\n"
-            + "ORDER BY \"date\" DESC";
-    final String finalQuery =
-        String.format(
-            dailyQuerySubmittedTimeGreaterThan,
-            getEpochMillisFromLocalDate(today.minusDays(days - 1)));
-    List<RecordBatchHolder> results =
-        runQueryAsJobForResults(
-            finalQuery,
-            SYSTEM_USERNAME,
-            QueryType.UI_INTERNAL_RUN.toString(),
-            QueryLabel.NONE.toString(),
-            0,
-            10000);
-    try {
-      return JobsServiceUtil.buildDailyJobAndUserStats(days, today, results);
-    } finally {
-      AutoCloseables.close(results);
-    }
   }
 
   List<JobAndUserStat> getWeeklyUserStats() throws Exception {
@@ -3759,10 +3666,16 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
     private final Cache<LocalDate, JobAndUserStat> statsCache;
     private final SortedSet<LocalDate> keys;
     private static final int MAX_DAYS = 30;
+    private volatile boolean isCacheBuildInProgress;
 
     JobAndUserStatsCache() {
       this.statsCache = Caffeine.newBuilder().build();
       this.keys = new TreeSet<>();
+      this.isCacheBuildInProgress = false;
+    }
+
+    public boolean isCacheBuildInProgress() {
+      return isCacheBuildInProgress;
     }
 
     public JobAndUserStat get(LocalDate date) throws Exception {
@@ -3821,6 +3734,97 @@ public class LocalJobsService implements Service, JobResultInfoProvider, SimpleJ
         statsCache.invalidateAll();
         logger.error("Could not build the cache", ex);
         throw ex;
+      }
+    }
+
+    private JobAndUserStat getDailyJobAndUserStatsForADay(LocalDate day) {
+      isCacheBuildInProgress = true;
+      try {
+        final SearchJobsRequest searchJobsRequest =
+            SearchJobsRequest.newBuilder()
+                .setFilterString(
+                    String.format(
+                        FILTER,
+                        getEpochMillisFromLocalDate(day),
+                        getEpochMillisFromLocalDate(day.plusDays(1))))
+                .build();
+        Map<QueryType, Long> jobCountByQueryType = new HashMap<>();
+        Map<QueryType, Set<String>> uniqueUsersByQueryType = new HashMap<>();
+        long totalJobs = 0;
+        Set<String> totalUniqueUsers = new HashSet<>();
+        for (Entry<JobId, JobResult> entry : store.find(createCondition(searchJobsRequest))) {
+          totalJobs++;
+          String user = entry.getValue().getAttemptsList().get(0).getInfo().getUser();
+          totalUniqueUsers.add(user);
+          QueryType queryType = entry.getValue().getAttemptsList().get(0).getInfo().getQueryType();
+          jobCountByQueryType.putIfAbsent(queryType, 0L);
+          jobCountByQueryType.put(queryType, jobCountByQueryType.get(queryType) + 1);
+          uniqueUsersByQueryType.putIfAbsent(queryType, new HashSet<>());
+          uniqueUsersByQueryType.get(queryType).add(user);
+        }
+        List<JobCountByQueryType> jobCounts =
+            jobCountByQueryType.entrySet().stream()
+                .map(
+                    (entry) ->
+                        JobCountByQueryType.newBuilder()
+                            .setQueryType(
+                                com.dremio.service.job.QueryType.valueOf(entry.getKey().toString()))
+                            .setJobCount(entry.getValue())
+                            .build())
+                .collect(Collectors.toList());
+        List<UniqueUsersCountByQueryType> uniqueUsers =
+            uniqueUsersByQueryType.entrySet().stream()
+                .map(
+                    (entry) ->
+                        UniqueUsersCountByQueryType.newBuilder()
+                            .setQueryType(
+                                com.dremio.service.job.QueryType.valueOf(entry.getKey().toString()))
+                            .addAllUniqueUsers(entry.getValue())
+                            .build())
+                .collect(Collectors.toList());
+        return JobAndUserStat.newBuilder()
+            .setDate(day.toString())
+            .setTotalJobs(totalJobs)
+            .setTotalUniqueUsers(totalUniqueUsers.size())
+            .addAllJobCountByQueryType(jobCounts)
+            .addAllUniqueUsersCountByQueryType(uniqueUsers)
+            .build();
+      } finally {
+        isCacheBuildInProgress = false;
+      }
+    }
+
+    private List<JobAndUserStat> getDailyJobAndUserStats(int days) throws Exception {
+      isCacheBuildInProgress = true;
+      List<RecordBatchHolder> results = null;
+      try {
+        final LocalDate today = LocalDate.now();
+        final String dailyQuerySubmittedTimeGreaterThan =
+            "SELECT\n"
+                + "TO_CHAR(submitted_ts, 'YYYY-MM-DD') AS \"date\",\n"
+                + "query_type,\n"
+                + "LISTAGG(DISTINCT user_name, ';') AS \"Unique Users\",\n"
+                + "COUNT(*) AS \"Jobs Executed\"\n"
+                + "FROM sys.jobs_recent\n"
+                + "WHERE submitted_epoch_millis > %s\n"
+                + "GROUP BY ROLLUP(\"date\", query_type)\n"
+                + "ORDER BY \"date\" DESC";
+        final String finalQuery =
+            String.format(
+                dailyQuerySubmittedTimeGreaterThan,
+                getEpochMillisFromLocalDate(today.minusDays(days - 1)));
+        results =
+            runQueryAsJobForResults(
+                finalQuery,
+                SYSTEM_USERNAME,
+                QueryType.UI_INTERNAL_RUN.toString(),
+                QueryLabel.NONE.toString(),
+                0,
+                10000);
+        return JobsServiceUtil.buildDailyJobAndUserStats(days, today, results);
+      } finally {
+        AutoCloseables.close(results);
+        isCacheBuildInProgress = false;
       }
     }
   }

@@ -46,7 +46,6 @@ import com.dremio.connector.metadata.DatasetHandle;
 import com.dremio.connector.metadata.EntityPath;
 import com.dremio.connector.metadata.GetDatasetOption;
 import com.dremio.connector.metadata.ViewDatasetHandle;
-import com.dremio.exec.catalog.CatalogImpl.IdentityResolver;
 import com.dremio.exec.catalog.ManagedStoragePlugin.StoragePluginChanging;
 import com.dremio.exec.catalog.conf.ConnectionConf;
 import com.dremio.exec.dotfile.View;
@@ -62,8 +61,6 @@ import com.dremio.exec.store.dfs.FileSystemPlugin;
 import com.dremio.exec.store.dfs.ImpersonationConf;
 import com.dremio.exec.store.dfs.MetadataIOPool;
 import com.dremio.options.OptionManager;
-import com.dremio.service.namespace.NamespaceException;
-import com.dremio.service.namespace.NamespaceIdentity;
 import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceService;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -72,6 +69,10 @@ import com.dremio.service.namespace.dataset.proto.ReadDefinition;
 import com.dremio.service.namespace.dataset.proto.ViewFieldType;
 import com.dremio.service.namespace.dataset.proto.VirtualDataset;
 import com.dremio.service.namespace.proto.EntityId;
+import com.dremio.service.users.SimpleUser;
+import com.dremio.service.users.UserNotFoundException;
+import com.dremio.service.users.UserService;
+import com.dremio.service.users.proto.UID;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
 import java.security.AccessControlException;
@@ -90,6 +91,7 @@ import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
 import org.apache.calcite.rel.type.RelRecordType;
 import org.apache.calcite.rel.type.StructKind;
 import org.apache.calcite.sql.type.SqlTypeName;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -102,17 +104,12 @@ import org.projectnessie.error.NessieRuntimeException;
 
 /** Tests for DatasetManager */
 public class TestDatasetManager {
+  private static final UserService userService = mock(UserService.class);
 
-  private class CatalogIdentityResolver implements IdentityResolver {
-    @Override
-    public CatalogIdentity getOwner(List<String> path) throws NamespaceException {
-      return null;
-    }
-
-    @Override
-    public NamespaceIdentity toNamespaceIdentity(CatalogIdentity identity) {
-      return null;
-    }
+  @BeforeAll
+  public static void before() throws UserNotFoundException {
+    when(userService.getUser(any(String.class)))
+        .thenReturn(SimpleUser.newBuilder().setUID(UID.getDefaultInstance()).build());
   }
 
   @Test
@@ -185,10 +182,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            new CatalogIdentityResolver(),
             null,
             null,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     datasetManager.getTable(namespaceKey, metadataRequestOptions, false);
   }
 
@@ -248,10 +246,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            new CatalogIdentityResolver(),
             null,
             null,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     datasetManager.getTable(namespaceKey, metadataRequestOptions, true);
   }
 
@@ -334,10 +333,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            new CatalogIdentityResolver(),
             null,
             null,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     DremioTable table = datasetManager.getTable(namespaceKey, metadataRequestOptions, true);
     View.FieldType updatedField = ((ViewTable) table).getView().getFields().get(0);
     assertTrue(isComplexType(updatedField.getType()));
@@ -426,10 +426,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            new CatalogIdentityResolver(),
             null,
             null,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     assertThatThrownBy(() -> datasetManager.getTable(namespaceKey, metadataRequestOptions, false))
         .isInstanceOf(UserException.class)
@@ -474,7 +475,15 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     DremioTable table = datasetManager.getTable(namespaceKey, metadataRequestOptions, true);
     assertThat(table).isNull();
   }
@@ -526,7 +535,15 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     DremioTable table = datasetManager.getTable(namespaceKey, metadataRequestOptions, true);
     assertThat(table).isNull();
   }
@@ -583,13 +600,22 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     try {
       datasetManager.getTable(sourceKey, metadataRequestOptions, true);
     } catch (UserException e) {
       assertThat(e.getMessage())
           .contains(
-              "Version context for entity VersionedCatalog.\"Table\" must be specified using AT SQL syntax");
+              "Version context for entity VersionedCatalog.\"Table\" must be specified using AT SQL"
+                  + " syntax");
       return;
     }
     fail("getTable should have thrown exception");
@@ -639,10 +665,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     DremioTable returnedTable = datasetManager.getTable(sourceKey, metadataRequestOptions, true);
     assertThat(returnedTable).isNull();
@@ -694,10 +721,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     assertThrows(
         NessieRuntimeException.class,
@@ -750,10 +778,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     assertThrows(
         RuntimeException.class,
@@ -807,10 +836,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     assertThrows(
         RuntimeException.class,
@@ -864,10 +894,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     assertThrows(
         IllegalStateException.class,
@@ -916,10 +947,11 @@ public class TestDatasetManager {
             namespaceService,
             optionManager,
             "username",
-            null,
             versionContextResolver,
             versionedDatasetAdapterFactory,
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     try {
       DremioTable returnedTable = datasetManager.getTable(sourceKey, metadataRequestOptions, true);
       assertThat(returnedTable).isNull();
@@ -965,7 +997,15 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     try {
       DremioTable returnedTable = datasetManager.getTable(sourceKey, metadataRequestOptions, true);
       assertThat(returnedTable).isNull();
@@ -1010,7 +1050,15 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     DremioTable returnedTable = datasetManager.getTable(sourceKey, metadataRequestOptions, true);
     assertThat(returnedTable).isNull();
@@ -1074,10 +1122,11 @@ public class TestDatasetManager {
             namespaceService,
             null,
             "username",
-            new CatalogIdentityResolver(),
             null,
             new VersionedDatasetAdapterFactory(),
-            null);
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     datasetManager.getTable(datasetId, metadataRequestOptions);
   }
@@ -1120,7 +1169,15 @@ public class TestDatasetManager {
 
     final DatasetManager datasetManager =
         new DatasetManager(
-            pluginRetriever, namespaceService, optionManager, "username", null, null, null, null);
+            pluginRetriever,
+            namespaceService,
+            optionManager,
+            "username",
+            null,
+            null,
+            null,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
     assertThatThrownBy(() -> datasetManager.getTable(namespaceKey, metadataRequestOptions, true))
         .isInstanceOf(UserException.class)
         .hasMessageContaining("Not allowed to perform directory traversal");
@@ -1197,7 +1254,8 @@ public class TestDatasetManager {
             null,
             null,
             null,
-            null);
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     if (numExceptionsThrown <= 1) {
       // Verify that when one exception is thrown, the save call is retried.
@@ -1303,7 +1361,8 @@ public class TestDatasetManager {
             null,
             null,
             null,
-            null);
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     if (numExceptionsThrown <= 1) {
       // Verify that when one exception is thrown, the save call is retried.
@@ -1403,8 +1462,9 @@ public class TestDatasetManager {
             "username",
             null,
             null,
-            null,
-            MetadataIOPool.Factory.INSTANCE.newPool(0));
+            MetadataIOPool.Factory.INSTANCE.newPool(0),
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     BulkResponse<NamespaceKey, Optional<DremioTable>> res =
         datasetManager.bulkGetTables(req, metadataRequestOptions, true);
@@ -1494,8 +1554,9 @@ public class TestDatasetManager {
             "username",
             null,
             null,
-            null,
-            metadataIOPool);
+            metadataIOPool,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     // We shouldn't use the thread pool if checkValidity=false
     verify(metadataIOPool, never()).execute(any());
@@ -1566,8 +1627,9 @@ public class TestDatasetManager {
             "username",
             null,
             null,
-            null,
-            metadataIOPool);
+            metadataIOPool,
+            key -> Optional.empty(),
+            new UserOrRoleResolverImpl(userService));
 
     // Call getTable and verify that a ViewTable is returned
     try {

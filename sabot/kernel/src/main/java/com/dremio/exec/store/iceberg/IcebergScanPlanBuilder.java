@@ -85,6 +85,7 @@ import org.apache.calcite.rex.RexNode;
 import org.apache.calcite.rex.RexUtil;
 import org.apache.calcite.sql.fun.SqlStdOperatorTable;
 import org.apache.calcite.util.Pair;
+import org.apache.iceberg.FileContent;
 
 public class IcebergScanPlanBuilder {
 
@@ -268,8 +269,8 @@ public class IcebergScanPlanBuilder {
         == FILTER_PARTITIONS) {
       return createIcebergSnapshotBasedRefreshPlanBuilder().buildSnapshotDiffPlanFilterPartitions();
     } else if (icebergScanPrel.isPartitionValuesEnabled()) {
-      return new IcebergPartitionAggregationPlanBuilder(icebergScanPrel)
-          .buildManifestScanPlanForPartitionAggregation();
+      return new IcebergManifestColumnMetadataPlanBuilder(icebergScanPrel)
+          .buildPartitionValuesReaderPlan();
     }
     return buildSingleSnapshotPlan(null);
   }
@@ -661,24 +662,26 @@ public class IcebergScanPlanBuilder {
   }
 
   public RelNode buildDataAndDeleteFileJoinAndAggregate(RelNode data, RelNode deletes) {
+
     // put delete files on the build side... we will always broadcast as regular table maintenance
     // is assumed to keep
     // delete file counts at a reasonable level
     RelOptCluster cluster = icebergScanPrel.getCluster();
     RelNode build = new BroadcastExchangePrel(cluster, deletes.getTraitSet(), deletes);
-
     RelDataTypeField probeSeqNumField = getField(data, SystemSchemas.SEQUENCE_NUMBER);
     RelDataTypeField probeSpecIdField = getField(data, SystemSchemas.PARTITION_SPEC_ID);
     RelDataTypeField probePartKeyField = getField(data, SystemSchemas.PARTITION_KEY);
     RelDataTypeField buildSeqNumField = getField(build, SystemSchemas.SEQUENCE_NUMBER);
     RelDataTypeField buildSpecIdField = getField(build, SystemSchemas.PARTITION_SPEC_ID);
     RelDataTypeField buildPartKeyField = getField(build, SystemSchemas.PARTITION_KEY);
+    RelDataTypeField deleteContentType = getField(build, SystemSchemas.FILE_CONTENT);
 
     // build the join condition:
     //   data.partitionSpecId == deletes.partitionSpecId &&
     //   data.partitionKey == deletes.partitionKey
     // with extra condition:
-    //   data.sequenceNumber <= deletes.sequenceNumber
+    //   data.sequenceNumber <= deletes.sequenceNumber if fileContent = POSITION_DELETES
+    //   data.sequenceNumber < deletes.sequenceNumber if fileContent = EQUALITY_DELETES
     int probeFieldCount = data.getRowType().getFieldCount();
     RexBuilder rexBuilder = cluster.getRexBuilder();
     RexNode joinCondition =
@@ -696,10 +699,37 @@ public class IcebergScanPlanBuilder {
                     buildPartKeyField.getType(), probeFieldCount + buildPartKeyField.getIndex())));
     RexNode extraJoinCondition =
         rexBuilder.makeCall(
-            SqlStdOperatorTable.LESS_THAN_OR_EQUAL,
-            rexBuilder.makeInputRef(probeSeqNumField.getType(), probeSeqNumField.getIndex()),
-            rexBuilder.makeInputRef(
-                buildSeqNumField.getType(), probeFieldCount + buildSeqNumField.getIndex()));
+            SqlStdOperatorTable.OR,
+            rexBuilder.makeCall(
+                SqlStdOperatorTable.AND,
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.EQUALS,
+                    rexBuilder.makeLiteral(FileContent.POSITION_DELETES.name()),
+                    rexBuilder.makeInputRef(
+                        deleteContentType.getType(),
+                        probeFieldCount + deleteContentType.getIndex())),
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.LESS_THAN_OR_EQUAL,
+                    rexBuilder.makeInputRef(
+                        probeSeqNumField.getType(), probeSeqNumField.getIndex()),
+                    rexBuilder.makeInputRef(
+                        buildSeqNumField.getType(),
+                        probeFieldCount + buildSeqNumField.getIndex()))),
+            rexBuilder.makeCall(
+                SqlStdOperatorTable.AND,
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.EQUALS,
+                    rexBuilder.makeLiteral(FileContent.EQUALITY_DELETES.name()),
+                    rexBuilder.makeInputRef(
+                        deleteContentType.getType(),
+                        probeFieldCount + deleteContentType.getIndex())),
+                rexBuilder.makeCall(
+                    SqlStdOperatorTable.LESS_THAN,
+                    rexBuilder.makeInputRef(
+                        probeSeqNumField.getType(), probeSeqNumField.getIndex()),
+                    rexBuilder.makeInputRef(
+                        buildSeqNumField.getType(),
+                        probeFieldCount + buildSeqNumField.getIndex()))));
 
     RelNode output =
         HashJoinPrel.create(

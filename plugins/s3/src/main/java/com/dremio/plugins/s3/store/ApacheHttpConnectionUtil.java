@@ -17,6 +17,7 @@
 package com.dremio.plugins.s3.store;
 
 import com.dremio.common.exceptions.UserException;
+import com.dremio.io.file.UriSchemes;
 import com.google.common.base.Preconditions;
 import java.io.IOException;
 import java.net.URI;
@@ -28,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import software.amazon.awssdk.http.SdkHttpClient;
 import software.amazon.awssdk.http.apache.ApacheHttpClient;
 import software.amazon.awssdk.http.apache.ProxyConfiguration;
+import software.amazon.awssdk.http.nio.netty.NettyNioAsyncHttpClient;
 
 /** Apache HTTP Connection Utility that supports aws sdk 2.X */
 final class ApacheHttpConnectionUtil {
@@ -40,13 +42,34 @@ final class ApacheHttpConnectionUtil {
     httpBuilder.maxConnections(
         intOption(conf, Constants.MAXIMUM_CONNECTIONS, Constants.DEFAULT_MAXIMUM_CONNECTIONS, 1));
     httpBuilder.connectionTimeout(
-        Duration.ofSeconds(
+        Duration.ofMillis(
             intOption(conf, Constants.ESTABLISH_TIMEOUT, Constants.DEFAULT_ESTABLISH_TIMEOUT, 0)));
     httpBuilder.socketTimeout(
-        Duration.ofSeconds(
+        Duration.ofMillis(
             intOption(conf, Constants.SOCKET_TIMEOUT, Constants.DEFAULT_SOCKET_TIMEOUT, 0)));
     if (isProxyEnabled(conf)) {
       httpBuilder.proxyConfiguration(initProxySupport(conf));
+    }
+
+    return httpBuilder;
+  }
+
+  public static NettyNioAsyncHttpClient.Builder initAsyncConnectionSettings(Configuration conf) {
+    final NettyNioAsyncHttpClient.Builder httpBuilder = NettyNioAsyncHttpClient.builder();
+    httpBuilder.maxConcurrency(
+        intOption(conf, Constants.MAXIMUM_CONNECTIONS, Constants.DEFAULT_MAXIMUM_CONNECTIONS, 1));
+    httpBuilder.connectionTimeout(
+        Duration.ofMillis(
+            intOption(conf, Constants.ESTABLISH_TIMEOUT, Constants.DEFAULT_ESTABLISH_TIMEOUT, 0)));
+    httpBuilder.readTimeout(
+        Duration.ofMillis(
+            intOption(conf, Constants.SOCKET_TIMEOUT, Constants.DEFAULT_SOCKET_TIMEOUT, 0)));
+    httpBuilder.writeTimeout(
+        Duration.ofMillis(
+            intOption(conf, Constants.SOCKET_TIMEOUT, Constants.DEFAULT_SOCKET_TIMEOUT, 0)));
+
+    if (isProxyEnabled(conf)) {
+      httpBuilder.proxyConfiguration(initAsyncProxySupport(conf));
     }
 
     return httpBuilder;
@@ -56,17 +79,27 @@ final class ApacheHttpConnectionUtil {
       throws IllegalArgumentException {
     final ProxyConfiguration.Builder builder = ProxyConfiguration.builder();
 
+    boolean isSecureConnections =
+        conf.getBoolean(Constants.SECURE_CONNECTIONS, Constants.DEFAULT_SECURE_CONNECTIONS);
+
     final String proxyHost = conf.getTrimmed(Constants.PROXY_HOST, "");
     int proxyPort = conf.getInt(Constants.PROXY_PORT, -1);
     if (proxyPort < 0) {
-      if (conf.getBoolean(Constants.SECURE_CONNECTIONS, Constants.DEFAULT_SECURE_CONNECTIONS)) {
+      if (isSecureConnections) {
         proxyPort = 443;
       } else {
         proxyPort = 80;
       }
     }
 
-    builder.endpoint(URI.create(proxyHost + ":" + proxyPort));
+    final String authority = proxyHost + ":" + proxyPort;
+    final String protocol = isSecureConnections ? "https" : "http";
+    final URI endpoint =
+        URI.create(
+            authority.contains(UriSchemes.SCHEME_SEPARATOR)
+                ? authority
+                : protocol + UriSchemes.SCHEME_SEPARATOR + authority);
+    builder.endpoint(endpoint);
 
     try {
       final String proxyUsername = lookupPassword(conf, Constants.PROXY_USERNAME);
@@ -96,6 +129,48 @@ final class ApacheHttpConnectionUtil {
               "Proxy error: %s set without %s", Constants.PROXY_HOST, Constants.PROXY_PORT));
     }
     return !proxyHost.isEmpty();
+  }
+
+  private static software.amazon.awssdk.http.nio.netty.ProxyConfiguration initAsyncProxySupport(
+      Configuration conf) {
+    final software.amazon.awssdk.http.nio.netty.ProxyConfiguration.Builder builder =
+        software.amazon.awssdk.http.nio.netty.ProxyConfiguration.builder();
+
+    final String proxyHost = conf.getTrimmed(Constants.PROXY_HOST, "");
+    int proxyPort = conf.getInt(Constants.PROXY_PORT, -1);
+    if (proxyPort < 0) {
+      if (conf.getBoolean(Constants.SECURE_CONNECTIONS, Constants.DEFAULT_SECURE_CONNECTIONS)) {
+        proxyPort = 443;
+      } else {
+        proxyPort = 80;
+      }
+    }
+
+    builder.host(proxyHost);
+    builder.port(proxyPort);
+    builder.scheme(
+        conf.getBoolean(Constants.SECURE_CONNECTIONS, Constants.DEFAULT_SECURE_CONNECTIONS)
+            ? "https"
+            : "http");
+
+    try {
+      final String proxyUsername = lookupPassword(conf, Constants.PROXY_USERNAME);
+      final String proxyPassword = lookupPassword(conf, Constants.PROXY_PASSWORD);
+      if ((proxyUsername == null) != (proxyPassword == null)) {
+        throw new IllegalArgumentException(
+            String.format(
+                "Proxy error: %s or %s set without the other.",
+                Constants.PROXY_USERNAME, Constants.PROXY_PASSWORD));
+      }
+
+      builder.username(proxyUsername);
+      builder.password(proxyPassword);
+      // Note: Netty proxy configuration doesn't support NTLM domain and workstation
+    } catch (IOException e) {
+      throw UserException.sourceInBadState(e).buildSilently();
+    }
+
+    return builder.build();
   }
 
   private static int intOption(Configuration conf, String key, int defVal, int min) {

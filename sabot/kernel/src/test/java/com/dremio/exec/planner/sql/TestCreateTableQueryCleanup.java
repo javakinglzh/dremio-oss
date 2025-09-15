@@ -64,9 +64,32 @@ import java.util.List;
 import org.apache.calcite.sql.SqlNodeList;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.SortOrder;
+import org.apache.iceberg.TableOperations;
+import org.junit.Assert;
 import org.junit.Test;
 
 public class TestCreateTableQueryCleanup {
+  @Test
+  public void testIsIcebergTableUpdatedDoesNotThrowOnNullCurrentMetadata() {
+    IcebergCommand icebergCommand = mock(IcebergCommand.class);
+    TableOperations tableOperations = mock(TableOperations.class);
+    when(icebergCommand.getTableOps()).thenReturn(tableOperations);
+    when(tableOperations.current()).thenReturn(null);
+
+    IcebergTableCreationCommitter committer =
+        new IcebergTableCreationCommitter(
+            "table",
+            BatchSchema.EMPTY,
+            ImmutableList.of(),
+            icebergCommand,
+            Collections.emptyMap(),
+            null,
+            PartitionSpec.unpartitioned(),
+            SortOrder.unsorted());
+
+    Assert.assertFalse(committer.isIcebergTableUpdated());
+  }
+
   @Test
   public void testTableCleanupInIcebergTableCreationCommitterOnFailure() {
     IcebergCommand command = mock(IcebergCommand.class);

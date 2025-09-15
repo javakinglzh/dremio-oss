@@ -40,7 +40,6 @@ import com.dremio.exec.catalog.DremioTable;
 import com.dremio.exec.catalog.DremioTranslatableTable;
 import com.dremio.exec.catalog.EntityExplorer;
 import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor;
-import com.dremio.exec.planner.plancache.CacheRefresherService;
 import com.dremio.exec.server.MaterializationDescriptorProvider;
 import com.dremio.exec.server.SabotContext;
 import com.dremio.exec.store.CatalogService;
@@ -174,7 +173,6 @@ public class ReflectionServiceImpl extends BaseReflectionService {
   private ReflectionManager reflectionManager = null;
 
   private final Supplier<ReflectionManagerFactory> reflectionManagerFactorySupplier;
-  private final Provider<CacheRefresherService> cacheRefresherService;
 
   public ReflectionServiceImpl(
       final SabotConfig config,
@@ -189,7 +187,6 @@ public class ReflectionServiceImpl extends BaseReflectionService {
       final BufferAllocator allocator,
       final Provider<RequestContext> requestContextProvider,
       final DatasetEventHub datasetEventHub,
-      final Provider<CacheRefresherService> cacheRefresherService,
       final Provider<ReflectionChangeNotificationHandler> changeNotificationHandlerProvider) {
     this.schedulerService =
         Preconditions.checkNotNull(schedulerService, "scheduler service required");
@@ -235,8 +232,7 @@ public class ReflectionServiceImpl extends BaseReflectionService {
                       requestsStore,
                       dependenciesStore,
                       allocator,
-                      () -> materializationCache,
-                      this::wakeupCacheRefresher);
+                      () -> materializationCache);
               return config.getInstance(
                   ReflectionManagerFactory.REFLECTION_MANAGER_FACTORY,
                   ReflectionManagerFactory.class,
@@ -249,8 +245,6 @@ public class ReflectionServiceImpl extends BaseReflectionService {
     this.reflectionValidatorSupplier =
         Suppliers.memoize(() -> reflectionManagerFactorySupplier.get().newReflectionValidator());
     this.datasetEventHub = datasetEventHub;
-    this.cacheRefresherService =
-        Preconditions.checkNotNull(cacheRefresherService, "cache refresher  service required");
   }
 
   public MaterializationDescriptorProvider getMaterializationDescriptor() {
@@ -392,6 +386,11 @@ public class ReflectionServiceImpl extends BaseReflectionService {
       @Override
       public MaterializationStore getMaterializationStore() {
         return materializationStore;
+      }
+
+      @Override
+      public MaterializationPlanStore getMaterializationPlanStore() {
+        return materializationPlanStore;
       }
 
       @Override
@@ -945,10 +944,6 @@ public class ReflectionServiceImpl extends BaseReflectionService {
   @Override
   public Future<?> wakeupManager(String reason) {
     return wakeupManager(reason, false);
-  }
-
-  public void wakeupCacheRefresher(String reason) {
-    cacheRefresherService.get().wakeupCacheRefresher(reason);
   }
 
   @Override

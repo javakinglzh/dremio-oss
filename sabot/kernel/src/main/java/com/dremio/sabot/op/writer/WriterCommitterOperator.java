@@ -148,7 +148,6 @@ public class WriterCommitterOperator implements SingleInputOperator {
     }
 
     Stopwatch stopwatch = Stopwatch.createStarted();
-    // TODO(DX-96947): specify dataset for createFS
     fs =
         config
             .getPlugin()
@@ -158,6 +157,7 @@ public class WriterCommitterOperator implements SingleInputOperator {
                         Optional.ofNullable(config.getTempLocation())
                             .orElse(config.getFinalLocation()))
                     .userName(config.getProps().getUserName())
+                    .userId(config.getProps().getUserId())
                     .dataset(config.getDatasetPath().getPathComponents())
                     .operatorContext(context));
     addMetricStat(Metric.FILE_SYSTEM_CREATE_TIME, stopwatch.elapsed(TimeUnit.MILLISECONDS));

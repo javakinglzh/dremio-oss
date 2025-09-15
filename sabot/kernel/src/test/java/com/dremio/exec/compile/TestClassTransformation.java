@@ -168,23 +168,28 @@ public class TestClassTransformation extends BaseTestQuery {
   }
 
   @Test
-  public void testClassGeneratorEmptyBlock() throws Exception {
+  public void testClassGeneratorUnnestWrongBlock() throws Exception {
+    final String eval = "doOutside";
+    final String setup = "doInsideOutside";
     CodeGenerator<ExampleInner> cg =
-        newCodeGenerator(ExampleInner.class, ExampleTemplateWithInner.class);
+        newCodeGenerator(ExampleInner.class, ExampleTemplatePlain.class);
     ClassGenerator<ExampleInner> root = cg.getRoot();
-    JBlock block = new JBlock();
-    root.nestSetupBlock(block);
-    Assert.assertNotNull(root.getSetupBlock());
+    root.setMappingSet(new MappingSet(new GeneratorMapping(setup, eval, null, null)));
+    root.nestEvalBlock(new JBlock());
+    root.nestSetupBlock(new JBlock());
+    root.setMappingSet(new MappingSet(new GeneratorMapping(setup, setup, null, null)));
+    root.nestEvalBlock(new JBlock());
+    root.setMappingSet(new MappingSet(new GeneratorMapping(setup, eval, null, null)));
+    root.unNestEvalBlock();
     root.unNestSetupBlock();
-    Assert.assertNotNull(root.getSetupBlock());
-    root.unNestSetupBlock();
-    Assert.assertNotNull(root.getSetupBlock());
+    Assert.assertNotNull(root.getEvalBlock());
+    root.unNestEvalBlock();
   }
 
   private <T, X extends T> CodeGenerator<T> newCodeGenerator(Class<T> iface, Class<X> impl) {
     CompilationOptions compilationOptions = mock(CompilationOptions.class);
     when(compilationOptions.getNewMethodThreshold()).thenReturn(100);
-    when(compilationOptions.getAllowEmptyBlock()).thenReturn(true);
+    when(compilationOptions.getAutoUnnestBlock()).thenReturn(true);
     FunctionContext mockFunctionContext = mock(FunctionContext.class);
     when(mockFunctionContext.getCompilationOptions()).thenReturn(compilationOptions);
 

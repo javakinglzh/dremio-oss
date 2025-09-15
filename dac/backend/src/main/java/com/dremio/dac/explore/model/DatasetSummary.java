@@ -15,19 +15,9 @@
  */
 package com.dremio.dac.explore.model;
 
-import static com.dremio.common.utils.PathUtils.encodeURIComponent;
-
 import com.dremio.dac.api.JsonISODateTime;
-import com.dremio.dac.model.common.RootEntity;
-import com.dremio.dac.model.folder.FolderName;
-import com.dremio.dac.model.job.JobFilters;
-import com.dremio.dac.model.sources.SourceName;
-import com.dremio.dac.model.spaces.HomeName;
-import com.dremio.dac.model.spaces.SpaceName;
-import com.dremio.dac.model.spaces.TempSpace;
+import com.dremio.dac.model.common.NamespacePathUtils;
 import com.dremio.dac.util.DatasetsUtil;
-import com.dremio.service.jobs.JobIndexKeys;
-import com.dremio.service.namespace.NamespaceKey;
 import com.dremio.service.namespace.NamespaceUtils;
 import com.dremio.service.namespace.dataset.DatasetVersion;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -39,12 +29,9 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /** Dataset summary for overlay */
 @JsonIgnoreProperties(
@@ -241,54 +228,8 @@ public class DatasetSummary {
     return schemaOutdated;
   }
 
-  // links
-  // TODO make this consistent with DatasetUI.createLinks. In ideal case, both methods should use
-  // the same util method
   public Map<String, String> getLinks() {
-    List<String> components = new ArrayList<>(fullPath);
-    String leafName = components.remove(fullPath.size() - 1);
-    String rootName = components.remove(0);
-    DatasetPath datasetPath =
-        new DatasetPath(
-            getRootEntity(rootName, rootContainerType),
-            components.stream().map(FolderName::new).collect(Collectors.toList()),
-            new DatasetName(leafName));
-
-    Map<String, String> links = new HashMap<>();
-
-    links.put("self", datasetPath.toUrlPath());
-    links.put("query", datasetPath.getQueryUrlPath());
-    links.put("jobs", this.getJobsUrl());
-
-    if (datasetType == DatasetType.VIRTUAL_DATASET) {
-      String versionValue =
-          (datasetVersion != null) ? encodeURIComponent(datasetVersion.toString()) : null;
-      links.put("edit", datasetPath.getQueryUrlPath() + "?mode=edit&version=" + versionValue);
-    }
-    return links;
-  }
-
-  private String getJobsUrl() {
-    final NamespaceKey datasetPath = new NamespaceKey(fullPath);
-    final JobFilters jobFilters =
-        new JobFilters()
-            .addFilter(JobIndexKeys.ALL_DATASETS, datasetPath.toString())
-            .addFilter(JobIndexKeys.QUERY_TYPE, JobIndexKeys.UI, JobIndexKeys.EXTERNAL);
-    return jobFilters.toUrl();
-  }
-
-  private static RootEntity getRootEntity(String name, NameSpaceContainer.Type rootContainerType) {
-    if (TempSpace.isTempSpace(name)) {
-      return TempSpace.impl();
-    } else if (NamespaceUtils.isHomeSpace(name)) {
-      return new HomeName(name);
-    } else if (rootContainerType == NameSpaceContainer.Type.SOURCE) {
-      return new SourceName(name);
-    } else if (rootContainerType == NameSpaceContainer.Type.SPACE) {
-      return new SpaceName(name);
-    } else {
-      throw new IllegalArgumentException(
-          "Unexpected rootContainerType: " + rootContainerType + " for name: " + name);
-    }
+    return NamespacePathUtils.createLinksWithQueryLink(
+        fullPath, datasetVersion, datasetType, rootContainerType);
   }
 }

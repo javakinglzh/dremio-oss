@@ -422,8 +422,42 @@ public class TestScriptServiceImpl {
 
     // when script is searched for name "Script"
     List<ScriptProto.Script> scripts =
+        runWithUserContext(USER_ID_1, () -> scriptService.getScripts(0, 1000, "Script", "", null));
+
+    // assert 2 scripts are found
+    Assert.assertEquals(2, scripts.size());
+    Assert.assertTrue(
+        scripts.stream()
+            .map(ScriptProto.Script::getScriptId)
+            .collect(Collectors.toList())
+            .containsAll(Arrays.asList(script1.getScriptId(), script2.getScriptId())));
+  }
+
+  @Test
+  public void testGetAllScripts() throws Exception {
+    ScriptProto.ScriptRequest scriptRequest =
+        ScriptProto.ScriptRequest.newBuilder()
+            .setName("FirstScript")
+            .setDescription("test description")
+            .addAllContext(new ArrayList<>(List.of("a")))
+            .setContent("select * from xyz")
+            .build();
+
+    ScriptProto.Script script1 =
         runWithUserContext(
-            USER_ID_1, () -> scriptService.getScripts(0, 1000, "Script", "", "", null));
+            USER_ID_1,
+            () ->
+                scriptService.createScript(
+                    scriptRequest.toBuilder().setName("FirstScript").build()));
+    ScriptProto.Script script2 =
+        runWithUserContext(
+            USER_ID_2,
+            () ->
+                scriptService.createScript(
+                    scriptRequest.toBuilder().setName("SecondScript").build()));
+
+    List<ScriptProto.Script> scripts =
+        runWithUserContext(USER_ID_2, () -> scriptService.getScripts(0, 1000, "", "", null));
 
     // assert 2 scripts are found
     Assert.assertEquals(2, scripts.size());
@@ -457,8 +491,7 @@ public class TestScriptServiceImpl {
 
     // when script is searched for name "Script"
     List<ScriptProto.Script> scripts =
-        runWithUserContext(
-            USER_ID_1, () -> scriptService.getScripts(0, 1000, "Script", "", "", null));
+        runWithUserContext(USER_ID_1, () -> scriptService.getScripts(0, 1000, "Script", "", null));
 
     // assert 2 scripts are found
     Assert.assertEquals(2, scripts.size());
@@ -504,15 +537,14 @@ public class TestScriptServiceImpl {
     // when  sorted on name
     List<ScriptProto.Script> scripts =
         runWithUserContext(
-            USER_ID_1, () -> scriptService.getScripts(0, 1000, "sortScript", "-name", "", null));
+            USER_ID_1, () -> scriptService.getScripts(0, 1000, "sortScript", "-name", null));
     Assert.assertEquals("sortScript2", scripts.get(0).getName());
     Assert.assertEquals("sortScript1", scripts.get(1).getName());
 
     // when sorted on createdAt
     scripts =
         runWithUserContext(
-            USER_ID_1,
-            () -> scriptService.getScripts(0, 1000, "sortScript", "createdAt", "", null));
+            USER_ID_1, () -> scriptService.getScripts(0, 1000, "sortScript", "createdAt", null));
     Assert.assertEquals("sortScript1", scripts.get(0).getName());
     Assert.assertEquals("sortScript2", scripts.get(1).getName());
     Assert.assertTrue(scripts.get(0).getCreatedAt() <= scripts.get(1).getCreatedAt());
@@ -520,8 +552,7 @@ public class TestScriptServiceImpl {
     // when sorted on -modifiedAt
     scripts =
         runWithUserContext(
-            USER_ID_1,
-            () -> scriptService.getScripts(0, 1000, "sortScript", "-modifiedAt", "", null));
+            USER_ID_1, () -> scriptService.getScripts(0, 1000, "sortScript", "-modifiedAt", null));
     Assert.assertEquals("sortScript1", scripts.get(0).getName());
     Assert.assertEquals("sortScript2", scripts.get(1).getName());
     Assert.assertTrue(scripts.get(0).getCreatedAt() <= scripts.get(1).getCreatedAt());
@@ -531,7 +562,7 @@ public class TestScriptServiceImpl {
     assertThatThrownBy(
             () ->
                 runWithUserContext(
-                    USER_ID_1, () -> scriptService.getScripts(0, 1000, "", "xyz", "", null)))
+                    USER_ID_1, () -> scriptService.getScripts(0, 1000, "", "xyz", null)))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("sort on parameter : xyz not supported.");
   }
@@ -573,5 +604,206 @@ public class TestScriptServiceImpl {
                 maxNumberOfScriptsPerUser, maxNumberOfScriptsPerUser));
 
     verify(mockedScriptStore, times(1)).getCountByCondition(any(SearchTypes.SearchQuery.class));
+  }
+
+  @Test
+  public void testGetSortConditionId() {
+    String orderBy = "id";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("ID")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setScriptId("id1").build();
+    ScriptProto.Script script2 = ScriptProto.Script.newBuilder().setScriptId("id2").build();
+    Assert.assertTrue(sortCondition.getComparator().compare(script1, script2) < 0);
+    Assert.assertTrue(sortCondition.getComparator().compare(script2, script1) > 0);
+  }
+
+  @Test
+  public void testGetSortConditionIdDescending() {
+    String orderBy = "-id";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("ID")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.DESCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setScriptId("id1").build();
+    ScriptProto.Script script2 = ScriptProto.Script.newBuilder().setScriptId("id2").build();
+    Assert.assertTrue(sortCondition.getComparator().compare(script1, script2) > 0);
+    Assert.assertTrue(sortCondition.getComparator().compare(script2, script1) < 0);
+  }
+
+  @Test
+  public void testGetSortConditionName() {
+    String orderBy = "name";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("NAME")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setName("script1").build();
+    ScriptProto.Script script2 = ScriptProto.Script.newBuilder().setName("script2").build();
+    Assert.assertTrue(sortCondition.getComparator().compare(script1, script2) < 0);
+    Assert.assertTrue(sortCondition.getComparator().compare(script2, script1) > 0);
+  }
+
+  @Test
+  public void testGetSortConditionCreatedAt() {
+    String orderBy = "createdAt";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("CREATED_AT")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.LONG)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setCreatedAt(1L).build();
+    ScriptProto.Script script2 = ScriptProto.Script.newBuilder().setCreatedAt(2L).build();
+    Assert.assertTrue(sortCondition.getComparator().compare(script1, script2) < 0);
+    Assert.assertTrue(sortCondition.getComparator().compare(script2, script1) > 0);
+  }
+
+  @Test
+  public void testGetSortConditionModifiedAt() {
+    String orderBy = "modifiedAt";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("MODIFIED_AT")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.LONG)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setModifiedAt(1L).build();
+    ScriptProto.Script script2 = ScriptProto.Script.newBuilder().setModifiedAt(2L).build();
+    Assert.assertTrue(sortCondition.getComparator().compare(script1, script2) < 0);
+    Assert.assertTrue(sortCondition.getComparator().compare(script2, script1) > 0);
+  }
+
+  @Test
+  public void testGetSortConditionCreatedAtAscendingAndIdDescending() {
+    String orderBy = "createdAt,-id";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("CREATED_AT")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.LONG)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build(),
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("ID")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.DESCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setCreatedAt(1L).build();
+    ScriptProto.Script script2 =
+        ScriptProto.Script.newBuilder().setCreatedAt(2L).setScriptId("script2").build();
+    ScriptProto.Script script3 =
+        ScriptProto.Script.newBuilder().setCreatedAt(2L).setScriptId("script3").build();
+    List<ScriptProto.Script> sortedScripts = Arrays.asList(script1, script2, script3);
+    sortedScripts.sort(sortCondition.getComparator());
+    Assert.assertEquals(script1, sortedScripts.get(0));
+    Assert.assertEquals(script3, sortedScripts.get(1));
+    Assert.assertEquals(script2, sortedScripts.get(2));
+  }
+
+  @Test
+  public void testGetSortConditionModifiedAtDescendingAndNameAscending() {
+    String orderBy = "-modifiedAt,name";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("MODIFIED_AT")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.LONG)
+                .setOrder(SearchTypes.SortOrder.DESCENDING)
+                .build(),
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("NAME")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setModifiedAt(1L).build();
+    ScriptProto.Script script2 =
+        ScriptProto.Script.newBuilder().setModifiedAt(2L).setName("script2").build();
+    ScriptProto.Script script3 =
+        ScriptProto.Script.newBuilder().setModifiedAt(2L).setName("script3").build();
+    List<ScriptProto.Script> sortedScripts = Arrays.asList(script1, script2, script3);
+    sortedScripts.sort(sortCondition.getComparator());
+    Assert.assertEquals(script2, sortedScripts.get(0));
+    Assert.assertEquals(script3, sortedScripts.get(1));
+    Assert.assertEquals(script1, sortedScripts.get(2));
+  }
+
+  @Test
+  public void testGetSortConditionCreatedAtAscendingAndNameAscending() {
+    String orderBy = "createdAt,name";
+    ScriptServiceImpl.ScriptSortCondition sortCondition =
+        ((ScriptServiceImpl) scriptService).getSortCondition(orderBy);
+
+    List<SearchTypes.SearchFieldSorting> expectedSortings =
+        List.of(
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("CREATED_AT")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.LONG)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build(),
+            SearchTypes.SearchFieldSorting.newBuilder()
+                .setField("NAME")
+                .setType(SearchTypes.SearchFieldSorting.FieldType.STRING)
+                .setOrder(SearchTypes.SortOrder.ASCENDING)
+                .build());
+    Assert.assertEquals(expectedSortings, sortCondition.getSearchFieldSortings());
+
+    ScriptProto.Script script1 = ScriptProto.Script.newBuilder().setCreatedAt(1L).build();
+    ScriptProto.Script script2 =
+        ScriptProto.Script.newBuilder().setCreatedAt(2L).setName("script2").build();
+    ScriptProto.Script script3 =
+        ScriptProto.Script.newBuilder().setCreatedAt(2L).setName("script3").build();
+    List<ScriptProto.Script> sortedScripts = Arrays.asList(script1, script2, script3);
+    sortedScripts.sort(sortCondition.getComparator());
+    Assert.assertEquals(script1, sortedScripts.get(0));
+    Assert.assertEquals(script2, sortedScripts.get(1));
+    Assert.assertEquals(script3, sortedScripts.get(2));
   }
 }

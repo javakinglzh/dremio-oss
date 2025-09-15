@@ -94,7 +94,7 @@ public class ParquetTypeHelper {
   }
 
   public static LogicalTypeAnnotation getLogicalTypeForMinorType(
-      MinorType minorType, Integer scale, Integer precision) {
+      MinorType minorType, Integer scale, Integer precision, boolean isIcebergWriter) {
     switch (minorType) {
       case DECIMAL:
         return LogicalTypeAnnotation.decimalType(scale, precision);
@@ -104,8 +104,15 @@ public class ParquetTypeHelper {
         return LogicalTypeAnnotation.dateType();
       case TIME:
         return LogicalTypeAnnotation.timeType(false, TimeUnit.MILLIS);
+      case TIMETZ:
+        return LogicalTypeAnnotation.timeType(true, TimeUnit.MILLIS);
       case TIMESTAMPMILLI:
-        return LogicalTypeAnnotation.timestampType(false, TimeUnit.MILLIS);
+        // in case of iceberg tables the TIMESTAMPMILLI minor type is mapped to TIMESTAMPTZ
+        // iceberg type (SchemaConverter#visit(Timestamp timestamp))
+        // therefore we need to set isAdjustedToUTC to true
+        return LogicalTypeAnnotation.timestampType(isIcebergWriter, TimeUnit.MILLIS);
+      case TIMESTAMPTZ:
+        return LogicalTypeAnnotation.timestampType(true, TimeUnit.MILLIS);
       case INTERVALDAY:
       case INTERVALYEAR:
       case INTERVAL:

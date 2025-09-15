@@ -104,6 +104,27 @@ public abstract class AbstractTestFlightServer extends BaseFlightQueryTest {
         .go();
   }
 
+  /**
+   * Test cancellation of query after partial drain of the stream. This is to test the case where
+   * the client has already started processing the stream, and cancels midway leaving data on the
+   * coordinator waiting to be consumed. Failure can also be manifested by leaked buffers on the
+   * server side.
+   */
+  @Test
+  public void testFlightClientQueryCancellationAfterPartialDrain() throws Exception {
+    try (final FlightStream stream = executeQuery(SELECT_QUERY_10K)) {
+      drainStream(stream, 1000);
+
+      stream.cancel(
+          "Query is cancelled after stream is retrieved.",
+          new Exception("Testing query data retrieval cancellation."));
+    }
+  }
+
+  /**
+   * Test cancellation of query after the stream is completely drained. Failure can also be
+   * manifested by leaked buffers on the server side.
+   */
   @Test
   public void testFlightClientQueryCancellationAfterStreamIsRetrieved() throws Exception {
     try (final FlightStream stream = executeQuery(SELECT_QUERY)) {
@@ -112,10 +133,13 @@ public abstract class AbstractTestFlightServer extends BaseFlightQueryTest {
       stream.cancel(
           "Query is cancelled after stream is retrieved.",
           new Exception("Testing query data retrieval cancellation."));
-      stream.getRoot().clear();
     }
   }
 
+  /**
+   * Test cancellation of query before starting to drain the stream. Failure can also be manifested
+   * by leaked buffers on the server side.
+   */
   @Test
   public void testFlightClientQueryCancellationBeforeStreamIsRetrieved() throws Exception {
     try (FlightStream stream = executeQuery(SELECT_QUERY)) {

@@ -38,4 +38,6 @@ public @interface AdminCommand {
    * @return user friendly description
    */
   String description();
+
+  boolean hideHelp() default false;
 }

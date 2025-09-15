@@ -21,6 +21,7 @@ import com.dremio.exec.record.BatchSchema;
 import com.dremio.exec.store.iceberg.IcebergUtils;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogGrpcClient;
 import com.dremio.exec.store.metadatarefresh.committer.DatasetCatalogRequestBuilder;
+import com.dremio.options.OptionManager;
 import com.dremio.sabot.exec.context.OperatorStats;
 import com.dremio.service.catalog.UpdatableDatasetConfigFields;
 import com.dremio.service.namespace.dataset.proto.DatasetConfig;
@@ -69,6 +70,7 @@ public class FullMetadataRefreshCommitter extends IcebergTableCreationCommitter 
           .collect(Collectors.toMap(d -> d[0], d -> d[1]));
 
   public FullMetadataRefreshCommitter(
+      OptionManager optionManager,
       String tableName,
       List<String> datasetPath,
       String tableLocation,
@@ -99,7 +101,12 @@ public class FullMetadataRefreshCommitter extends IcebergTableCreationCommitter 
     this.fileType = fileType;
     datasetCatalogRequestBuilder =
         DatasetCatalogRequestBuilder.forFullMetadataRefresh(
-            datasetPath, tableLocation, batchSchema, partitionColumnNames, datasetConfig);
+            datasetPath,
+            tableLocation,
+            batchSchema,
+            partitionColumnNames,
+            datasetConfig,
+            optionManager);
   }
 
   @Override

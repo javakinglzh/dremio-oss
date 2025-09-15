@@ -20,6 +20,8 @@ import static com.dremio.exec.store.iceberg.IcebergUtils.isIdentityPartitionColu
 
 import com.dremio.common.exceptions.UserException;
 import com.dremio.common.utils.PathUtils;
+import com.dremio.context.RequestContext;
+import com.dremio.context.UserContext;
 import com.dremio.exec.physical.base.PhysicalOperator;
 import com.dremio.exec.physical.config.ManifestScanFilters;
 import com.dremio.exec.physical.config.ManifestScanTableFunctionContext;
@@ -195,11 +197,13 @@ public class TableFunctionPrel extends SinglePrel implements RuntimeFilteredRel,
   @Override
   public PhysicalOperator getPhysicalOperator(PhysicalPlanCreator creator) throws IOException {
     Prel child = (Prel) this.getInput();
+    UserContext userContext = RequestContext.current().get(UserContext.CTX_KEY);
+    String userId = userContext != null ? userContext.getUserId() : null;
 
     PhysicalOperator childPOP = child.getPhysicalOperator(creator);
     validateSchema(childPOP.getProps().getSchema(), functionConfig.getOutputSchema());
     return new TableFunctionPOP(
-        creator.props(this, user, functionConfig.getOutputSchema(), RESERVE, LIMIT),
+        creator.props(this, user, userId, functionConfig.getOutputSchema(), RESERVE, LIMIT),
         childPOP,
         functionConfig);
   }

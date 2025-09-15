@@ -305,7 +305,7 @@ public class TestVectorizedHashAggPartitionSpillHandler extends BaseTestOperator
         final SimpleBigIntVector hashValues = new SimpleBigIntVector("hashvalues", allocator)) {
 
       /* pivot the data into temporary space */
-      Pivots.pivot(pivot, records, fbv, var);
+      Pivots.pivot(pivot, records, fbv, var, true);
 
       final long keyFixedVectorAddr = fbv.getMemoryAddress();
       final long keyVarVectorAddr = var.getMemoryAddress();

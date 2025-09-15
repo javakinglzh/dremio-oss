@@ -16,6 +16,7 @@
 package com.dremio.exec.planner.acceleration.substitution;
 
 import com.dremio.exec.planner.StatelessRelShuttleImpl;
+import com.dremio.exec.planner.acceleration.MaterializationExpander.InvalidMatchingRel;
 import org.apache.calcite.rel.RelNode;
 import org.apache.calcite.rel.logical.LogicalJoin;
 import org.apache.calcite.rel.logical.LogicalUnion;
@@ -58,6 +59,9 @@ public class JoinUnionCounter extends StatelessRelShuttleImpl {
         throw new UnsupportedOperationException();
       }
       numJoins += (other.getInputs().size() - 1);
+    } else if (other instanceof InvalidMatchingRel) {
+      numJoins = ((InvalidMatchingRel) other).getNumUnionsAndJoins();
+      return other;
     }
     return super.visit(other);
   }

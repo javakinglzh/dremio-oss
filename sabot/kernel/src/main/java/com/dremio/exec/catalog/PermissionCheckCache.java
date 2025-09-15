@@ -36,7 +36,7 @@ import java.util.concurrent.TimeUnit;
 import javax.inject.Provider;
 
 /** Thread-safe cache of permission checks. Caches up to maximumSize entries. */
-class PermissionCheckCache {
+public class PermissionCheckCache {
   private static final org.slf4j.Logger logger =
       org.slf4j.LoggerFactory.getLogger(PermissionCheckCache.class);
 

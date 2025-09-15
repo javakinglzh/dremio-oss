@@ -31,7 +31,6 @@ import com.dremio.plugins.s3.store.STSCredentialProviderV2;
 import com.dremio.plugins.util.awsauth.DremioSessionCredentialsProviderV2;
 import com.dremio.plugins.util.awsauth.GlueAwsCredentialsProviderV2;
 import com.dremio.service.coordinator.DremioAssumeRoleCredentialsProviderV2;
-import java.io.IOException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.s3a.Constants;
 import software.amazon.awssdk.auth.credentials.AnonymousCredentialsProvider;
@@ -48,8 +47,7 @@ public final class AwsCredentialProviderUtils {
    * Create credential provider from the configuration. AwsCredentialsProvider might also implement
    * SdkAutoCloseable. Make sure to close if using directly (or let client close it for you).
    */
-  public static AwsCredentialsProvider getCredentialsProvider(Configuration config)
-      throws IOException {
+  public static AwsCredentialsProvider getCredentialsProvider(Configuration config) {
     switch (config.get(Constants.AWS_CREDENTIALS_PROVIDER)) {
       case ACCESS_KEY_PROVIDER:
       case GLUE_ACCESS_KEY_PROVIDER:

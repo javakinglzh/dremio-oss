@@ -42,7 +42,14 @@ message PRexNode {
     PRexRangeRef rex_range_ref = 11;
     PRexPatternFieldRef rex_pattern_field_ref = 12;
     PRexWinAggCall rex_window_agg_call = 13;
+    int32 reference = 14;
+    RexIndirection indirection = 15;
   }
+}
+
+message RexIndirection {
+  PRexNode rex = 1;
+  repeated PRexNode children = 2;
 }
 
 message PRexLocalRef {

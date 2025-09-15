@@ -15,6 +15,7 @@
  */
 package com.dremio.exec.planner;
 
+import static com.dremio.exec.planner.physical.PlannerSettings.AGG_METADATA_PUSH_DOWN_PHASE;
 import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_MERGE_RULE;
 import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_PHASE;
 import static com.dremio.exec.planner.physical.PlannerSettings.AGG_PUSH_DOWN_SIMPLE_JOIN_RULE;
@@ -25,7 +26,7 @@ import com.dremio.exec.planner.logical.BridgeExchangePrule;
 import com.dremio.exec.planner.logical.BridgeReaderPrule;
 import com.dremio.exec.planner.logical.CopyIntoTableRule;
 import com.dremio.exec.planner.logical.CorrelateRule;
-import com.dremio.exec.planner.logical.CountOnScanToValuesRule;
+import com.dremio.exec.planner.logical.CountOnScanToValuesRule.Config;
 import com.dremio.exec.planner.logical.DremioAggregateReduceFunctionsRule;
 import com.dremio.exec.planner.logical.DremioExpandDistinctAggregatesRule;
 import com.dremio.exec.planner.logical.DremioRelFactories;
@@ -47,6 +48,7 @@ import com.dremio.exec.planner.logical.LimitRule;
 import com.dremio.exec.planner.logical.MergeProjectForFlattenRule;
 import com.dremio.exec.planner.logical.MergeProjectRule;
 import com.dremio.exec.planner.logical.ProjectRule;
+import com.dremio.exec.planner.logical.PushAggregateIntoScanRule;
 import com.dremio.exec.planner.logical.PushFilterPastExpansionRule;
 import com.dremio.exec.planner.logical.PushFilterPastFlattenrule;
 import com.dremio.exec.planner.logical.PushFilterPastProjectRule;
@@ -57,7 +59,6 @@ import com.dremio.exec.planner.logical.PushProjectIntoFilesystemScanRule;
 import com.dremio.exec.planner.logical.PushProjectIntoScanRule;
 import com.dremio.exec.planner.logical.PushProjectPastFlattenRule;
 import com.dremio.exec.planner.logical.RemoveEmptyScansRule;
-import com.dremio.exec.planner.logical.RollupWithBridgeExchangeRule;
 import com.dremio.exec.planner.logical.SimpleFilterJoinRule;
 import com.dremio.exec.planner.logical.SortRule;
 import com.dremio.exec.planner.logical.TableModifyRule;
@@ -91,6 +92,7 @@ import com.dremio.exec.planner.physical.ScreenPrule;
 import com.dremio.exec.planner.physical.SortConvertPrule;
 import com.dremio.exec.planner.physical.SortPrule;
 import com.dremio.exec.planner.physical.StreamAggPrule;
+import com.dremio.exec.planner.physical.TableMetadataScanConverter;
 import com.dremio.exec.planner.physical.UnionAllPrule;
 import com.dremio.exec.planner.physical.ValuesPrule;
 import com.dremio.exec.planner.physical.WindowPrule;
@@ -375,13 +377,6 @@ public enum PlannerPhase {
       if (context
           .getPlannerSettings()
           .options
-          .getOption(PlannerSettings.ENABLE_COUNT_STAR_OPTIMIZATION)) {
-        b.add(CountOnScanToValuesRule.AGG_ON_PROJ_ON_SCAN_INSTANCE);
-        b.add(CountOnScanToValuesRule.AGG_ON_SCAN_INSTANCE);
-      }
-      if (context
-          .getPlannerSettings()
-          .options
           .getOption(PlannerSettings.USE_ENHANCED_FILTER_JOIN_GUARDRAIL_FOR_JOIN)) {
         b.add(JoinFilterCanonicalizationRule.INSTANCE);
       }
@@ -428,6 +423,25 @@ public enum PlannerPhase {
       return RuleSets.ofList(rules);
     }
   },
+
+  AGG_METADATA_PUSHDOWN("Metadata Operation Pushdown") {
+    @Override
+    public RuleSet getRules(OptimizerRulesContext context) {
+      List<RelOptRule> rules = new ArrayList<>();
+      if (context.getOptions().getOption(AGG_METADATA_PUSH_DOWN_PHASE)
+          || context.getOptions().getOption(PlannerSettings.ENABLE_COUNT_STAR_OPTIMIZATION)) {
+        rules.add(DremioCoreRules.AGGREGATE_PROJECT_MERGE_RULE);
+        if (context.getOptions().getOption(AGG_METADATA_PUSH_DOWN_PHASE)) {
+          rules.add(PushAggregateIntoScanRule.INSTANCE);
+        }
+        if (context.getOptions().getOption(PlannerSettings.ENABLE_COUNT_STAR_OPTIMIZATION)) {
+          rules.add(Config.AGG_ON_SCAN.toRule());
+        }
+      }
+      return RuleSets.ofList(rules);
+    }
+  },
+
   /** Initial phase of join planning */
   JOIN_PLANNING_MULTI_JOIN("Multi-Join analysis") {
     @Override
@@ -576,7 +590,6 @@ public enum PlannerPhase {
     public RuleSet getRules(OptimizerRulesContext context) {
       final ImmutableList.Builder<RelOptRule> rules = ImmutableList.builder();
       rules.add(InClauseCommonSubexpressionEliminationRule.INSTANCE);
-      rules.add(RollupWithBridgeExchangeRule.INSTANCE);
       if (context.getOptions().getOption(AGG_PUSH_DOWN_PHASE)) {
         rules
             .add(DremioCoreRules.PROJECT_REMOVE_DRULE)
@@ -805,6 +818,7 @@ public enum PlannerPhase {
     ruleList.add(new CopyIntoTablePrule(optimizerRulesContext));
     ruleList.add(new CopyErrorsPrule(optimizerRulesContext));
     ruleList.add(new ClusteringInfoPrule(optimizerRulesContext));
+    ruleList.add(new TableMetadataScanConverter(optimizerRulesContext));
 
     return RuleSets.ofList(ImmutableSet.copyOf(ruleList));
   }

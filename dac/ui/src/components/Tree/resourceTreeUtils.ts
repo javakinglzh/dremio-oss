@@ -403,8 +403,7 @@ export function getFullPathFromResourceTree(node: any) {
   let fullPath =
     node.get("fullPath")?.map((part: string) => encodeURIComponent(part)) || [];
   if (node.get("type") === "FOLDER") {
-    const root = fullPath.shift();
-    fullPath = [root, "folder", ...fullPath];
+    fullPath = [fullPath.first(), "folder", ...fullPath.rest()];
   }
   const rootSource = getResourceByFullPath(node, tree);
   return [rootSource?.get("type")?.toLowerCase(), ...fullPath].join("/");

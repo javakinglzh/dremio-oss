@@ -23,14 +23,12 @@ import com.dremio.context.RequestContext;
 import com.dremio.context.UserContext;
 import com.dremio.options.OptionManager;
 import com.dremio.service.namespace.NamespaceException;
-import com.dremio.service.namespace.NamespaceIdentity;
 import com.dremio.service.namespace.NamespaceService;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -38,25 +36,19 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 public class TestInformationSchemaCatalogWithUserContext {
   private static final String expectedUserId = UUID.randomUUID().toString();
-
   @Mock private NamespaceService namespaceService;
-
-  @Mock private PluginRetriever pluginRetriever;
-
   @Mock private OptionManager optionManager;
-
-  @Mock private NamespaceIdentity identity;
-
+  @Mock private PluginRetriever pluginRetriever;
   @Mock private VersionedPlugin versionedPlugin;
-
-  @InjectMocks private InformationSchemaCatalogImpl informationSchemaCatalog;
+  private InformationSchemaCatalogImpl informationSchemaCatalog;
 
   @BeforeEach
   public void setUp() throws Exception {
     when(pluginRetriever.getAllVersionedPlugins()).thenReturn(Stream.of(versionedPlugin));
-    when(identity.getId()).thenReturn(expectedUserId);
-
     when(versionedPlugin.getName()).thenReturn("SomeSource");
+    informationSchemaCatalog =
+        new InformationSchemaCatalogImpl(
+            namespaceService, pluginRetriever, optionManager, expectedUserId);
   }
 
   @Test

@@ -112,6 +112,7 @@ public class OptimizeManifestsTableFunction extends AbstractTableFunction {
             SupportsFsCreation.builder()
                 .filePath(tableProps.getTableLocation())
                 .userName(opProps.getUserName())
+                .userId(opProps.getUserId())
                 .operatorContext(context)
                 .datasetFromTableFunctionConfig(functionConfig))) {
       FileIO fileIO = icebergMutablePlugin.createIcebergFileIO(fs, null, null, null, null);

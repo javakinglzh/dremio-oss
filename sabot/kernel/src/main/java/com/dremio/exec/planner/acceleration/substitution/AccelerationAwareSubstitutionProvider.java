@@ -85,14 +85,13 @@ public class AccelerationAwareSubstitutionProvider implements SubstitutionProvid
   @Override
   public Optional<RelNode> wrapDefaultExpansionNode(
       NamespaceKey path,
-      final RelNode query,
       DremioMaterialization materialization,
       RelDataType rowType,
       TableVersionContext versionContext,
       ViewExpansionContext viewExpansionContext,
       ViewTable viewTable) {
     return delegate.wrapDefaultExpansionNode(
-        path, query, materialization, rowType, versionContext, viewExpansionContext, viewTable);
+        path, materialization, rowType, versionContext, viewExpansionContext, viewTable);
   }
 
   @Override
@@ -121,8 +120,8 @@ public class AccelerationAwareSubstitutionProvider implements SubstitutionProvid
   }
 
   @Override
-  public Optional<RelNode> generateHashReplacement(RelNode query) {
-    return delegate.generateHashReplacement(query);
+  public Optional<RelNode> generateHashReplacement(RelNode query, RelDataType validatedRowType) {
+    return delegate.generateHashReplacement(query, validatedRowType);
   }
 
   public static AccelerationAwareSubstitutionProvider of(final SubstitutionProvider delegate) {

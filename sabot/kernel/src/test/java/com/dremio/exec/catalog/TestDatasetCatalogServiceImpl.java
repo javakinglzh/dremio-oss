@@ -78,6 +78,9 @@ import com.dremio.service.orphanage.Orphanage;
 import com.dremio.service.orphanage.OrphanageImpl;
 import com.dremio.service.scheduler.LocalSchedulerService;
 import com.dremio.service.scheduler.ModifiableLocalSchedulerService;
+import com.dremio.service.users.SimpleUser;
+import com.dremio.service.users.UserService;
+import com.dremio.service.users.proto.UID;
 import com.dremio.services.credentials.CredentialsService;
 import com.dremio.services.credentials.SecretsCreator;
 import com.dremio.services.fabric.FabricServiceImpl;
@@ -162,6 +165,8 @@ public class TestDatasetCatalogServiceImpl {
     private NamespaceKey mockUpKey;
     private CatalogServiceImpl catalogService;
     private DatasetCatalogServiceImpl datasetCatalogService;
+
+    private final UserService userService = mock(UserService.class);
 
     @Rule public TemporarySystemProperties properties = new TemporarySystemProperties();
 
@@ -310,7 +315,8 @@ public class TestDatasetCatalogServiceImpl {
               () -> new VersionedDatasetAdapterFactory(),
               () -> new CatalogStatusEventsImpl(),
               () -> mock(ExecutorService.class),
-              () -> namespaceServiceFactory);
+              () -> namespaceServiceFactory,
+              () -> userService);
       catalogService.start();
 
       mockUpPlugin = new TestCatalogServiceImpl.MockUpPlugin();
@@ -349,6 +355,9 @@ public class TestDatasetCatalogServiceImpl {
       assertTrue(namespaceService.exists(MOCKUP_NEWDATASET));
       DatasetConfig dataset = namespaceService.getDataset(MOCKUP_NEWDATASET);
       assertNotNull(dataset.getName());
+
+      when(userService.getUser(any(String.class)))
+          .thenReturn(SimpleUser.newBuilder().setUID(UID.getDefaultInstance()).build());
 
       Catalog catalog = catalogService.getSystemUserCatalog();
       assertNotNull(catalog.getTable(MOCKUP_NEWDATASET));

@@ -57,7 +57,10 @@ public class HiveOrcFooterReader implements FooterReader {
 
   public HiveOrcFooterReader(BatchSchema tableSchema, FileSystem fs, OperatorContext context) {
     Preconditions.checkArgument(tableSchema != null, "Unexpected state");
-    this.estimatedRecordSize = tableSchema.estimateRecordSize((int) context.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+    this.estimatedRecordSize =
+        tableSchema.estimateRecordSize(
+            (int) context.getOptions().getOption(ExecConstants.BATCH_LIST_SIZE_ESTIMATE),
+            (int) context.getOptions().getOption(ExecConstants.BATCH_MAP_SIZE_ESTIMATE),
             (int) context.getOptions().getOption(ExecConstants.BATCH_VARIABLE_FIELD_SIZE_ESTIMATE));
     this.tableSchema = tableSchema;
     this.fs = fs;

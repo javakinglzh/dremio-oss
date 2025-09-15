@@ -19,9 +19,7 @@ import com.dremio.exec.planner.acceleration.descriptor.MaterializationDescriptor
 import com.dremio.exec.planner.observer.AttemptObserver;
 import com.dremio.exec.planner.physical.PlannerSettings;
 import com.dremio.exec.proto.UserBitShared.LayoutMaterializedViewProfile;
-import com.dremio.exec.work.user.SubstitutionSettings;
 import com.dremio.options.OptionResolver;
-import com.google.common.collect.Sets;
 import java.util.Set;
 
 class HintChecker {
@@ -45,14 +43,11 @@ class HintChecker {
     this.currentIcebergDataOnly = other.currentIcebergDataOnly;
   }
 
-  public HintChecker(
-      OptionResolver optionResolver,
-      SubstitutionSettings substitutionSettings,
-      AttemptObserver observer) {
+  public HintChecker(OptionResolver optionResolver, AttemptObserver observer) {
     this.optionResolver = optionResolver;
     this.observer = observer;
-    exclusions = getExclusions(substitutionSettings);
-    inclusions = getInclusions(substitutionSettings);
+    exclusions = getExclusions();
+    inclusions = getInclusions();
     hasInclusions = !inclusions.isEmpty();
     reflectionMaterializationStalenessEnabled =
         optionResolver.getOption(PlannerSettings.REFLECTION_MATERIALIZATION_STALENESS_ENABLED);
@@ -111,19 +106,17 @@ class HintChecker {
     return reflectionMaterializationStalenessEnabled;
   }
 
-  private Set<String> getInclusions(SubstitutionSettings substitutionSettings) {
-    Set<String> inclusions = Sets.newHashSet(substitutionSettings.getInclusions());
-    inclusions.addAll(
+  private Set<String> getInclusions() {
+    Set<String> inclusions =
         MaterializationList.parseReflectionIds(
-            optionResolver.getOption(PlannerSettings.CONSIDER_REFLECTIONS)));
+            optionResolver.getOption(PlannerSettings.CONSIDER_REFLECTIONS));
     return inclusions;
   }
 
-  private Set<String> getExclusions(SubstitutionSettings substitutionSettings) {
-    Set<String> exclusions = Sets.newHashSet(substitutionSettings.getExclusions());
-    exclusions.addAll(
+  private Set<String> getExclusions() {
+    Set<String> exclusions =
         MaterializationList.parseReflectionIds(
-            optionResolver.getOption(PlannerSettings.EXCLUDE_REFLECTIONS)));
+            optionResolver.getOption(PlannerSettings.EXCLUDE_REFLECTIONS));
     return exclusions;
   }
 

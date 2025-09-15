@@ -108,4 +108,9 @@ public class DremioInputFile implements InputFile {
           String.format("Failed to check existence of file: %s", path), e);
     }
   }
+
+  @Override
+  public String toString() {
+    return location();
+  }
 }

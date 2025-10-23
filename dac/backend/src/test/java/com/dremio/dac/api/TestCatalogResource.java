@@ -1900,7 +1900,7 @@ public class TestCatalogResource extends BaseTestServerJunit5 {
                     .path("by-path")
                     .path(createdSource.getName())
                     .path("testfiles")
-                    .path("file_with_?.json"))
+                    .path("file_with_qm.json"))
             .buildGet(),
         new GenericType<File>() {});
   }
